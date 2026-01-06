@@ -1,0 +1,167 @@
+package helpers
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/griffithind/dcx/internal/config"
+	"github.com/stretchr/testify/require"
+)
+
+// FixtureDir returns the path to the testdata directory.
+func FixtureDir(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(GetProjectRoot(t), "testdata")
+}
+
+// ConfigFixture returns the path to a config fixture directory.
+func ConfigFixture(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(FixtureDir(t), "configs", name)
+}
+
+// ComposeFixture returns the path to a compose fixture directory.
+func ComposeFixture(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(FixtureDir(t), "compose", name)
+}
+
+// FeatureFixture returns the path to a feature fixture directory.
+func FeatureFixture(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(FixtureDir(t), "features", name)
+}
+
+// LoadTestConfig loads a devcontainer configuration from a fixture.
+func LoadTestConfig(t *testing.T, fixtureName string) *config.DevcontainerConfig {
+	t.Helper()
+
+	fixtureDir := ConfigFixture(t, fixtureName)
+	cfg, _, err := config.Load(fixtureDir, "")
+	require.NoError(t, err, "failed to load fixture config: %s", fixtureName)
+
+	return cfg
+}
+
+// CreateTempWorkspace creates a temporary workspace with a devcontainer config.
+// Returns the workspace path.
+func CreateTempWorkspace(t *testing.T, devcontainerJSON string) string {
+	t.Helper()
+
+	// Create temp directory
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Write devcontainer.json
+	configPath := filepath.Join(devcontainerDir, "devcontainer.json")
+	err = os.WriteFile(configPath, []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// CreateTempWorkspaceFromFixture creates a temp workspace by copying a fixture.
+func CreateTempWorkspaceFromFixture(t *testing.T, fixtureName string) string {
+	t.Helper()
+
+	srcDir := ConfigFixture(t, fixtureName)
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Copy all files from fixture
+	entries, err := os.ReadDir(srcDir)
+	require.NoError(t, err)
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := filepath.Join(devcontainerDir, entry.Name())
+
+		data, err := os.ReadFile(srcPath)
+		require.NoError(t, err)
+
+		err = os.WriteFile(dstPath, data, 0644)
+		require.NoError(t, err)
+	}
+
+	return tmpDir
+}
+
+// SimpleImageConfig returns a minimal devcontainer.json for an image-based config.
+func SimpleImageConfig(image string) string {
+	cfg := map[string]interface{}{
+		"name":            "test",
+		"image":           image,
+		"workspaceFolder": "/workspace",
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return string(data)
+}
+
+// SimpleComposeConfig returns a devcontainer.json for a compose-based config.
+func SimpleComposeConfig(composeFile, service string) string {
+	cfg := map[string]interface{}{
+		"name":              "test",
+		"dockerComposeFile": composeFile,
+		"service":           service,
+		"workspaceFolder":   "/workspace",
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return string(data)
+}
+
+// ConfigWithFeatures returns a devcontainer.json with features.
+func ConfigWithFeatures(image string, features map[string]interface{}) string {
+	cfg := map[string]interface{}{
+		"name":            "test",
+		"image":           image,
+		"workspaceFolder": "/workspace",
+		"features":        features,
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return string(data)
+}
+
+// CreateTempComposeWorkspace creates a temp workspace with compose files.
+func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAML string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Write devcontainer.json
+	configPath := filepath.Join(devcontainerDir, "devcontainer.json")
+	err = os.WriteFile(configPath, []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Write docker-compose.yml
+	composePath := filepath.Join(devcontainerDir, "docker-compose.yml")
+	err = os.WriteFile(composePath, []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// UniqueEnvKey generates a unique env key for a test.
+func UniqueEnvKey(t *testing.T) string {
+	t.Helper()
+	// Use test name to generate a semi-unique key
+	name := t.Name()
+	if len(name) > 12 {
+		name = name[:12]
+	}
+	return TestPrefix + name
+}

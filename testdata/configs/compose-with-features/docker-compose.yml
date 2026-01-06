@@ -1,0 +1,7 @@
+version: '3.8'
+services:
+  app:
+    image: ubuntu:22.04
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
