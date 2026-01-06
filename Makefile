@@ -10,8 +10,9 @@ LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$
 all: build
 
 # Build the binary for current platform + Linux binaries for SSH agent forwarding
+# CGO_ENABLED=0 ensures static linking for compatibility with all Linux distros (including Alpine/musl)
 build:
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dcx
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
