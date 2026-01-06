@@ -1,0 +1,127 @@
+package ssh
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/griffithind/dcx/internal/version"
+)
+
+// DeployToContainer deploys the dcx binary to a container.
+// It checks if the correct version is already deployed and skips if so.
+func DeployToContainer(ctx context.Context, containerName, binaryPath string) error {
+	// Check if correct version of dcx is already in container
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "test", "-f", binaryPath)
+	if err := checkCmd.Run(); err == nil {
+		// Binary already exists
+		return nil
+	}
+
+	// Need to copy dcx to container
+	return copyBinaryToContainer(ctx, containerName, binaryPath)
+}
+
+// copyBinaryToContainer copies the dcx binary to the container.
+func copyBinaryToContainer(ctx context.Context, containerName, binaryPath string) error {
+	// Try to get a Linux binary (embedded or from filesystem)
+	dcxPath := getLinuxBinaryPathStandalone()
+	needsCleanup := false
+
+	if dcxPath == "" {
+		// Fall back to current executable (works when already on Linux)
+		var err error
+		dcxPath, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("failed to get executable path: %w", err)
+		}
+	} else if strings.HasPrefix(dcxPath, os.TempDir()) {
+		// If it's a temp file (from embedded binary), clean it up after
+		needsCleanup = true
+	}
+
+	if needsCleanup {
+		defer os.Remove(dcxPath)
+	}
+
+	// Copy to container
+	copyCmd := exec.CommandContext(ctx, "docker", "cp", dcxPath, containerName+":"+binaryPath)
+	if err := copyCmd.Run(); err != nil {
+		return fmt.Errorf("failed to copy dcx to container: %w", err)
+	}
+
+	// Make executable (run as root to avoid permission issues)
+	chmodCmd := exec.CommandContext(ctx, "docker", "exec", "--user", "root", containerName, "chmod", "+x", binaryPath)
+	if err := chmodCmd.Run(); err != nil {
+		return fmt.Errorf("failed to make dcx executable: %w", err)
+	}
+
+	return nil
+}
+
+// getLinuxBinaryPathStandalone returns the path to a Linux binary for the container architecture.
+// Returns empty string if not available.
+func getLinuxBinaryPathStandalone() string {
+	// Determine container architecture
+	arch := runtime.GOARCH
+
+	// Check for embedded binaries first (not available on Linux builds)
+	if runtime.GOOS != "linux" {
+		var embeddedBinary []byte
+		switch arch {
+		case "amd64":
+			embeddedBinary = dcxLinuxAmd64
+		case "arm64":
+			embeddedBinary = dcxLinuxArm64
+		}
+
+		if len(embeddedBinary) > 0 {
+			// Write embedded binary to temp file
+			tmpFile, err := os.CreateTemp("", "dcx-linux-*")
+			if err != nil {
+				return ""
+			}
+			if _, err := tmpFile.Write(embeddedBinary); err != nil {
+				tmpFile.Close()
+				os.Remove(tmpFile.Name())
+				return ""
+			}
+			tmpFile.Close()
+			return tmpFile.Name()
+		}
+	}
+
+	// Check for pre-built binaries next to current executable
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	exeDir := filepath.Dir(exe)
+
+	var binaryName string
+	switch arch {
+	case "amd64":
+		binaryName = "dcx-linux-amd64"
+	case "arm64":
+		binaryName = "dcx-linux-arm64"
+	default:
+		return ""
+	}
+
+	linuxBinaryPath := filepath.Join(exeDir, binaryName)
+	if _, err := os.Stat(linuxBinaryPath); err == nil {
+		return linuxBinaryPath
+	}
+
+	return ""
+}
+
+// GetContainerBinaryPath returns the path for dcx binary in the container.
+// Includes version to ensure the binary is updated when dcx is upgraded.
+func GetContainerBinaryPath() string {
+	return fmt.Sprintf("/tmp/dcx-%s", version.Version)
+}

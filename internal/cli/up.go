@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	recreate bool
-	rebuild  bool
-	noAgent  bool
+	recreate  bool
+	rebuild   bool
+	noAgent   bool
+	enableSSH bool
 )
 
 var upCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func init() {
 	upCmd.Flags().BoolVar(&recreate, "recreate", false, "force recreate containers")
 	upCmd.Flags().BoolVar(&rebuild, "rebuild", false, "force rebuild images")
 	upCmd.Flags().BoolVar(&noAgent, "no-agent", false, "disable SSH agent forwarding")
+	upCmd.Flags().BoolVar(&enableSSH, "ssh", false, "enable SSH server access")
 }
 
 func runUp(cmd *cobra.Command, args []string) error {
@@ -124,7 +126,54 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
+	// Setup SSH server access if requested
+	if enableSSH {
+		if err := setupSSHAccess(ctx, dockerClient, cfg, envKey); err != nil {
+			fmt.Printf("Warning: Failed to setup SSH access: %v\n", err)
+		}
+	}
+
 	fmt.Println("Environment is ready")
+	return nil
+}
+
+func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, envKey string) error {
+	// Get the primary container
+	stateMgr := state.NewManager(dockerClient)
+	_, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	if err != nil {
+		return fmt.Errorf("failed to get container state: %w", err)
+	}
+	if containerInfo == nil {
+		return fmt.Errorf("no primary container found")
+	}
+
+	// Deploy dcx binary to container
+	binaryPath := ssh.GetContainerBinaryPath()
+	if err := ssh.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
+		return fmt.Errorf("failed to deploy SSH server: %w", err)
+	}
+
+	// Determine user
+	user := "root"
+	if cfg != nil {
+		if cfg.RemoteUser != "" {
+			user = cfg.RemoteUser
+		} else if cfg.ContainerUser != "" {
+			user = cfg.ContainerUser
+		}
+		user = config.Substitute(user, &config.SubstitutionContext{
+			LocalWorkspaceFolder: workspacePath,
+		})
+	}
+
+	// Add SSH config entry
+	hostName := envKey + ".dcx"
+	if err := ssh.AddSSHConfig(hostName, envKey, user); err != nil {
+		return fmt.Errorf("failed to update SSH config: %w", err)
+	}
+
+	fmt.Printf("SSH configured: ssh %s\n", hostName)
 	return nil
 }
 
