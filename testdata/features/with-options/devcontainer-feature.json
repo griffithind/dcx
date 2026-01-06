@@ -1,0 +1,23 @@
+{
+    "id": "with-options",
+    "version": "1.0.0",
+    "name": "Feature with Options",
+    "description": "Test feature that accepts options",
+    "options": {
+        "greeting": {
+            "type": "string",
+            "default": "Hello",
+            "description": "Greeting message"
+        },
+        "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable feature"
+        },
+        "count": {
+            "type": "string",
+            "default": "1",
+            "description": "Count value"
+        }
+    }
+}

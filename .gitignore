@@ -1,0 +1,47 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dcx
+dcx-linux-*
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.log
+debug/
+
+# Local environment files
+.env
+.env.local
+*.local
+
+# Build artifacts
+dist/
+build/
+
+# Test artifacts
+test/fixtures/tmp/

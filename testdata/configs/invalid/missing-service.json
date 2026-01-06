@@ -1,0 +1,4 @@
+{
+  "name": "Missing Service",
+  "dockerComposeFile": "docker-compose.yml"
+}
