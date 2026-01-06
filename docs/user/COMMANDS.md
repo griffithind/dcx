@@ -143,13 +143,19 @@ dcx down --volumes --remove-orphans
 Run a command in the running container.
 
 ```bash
-dcx exec -- <command> [args...]
+dcx exec [--no-agent] -- <command> [args...]
 ```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--no-agent` | Disable SSH agent forwarding |
 
 **Behavior:**
 - Executes command in primary container
 - Returns command exit code
 - Requires environment to be running
+- SSH agent forwarding enabled by default (if available)
 
 **Examples:**
 ```bash
@@ -161,6 +167,9 @@ dcx exec -- npm run build --production
 
 # List files
 dcx exec -- ls -la /workspace
+
+# Without SSH agent forwarding
+dcx exec --no-agent -- git status
 ```
 
 **Network Required:** No (offline-safe)
@@ -172,18 +181,27 @@ dcx exec -- ls -la /workspace
 Open an interactive shell in the container.
 
 ```bash
-dcx shell
+dcx shell [--no-agent]
 ```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--no-agent` | Disable SSH agent forwarding |
 
 **Behavior:**
 - Opens interactive shell in primary container
-- Uses container's default shell
+- Uses `/bin/bash` if available, otherwise `/bin/sh`
 - Allocates TTY for interactive use
+- SSH agent forwarding enabled by default (if available)
 
 **Examples:**
 ```bash
 # Open shell
 dcx shell
+
+# Without SSH agent forwarding
+dcx shell --no-agent
 ```
 
 **Network Required:** No (offline-safe)
@@ -286,6 +304,43 @@ All checks passed!
 
 ---
 
+### dcx upgrade
+
+Upgrade dcx to the latest version.
+
+```bash
+dcx upgrade
+```
+
+**Behavior:**
+- Checks GitHub releases for latest version
+- Compares with current version
+- Downloads appropriate binary for your platform
+- Replaces current executable in-place
+
+**Examples:**
+```bash
+# Check current version first
+dcx --version
+
+# Upgrade to latest
+dcx upgrade
+```
+
+**Output:**
+```
+Current version: v0.1.0
+Latest version:  v0.2.0
+Downloading dcx-darwin-arm64...
+Installing to /Users/you/.local/bin/dcx...
+Successfully upgraded to v0.2.0!
+Release notes: https://github.com/griffithind/dcx/releases/tag/v0.2.0
+```
+
+**Network Required:** Yes
+
+---
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -320,3 +375,4 @@ These commands may require network:
 - `dcx up` (may pull images)
 - `dcx build` (may pull base images)
 - `dcx doctor` (some checks)
+- `dcx upgrade` (downloads from GitHub)

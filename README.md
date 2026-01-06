@@ -7,17 +7,30 @@ A CLI that parses, validates, and runs devcontainers without using the @devconta
 - **Native Docker integration** - Uses Docker Engine API and docker compose CLI directly
 - **Offline-safe operations** - `start`, `stop`, `exec`, and `shell` commands work without network access
 - **Labels as database** - Container state tracked via Docker labels, no local state files required
-- **SSH agent forwarding** - Automatic forwarding of any SSH agent to containers
+- **SSH agent forwarding** - Automatic forwarding of SSH agent to containers via TCP proxy
 - **SELinux support** - Automatic detection and :Z relabeling on enforcing systems
 - **Compose support** - Full support for docker compose-based devcontainers
+- **Self-updating** - Built-in `upgrade` command to update to latest version
 
 ## Installation
 
-```bash
-# Using go install
-go install github.com/griffithind/dcx/cmd/dcx@latest
+### Quick Install (Recommended)
 
-# From source
+```bash
+curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | sh
+```
+
+This installs dcx to `~/.local/bin/dcx`.
+
+### Using Go Install
+
+```bash
+go install github.com/griffithind/dcx/cmd/dcx@latest
+```
+
+### From Source
+
+```bash
 git clone https://github.com/griffithind/dcx.git
 cd dcx
 make build
@@ -49,6 +62,7 @@ dcx down                  # Remove containers
 | `dcx down` | Yes | Stop and remove containers |
 | `dcx status` | Yes | Show environment state |
 | `dcx doctor` | Partial | Check system requirements |
+| `dcx upgrade` | No | Update dcx to latest version |
 
 ## Global Flags
 
@@ -56,6 +70,7 @@ dcx down                  # Remove containers
 -w, --workspace   Workspace directory (default: current directory)
 -c, --config      Path to devcontainer.json
 -v, --verbose     Enable verbose output
+    --version     Show version
 ```
 
 ## Environment States
@@ -72,7 +87,7 @@ dcx tracks environment state using Docker labels:
 
 dcx supports the following devcontainer.json configurations:
 
-### Compose-based (Milestone 1)
+### Compose-based
 ```json
 {
   "name": "My App",
@@ -82,7 +97,7 @@ dcx supports the following devcontainer.json configurations:
 }
 ```
 
-### Image-based (Milestone 2)
+### Image-based
 ```json
 {
   "name": "My App",
@@ -91,7 +106,7 @@ dcx supports the following devcontainer.json configurations:
 }
 ```
 
-### Dockerfile-based (Milestone 2)
+### Dockerfile-based
 ```json
 {
   "name": "My App",
@@ -116,14 +131,16 @@ Containers are tagged with labels under the `io.github.dcx.*` namespace:
 
 ## SSH Agent Forwarding
 
-dcx automatically forwards your SSH agent to containers:
+dcx automatically forwards your SSH agent to containers using a TCP-based proxy:
 
-- Detects `SSH_AUTH_SOCK` from the host
-- Creates a proxy socket that supports agent restarts
-- Mounts the proxy to `/ssh-agent` in containers
-- Sets `SSH_AUTH_SOCK=/ssh-agent/agent.sock`
+1. Host runs a TCP listener that connects to your local SSH agent
+2. dcx binary is copied into the container
+3. Container-side proxy creates a Unix socket and forwards to host via TCP
+4. `SSH_AUTH_SOCK` is set to the container socket path
 
-Use `--no-agent` to disable SSH forwarding.
+This approach works across all platforms (Docker Desktop, native Linux, Colima, Podman) without socket mounting issues.
+
+Use `--no-agent` on `exec`, `shell`, or `up` commands to disable SSH forwarding.
 
 ## SELinux Support
 
@@ -132,6 +149,16 @@ On Linux systems with SELinux in enforcing mode, dcx automatically:
 - Detects the SELinux mode
 - Applies `:Z` relabeling to bind mounts
 - Ensures proper container access to mounted directories
+
+## Upgrading
+
+```bash
+# Check current version
+dcx --version
+
+# Upgrade to latest
+dcx upgrade
+```
 
 ## Development
 
@@ -142,13 +169,16 @@ make build
 # Run tests
 make test
 
+# Build release binaries (with embedded Linux binaries for macOS)
+make build-release
+
 # Run with verbose output
 ./bin/dcx -v up
 ```
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.24+ (for building from source)
 - Docker Engine
 - docker compose CLI plugin
 
@@ -158,7 +188,6 @@ make test
 - [Command Reference](docs/user/COMMANDS.md)
 - [Configuration Guide](docs/user/CONFIGURATION.md)
 - [Architecture](docs/design/ARCHITECTURE.md)
-- [Specification](docs/design/SPEC.md)
 
 ## License
 

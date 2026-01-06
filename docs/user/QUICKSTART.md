@@ -2,6 +2,14 @@
 
 ## Installation
 
+### Quick Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | sh
+```
+
+This installs dcx to `~/.local/bin/dcx`. Make sure this directory is in your PATH.
+
 ### Using Go Install
 
 ```bash
@@ -15,6 +23,12 @@ git clone https://github.com/griffithind/dcx.git
 cd dcx
 make build
 ./bin/dcx --version
+```
+
+### Upgrading
+
+```bash
+dcx upgrade
 ```
 
 ## Prerequisites
