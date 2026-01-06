@@ -145,8 +145,8 @@ func createWorkspaceWithLocalFeature(t *testing.T) string {
 	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
 	require.NoError(t, err)
 
-	// Create install script
-	installScript := `#!/bin/bash
+	// Create install script (use /bin/sh for Alpine compatibility)
+	installScript := `#!/bin/sh
 set -e
 echo "feature installed" > /tmp/feature-marker
 `
@@ -243,7 +243,7 @@ func createWorkspaceWithDependentFeatures(t *testing.T) string {
 	err = os.WriteFile(filepath.Join(simpleDir, "devcontainer-feature.json"), []byte(simpleJSON), 0644)
 	require.NoError(t, err)
 
-	simpleInstall := `#!/bin/bash
+	simpleInstall := `#!/bin/sh
 set -e
 echo "simple-marker installed" > /tmp/simple-marker
 `
@@ -309,7 +309,7 @@ func createWorkspaceWithMultipleFeatures(t *testing.T) string {
 	err = os.WriteFile(filepath.Join(simpleDir, "devcontainer-feature.json"), []byte(simpleJSON), 0644)
 	require.NoError(t, err)
 
-	simpleInstall := `#!/bin/bash
+	simpleInstall := `#!/bin/sh
 set -e
 echo "simple-marker installed" > /tmp/simple-marker
 `

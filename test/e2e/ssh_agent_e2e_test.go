@@ -38,13 +38,11 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	t.Run("ssh_auth_sock_set", func(t *testing.T) {
 		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SSH_AUTH_SOCK")
 		require.NoError(t, err)
-		// On Docker Desktop: /run/host-services/ssh-auth.sock
-		// On native Docker: /ssh-agent/agent-xxxxx.sock (unique per exec)
+		// Socket path is /tmp/ssh-agent-<uid>.sock via TCP proxy
 		sockPath := strings.TrimSpace(stdout)
 		assert.True(t,
-			strings.Contains(sockPath, "/run/host-services/ssh-auth.sock") ||
-				strings.Contains(sockPath, "/ssh-agent/agent-"),
-			"SSH_AUTH_SOCK should be set to Docker Desktop path or proxy path, got: %s", sockPath)
+			strings.HasPrefix(sockPath, "/tmp/ssh-agent-"),
+			"SSH_AUTH_SOCK should be set to proxy socket path, got: %s", sockPath)
 	})
 
 	// Verify the socket file exists during exec (the proxy creates it for each exec)
@@ -137,11 +135,10 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 		// All sockets should be valid
 		assert.GreaterOrEqual(t, len(socketPaths), 1, "Should have at least one socket path")
 
-		// Check the socket paths are valid
+		// Check the socket paths are valid (TCP proxy uses /tmp/ssh-agent-<uid>.sock)
 		for sock := range socketPaths {
 			assert.True(t,
-				strings.Contains(sock, "/run/host-services/ssh-auth.sock") ||
-					strings.Contains(sock, "/ssh-agent/agent-"),
+				strings.HasPrefix(sock, "/tmp/ssh-agent-"),
 				"Socket path should be valid: %s", sock)
 		}
 	})
@@ -196,8 +193,7 @@ func TestSSHAgentExecNoAgentFlag(t *testing.T) {
 		require.NoError(t, err)
 		sockPath := strings.TrimSpace(stdout)
 		assert.True(t,
-			strings.Contains(sockPath, "/run/host-services/ssh-auth.sock") ||
-				strings.Contains(sockPath, "/ssh-agent/agent-"),
+			strings.HasPrefix(sockPath, "/tmp/ssh-agent-"),
 			"SSH_AUTH_SOCK should be set, got: %s", sockPath)
 	})
 
