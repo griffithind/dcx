@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/version"
 )
 
@@ -66,7 +68,14 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 // Returns the socket path inside the container for SSH_AUTH_SOCK.
 func (p *AgentProxy) Start() (string, error) {
 	// Start TCP listener on host
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	// On native Linux, bind to docker bridge to accept connections from containers.
+	// On Docker Desktop (Mac/Windows), localhost works because of the VM networking.
+	bindAddr := "127.0.0.1:0"
+	if runtime.GOOS == "linux" && !IsDockerDesktop() {
+		// Use docker0 bridge IP (host-gateway) for native Linux
+		bindAddr = getDockerBridgeIP() + ":0"
+	}
+	listener, err := net.Listen("tcp", bindAddr)
 	if err != nil {
 		return "", fmt.Errorf("failed to start TCP listener: %w", err)
 	}
@@ -198,8 +207,14 @@ func (p *AgentProxy) deployAndStartClient() error {
 	}
 
 	// Start client in background
-	// Using nohup and & to run in background, capturing PID
-	hostAddr := fmt.Sprintf("host.docker.internal:%d", p.port)
+	// On Docker Desktop, use host.docker.internal (built-in).
+	// On native Linux, use the bridge gateway IP directly.
+	var hostAddr string
+	if runtime.GOOS == "linux" && !IsDockerDesktop() {
+		hostAddr = fmt.Sprintf("%s:%d", getDockerBridgeIP(), p.port)
+	} else {
+		hostAddr = fmt.Sprintf("host.docker.internal:%d", p.port)
+	}
 	startCmd := exec.CommandContext(ctx, "docker", "exec", "-d", "--user", "root",
 		p.containerName,
 		binaryPath, "ssh-agent-proxy", "client",
@@ -262,42 +277,43 @@ func (p *AgentProxy) copyDCXToContainer(ctx context.Context, binaryPath string) 
 }
 
 // getLinuxBinaryPath returns the path to a Linux binary for the container architecture.
-// Returns empty string if not available (e.g., when running on Linux already).
+// Returns empty string if not available.
+// On Linux, we still prefer the statically-linked binary if available, because the
+// current executable may be dynamically linked against glibc and won't work on
+// Alpine/musl-based containers.
 func (p *AgentProxy) getLinuxBinaryPath() string {
-	// If we're already on Linux, use current executable
-	if runtime.GOOS == "linux" {
-		return ""
-	}
-
 	// Determine container architecture (Docker Desktop on Mac runs arm64 Linux containers on M1/M2)
 	// For now, we detect based on host architecture since Docker Desktop matches host arch by default
 	arch := runtime.GOARCH
 
-	// Check for embedded binaries first
-	var embeddedBinary []byte
-	switch arch {
-	case "amd64":
-		embeddedBinary = dcxLinuxAmd64
-	case "arm64":
-		embeddedBinary = dcxLinuxArm64
-	}
+	// Check for embedded binaries first (not available on Linux builds)
+	if runtime.GOOS != "linux" {
+		var embeddedBinary []byte
+		switch arch {
+		case "amd64":
+			embeddedBinary = dcxLinuxAmd64
+		case "arm64":
+			embeddedBinary = dcxLinuxArm64
+		}
 
-	if len(embeddedBinary) > 0 {
-		// Write embedded binary to temp file
-		tmpFile, err := os.CreateTemp("", "dcx-linux-*")
-		if err != nil {
-			return ""
-		}
-		if _, err := tmpFile.Write(embeddedBinary); err != nil {
+		if len(embeddedBinary) > 0 {
+			// Write embedded binary to temp file
+			tmpFile, err := os.CreateTemp("", "dcx-linux-*")
+			if err != nil {
+				return ""
+			}
+			if _, err := tmpFile.Write(embeddedBinary); err != nil {
+				tmpFile.Close()
+				os.Remove(tmpFile.Name())
+				return ""
+			}
 			tmpFile.Close()
-			os.Remove(tmpFile.Name())
-			return ""
+			return tmpFile.Name()
 		}
-		tmpFile.Close()
-		return tmpFile.Name()
 	}
 
 	// Check for pre-built binaries next to current executable
+	// These are statically linked and work on any Linux distro including Alpine
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
@@ -418,4 +434,29 @@ func StartServerProcess() (int, func(), error) {
 	}
 
 	return port, stop, nil
+}
+
+// getDockerBridgeIP returns the gateway IP of the default Docker bridge network.
+// This is the IP that containers use to reach the host on native Linux via host.docker.internal.
+func getDockerBridgeIP() string {
+	ctx := context.Background()
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer cli.Close()
+
+	network, err := cli.NetworkInspect(ctx, "bridge", network.InspectOptions{})
+	if err != nil {
+		return "127.0.0.1"
+	}
+
+	for _, config := range network.IPAM.Config {
+		if config.Gateway != "" {
+			return config.Gateway
+		}
+	}
+
+	return "127.0.0.1"
 }
