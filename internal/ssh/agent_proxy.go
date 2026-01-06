@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/griffithind/dcx/internal/version"
 )
 
 // AgentProxy manages SSH agent forwarding between host and container.
@@ -175,15 +177,22 @@ func (p *AgentProxy) handleConnection(tcpConn net.Conn) {
 	<-done
 }
 
+// getContainerBinaryPath returns the path for dcx binary in the container.
+// Includes version to ensure the binary is updated when dcx is upgraded.
+func (p *AgentProxy) getContainerBinaryPath() string {
+	return fmt.Sprintf("/tmp/dcx-%s", version.Version)
+}
+
 // deployAndStartClient copies dcx to the container and starts the client.
 func (p *AgentProxy) deployAndStartClient() error {
 	ctx := context.Background()
+	binaryPath := p.getContainerBinaryPath()
 
-	// Check if dcx is already in container
-	checkCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName, "test", "-f", "/tmp/dcx")
+	// Check if correct version of dcx is already in container
+	checkCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName, "test", "-f", binaryPath)
 	if err := checkCmd.Run(); err != nil {
 		// Need to copy dcx to container
-		if err := p.copyDCXToContainer(ctx); err != nil {
+		if err := p.copyDCXToContainer(ctx, binaryPath); err != nil {
 			return err
 		}
 	}
@@ -193,7 +202,7 @@ func (p *AgentProxy) deployAndStartClient() error {
 	hostAddr := fmt.Sprintf("host.docker.internal:%d", p.port)
 	startCmd := exec.CommandContext(ctx, "docker", "exec", "-d", "--user", "root",
 		p.containerName,
-		"/tmp/dcx", "ssh-agent-proxy", "client",
+		binaryPath, "ssh-agent-proxy", "client",
 		"--host", hostAddr,
 		"--socket", p.socketPath,
 		"--uid", strconv.Itoa(p.uid),
@@ -206,7 +215,7 @@ func (p *AgentProxy) deployAndStartClient() error {
 
 	// Get the PID of the client process
 	pidCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName,
-		"sh", "-c", fmt.Sprintf("pgrep -f 'dcx ssh-agent-proxy client.*%s'", p.socketPath))
+		"sh", "-c", fmt.Sprintf("pgrep -f 'dcx-%s ssh-agent-proxy client.*%s'", version.Version, p.socketPath))
 	output, err := pidCmd.Output()
 	if err == nil {
 		p.clientPID = strings.TrimSpace(string(output))
@@ -215,8 +224,8 @@ func (p *AgentProxy) deployAndStartClient() error {
 	return nil
 }
 
-// copyDCXToContainer copies the dcx binary to the container.
-func (p *AgentProxy) copyDCXToContainer(ctx context.Context) error {
+// copyDCXToContainer copies the dcx binary to the container at the given path.
+func (p *AgentProxy) copyDCXToContainer(ctx context.Context, binaryPath string) error {
 	// Try to get a Linux binary (embedded or from filesystem)
 	dcxPath := p.getLinuxBinaryPath()
 	needsCleanup := false
@@ -238,13 +247,13 @@ func (p *AgentProxy) copyDCXToContainer(ctx context.Context) error {
 	}
 
 	// Copy to container
-	copyCmd := exec.CommandContext(ctx, "docker", "cp", dcxPath, p.containerName+":/tmp/dcx")
+	copyCmd := exec.CommandContext(ctx, "docker", "cp", dcxPath, p.containerName+":"+binaryPath)
 	if err := copyCmd.Run(); err != nil {
 		return fmt.Errorf("failed to copy dcx to container: %w", err)
 	}
 
 	// Make executable (run as root to avoid permission issues)
-	chmodCmd := exec.CommandContext(ctx, "docker", "exec", "--user", "root", p.containerName, "chmod", "+x", "/tmp/dcx")
+	chmodCmd := exec.CommandContext(ctx, "docker", "exec", "--user", "root", p.containerName, "chmod", "+x", binaryPath)
 	if err := chmodCmd.Run(); err != nil {
 		return fmt.Errorf("failed to make dcx executable: %w", err)
 	}

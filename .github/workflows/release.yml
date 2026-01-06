@@ -26,13 +26,13 @@ jobs:
       - name: Build Linux amd64
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/cli.Version=${{ steps.version.outputs.VERSION }}" \
+            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
             -o internal/ssh/bin/dcx-linux-amd64 ./cmd/dcx
 
       - name: Build Linux arm64
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/cli.Version=${{ steps.version.outputs.VERSION }}" \
+            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
             -o internal/ssh/bin/dcx-linux-arm64 ./cmd/dcx
 
       # Copy Linux binaries to release directory
@@ -45,13 +45,13 @@ jobs:
       - name: Build macOS amd64 (with embedded Linux binaries)
         run: |
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -tags embed \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/cli.Version=${{ steps.version.outputs.VERSION }}" \
+            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
             -o dcx-darwin-amd64 ./cmd/dcx
 
       - name: Build macOS arm64 (with embedded Linux binaries)
         run: |
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/cli.Version=${{ steps.version.outputs.VERSION }}" \
+            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
             -o dcx-darwin-arm64 ./cmd/dcx
 
       # Create checksums
