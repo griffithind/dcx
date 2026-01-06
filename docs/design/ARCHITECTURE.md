@@ -193,9 +193,10 @@ dcx generates an override file to inject:
 
 1. **DCX labels** - For container tracking
 2. **Workspace mount** - Bind mount with working_dir
-3. **SSH agent mount** - Proxy socket directory
-4. **Environment variables** - containerEnv, remoteEnv, SSH_AUTH_SOCK
-5. **runArgs mapping** - Capabilities, devices, security options
+3. **Environment variables** - containerEnv, remoteEnv
+4. **runArgs mapping** - Capabilities, devices, security options
+
+Note: SSH agent forwarding is handled at runtime via TCP proxy (see below), not in the override file.
 
 Example generated override:
 
@@ -211,31 +212,64 @@ services:
     working_dir: /workspace
     volumes:
       - /home/user/project:/workspace:Z
-      - /run/user/1000/dcx/abcd1234efgh/ssh-agent:/ssh-agent:Z
     environment:
-      SSH_AUTH_SOCK: /ssh-agent/agent.sock
+      PGHOST: db
 ```
+
+Note: SSH agent forwarding is handled at runtime via TCP proxy, not via volume mounts.
 
 ## SSH Agent Proxy
 
-The SSH proxy enables agent forwarding that survives agent restarts:
+dcx uses a TCP-based proxy for SSH agent forwarding that works across all platforms:
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Container  │    │   Proxy     │    │  SSH Agent  │
-│             │    │             │    │             │
-│ SSH_AUTH_   │───▶│ agent.sock  │───▶│ (upstream)  │
-│   SOCK      │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘
-                    Per-connection
-                    dial to upstream
+┌─────────────────────────────────────────────────────────────────┐
+│  HOST                                                           │
+│  ┌─────────────┐         ┌─────────────┐                       │
+│  │ dcx process │────────▶│ TCP Listener│                       │
+│  │             │         │ 127.0.0.1:N │                       │
+│  └─────────────┘         └──────┬──────┘                       │
+│                                 │                               │
+│                                 ▼                               │
+│                          ┌─────────────┐                       │
+│                          │ SSH Agent   │                       │
+│                          │ $SSH_AUTH_  │                       │
+│                          │    SOCK     │                       │
+│                          └─────────────┘                       │
+└─────────────────────────────────────────────────────────────────┘
+          │
+          │ TCP via host.docker.internal:N
+          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  CONTAINER                                                      │
+│  ┌─────────────┐         ┌─────────────┐                       │
+│  │ /tmp/dcx    │────────▶│ Unix Socket │                       │
+│  │ (dcx binary)│         │ /tmp/ssh-   │                       │
+│  │             │         │ agent-N.sock│                       │
+│  └─────────────┘         └──────┬──────┘                       │
+│                                 │                               │
+│                                 ▼                               │
+│                          ┌─────────────┐                       │
+│                          │ User App    │                       │
+│                          │ SSH_AUTH_   │                       │
+│                          │   SOCK      │                       │
+│                          └─────────────┘                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Features:
-- New upstream connection per client connection
-- Supports agent restart without container restart
-- Platform-specific socket directories
-- Proper permission handling (0700 dir, 0600 socket)
+**How it works:**
+
+1. Host-side dcx starts a TCP listener on `127.0.0.1:<random-port>`
+2. dcx binary is copied to container at `/tmp/dcx`
+3. Container-side dcx runs as `ssh-agent-proxy client`, creating a Unix socket
+4. User commands use `SSH_AUTH_SOCK=/tmp/ssh-agent-<uid>.sock`
+5. Connections flow: Unix socket → TCP → host agent
+
+**Benefits:**
+- Works on Docker Desktop, native Linux, Colima, Podman
+- No socket mounting issues (SELinux, permissions)
+- Supports agent restarts
+- Clean isolation per exec/shell session
 
 ## SELinux Support
 
