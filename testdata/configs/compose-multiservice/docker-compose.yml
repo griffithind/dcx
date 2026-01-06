@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+    depends_on:
+      - db
+  db:
+    image: alpine:latest
+    command: sleep infinity

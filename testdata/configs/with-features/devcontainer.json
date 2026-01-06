@@ -1,0 +1,10 @@
+{
+    "name": "With Features",
+    "image": "ubuntu:22.04",
+    "features": {
+        "./features/simple-marker": {
+            "message": "Hello from feature!"
+        }
+    },
+    "workspaceFolder": "/workspace"
+}

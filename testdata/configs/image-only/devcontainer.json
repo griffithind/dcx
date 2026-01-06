@@ -1,0 +1,1 @@
+{"name": "Simple Alpine", "image": "alpine:latest", "workspaceFolder": "/workspace", "remoteUser": "root", "postCreateCommand": "echo Container created"}

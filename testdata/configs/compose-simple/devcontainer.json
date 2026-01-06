@@ -1,0 +1,9 @@
+{
+  "name": "Simple Compose Test",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "NODE_ENV": "development"
+  }
+}

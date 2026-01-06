@@ -1,0 +1,11 @@
+{
+    "name": "Compose with Features",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "features": {
+        "./features/simple-marker": {
+            "message": "Hello from compose!"
+        }
+    }
+}
