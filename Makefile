@@ -9,9 +9,11 @@ LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/cli.Version=$(VER
 # Default target
 all: build
 
-# Build the binary for current platform
+# Build the binary for current platform + Linux binaries for SSH agent forwarding
 build:
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
 # Build Linux binaries for container deployment (SSH agent proxy)
 build-linux:
