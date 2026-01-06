@@ -64,6 +64,24 @@ func NewRunnerFromEnvKey(workspacePath, envKey string) *Runner {
 	}
 }
 
+// writeOverrideToTempFile writes the override content to a temp file and returns the path.
+// The caller is responsible for cleaning up the file after use.
+func (r *Runner) writeOverrideToTempFile(content string) (string, error) {
+	tmpFile, err := os.CreateTemp("", "dcx-override-*.yml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to write override: %w", err)
+	}
+
+	tmpFile.Close()
+	return tmpFile.Name(), nil
+}
+
 // UpOptions contains options for compose up.
 type UpOptions struct {
 	Build   bool
@@ -88,11 +106,12 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 		return fmt.Errorf("failed to generate override: %w", err)
 	}
 
-	// Write override file
-	r.overridePath = filepath.Join(r.configDir, ".dcx-override.yml")
-	if err := os.WriteFile(r.overridePath, []byte(override), 0644); err != nil {
-		return fmt.Errorf("failed to write override file: %w", err)
+	// Write override to temp file
+	r.overridePath, err = r.writeOverrideToTempFile(override)
+	if err != nil {
+		return err
 	}
+	defer os.Remove(r.overridePath)
 
 	// Build compose args
 	args := r.composeBaseArgs()
@@ -241,10 +260,12 @@ func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
 			return fmt.Errorf("failed to generate override: %w", err)
 		}
 
-		r.overridePath = filepath.Join(r.configDir, ".dcx-override.yml")
-		if err := os.WriteFile(r.overridePath, []byte(override), 0644); err != nil {
-			return fmt.Errorf("failed to write override file: %w", err)
+		// Write override to temp file
+		r.overridePath, err = r.writeOverrideToTempFile(override)
+		if err != nil {
+			return err
 		}
+		defer os.Remove(r.overridePath)
 	}
 
 	args := r.composeBaseArgs()
