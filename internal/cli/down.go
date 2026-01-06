@@ -6,6 +6,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +79,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}
+	}
+
+	// Clean up SSH config entry if present
+	if err := ssh.RemoveSSHConfig(envKey); err != nil {
+		fmt.Printf("Warning: Failed to remove SSH config: %v\n", err)
 	}
 
 	fmt.Println("Environment removed")
