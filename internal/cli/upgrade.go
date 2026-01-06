@@ -3,12 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"runtime"
 	"strings"
 
+	"github.com/minio/selfupdate"
 	"github.com/spf13/cobra"
 
 	"github.com/griffithind/dcx/internal/version"
@@ -85,51 +84,20 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Downloading %s...\n", binaryName)
 
-	// Download to temp file
-	tmpFile, err := os.CreateTemp("", "dcx-upgrade-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
 	resp, err := http.Get(downloadURL)
 	if err != nil {
-		tmpFile.Close()
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		tmpFile.Close()
 		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
 
-	_, err = io.Copy(tmpFile, resp.Body)
-	tmpFile.Close()
-	if err != nil {
-		return fmt.Errorf("failed to save download: %w", err)
-	}
-
-	// Make executable
-	if err := os.Chmod(tmpPath, 0755); err != nil {
-		return fmt.Errorf("failed to set permissions: %w", err)
-	}
-
-	// Get current executable path
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
-	}
-
-	// Replace current executable
-	fmt.Printf("Installing to %s...\n", execPath)
-
-	if err := os.Rename(tmpPath, execPath); err != nil {
-		// Try copy if rename fails (cross-device)
-		if err := copyFile(tmpPath, execPath); err != nil {
-			return fmt.Errorf("failed to install: %w", err)
-		}
+	// Apply the update using selfupdate library
+	// This handles "text file busy" and other OS-specific issues
+	if err := selfupdate.Apply(resp.Body, selfupdate.Options{}); err != nil {
+		return fmt.Errorf("failed to apply update: %w", err)
 	}
 
 	fmt.Printf("Successfully upgraded to %s!\n", latestVersion)
@@ -159,23 +127,3 @@ func getLatestRelease() (*githubRelease, error) {
 	return &release, nil
 }
 
-func copyFile(src, dst string) error {
-	source, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	dest, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dest.Close()
-
-	_, err = io.Copy(dest, source)
-	if err != nil {
-		return err
-	}
-
-	return os.Chmod(dst, 0755)
-}
