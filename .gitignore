@@ -5,8 +5,8 @@ bin/
 *.dll
 *.so
 *.dylib
-dcx
-dcx-linux-*
+/dcx
+/dcx-linux-*
 
 # Test binary, built with `go test -c`
 *.test
