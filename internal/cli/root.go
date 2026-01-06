@@ -6,10 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
 
-// Version is set at build time via ldflags.
-var Version = "dev"
+	"github.com/griffithind/dcx/internal/version"
+)
 
 // Global flags
 var (
@@ -28,7 +27,7 @@ with full support for docker compose and Features.
 It uses the Docker Engine API and docker compose CLI directly, without
 requiring the @devcontainers/cli. Container state is tracked using labels,
 enabling offline-safe operations for start/stop/exec commands.`,
-	Version: Version,
+	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize workspace path if not provided
 		if workspacePath == "" {
