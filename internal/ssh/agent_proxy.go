@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	"github.com/griffithind/dcx/internal/version"
 )
 
 // AgentProxy manages SSH agent forwarding between host and container.
@@ -186,24 +184,14 @@ func (p *AgentProxy) handleConnection(tcpConn net.Conn) {
 	<-done
 }
 
-// getContainerBinaryPath returns the path for dcx binary in the container.
-// Includes version to ensure the binary is updated when dcx is upgraded.
-func (p *AgentProxy) getContainerBinaryPath() string {
-	return fmt.Sprintf("/tmp/dcx-%s", version.Version)
-}
-
-// deployAndStartClient copies dcx to the container and starts the client.
+// deployAndStartClient deploys dcx to the container and starts the agent proxy client.
 func (p *AgentProxy) deployAndStartClient() error {
 	ctx := context.Background()
-	binaryPath := p.getContainerBinaryPath()
+	binaryPath := GetContainerBinaryPath()
 
-	// Check if correct version of dcx is already in container
-	checkCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName, "test", "-f", binaryPath)
-	if err := checkCmd.Run(); err != nil {
-		// Need to copy dcx to container
-		if err := p.copyDCXToContainer(ctx, binaryPath); err != nil {
-			return err
-		}
+	// Deploy dcx binary to container (uses shared deployment code)
+	if err := DeployToContainer(ctx, p.containerName, binaryPath); err != nil {
+		return err
 	}
 
 	// Start client in background
@@ -230,112 +218,13 @@ func (p *AgentProxy) deployAndStartClient() error {
 
 	// Get the PID of the client process
 	pidCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName,
-		"sh", "-c", fmt.Sprintf("pgrep -f 'dcx-%s ssh-agent-proxy client.*%s'", version.Version, p.socketPath))
+		"sh", "-c", fmt.Sprintf("pgrep -f 'ssh-agent-proxy client.*%s'", p.socketPath))
 	output, err := pidCmd.Output()
 	if err == nil {
 		p.clientPID = strings.TrimSpace(string(output))
 	}
 
 	return nil
-}
-
-// copyDCXToContainer copies the dcx binary to the container at the given path.
-func (p *AgentProxy) copyDCXToContainer(ctx context.Context, binaryPath string) error {
-	// Try to get a Linux binary (embedded or from filesystem)
-	dcxPath := p.getLinuxBinaryPath()
-	needsCleanup := false
-
-	if dcxPath == "" {
-		// Fall back to current executable (works when already on Linux)
-		var err error
-		dcxPath, err = os.Executable()
-		if err != nil {
-			return fmt.Errorf("failed to get executable path: %w", err)
-		}
-	} else if strings.HasPrefix(dcxPath, os.TempDir()) {
-		// If it's a temp file (from embedded binary), clean it up after
-		needsCleanup = true
-	}
-
-	if needsCleanup {
-		defer os.Remove(dcxPath)
-	}
-
-	// Copy to container
-	copyCmd := exec.CommandContext(ctx, "docker", "cp", dcxPath, p.containerName+":"+binaryPath)
-	if err := copyCmd.Run(); err != nil {
-		return fmt.Errorf("failed to copy dcx to container: %w", err)
-	}
-
-	// Make executable (run as root to avoid permission issues)
-	chmodCmd := exec.CommandContext(ctx, "docker", "exec", "--user", "root", p.containerName, "chmod", "+x", binaryPath)
-	if err := chmodCmd.Run(); err != nil {
-		return fmt.Errorf("failed to make dcx executable: %w", err)
-	}
-
-	return nil
-}
-
-// getLinuxBinaryPath returns the path to a Linux binary for the container architecture.
-// Returns empty string if not available.
-// On Linux, we still prefer the statically-linked binary if available, because the
-// current executable may be dynamically linked against glibc and won't work on
-// Alpine/musl-based containers.
-func (p *AgentProxy) getLinuxBinaryPath() string {
-	// Determine container architecture (Docker Desktop on Mac runs arm64 Linux containers on M1/M2)
-	// For now, we detect based on host architecture since Docker Desktop matches host arch by default
-	arch := runtime.GOARCH
-
-	// Check for embedded binaries first (not available on Linux builds)
-	if runtime.GOOS != "linux" {
-		var embeddedBinary []byte
-		switch arch {
-		case "amd64":
-			embeddedBinary = dcxLinuxAmd64
-		case "arm64":
-			embeddedBinary = dcxLinuxArm64
-		}
-
-		if len(embeddedBinary) > 0 {
-			// Write embedded binary to temp file
-			tmpFile, err := os.CreateTemp("", "dcx-linux-*")
-			if err != nil {
-				return ""
-			}
-			if _, err := tmpFile.Write(embeddedBinary); err != nil {
-				tmpFile.Close()
-				os.Remove(tmpFile.Name())
-				return ""
-			}
-			tmpFile.Close()
-			return tmpFile.Name()
-		}
-	}
-
-	// Check for pre-built binaries next to current executable
-	// These are statically linked and work on any Linux distro including Alpine
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	exeDir := filepath.Dir(exe)
-
-	var binaryName string
-	switch arch {
-	case "amd64":
-		binaryName = "dcx-linux-amd64"
-	case "arm64":
-		binaryName = "dcx-linux-arm64"
-	default:
-		return ""
-	}
-
-	linuxBinaryPath := filepath.Join(exeDir, binaryName)
-	if _, err := os.Stat(linuxBinaryPath); err == nil {
-		return linuxBinaryPath
-	}
-
-	return ""
 }
 
 // waitForSocket waits for the client socket to be ready.
@@ -356,15 +245,6 @@ func (p *AgentProxy) waitForSocket() error {
 // SocketPath returns the socket path inside the container.
 func (p *AgentProxy) SocketPath() string {
 	return p.socketPath
-}
-
-// Helper to get dcx path relative to current binary
-func getDCXPath() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(exe)
 }
 
 // GetContainerUserIDs gets the UID and GID for a user in a container.
