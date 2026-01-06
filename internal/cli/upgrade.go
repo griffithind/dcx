@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/griffithind/dcx/internal/version"
 )
 
 const (
@@ -41,7 +43,7 @@ type githubRelease struct {
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
-	fmt.Printf("Current version: %s\n", Version)
+	fmt.Printf("Current version: %s\n", version.Version)
 
 	// Get latest release info
 	release, err := getLatestRelease()
@@ -53,7 +55,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Latest version:  %s\n", latestVersion)
 
 	// Compare versions (strip 'v' prefix for comparison)
-	currentClean := strings.TrimPrefix(Version, "v")
+	currentClean := strings.TrimPrefix(version.Version, "v")
 	latestClean := strings.TrimPrefix(latestVersion, "v")
 
 	if currentClean == latestClean {
@@ -61,7 +63,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if Version == "dev" {
+	if version.Version == "dev" {
 		fmt.Println("Running development version, upgrading to latest release...")
 	}
 

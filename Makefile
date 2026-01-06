@@ -4,7 +4,7 @@
 BINARY_NAME=dcx
 BUILD_DIR=bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/cli.Version=$(VERSION)"
+LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
 
 # Default target
 all: build
