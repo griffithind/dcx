@@ -8,6 +8,10 @@ bin/
 /dcx
 /dcx-linux-*
 
+# Embedded binaries (built for release, not committed)
+internal/ssh/bin/*
+!internal/ssh/bin/.gitkeep
+
 # Test binary, built with `go test -c`
 *.test
 
