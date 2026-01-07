@@ -239,14 +239,26 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 
+	// Get container info for subsequent operations
+	_, containerInfo, err = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
+	if err != nil {
+		return fmt.Errorf("failed to get container info: %w", err)
+	}
+
+	// Update remote user UID/GID to match host user (Linux only)
+	// This must happen before lifecycle hooks so files created by hooks have correct ownership
+	if isNewEnvironment && containerInfo != nil {
+		if err := s.updateRemoteUserUID(ctx, containerInfo.ID, info.Config); err != nil {
+			// Non-fatal warning - some containers may not support this
+			fmt.Printf("Warning: Could not update remote user UID: %v\n", err)
+		}
+	}
+
 	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
-	if opts.SSHAgentEnabled {
-		_, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
-		if err == nil && containerInfo != nil {
-			fmt.Println("Installing dcx agent...")
-			if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
-				return fmt.Errorf("failed to install dcx agent: %w", err)
-			}
+	if opts.SSHAgentEnabled && containerInfo != nil {
+		fmt.Println("Installing dcx agent...")
+		if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
+			return fmt.Errorf("failed to install dcx agent: %w", err)
 		}
 	}
 
