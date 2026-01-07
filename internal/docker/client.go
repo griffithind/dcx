@@ -474,7 +474,9 @@ type BuildOptions struct {
 	Args       map[string]string
 	Target     string
 	CacheFrom  []string
-	ConfigDir  string // Directory containing the devcontainer.json (for resolving relative paths)
+	ConfigDir  string    // Directory containing the devcontainer.json (for resolving relative paths)
+	Stdout     io.Writer // Output stream for build output (nil = discard)
+	Stderr     io.Writer // Error stream for build output (nil = discard)
 }
 
 // BuildImage builds a Docker image from a Dockerfile.
@@ -541,8 +543,16 @@ func buildImageWithCLI(ctx context.Context, opts BuildOptions) error {
 
 	// Execute docker build
 	cmd := execCommand(ctx, "docker", args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	if opts.Stdout != nil {
+		cmd.Stdout = opts.Stdout
+	} else {
+		cmd.Stdout = io.Discard
+	}
+	if opts.Stderr != nil {
+		cmd.Stderr = opts.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 
 	return cmd.Run()
 }
