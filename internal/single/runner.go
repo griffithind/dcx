@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/parse"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -50,14 +51,8 @@ func (r *Runner) getContainerName() string {
 	return fmt.Sprintf("dcx_%s", r.envKey)
 }
 
-// UpOptions contains options for bringing up the environment.
-type UpOptions struct {
-	Build bool
-	Pull  bool // Force re-fetch of remote features
-}
-
 // Up creates and starts the single-container environment.
-func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
+func (r *Runner) Up(ctx context.Context, opts runner.UpOptions) error {
 	// Determine the image to use
 	imageRef, err := r.resolveImage(ctx, opts)
 	if err != nil {
@@ -79,7 +74,7 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 }
 
 // resolveImage determines which image to use, pulling or building as needed.
-func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, error) {
+func (r *Runner) resolveImage(ctx context.Context, opts runner.UpOptions) (string, error) {
 	var baseImage string
 
 	// Image-based configuration
@@ -402,14 +397,8 @@ func (r *Runner) Stop(ctx context.Context) error {
 }
 
 // Down removes the container and optionally its volumes.
-func (r *Runner) Down(ctx context.Context, opts DownOptions) error {
+func (r *Runner) Down(ctx context.Context, opts runner.DownOptions) error {
 	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true, opts.RemoveVolumes)
-}
-
-// DownOptions configures the Down operation.
-type DownOptions struct {
-	RemoveVolumes bool
-	RemoveOrphans bool // Not used for single containers
 }
 
 // GetContainerWorkspaceFolder returns the workspace folder path in the container.
@@ -423,23 +412,17 @@ func (r *Runner) GetPrimaryContainerName() string {
 }
 
 // Build builds the container image without starting the container.
-func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
+func (r *Runner) Build(ctx context.Context, opts runner.BuildOptions) error {
 	// Resolve the image (may involve building from Dockerfile or features)
-	_, err := r.resolveImage(ctx, UpOptions{
+	_, err := r.resolveImage(ctx, runner.UpOptions{
 		Build: true,
 		Pull:  opts.Pull,
 	})
 	return err
 }
 
-// BuildOptions configures the Build operation.
-type BuildOptions struct {
-	NoCache bool
-	Pull    bool
-}
-
 // Exec executes a command in the running container.
-func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error) {
+func (r *Runner) Exec(ctx context.Context, cmd []string, opts runner.ExecOptions) (int, error) {
 	containerName := r.getContainerName()
 
 	execConfig := docker.ExecConfig{
@@ -451,15 +434,6 @@ func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int,
 	}
 
 	return r.dockerClient.Exec(ctx, containerName, execConfig)
-}
-
-// ExecOptions configures the Exec operation.
-type ExecOptions struct {
-	WorkingDir      string
-	User            string
-	Env             []string
-	TTY             bool
-	SSHAgentEnabled bool
 }
 
 // parseMountString parses a devcontainer mount string and returns a Docker-compatible format.

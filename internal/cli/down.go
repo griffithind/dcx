@@ -7,6 +7,7 @@ import (
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
@@ -86,8 +87,8 @@ func runDown(cmd *cobra.Command, args []string) error {
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-		if err := runner.Down(ctx, compose.DownOptions{
+		composeRunner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
+		if err := composeRunner.Down(ctx, runner.DownOptions{
 			RemoveVolumes: removeVolumes,
 			RemoveOrphans: removeOrphans,
 		}); err != nil {

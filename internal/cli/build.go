@@ -8,6 +8,7 @@ import (
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -105,13 +106,13 @@ func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.
 	fmt.Println("Building compose-based environment...")
 
 	// Create compose runner with docker client for API operations
-	runner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
+	composeRunner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}
 
 	// Run compose build
-	if err := runner.Build(ctx, compose.BuildOptions{
+	if err := composeRunner.Build(ctx, runner.BuildOptions{
 		NoCache: noCache,
 		Pull:    pullBuild,
 	}); err != nil {
