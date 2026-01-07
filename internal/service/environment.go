@@ -163,6 +163,20 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		return err
 	}
 
+	// Validate host requirements
+	if info.Config.HostRequirements != nil {
+		result := config.ValidateHostRequirements(info.Config.HostRequirements)
+		for _, warning := range result.Warnings {
+			fmt.Printf("Warning: %s\n", warning)
+		}
+		if !result.Satisfied {
+			for _, errMsg := range result.Errors {
+				fmt.Printf("Error: %s\n", errMsg)
+			}
+			return fmt.Errorf("host requirements not satisfied")
+		}
+	}
+
 	// Check current state
 	currentState, containerInfo, err := s.GetState(ctx, info)
 	if err != nil {
