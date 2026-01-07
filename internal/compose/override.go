@@ -158,6 +158,11 @@ func (g *overrideGenerator) generateRunServiceOverride(serviceName string) Servi
 	containerWorkspace := config.DetermineContainerWorkspaceFolder(g.cfg, g.workspacePath)
 	svc.Volumes = append(svc.Volumes, g.formatMount(g.workspacePath, containerWorkspace))
 
+	// Set pull_policy to "build" to ensure services with Dockerfiles are rebuilt
+	// when config changes. This prevents stale cached images from being used.
+	// For services with only an image (no build config), compose will use the image.
+	svc.PullPolicy = "build"
+
 	return svc
 }
 
