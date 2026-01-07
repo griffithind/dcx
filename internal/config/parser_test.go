@@ -406,6 +406,25 @@ func TestRemoteUserSubstitution(t *testing.T) {
 	}
 }
 
+// TestSubstituteConfigRemoteUser tests that SubstituteConfig substitutes remoteUser.
+func TestSubstituteConfigRemoteUser(t *testing.T) {
+	// Set test environment variable
+	os.Setenv("USER", "testuser")
+	defer os.Unsetenv("USER")
+
+	ctx := &SubstitutionContext{
+		LocalWorkspaceFolder: "/home/testuser/project",
+	}
+
+	cfg := &DevcontainerConfig{
+		RemoteUser: "${localEnv:USER}",
+	}
+
+	SubstituteConfig(cfg, ctx)
+
+	assert.Equal(t, "testuser", cfg.RemoteUser)
+}
+
 // TestForwardPortsParsing tests various forward ports formats.
 // GetForwardPorts returns []string in "port:port" format for numbers.
 func TestForwardPortsParsing(t *testing.T) {
