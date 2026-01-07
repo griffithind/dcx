@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strings"
 	"syscall"
 	"time"
 
@@ -125,7 +126,13 @@ func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
 	// Check if there's a specific command to run
 	cmdArgs := sess.Command()
 	if len(cmdArgs) > 0 {
-		cmd = exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		// Always run commands through the shell to handle:
+		// - Shell built-ins (cd, export, source)
+		// - Shell operators (;, &&, ||, |, >, <)
+		// - Variable expansion, globbing, etc.
+		// This matches OpenSSH behavior.
+		cmdStr := strings.Join(cmdArgs, " ")
+		cmd = exec.Command(s.shell, "-c", cmdStr)
 	} else {
 		// Start a login shell
 		cmd = exec.Command(s.shell)
