@@ -13,6 +13,23 @@ import (
 	"github.com/griffithind/dcx/internal/ssh"
 )
 
+// CommandSpec represents a parsed command that can be either a shell string
+// or an exec-style array of arguments.
+type CommandSpec struct {
+	// Args contains the command and its arguments.
+	// For shell commands, this is ["sh", "-c", "command string"].
+	// For exec commands, this is the raw arguments array.
+	Args []string
+
+	// UseShell indicates whether this command should be run through a shell.
+	// When true, Args[0] is the full command string to pass to sh -c.
+	// When false, Args is executed directly via exec.
+	UseShell bool
+
+	// Name is an optional name for named commands (from map format).
+	Name string
+}
+
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
 	dockerClient     *docker.Client
@@ -151,11 +168,26 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 	return nil
 }
 
-// executeHostCommand runs a single command on the host.
-func (r *HookRunner) executeHostCommand(ctx context.Context, command string) error {
-	fmt.Printf("  > %s\n", command)
+// formatCommandForDisplay returns a human-readable string for displaying the command.
+func formatCommandForDisplay(cmd CommandSpec) string {
+	if cmd.Name != "" {
+		return fmt.Sprintf("[%s] %s", cmd.Name, strings.Join(cmd.Args, " "))
+	}
+	return strings.Join(cmd.Args, " ")
+}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+// executeHostCommand runs a single command on the host.
+func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec) error {
+	fmt.Printf("  > %s\n", formatCommandForDisplay(cmdSpec))
+
+	var cmd *exec.Cmd
+	if cmdSpec.UseShell {
+		// Shell command: pass through sh -c
+		cmd = exec.CommandContext(ctx, "sh", "-c", cmdSpec.Args[0])
+	} else {
+		// Exec command: execute directly with args
+		cmd = exec.CommandContext(ctx, cmdSpec.Args[0], cmdSpec.Args[1:]...)
+	}
 	cmd.Dir = r.workspacePath
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stdout
@@ -165,8 +197,8 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, command string) err
 }
 
 // executeContainerCommand runs a single command in the container.
-func (r *HookRunner) executeContainerCommand(ctx context.Context, command string) error {
-	fmt.Printf("  > %s\n", command)
+func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
+	fmt.Printf("  > %s\n", formatCommandForDisplay(cmdSpec))
 
 	workspaceFolder := config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 
@@ -178,8 +210,18 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, command string
 		})
 	}
 
+	// Build the command to execute
+	var execCmd []string
+	if cmdSpec.UseShell {
+		// Shell command: wrap with sh -c
+		execCmd = []string{"sh", "-c", cmdSpec.Args[0]}
+	} else {
+		// Exec command: use args directly
+		execCmd = cmdSpec.Args
+	}
+
 	execConfig := docker.ExecConfig{
-		Cmd:        []string{"sh", "-c", command},
+		Cmd:        execCmd,
 		WorkingDir: workspaceFolder,
 		User:       user,
 		Stdout:     os.Stdout,
@@ -228,51 +270,80 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, command string
 
 // parseCommand parses a command specification into individual commands.
 // Commands can be:
-// - string: single command
-// - []string: array of commands (but treated as a single command line)
-// - []interface{}: array of command strings
+// - string: single shell command (executed via sh -c)
+// - []string: exec-style command with arguments (executed directly)
+// - []interface{}: exec-style command with arguments (executed directly)
 // - map[string]interface{}: named parallel commands (executed sequentially for now)
-func parseCommand(command interface{}) []string {
+//
+// Per the devcontainer spec:
+// - String format: "npm install" -> executed as shell command
+// - Array format: ["npm", "install"] -> executed directly with exec semantics
+func parseCommand(command interface{}) []CommandSpec {
 	if command == nil {
 		return nil
 	}
 
 	switch v := command.(type) {
 	case string:
-		return []string{v}
+		// String command: execute via shell
+		return []CommandSpec{{
+			Args:     []string{v},
+			UseShell: true,
+		}}
 
 	case []string:
-		// Array form is treated as a single command with arguments
-		return []string{strings.Join(v, " ")}
+		// Array of strings: exec-style command with arguments
+		if len(v) == 0 {
+			return nil
+		}
+		return []CommandSpec{{
+			Args:     v,
+			UseShell: false,
+		}}
 
 	case []interface{}:
-		// Could be array of strings (single command) or array of commands
-		var parts []string
+		// Array of interface{}: exec-style command with arguments
+		var args []string
 		for _, item := range v {
 			if s, ok := item.(string); ok {
-				parts = append(parts, s)
+				args = append(args, s)
 			}
 		}
-		// Treat as single command with arguments
-		return []string{strings.Join(parts, " ")}
+		if len(args) == 0 {
+			return nil
+		}
+		return []CommandSpec{{
+			Args:     args,
+			UseShell: false,
+		}}
 
 	case map[string]interface{}:
 		// Named commands - execute each one
-		var cmds []string
+		var cmds []CommandSpec
 		for name, cmd := range v {
 			if cmdStr, ok := cmd.(string); ok {
-				cmds = append(cmds, cmdStr)
+				// Named string command: shell execution
+				cmds = append(cmds, CommandSpec{
+					Args:     []string{cmdStr},
+					UseShell: true,
+					Name:     name,
+				})
 			} else if cmdArr, ok := cmd.([]interface{}); ok {
-				var parts []string
+				// Named array command: exec-style
+				var args []string
 				for _, item := range cmdArr {
 					if s, ok := item.(string); ok {
-						parts = append(parts, s)
+						args = append(args, s)
 					}
 				}
-				cmds = append(cmds, strings.Join(parts, " "))
+				if len(args) > 0 {
+					cmds = append(cmds, CommandSpec{
+						Args:     args,
+						UseShell: false,
+						Name:     name,
+					})
+				}
 			}
-			// Log the command name for verbose output
-			_ = name
 		}
 		return cmds
 
