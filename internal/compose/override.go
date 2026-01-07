@@ -169,6 +169,10 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 		if features.NeedsPrivileged(g.resolvedFeatures) {
 			t := true
 			svc.Privileged = &t
+			// Warn user about security implications
+			privFeatures := features.GetPrivilegedFeatures(g.resolvedFeatures)
+			fmt.Printf("Warning: Enabling privileged mode (requested by features: %s)\n", strings.Join(privFeatures, ", "))
+			fmt.Println("  Privileged mode grants full access to host devices and bypasses security features.")
 		}
 
 		// Check if init is needed

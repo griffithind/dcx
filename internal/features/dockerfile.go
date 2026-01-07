@@ -187,6 +187,69 @@ func NeedsPrivileged(features []*Feature) bool {
 	return false
 }
 
+// GetPrivilegedFeatures returns the names of features that require privileged mode.
+func GetPrivilegedFeatures(features []*Feature) []string {
+	var names []string
+	for _, feature := range features {
+		if feature.Metadata != nil && feature.Metadata.Privileged {
+			name := feature.Metadata.Name
+			if name == "" {
+				name = feature.Metadata.ID
+			}
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// SecurityRequirements summarizes the security requirements from features.
+type SecurityRequirements struct {
+	Privileged   bool
+	Capabilities []string
+	SecurityOpts []string
+	FeatureNames []string // Features that require elevated privileges
+}
+
+// GetSecurityRequirements returns all security requirements from features.
+func GetSecurityRequirements(features []*Feature) SecurityRequirements {
+	reqs := SecurityRequirements{}
+
+	capMap := make(map[string]bool)
+	optMap := make(map[string]bool)
+
+	for _, feature := range features {
+		if feature.Metadata == nil {
+			continue
+		}
+
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+
+		if feature.Metadata.Privileged {
+			reqs.Privileged = true
+			reqs.FeatureNames = append(reqs.FeatureNames, name+" (privileged)")
+		}
+
+		for _, cap := range feature.Metadata.CapAdd {
+			if !capMap[cap] {
+				capMap[cap] = true
+				reqs.Capabilities = append(reqs.Capabilities, cap)
+			}
+		}
+
+		for _, opt := range feature.Metadata.SecurityOpt {
+			if !optMap[opt] {
+				optMap[opt] = true
+				reqs.SecurityOpts = append(reqs.SecurityOpts, opt)
+			}
+		}
+	}
+
+	return reqs
+}
+
 // NeedsInit returns true if any feature requires init.
 func NeedsInit(features []*Feature) bool {
 	for _, feature := range features {
