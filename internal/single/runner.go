@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
@@ -264,7 +265,13 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 	// Check if privileged mode is needed
 	privileged := r.cfg.Privileged != nil && *r.cfg.Privileged
 	if !privileged && len(r.resolvedFeatures) > 0 {
-		privileged = features.NeedsPrivileged(r.resolvedFeatures)
+		if features.NeedsPrivileged(r.resolvedFeatures) {
+			privileged = true
+			// Warn user about security implications
+			privFeatures := features.GetPrivilegedFeatures(r.resolvedFeatures)
+			fmt.Printf("Warning: Enabling privileged mode (requested by features: %s)\n", strings.Join(privFeatures, ", "))
+			fmt.Println("  Privileged mode grants full access to host devices and bypasses security features.")
+		}
 	}
 
 	// Check if init is needed
