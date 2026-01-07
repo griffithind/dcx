@@ -301,7 +301,8 @@ func containerInfoFromDocker(c *docker.Container) *ContainerInfo {
 
 // Cleanup removes all containers for an environment.
 // This is useful for recovering from broken states.
-func (m *Manager) Cleanup(ctx context.Context, envKey string) error {
+// If removeVolumes is true, anonymous volumes attached to containers are also removed.
+func (m *Manager) Cleanup(ctx context.Context, envKey string, removeVolumes bool) error {
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		docker.LabelEnvKey: envKey,
 	})
@@ -319,8 +320,8 @@ func (m *Manager) Cleanup(ctx context.Context, envKey string) error {
 			}
 		}
 
-		// Remove container
-		if err := m.client.RemoveContainer(ctx, c.ID, true); err != nil {
+		// Remove container and optionally volumes
+		if err := m.client.RemoveContainer(ctx, c.ID, true, removeVolumes); err != nil {
 			lastErr = err
 		}
 	}

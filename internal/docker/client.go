@@ -151,10 +151,11 @@ func (c *Client) StopContainer(ctx context.Context, containerID string, timeout 
 }
 
 // RemoveContainer removes a container.
-func (c *Client) RemoveContainer(ctx context.Context, containerID string, force bool) error {
+// If removeVolumes is true, anonymous volumes attached to the container are also removed.
+func (c *Client) RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error {
 	return c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force:         force,
-		RemoveVolumes: false,
+		RemoveVolumes: removeVolumes,
 	})
 }
 
