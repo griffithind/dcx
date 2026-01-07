@@ -53,6 +53,9 @@ func TestSSHServerE2E(t *testing.T) {
 
 	hostname := envKey + ".dcx"
 
+	// The container name used in SSH config is dcx_<envKey> for single containers
+	containerName := "dcx_" + envKey
+
 	// Verify SSH config entry was added
 	t.Run("ssh_config_entry_added", func(t *testing.T) {
 		home, err := os.UserHomeDir()
@@ -63,10 +66,10 @@ func TestSSHServerE2E(t *testing.T) {
 		require.NoError(t, err)
 
 		configStr := string(content)
-		assert.Contains(t, configStr, "# DCX managed - "+envKey)
+		assert.Contains(t, configStr, "# DCX managed - "+containerName)
 		assert.Contains(t, configStr, "Host "+hostname)
 		assert.Contains(t, configStr, "ProxyCommand")
-		assert.Contains(t, configStr, "ssh --stdio "+envKey)
+		assert.Contains(t, configStr, "ssh --stdio "+containerName)
 	})
 
 	// Test SSH connection works
@@ -124,7 +127,7 @@ func TestSSHServerE2E(t *testing.T) {
 		content, err := os.ReadFile(configPath)
 		if err == nil {
 			configStr := string(content)
-			assert.NotContains(t, configStr, "# DCX managed - "+envKey,
+			assert.NotContains(t, configStr, "# DCX managed - "+containerName,
 				"SSH config entry should be removed after down")
 		}
 		// If file doesn't exist, that's also fine
@@ -209,12 +212,14 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
 	hostname := extractSSHHostname(t, stdout)
 	envKey := strings.TrimSuffix(hostname, ".dcx")
+	// The container name used in SSH config is dcx_<envKey> for single containers
+	containerName := "dcx_" + envKey
 
 	// Verify workspace_path label is set on container
 	t.Run("workspace_path_label_set", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
 			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
-			"dcx_"+envKey)
+			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 
@@ -228,13 +233,14 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 		dcxBinary := helpers.GetDCXBinary(t)
 
 		// Run SSH with ProxyCommand explicitly from /tmp
+		// The ProxyCommand uses the container name (dcx_<envKey>)
 		sshArgs := []string{
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",
 			"-o", "LogLevel=ERROR",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
-			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, envKey),
+			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, containerName),
 			hostname,
 			"pwd",
 		}
@@ -260,7 +266,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 			"-o", "LogLevel=ERROR",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
-			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, envKey),
+			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, containerName),
 			hostname,
 			"whoami",
 		}

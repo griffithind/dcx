@@ -655,3 +655,267 @@ func TestRunServicesConfig(t *testing.T) {
 
 	assert.Equal(t, []string{"app", "db", "redis"}, cfg.RunServices)
 }
+
+// TestNewDevcontainerFields tests parsing of the newly added devcontainer specification fields.
+func TestNewDevcontainerFields(t *testing.T) {
+	t.Run("updateRemoteUserUID", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			expected *bool
+		}{
+			{
+				name: "updateRemoteUserUID true",
+				input: `{
+					"image": "alpine",
+					"updateRemoteUserUID": true
+				}`,
+				expected: boolPtr(true),
+			},
+			{
+				name: "updateRemoteUserUID false",
+				input: `{
+					"image": "alpine",
+					"updateRemoteUserUID": false
+				}`,
+				expected: boolPtr(false),
+			},
+			{
+				name: "updateRemoteUserUID not set",
+				input: `{
+					"image": "alpine"
+				}`,
+				expected: nil,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg, err := Parse([]byte(tt.input))
+				require.NoError(t, err)
+				if tt.expected == nil {
+					assert.Nil(t, cfg.UpdateRemoteUserUID)
+				} else {
+					require.NotNil(t, cfg.UpdateRemoteUserUID)
+					assert.Equal(t, *tt.expected, *cfg.UpdateRemoteUserUID)
+				}
+			})
+		}
+	})
+
+	t.Run("userEnvProbe", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			expected string
+		}{
+			{
+				name: "userEnvProbe none",
+				input: `{
+					"image": "alpine",
+					"userEnvProbe": "none"
+				}`,
+				expected: "none",
+			},
+			{
+				name: "userEnvProbe loginShell",
+				input: `{
+					"image": "alpine",
+					"userEnvProbe": "loginShell"
+				}`,
+				expected: "loginShell",
+			},
+			{
+				name: "userEnvProbe loginInteractiveShell",
+				input: `{
+					"image": "alpine",
+					"userEnvProbe": "loginInteractiveShell"
+				}`,
+				expected: "loginInteractiveShell",
+			},
+			{
+				name: "userEnvProbe interactiveShell",
+				input: `{
+					"image": "alpine",
+					"userEnvProbe": "interactiveShell"
+				}`,
+				expected: "interactiveShell",
+			},
+			{
+				name: "userEnvProbe not set",
+				input: `{
+					"image": "alpine"
+				}`,
+				expected: "",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg, err := Parse([]byte(tt.input))
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, cfg.UserEnvProbe)
+			})
+		}
+	})
+
+	t.Run("waitFor", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			expected string
+		}{
+			{
+				name: "waitFor onCreateCommand",
+				input: `{
+					"image": "alpine",
+					"waitFor": "onCreateCommand"
+				}`,
+				expected: "onCreateCommand",
+			},
+			{
+				name: "waitFor updateContentCommand",
+				input: `{
+					"image": "alpine",
+					"waitFor": "updateContentCommand"
+				}`,
+				expected: "updateContentCommand",
+			},
+			{
+				name: "waitFor postCreateCommand",
+				input: `{
+					"image": "alpine",
+					"waitFor": "postCreateCommand"
+				}`,
+				expected: "postCreateCommand",
+			},
+			{
+				name: "waitFor postStartCommand",
+				input: `{
+					"image": "alpine",
+					"waitFor": "postStartCommand"
+				}`,
+				expected: "postStartCommand",
+			},
+			{
+				name: "waitFor not set",
+				input: `{
+					"image": "alpine"
+				}`,
+				expected: "",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg, err := Parse([]byte(tt.input))
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, cfg.WaitFor)
+			})
+		}
+	})
+
+	t.Run("otherPortsAttributes", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			input       string
+			expectNil   bool
+			checkAttrs  func(t *testing.T, attrs interface{})
+		}{
+			{
+				name: "otherPortsAttributes with onAutoForward",
+				input: `{
+					"image": "alpine",
+					"otherPortsAttributes": {
+						"onAutoForward": "ignore"
+					}
+				}`,
+				expectNil: false,
+				checkAttrs: func(t *testing.T, attrs interface{}) {
+					attrMap, ok := attrs.(map[string]interface{})
+					require.True(t, ok, "otherPortsAttributes should be a map")
+					assert.Equal(t, "ignore", attrMap["onAutoForward"])
+				},
+			},
+			{
+				name: "otherPortsAttributes with label and protocol",
+				input: `{
+					"image": "alpine",
+					"otherPortsAttributes": {
+						"label": "Other Ports",
+						"protocol": "http",
+						"onAutoForward": "notify"
+					}
+				}`,
+				expectNil: false,
+				checkAttrs: func(t *testing.T, attrs interface{}) {
+					attrMap, ok := attrs.(map[string]interface{})
+					require.True(t, ok, "otherPortsAttributes should be a map")
+					assert.Equal(t, "Other Ports", attrMap["label"])
+					assert.Equal(t, "http", attrMap["protocol"])
+					assert.Equal(t, "notify", attrMap["onAutoForward"])
+				},
+			},
+			{
+				name: "otherPortsAttributes not set",
+				input: `{
+					"image": "alpine"
+				}`,
+				expectNil: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cfg, err := Parse([]byte(tt.input))
+				require.NoError(t, err)
+				if tt.expectNil {
+					assert.Nil(t, cfg.OtherPortsAttributes)
+				} else {
+					require.NotNil(t, cfg.OtherPortsAttributes)
+					if tt.checkAttrs != nil {
+						tt.checkAttrs(t, cfg.OtherPortsAttributes)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("all_new_fields_together", func(t *testing.T) {
+		input := `{
+			"name": "Full config test",
+			"image": "node:18",
+			"remoteUser": "vscode",
+			"updateRemoteUserUID": true,
+			"userEnvProbe": "loginInteractiveShell",
+			"waitFor": "postCreateCommand",
+			"forwardPorts": [3000, 5432],
+			"portsAttributes": {
+				"3000": { "label": "Web", "onAutoForward": "notify" }
+			},
+			"otherPortsAttributes": {
+				"onAutoForward": "silent"
+			},
+			"onCreateCommand": "npm install",
+			"postCreateCommand": "npm run build"
+		}`
+
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+
+		// Verify all new fields
+		require.NotNil(t, cfg.UpdateRemoteUserUID)
+		assert.True(t, *cfg.UpdateRemoteUserUID)
+		assert.Equal(t, "loginInteractiveShell", cfg.UserEnvProbe)
+		assert.Equal(t, "postCreateCommand", cfg.WaitFor)
+		require.NotNil(t, cfg.OtherPortsAttributes)
+		attrMap, ok := cfg.OtherPortsAttributes.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "silent", attrMap["onAutoForward"])
+	})
+}
+
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
+}
