@@ -224,6 +224,8 @@ func (r *Runner) buildImage(ctx context.Context, imageTag string) error {
 		Target:     r.cfg.Build.Target,
 		CacheFrom:  r.cfg.Build.CacheFrom,
 		ConfigDir:  configDir,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
 	}
 
 	return r.dockerClient.BuildImage(ctx, buildOpts)

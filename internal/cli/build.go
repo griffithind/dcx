@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
@@ -159,6 +160,8 @@ func buildSingle(ctx context.Context, dockerClient *docker.Client, cfg *config.D
 			Target:     cfg.Build.Target,
 			CacheFrom:  cfg.Build.CacheFrom,
 			ConfigDir:  cfgPath,
+			Stdout:     os.Stdout,
+			Stderr:     os.Stderr,
 		}
 
 		if err := dockerClient.BuildImage(ctx, buildOpts); err != nil {
