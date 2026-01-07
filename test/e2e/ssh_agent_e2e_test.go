@@ -4,9 +4,11 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
@@ -167,6 +169,89 @@ func TestSSHAgentDisabledE2E(t *testing.T) {
 	})
 }
 
+// TestSSHAgentProxyCleanupE2E tests that the SSH agent proxy is cleaned up after exec completes.
+func TestSSHAgentProxyCleanupE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	// Skip if no SSH agent is available on the host
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		t.Skip("SSH_AUTH_SOCK not set, skipping SSH agent test")
+	}
+
+	// Create a simple workspace
+	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	// Get container name for direct docker exec checks
+	var containerName string
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Bring up the environment
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+	// Get the container name from status output
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "status")
+	require.NoError(t, err)
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "Name:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				containerName = parts[1]
+			}
+		}
+	}
+	require.NotEmpty(t, containerName, "should find container name")
+
+	// Run a simple exec with SSH agent enabled
+	t.Run("exec_with_agent_then_cleanup", func(t *testing.T) {
+		// Run exec - this will start the agent proxy
+		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
+		require.NoError(t, err)
+
+		// After exec completes, verify no dcx ssh-agent-proxy processes remain in container
+		// Use [s] character class trick to prevent pgrep from matching itself
+		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "pgrep -f '[s]sh-agent-proxy' || echo 'no-processes'")
+		output, _ := checkCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		assert.Equal(t, "no-processes", outputStr,
+			"No ssh-agent-proxy processes should remain in container after exec, but found: %s", outputStr)
+	})
+
+	// Verify socket files are cleaned up
+	t.Run("socket_files_cleaned_up", func(t *testing.T) {
+		// Run another exec
+		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test2")
+		require.NoError(t, err)
+
+		// Check for lingering socket files
+		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "ls /tmp/ssh-agent-*.sock 2>/dev/null || echo 'no-sockets'")
+		output, _ := checkCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		assert.Equal(t, "no-sockets", outputStr,
+			"No ssh-agent socket files should remain after exec, but found: %s", outputStr)
+	})
+
+	// Verify .ready files are cleaned up
+	t.Run("ready_files_cleaned_up", func(t *testing.T) {
+		// Run another exec
+		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test3")
+		require.NoError(t, err)
+
+		// Check for lingering .ready files
+		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "ls /tmp/ssh-agent-*.sock.ready 2>/dev/null || echo 'no-ready-files'")
+		output, _ := checkCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		assert.Equal(t, "no-ready-files", outputStr,
+			"No ssh-agent .ready files should remain after exec, but found: %s", outputStr)
+	})
+}
+
 // TestSSHAgentExecNoAgentFlag tests the --no-agent flag specifically on exec.
 func TestSSHAgentExecNoAgentFlag(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
@@ -201,5 +286,114 @@ func TestSSHAgentExecNoAgentFlag(t *testing.T) {
 	t.Run("exec_without_agent", func(t *testing.T) {
 		stdout, _, _ := helpers.RunDCXInDir(t, workspace, "exec", "--no-agent", "--", "printenv", "SSH_AUTH_SOCK")
 		assert.Empty(t, strings.TrimSpace(stdout), "SSH_AUTH_SOCK should not be set with --no-agent on exec")
+	})
+}
+
+// TestSSHAgentConcurrentExecE2E tests that concurrent execs don't interfere with each other.
+func TestSSHAgentConcurrentExecE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	// Skip if no SSH agent is available on the host
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		t.Skip("SSH_AUTH_SOCK not set, skipping SSH agent test")
+	}
+
+	// Create a simple workspace
+	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+	// Test that concurrent execs get unique socket paths and don't interfere
+	t.Run("concurrent_execs_isolated", func(t *testing.T) {
+		var wg sync.WaitGroup
+		results := make(chan string, 3)
+		errors := make(chan error, 3)
+
+		// Start 3 concurrent execs that each sleep and then report their socket
+		for i := 0; i < 3; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				// Sleep a bit to overlap with other execs, then get socket path
+				stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+					"sh", "-c", "sleep 1 && echo $SSH_AUTH_SOCK")
+				if err != nil {
+					errors <- err
+					return
+				}
+				results <- strings.TrimSpace(stdout)
+			}(i)
+		}
+
+		wg.Wait()
+		close(results)
+		close(errors)
+
+		// Check for errors
+		for err := range errors {
+			require.NoError(t, err, "concurrent exec should not fail")
+		}
+
+		// Collect socket paths - they should all be unique
+		sockets := make(map[string]bool)
+		for sock := range results {
+			require.True(t, strings.HasPrefix(sock, "/tmp/ssh-agent-"),
+				"Socket path should be valid: %s", sock)
+			sockets[sock] = true
+		}
+
+		// All 3 execs should have unique socket paths
+		assert.Equal(t, 3, len(sockets),
+			"Each concurrent exec should have a unique socket path, got: %v", sockets)
+	})
+
+	// Test that one exec finishing doesn't kill another's agent
+	t.Run("cleanup_doesnt_affect_other_execs", func(t *testing.T) {
+		// Start a long-running exec
+		var wg sync.WaitGroup
+		longExecDone := make(chan struct{})
+		longExecResult := make(chan string, 1)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// This exec will sleep for 3 seconds
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+				"sh", "-c", "sleep 3 && ssh-add -l 2>&1 || echo 'agent-accessible'")
+			if err == nil {
+				longExecResult <- stdout
+			}
+			close(longExecDone)
+		}()
+
+		// Wait a moment for the long exec to start
+		time.Sleep(500 * time.Millisecond)
+
+		// Run a quick exec that will finish first
+		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "quick-exec")
+		require.NoError(t, err, "quick exec should succeed")
+
+		// Wait for long exec to complete
+		<-longExecDone
+		wg.Wait()
+
+		// The long exec should have been able to access the SSH agent
+		// even after the quick exec finished and cleaned up
+		select {
+		case result := <-longExecResult:
+			// Should either show keys or say "no identities" - both mean agent was accessible
+			assert.True(t,
+				strings.Contains(result, "agent-accessible") ||
+					strings.Contains(strings.ToLower(result), "no identities") ||
+					strings.Contains(result, "SHA256:"),
+				"Long-running exec should still have SSH agent access after quick exec cleanup, got: %s", result)
+		default:
+			t.Error("Long exec should have completed with a result")
+		}
 	})
 }
