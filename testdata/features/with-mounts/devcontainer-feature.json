@@ -1,0 +1,9 @@
+{
+    "id": "with-mounts",
+    "version": "1.0.0",
+    "name": "Feature with Mounts",
+    "description": "Test feature that mounts the Docker socket",
+    "mounts": [
+        "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    ]
+}

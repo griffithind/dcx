@@ -7,6 +7,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/state"
 	"gopkg.in/yaml.v3"
@@ -14,12 +15,13 @@ import (
 
 // overrideGenerator generates the dcx compose override file.
 type overrideGenerator struct {
-	cfg            *config.DevcontainerConfig
-	envKey         string
-	configHash     string
-	composeProject string
-	workspacePath  string
-	derivedImage   string // Derived image to use instead of service's image
+	cfg              *config.DevcontainerConfig
+	envKey           string
+	configHash       string
+	composeProject   string
+	workspacePath    string
+	derivedImage     string             // Derived image to use instead of service's image
+	resolvedFeatures []*features.Feature // Resolved features for runtime config
 }
 
 // ComposeOverride represents the override file structure.
@@ -128,6 +130,17 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 		}
 	}
 
+	// Add mounts from features
+	if len(g.resolvedFeatures) > 0 {
+		featureMounts := features.CollectMounts(g.resolvedFeatures)
+		for _, mount := range featureMounts {
+			parsed := g.parseMountString(mount)
+			if parsed != "" {
+				svc.Volumes = append(svc.Volumes, parsed)
+			}
+		}
+	}
+
 	// Add user override (apply variable substitution for devcontainer variables)
 	if g.cfg.RemoteUser != "" {
 		svc.User = config.Substitute(g.cfg.RemoteUser, &config.SubstitutionContext{
@@ -141,6 +154,29 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 
 	// Map runArgs to compose options
 	g.mapRunArgsToService(&svc)
+
+	// Add feature runtime requirements
+	if len(g.resolvedFeatures) > 0 {
+		// Add capabilities from features
+		featureCaps := features.CollectCapabilities(g.resolvedFeatures)
+		svc.CapAdd = append(svc.CapAdd, featureCaps...)
+
+		// Add security options from features
+		featureSecOpts := features.CollectSecurityOpts(g.resolvedFeatures)
+		svc.SecurityOpt = append(svc.SecurityOpt, featureSecOpts...)
+
+		// Check if privileged mode is needed
+		if features.NeedsPrivileged(g.resolvedFeatures) {
+			t := true
+			svc.Privileged = &t
+		}
+
+		// Check if init is needed
+		if features.NeedsInit(g.resolvedFeatures) {
+			t := true
+			svc.Init = &t
+		}
+	}
 
 	return svc, nil
 }

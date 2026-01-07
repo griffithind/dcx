@@ -16,16 +16,17 @@ import (
 
 // Runner manages docker compose operations.
 type Runner struct {
-	workspacePath  string
-	configPath     string
-	configDir      string
-	cfg            *config.DevcontainerConfig
-	envKey         string
-	configHash     string
-	composeProject string
-	composeFiles   []string
-	overridePath   string
-	derivedImage   string // Derived image with features (if any)
+	workspacePath    string
+	configPath       string
+	configDir        string
+	cfg              *config.DevcontainerConfig
+	envKey           string
+	configHash       string
+	composeProject   string
+	composeFiles     []string
+	overridePath     string
+	derivedImage     string             // Derived image with features (if any)
+	resolvedFeatures []*features.Feature // Resolved features (stored for runtime config)
 }
 
 // NewRunner creates a new compose runner.
@@ -171,6 +172,9 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	if err != nil {
 		return fmt.Errorf("failed to resolve features: %w", err)
 	}
+
+	// Store resolved features for runtime configuration (mounts, caps, etc.)
+	r.resolvedFeatures = resolvedFeatures
 
 	fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
 	for _, f := range resolvedFeatures {
@@ -364,12 +368,13 @@ func (r *Runner) runCompose(ctx context.Context, args []string) error {
 // generateOverride generates the dcx override compose file.
 func (r *Runner) generateOverride() (string, error) {
 	gen := &overrideGenerator{
-		cfg:            r.cfg,
-		envKey:         r.envKey,
-		configHash:     r.configHash,
-		composeProject: r.composeProject,
-		workspacePath:  r.workspacePath,
-		derivedImage:   r.derivedImage,
+		cfg:              r.cfg,
+		envKey:           r.envKey,
+		configHash:       r.configHash,
+		composeProject:   r.composeProject,
+		workspacePath:    r.workspacePath,
+		derivedImage:     r.derivedImage,
+		resolvedFeatures: r.resolvedFeatures,
 	}
 	return gen.Generate()
 }
