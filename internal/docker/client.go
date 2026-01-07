@@ -627,3 +627,77 @@ func (c *Client) GetLogs(ctx context.Context, containerID string, opts LogsOptio
 
 	return c.cli.ContainerLogs(ctx, containerID, options)
 }
+
+// AttachOptions contains options for attaching to a container.
+type AttachOptions struct {
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
+	TTY        bool
+	DetachKeys string
+}
+
+// AttachContainer attaches to a running container's streams.
+func (c *Client) AttachContainer(ctx context.Context, containerID string, opts AttachOptions) error {
+	attachOpts := container.AttachOptions{
+		Stream: true,
+		Stdin:  opts.Stdin != nil,
+		Stdout: true,
+		Stderr: true,
+	}
+
+	if opts.DetachKeys != "" {
+		attachOpts.DetachKeys = opts.DetachKeys
+	}
+
+	resp, err := c.cli.ContainerAttach(ctx, containerID, attachOpts)
+	if err != nil {
+		return fmt.Errorf("failed to attach: %w", err)
+	}
+	defer resp.Close()
+
+	// Handle I/O
+	errCh := make(chan error, 2)
+
+	// Copy stdin if provided
+	if opts.Stdin != nil {
+		go func() {
+			_, err := io.Copy(resp.Conn, opts.Stdin)
+			if cw, ok := resp.Conn.(interface{ CloseWrite() error }); ok {
+				cw.CloseWrite()
+			}
+			errCh <- err
+		}()
+	}
+
+	// Copy output
+	go func() {
+		if opts.TTY {
+			// TTY mode - stdout and stderr are combined
+			if opts.Stdout != nil {
+				_, err := io.Copy(opts.Stdout, resp.Reader)
+				errCh <- err
+				return
+			}
+		} else {
+			// Non-TTY mode - demux stdout/stderr
+			_, err := StdCopy(opts.Stdout, opts.Stderr, resp.Reader)
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	// Wait for output to complete
+	<-errCh
+	if opts.Stdin != nil {
+		<-errCh
+	}
+
+	return nil
+}
+
+// KillContainer sends a signal to a container.
+func (c *Client) KillContainer(ctx context.Context, containerID, signal string) error {
+	return c.cli.ContainerKill(ctx, containerID, signal)
+}
