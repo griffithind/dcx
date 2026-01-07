@@ -133,6 +133,7 @@ func SubstituteConfig(cfg *DevcontainerConfig, ctx *SubstitutionContext) {
 	cfg.Image = Substitute(cfg.Image, ctx)
 	cfg.WorkspaceFolder = Substitute(cfg.WorkspaceFolder, ctx)
 	cfg.WorkspaceMount = Substitute(cfg.WorkspaceMount, ctx)
+	cfg.RemoteUser = Substitute(cfg.RemoteUser, ctx)
 
 	// Substitute in build config
 	if cfg.Build != nil {
