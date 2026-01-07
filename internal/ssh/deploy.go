@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/griffithind/dcx/internal/version"
 )
 
 // DeployToContainer deploys the dcx binary to a container.
@@ -132,7 +130,14 @@ func getContainerArch(ctx context.Context, containerName string) string {
 }
 
 // GetContainerBinaryPath returns the path for dcx binary in the container.
-// Includes version to ensure the binary is updated when dcx is upgraded.
 func GetContainerBinaryPath() string {
-	return fmt.Sprintf("/tmp/dcx-%s", version.Version)
+	return "/tmp/dcx"
+}
+
+// PreDeployAgent deploys the dcx agent binary to the specified container.
+// This should be called once during 'up' before lifecycle hooks run.
+// Returns nil if the binary is already present (idempotent).
+func PreDeployAgent(ctx context.Context, containerName string) error {
+	binaryPath := GetContainerBinaryPath()
+	return DeployToContainer(ctx, containerName, binaryPath)
 }

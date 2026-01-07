@@ -18,6 +18,13 @@ import (
 	"github.com/docker/docker/client"
 )
 
+// AgentProxyOptions configures AgentProxy behavior.
+type AgentProxyOptions struct {
+	// SkipDeploy skips deploying the dcx binary, assuming it's already present.
+	// Set this to true when the binary has been pre-deployed during 'up'.
+	SkipDeploy bool
+}
+
 // AgentProxy manages SSH agent forwarding between host and container.
 // It runs a TCP server on the host that proxies to the SSH agent,
 // and deploys a client inside the container that creates a Unix socket.
@@ -36,10 +43,18 @@ type AgentProxy struct {
 
 	// Container-side
 	socketPath string
+
+	// Options
+	skipDeploy bool
 }
 
 // NewAgentProxy creates a new SSH agent proxy for the given container.
 func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy, error) {
+	return NewAgentProxyWithOptions(containerID, containerName, uid, gid, AgentProxyOptions{})
+}
+
+// NewAgentProxyWithOptions creates a new SSH agent proxy with options.
+func NewAgentProxyWithOptions(containerID, containerName string, uid, gid int, opts AgentProxyOptions) (*AgentProxy, error) {
 	agentSock := os.Getenv("SSH_AUTH_SOCK")
 	if agentSock == "" {
 		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
@@ -62,6 +77,7 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 		agentSock:     agentSock,
 		done:          make(chan struct{}),
 		socketPath:    fmt.Sprintf("/tmp/ssh-agent-%d-%s.sock", uid, uniqueID),
+		skipDeploy:    opts.SkipDeploy,
 	}, nil
 }
 
@@ -193,9 +209,11 @@ func (p *AgentProxy) deployAndStartClient() error {
 	ctx := context.Background()
 	binaryPath := GetContainerBinaryPath()
 
-	// Deploy dcx binary to container (uses shared deployment code)
-	if err := DeployToContainer(ctx, p.containerName, binaryPath); err != nil {
-		return err
+	// Deploy dcx binary to container unless pre-deployed
+	if !p.skipDeploy {
+		if err := DeployToContainer(ctx, p.containerName, binaryPath); err != nil {
+			return err
+		}
 	}
 
 	// Start client in background

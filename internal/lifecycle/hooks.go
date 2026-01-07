@@ -15,25 +15,28 @@ import (
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	dockerClient    *docker.Client
-	containerID     string
-	workspacePath   string
-	cfg             *config.DevcontainerConfig
-	envKey          string
-	sshAgentEnabled bool
+	dockerClient     *docker.Client
+	containerID      string
+	workspacePath    string
+	cfg              *config.DevcontainerConfig
+	envKey           string
+	sshAgentEnabled  bool
+	agentPreDeployed bool
 }
 
 // NewHookRunner creates a new hook runner.
 // envKey is the environment key for SSH proxy directory.
 // sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevcontainerConfig, envKey string, sshAgentEnabled bool) *HookRunner {
+// agentPreDeployed indicates whether the agent binary was pre-deployed during 'up'.
+func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevcontainerConfig, envKey string, sshAgentEnabled bool, agentPreDeployed bool) *HookRunner {
 	return &HookRunner{
-		dockerClient:    dockerClient,
-		containerID:     containerID,
-		workspacePath:   workspacePath,
-		cfg:             cfg,
-		envKey:          envKey,
-		sshAgentEnabled: sshAgentEnabled,
+		dockerClient:     dockerClient,
+		containerID:      containerID,
+		workspacePath:    workspacePath,
+		cfg:              cfg,
+		envKey:           envKey,
+		sshAgentEnabled:  sshAgentEnabled,
+		agentPreDeployed: agentPreDeployed,
 	}
 }
 
@@ -195,8 +198,9 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, command string
 		// Get UID/GID for the container user (use containerID for both ID and name, docker accepts either)
 		uid, gid := ssh.GetContainerUserIDs(r.containerID, user)
 
+		opts := ssh.AgentProxyOptions{SkipDeploy: r.agentPreDeployed}
 		var proxyErr error
-		agentProxy, proxyErr = ssh.NewAgentProxy(r.containerID, r.containerID, uid, gid)
+		agentProxy, proxyErr = ssh.NewAgentProxyWithOptions(r.containerID, r.containerID, uid, gid, opts)
 		if proxyErr == nil {
 			socketPath, startErr := agentProxy.Start()
 			if startErr == nil {

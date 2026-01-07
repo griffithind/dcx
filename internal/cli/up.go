@@ -116,6 +116,9 @@ func runUp(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Current state: %s\n", currentState)
 	}
 
+	// Determine if SSH agent should be enabled
+	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
+
 	// Handle state transitions
 	var isNewEnvironment bool
 	var needsRebuild bool // Track if we need to rebuild due to stale state
@@ -151,8 +154,20 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
+	if sshAgentEnabled {
+		stateMgr := state.NewManager(dockerClient)
+		_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
+		if err == nil && containerInfo != nil {
+			fmt.Println("Installing dcx agent...")
+			if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
+				return fmt.Errorf("failed to install dcx agent: %w", err)
+			}
+		}
+	}
+
 	// Run lifecycle hooks
-	if err := runLifecycleHooks(ctx, dockerClient, cfg, projectName, envKey, isNewEnvironment, effectiveNoAgent); err != nil {
+	if err := runLifecycleHooks(ctx, dockerClient, cfg, projectName, envKey, isNewEnvironment, sshAgentEnabled); err != nil {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
@@ -301,7 +316,7 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projec
 	})
 }
 
-func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string, isNew bool, effectiveNoAgent bool) error {
+func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string, isNew bool, sshAgentEnabled bool) error {
 	// Get the primary container ID
 	stateMgr := state.NewManager(dockerClient)
 	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
@@ -312,11 +327,8 @@ func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *co
 		return fmt.Errorf("no primary container found")
 	}
 
-	// Determine if SSH agent should be enabled for lifecycle hooks
-	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
-
-	// Create hook runner
-	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, envKey, sshAgentEnabled)
+	// Create hook runner (agent binary is pre-deployed, so skip deployment in hooks)
+	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, envKey, sshAgentEnabled, sshAgentEnabled)
 
 	// Run appropriate hooks based on whether this is a new environment
 	if isNew {
