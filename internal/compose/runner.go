@@ -95,6 +95,7 @@ func (r *Runner) writeOverrideToTempFile(content string) (string, error) {
 // UpOptions contains options for compose up.
 type UpOptions struct {
 	Build   bool
+	Rebuild bool // Force rebuild of all services with build configs
 	Verbose bool
 }
 
@@ -103,8 +104,17 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 	// Check if features are configured
 	hasFeatures := len(r.cfg.Features) > 0
 
+	// When features are present OR rebuild is requested, ensure all services
+	// with build configs are built first. This prevents stale cached images
+	// from being used for secondary services (like databases with custom Dockerfiles).
+	if hasFeatures || opts.Rebuild {
+		if err := r.ensureServicesBuilt(ctx, opts.Verbose); err != nil {
+			return fmt.Errorf("failed to build services: %w", err)
+		}
+	}
+
 	if hasFeatures {
-		// Build derived image with features
+		// Build derived image with features for the primary service
 		if err := r.buildDerivedImageWithFeatures(ctx, opts); err != nil {
 			return fmt.Errorf("failed to build derived image with features: %w", err)
 		}
@@ -131,8 +141,7 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 	// When we have features, we've already built the derived image separately,
 	// and using --build would cause compose to rebuild from the base Dockerfile
 	// and overwrite our feature image.
-	// Non-primary services with build configs will still be built by compose
-	// automatically since they don't have an image override.
+	// Non-primary services with build configs are now built by ensureServicesBuilt().
 	if opts.Build && !hasFeatures {
 		args = append(args, "--build")
 	}
@@ -428,4 +437,49 @@ func (r *Runner) Cleanup() error {
 // ComputeWorkspaceRootHash computes the hash of the workspace root.
 func ComputeWorkspaceRootHash(workspacePath string) string {
 	return state.ComputeWorkspaceHash(workspacePath)
+}
+
+// ensureServicesBuilt builds all services that have build configurations.
+// This ensures that services with Dockerfiles are rebuilt when configs change,
+// preventing stale cached images from being used.
+func (r *Runner) ensureServicesBuilt(ctx context.Context, verbose bool) error {
+	// Parse compose files to find services with build configs
+	compose, err := ParseComposeFiles(r.composeFiles)
+	if err != nil {
+		return fmt.Errorf("failed to parse compose files: %w", err)
+	}
+
+	// Collect services that need to be built
+	var servicesToBuild []string
+	for name, svc := range compose.Services {
+		if svc.Build != nil {
+			servicesToBuild = append(servicesToBuild, name)
+		}
+	}
+
+	if len(servicesToBuild) == 0 {
+		return nil
+	}
+
+	if verbose {
+		fmt.Printf("Building %d service(s) with Dockerfiles: %v\n", len(servicesToBuild), servicesToBuild)
+	}
+
+	// Build all services with build configs
+	buildArgs := r.composeBaseArgs()
+	buildArgs = append(buildArgs, "build")
+
+	// Add SSH agent forwarding for build if available
+	if ssh.IsAgentAvailable() {
+		buildArgs = append(buildArgs, "--ssh", "default")
+	}
+
+	// Add all services to build
+	buildArgs = append(buildArgs, servicesToBuild...)
+
+	if err := r.runCompose(ctx, buildArgs, verbose); err != nil {
+		return fmt.Errorf("failed to build services: %w", err)
+	}
+
+	return nil
 }
