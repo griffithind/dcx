@@ -89,7 +89,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts runner.UpOptions) (strin
 
 		if !exists || opts.Build {
 			fmt.Printf("Pulling image: %s\n", r.cfg.Image)
-			if err := r.dockerClient.PullImage(ctx, r.cfg.Image); err != nil {
+			if err := r.dockerClient.PullImageWithProgress(ctx, r.cfg.Image, os.Stdout); err != nil {
 				return "", fmt.Errorf("failed to pull image: %w", err)
 			}
 		}
