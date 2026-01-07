@@ -74,7 +74,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 				actualProject = projectName
 			}
 			runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-			if err := runner.Start(ctx, compose.StartOptions{Verbose: verbose}); err != nil {
+			if err := runner.Start(ctx); err != nil {
 				return fmt.Errorf("failed to start containers: %w", err)
 			}
 		}

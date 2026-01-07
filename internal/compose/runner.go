@@ -2,7 +2,6 @@
 package compose
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -96,7 +95,6 @@ func (r *Runner) writeOverrideToTempFile(content string) (string, error) {
 type UpOptions struct {
 	Build   bool
 	Rebuild bool // Force rebuild of all services with build configs
-	Verbose bool
 }
 
 // Up runs docker compose up with the generated override file.
@@ -108,7 +106,7 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 	// with build configs are built first. This prevents stale cached images
 	// from being used for secondary services (like databases with custom Dockerfiles).
 	if hasFeatures || opts.Rebuild {
-		if err := r.ensureServicesBuilt(ctx, opts.Verbose); err != nil {
+		if err := r.ensureServicesBuilt(ctx); err != nil {
 			return fmt.Errorf("failed to build services: %w", err)
 		}
 	}
@@ -147,24 +145,20 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Run compose up
-	return r.runCompose(ctx, args, opts.Verbose)
+	return r.runCompose(ctx, args)
 }
 
 // buildDerivedImageWithFeatures builds a derived image with features installed.
 func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptions) error {
-	if opts.Verbose {
-		fmt.Println("Building derived image with features...")
-	}
+	fmt.Println("Building derived image with features...")
 
 	// Get base image from compose file
-	baseImage, err := r.getBaseImage(ctx, opts)
+	baseImage, err := r.getBaseImage(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to determine base image: %w", err)
 	}
 
-	if opts.Verbose {
-		fmt.Printf("Base image: %s\n", baseImage)
-	}
+	fmt.Printf("Base image: %s\n", baseImage)
 
 	// Create feature manager
 	mgr, err := features.NewManager(r.configDir)
@@ -178,15 +172,13 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 		return fmt.Errorf("failed to resolve features: %w", err)
 	}
 
-	if opts.Verbose {
-		fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
-		for _, f := range resolvedFeatures {
-			name := f.ID
-			if f.Metadata != nil && f.Metadata.Name != "" {
-				name = f.Metadata.Name
-			}
-			fmt.Printf("  - %s\n", name)
+	fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
+	for _, f := range resolvedFeatures {
+		name := f.ID
+		if f.Metadata != nil && f.Metadata.Name != "" {
+			name = f.Metadata.Name
 		}
+		fmt.Printf("  - %s\n", name)
 	}
 
 	// Determine derived image tag
@@ -196,12 +188,10 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	buildDir := filepath.Join(os.TempDir(), "dcx-features", r.envKey)
 	defer os.RemoveAll(buildDir)
 
-	if opts.Verbose {
-		fmt.Printf("Building derived image: %s\n", derivedTag)
-	}
+	fmt.Printf("Building derived image: %s\n", derivedTag)
 
 	// Build the derived image
-	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir, opts.Verbose); err != nil {
+	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir); err != nil {
 		return err
 	}
 
@@ -212,7 +202,7 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 }
 
 // getBaseImage determines the base image for the primary service.
-func (r *Runner) getBaseImage(ctx context.Context, opts UpOptions) (string, error) {
+func (r *Runner) getBaseImage(ctx context.Context) (string, error) {
 	// Parse compose files
 	compose, err := ParseComposeFiles(r.composeFiles)
 	if err != nil {
@@ -237,13 +227,11 @@ func (r *Runner) getBaseImage(ctx context.Context, opts UpOptions) (string, erro
 
 	// Service has a build configuration - we need to build it first
 	if compose.HasBuild(serviceName) {
-		if opts.Verbose {
-			fmt.Println("Building base image from compose...")
-		}
+		fmt.Println("Building base image from compose...")
 
 		// Run compose build for the service
 		buildArgs := r.composeBaseArgs()
-		buildArgs = append(buildArgs, "build")
+		buildArgs = append(buildArgs, "build", "--parallel")
 
 		// Add SSH agent forwarding for build if available
 		if ssh.IsAgentAvailable() {
@@ -252,7 +240,7 @@ func (r *Runner) getBaseImage(ctx context.Context, opts UpOptions) (string, erro
 
 		buildArgs = append(buildArgs, serviceName)
 
-		if err := r.runCompose(ctx, buildArgs, opts.Verbose); err != nil {
+		if err := r.runCompose(ctx, buildArgs); err != nil {
 			return "", fmt.Errorf("failed to build service: %w", err)
 		}
 
@@ -267,7 +255,6 @@ func (r *Runner) getBaseImage(ctx context.Context, opts UpOptions) (string, erro
 // BuildOptions contains options for compose build.
 type BuildOptions struct {
 	NoCache bool
-	Verbose bool
 }
 
 // Build builds images without starting containers.
@@ -288,7 +275,7 @@ func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
 	}
 
 	args := r.composeBaseArgs()
-	args = append(args, "build")
+	args = append(args, "build", "--parallel")
 
 	if opts.NoCache {
 		args = append(args, "--no-cache")
@@ -299,42 +286,31 @@ func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
 		args = append(args, "--ssh", "default")
 	}
 
-	return r.runCompose(ctx, args, opts.Verbose)
-}
-
-// StartOptions contains options for compose start.
-type StartOptions struct {
-	Verbose bool
+	return r.runCompose(ctx, args)
 }
 
 // Start starts existing containers.
-func (r *Runner) Start(ctx context.Context, opts StartOptions) error {
+func (r *Runner) Start(ctx context.Context) error {
 	args := []string{
 		"-p", r.composeProject,
 		"start",
 	}
-	return r.runCompose(ctx, args, opts.Verbose)
-}
-
-// StopOptions contains options for compose stop.
-type StopOptions struct {
-	Verbose bool
+	return r.runCompose(ctx, args)
 }
 
 // Stop stops running containers.
-func (r *Runner) Stop(ctx context.Context, opts StopOptions) error {
+func (r *Runner) Stop(ctx context.Context) error {
 	args := []string{
 		"-p", r.composeProject,
 		"stop",
 	}
-	return r.runCompose(ctx, args, opts.Verbose)
+	return r.runCompose(ctx, args)
 }
 
 // DownOptions contains options for compose down.
 type DownOptions struct {
 	RemoveVolumes bool
 	RemoveOrphans bool
-	Verbose       bool
 }
 
 // Down stops and removes containers.
@@ -351,7 +327,7 @@ func (r *Runner) Down(ctx context.Context, opts DownOptions) error {
 		args = append(args, "--remove-orphans")
 	}
 
-	return r.runCompose(ctx, args, opts.Verbose)
+	return r.runCompose(ctx, args)
 }
 
 // composeBaseArgs returns the base arguments for compose commands.
@@ -372,23 +348,13 @@ func (r *Runner) composeBaseArgs() []string {
 }
 
 // runCompose executes a docker compose command.
-func (r *Runner) runCompose(ctx context.Context, args []string, verbose bool) error {
+func (r *Runner) runCompose(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
 	cmd.Dir = r.workspacePath
-
-	var stdout, stderr bytes.Buffer
-	if verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		if !verbose {
-			return fmt.Errorf("compose failed: %w\nstderr: %s", err, stderr.String())
-		}
 		return fmt.Errorf("compose failed: %w", err)
 	}
 
@@ -442,7 +408,7 @@ func ComputeWorkspaceRootHash(workspacePath string) string {
 // ensureServicesBuilt builds all services that have build configurations.
 // This ensures that services with Dockerfiles are rebuilt when configs change,
 // preventing stale cached images from being used.
-func (r *Runner) ensureServicesBuilt(ctx context.Context, verbose bool) error {
+func (r *Runner) ensureServicesBuilt(ctx context.Context) error {
 	// Parse compose files to find services with build configs
 	compose, err := ParseComposeFiles(r.composeFiles)
 	if err != nil {
@@ -461,13 +427,11 @@ func (r *Runner) ensureServicesBuilt(ctx context.Context, verbose bool) error {
 		return nil
 	}
 
-	if verbose {
-		fmt.Printf("Building %d service(s) with Dockerfiles: %v\n", len(servicesToBuild), servicesToBuild)
-	}
+	fmt.Printf("Building %d service(s) with Dockerfiles: %v\n", len(servicesToBuild), servicesToBuild)
 
 	// Build all services with build configs
 	buildArgs := r.composeBaseArgs()
-	buildArgs = append(buildArgs, "build")
+	buildArgs = append(buildArgs, "build", "--parallel")
 
 	// Add SSH agent forwarding for build if available
 	if ssh.IsAgentAvailable() {
@@ -477,7 +441,7 @@ func (r *Runner) ensureServicesBuilt(ctx context.Context, verbose bool) error {
 	// Add all services to build
 	buildArgs = append(buildArgs, servicesToBuild...)
 
-	if err := r.runCompose(ctx, buildArgs, verbose); err != nil {
+	if err := r.runCompose(ctx, buildArgs); err != nil {
 		return fmt.Errorf("failed to build services: %w", err)
 	}
 

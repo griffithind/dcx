@@ -49,8 +49,7 @@ func (r *Runner) getContainerName() string {
 
 // UpOptions contains options for bringing up the environment.
 type UpOptions struct {
-	Build   bool
-	Verbose bool
+	Build bool
 }
 
 // Up creates and starts the single-container environment.
@@ -81,9 +80,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 
 	// Image-based configuration
 	if r.cfg.Image != "" {
-		if opts.Verbose {
-			fmt.Printf("Using image: %s\n", r.cfg.Image)
-		}
+		fmt.Printf("Using image: %s\n", r.cfg.Image)
 
 		// Check if image exists locally
 		exists, err := r.dockerClient.ImageExists(ctx, r.cfg.Image)
@@ -92,9 +89,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 		}
 
 		if !exists || opts.Build {
-			if opts.Verbose {
-				fmt.Printf("Pulling image: %s\n", r.cfg.Image)
-			}
+			fmt.Printf("Pulling image: %s\n", r.cfg.Image)
 			if err := r.dockerClient.PullImage(ctx, r.cfg.Image); err != nil {
 				return "", fmt.Errorf("failed to pull image: %w", err)
 			}
@@ -104,11 +99,9 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 	} else if r.cfg.Build != nil {
 		// Dockerfile-based configuration
 		imageTag := fmt.Sprintf("dcx/%s:%s", r.envKey, r.configHash[:12])
-		if opts.Verbose {
-			fmt.Printf("Building image: %s\n", imageTag)
-		}
+		fmt.Printf("Building image: %s\n", imageTag)
 
-		if err := r.buildImage(ctx, imageTag, opts); err != nil {
+		if err := r.buildImage(ctx, imageTag); err != nil {
 			return "", fmt.Errorf("failed to build image: %w", err)
 		}
 
@@ -123,7 +116,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 	}
 
 	// Build derived image with features
-	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts)
+	derivedImage, err := r.buildDerivedImage(ctx, baseImage)
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image with features: %w", err)
 	}
@@ -132,10 +125,8 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 }
 
 // buildDerivedImage builds an image with features installed on top of the base image.
-func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, opts UpOptions) (string, error) {
-	if opts.Verbose {
-		fmt.Println("Resolving features...")
-	}
+func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string) (string, error) {
+	fmt.Println("Resolving features...")
 
 	// Create feature manager
 	configDir := filepath.Dir(r.configPath)
@@ -150,15 +141,13 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, opts U
 		return "", fmt.Errorf("failed to resolve features: %w", err)
 	}
 
-	if opts.Verbose {
-		fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
-		for _, f := range resolvedFeatures {
-			name := f.ID
-			if f.Metadata != nil && f.Metadata.Name != "" {
-				name = f.Metadata.Name
-			}
-			fmt.Printf("  - %s\n", name)
+	fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
+	for _, f := range resolvedFeatures {
+		name := f.ID
+		if f.Metadata != nil && f.Metadata.Name != "" {
+			name = f.Metadata.Name
 		}
+		fmt.Printf("  - %s\n", name)
 	}
 
 	// Determine derived image tag
@@ -168,12 +157,10 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, opts U
 	buildDir := filepath.Join(os.TempDir(), "dcx-features", r.envKey)
 	defer os.RemoveAll(buildDir)
 
-	if opts.Verbose {
-		fmt.Printf("Building derived image: %s\n", derivedTag)
-	}
+	fmt.Printf("Building derived image: %s\n", derivedTag)
 
 	// Build the derived image
-	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir, opts.Verbose); err != nil {
+	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir); err != nil {
 		return "", err
 	}
 
@@ -181,7 +168,7 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, opts U
 }
 
 // buildImage builds an image from a Dockerfile.
-func (r *Runner) buildImage(ctx context.Context, imageTag string, opts UpOptions) error {
+func (r *Runner) buildImage(ctx context.Context, imageTag string) error {
 	if r.cfg.Build == nil {
 		return fmt.Errorf("no build configuration")
 	}

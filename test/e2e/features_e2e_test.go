@@ -348,3 +348,65 @@ echo "simple-marker installed" > /tmp/simple-marker
 
 	return workspace
 }
+
+// TestFeatureCachingE2E tests that features are cached between runs.
+func TestFeatureCachingE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	workspace := createWorkspaceWithOptionsFeature(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see feature building output
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Second up - features should be cached (no "Building derived image" message expected
+	// since the container is already running and config hasn't changed)
+	t.Run("second_up_uses_cache", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		// Should see that environment is already running
+		assert.Contains(t, stdout, "already running")
+	})
+
+	// Now change the feature options and verify rebuild happens
+	t.Run("config_change_triggers_rebuild", func(t *testing.T) {
+		// First tear down
+		helpers.RunDCXInDirSuccess(t, workspace, "down")
+
+		// Change the feature options in devcontainer.json
+		devcontainerDir := filepath.Join(workspace, ".devcontainer")
+		devcontainerJSON := `{
+		"name": "Options Test",
+		"image": "alpine:latest",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/with-options": {
+				"greeting": "ChangedHello",
+				"enabled": true,
+				"count": "10"
+			}
+		}
+	}`
+		err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+		require.NoError(t, err)
+
+		// Now up should rebuild since config changed
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see building output since config changed
+		assert.Contains(t, stdout, "Building derived image")
+
+		// Verify new options are in effect
+		execStdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-options-marker")
+		require.NoError(t, err)
+		assert.Contains(t, execStdout, "GREETING=ChangedHello")
+		assert.Contains(t, execStdout, "COUNT=10")
+	})
+}

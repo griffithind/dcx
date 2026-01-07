@@ -75,7 +75,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 				actualProject = projectName
 			}
 			runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-			if err := runner.Stop(ctx, compose.StopOptions{Verbose: verbose}); err != nil {
+			if err := runner.Stop(ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}
 		}
