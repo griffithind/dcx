@@ -15,13 +15,14 @@ import (
 
 // Runner manages single-container devcontainer operations.
 type Runner struct {
-	dockerClient  *docker.Client
-	workspacePath string
-	configPath    string
-	cfg           *config.DevcontainerConfig
-	projectName   string // User-defined project name from dcx.json
-	envKey        string
-	configHash    string
+	dockerClient     *docker.Client
+	workspacePath    string
+	configPath       string
+	cfg              *config.DevcontainerConfig
+	projectName      string // User-defined project name from dcx.json
+	envKey           string
+	configHash       string
+	resolvedFeatures []*features.Feature // Resolved features (stored for runtime config)
 }
 
 // NewRunner creates a new single-container runner.
@@ -141,6 +142,9 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string) (strin
 		return "", fmt.Errorf("failed to resolve features: %w", err)
 	}
 
+	// Store resolved features for runtime configuration (mounts, caps, etc.)
+	r.resolvedFeatures = resolvedFeatures
+
 	fmt.Printf("Resolved %d features:\n", len(resolvedFeatures))
 	for _, f := range resolvedFeatures {
 		name := f.ID
@@ -193,6 +197,44 @@ func (r *Runner) buildImage(ctx context.Context, imageTag string) error {
 func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, error) {
 	containerName := r.getContainerName()
 
+	// Collect mounts from config and features
+	mounts := append([]string{}, r.cfg.Mounts...)
+	if len(r.resolvedFeatures) > 0 {
+		featureMounts := features.CollectMounts(r.resolvedFeatures)
+		for _, mount := range featureMounts {
+			parsed := parseMountString(mount)
+			if parsed != "" {
+				mounts = append(mounts, parsed)
+			}
+		}
+	}
+
+	// Collect capabilities from config and features
+	capAdd := append([]string{}, r.cfg.CapAdd...)
+	if len(r.resolvedFeatures) > 0 {
+		featureCaps := features.CollectCapabilities(r.resolvedFeatures)
+		capAdd = append(capAdd, featureCaps...)
+	}
+
+	// Collect security options from config and features
+	securityOpt := append([]string{}, r.cfg.SecurityOpt...)
+	if len(r.resolvedFeatures) > 0 {
+		featureSecOpts := features.CollectSecurityOpts(r.resolvedFeatures)
+		securityOpt = append(securityOpt, featureSecOpts...)
+	}
+
+	// Check if privileged mode is needed
+	privileged := r.cfg.Privileged != nil && *r.cfg.Privileged
+	if !privileged && len(r.resolvedFeatures) > 0 {
+		privileged = features.NeedsPrivileged(r.resolvedFeatures)
+	}
+
+	// Check if init is needed
+	init := r.cfg.Init != nil && *r.cfg.Init
+	if !init && len(r.resolvedFeatures) > 0 {
+		init = features.NeedsInit(r.resolvedFeatures)
+	}
+
 	// Prepare container configuration
 	createOpts := docker.CreateContainerOptions{
 		Name:           containerName,
@@ -201,13 +243,13 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 		WorkspaceMount: config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath),
 		Labels:         r.buildLabels(),
 		Env:            r.buildEnv(),
-		Mounts:         r.cfg.Mounts,
+		Mounts:         mounts,
 		RunArgs:        r.cfg.RunArgs,
 		User:           r.cfg.RemoteUser,
-		Privileged:     r.cfg.Privileged != nil && *r.cfg.Privileged,
-		Init:           r.cfg.Init != nil && *r.cfg.Init,
-		CapAdd:         r.cfg.CapAdd,
-		SecurityOpt:    r.cfg.SecurityOpt,
+		Privileged:     privileged,
+		Init:           init,
+		CapAdd:         capAdd,
+		SecurityOpt:    securityOpt,
 	}
 
 	// Parse runArgs for additional options
@@ -475,4 +517,77 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// parseMountString parses a devcontainer mount string and returns a Docker-compatible format.
+// Devcontainer format: "source=/path,target=/path,type=bind,consistency=cached"
+// Docker format: "source:target" or "source:target:ro"
+func parseMountString(mount string) string {
+	// If it already looks like Docker format (contains colon but no source= pattern), return as-is
+	if indexOf(mount, ":") >= 0 && indexOf(mount, "source=") < 0 {
+		return mount
+	}
+
+	parts := splitMountParts(mount, ",")
+
+	var source, target, mountType string
+	var readOnly bool
+	for _, part := range parts {
+		kv := splitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := trimSpace(kv[0])
+		value := trimSpace(kv[1])
+
+		switch key {
+		case "source", "src":
+			source = value
+		case "target", "dst", "destination":
+			target = value
+		case "type":
+			mountType = value
+		case "readonly", "ro":
+			readOnly = value == "true" || value == "1"
+		}
+	}
+
+	// Default type is bind
+	if mountType == "" {
+		mountType = "bind"
+	}
+
+	// For bind mounts, format as source:target
+	if mountType == "bind" && source != "" && target != "" {
+		if readOnly {
+			return source + ":" + target + ":ro"
+		}
+		return source + ":" + target
+	}
+
+	// For volume mounts, use named volume syntax
+	if mountType == "volume" && source != "" && target != "" {
+		if readOnly {
+			return source + ":" + target + ":ro"
+		}
+		return source + ":" + target
+	}
+
+	// Can't parse, return empty
+	return ""
+}
+
+// splitMountParts splits a string by separator with no limit.
+func splitMountParts(s, sep string) []string {
+	var result []string
+	for {
+		idx := indexOf(s, sep)
+		if idx < 0 {
+			result = append(result, s)
+			break
+		}
+		result = append(result, s[:idx])
+		s = s[idx+len(sep):]
+	}
+	return result
 }

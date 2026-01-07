@@ -410,3 +410,80 @@ func TestFeatureCachingE2E(t *testing.T) {
 		assert.Contains(t, execStdout, "COUNT=10")
 	})
 }
+
+// TestFeatureWithMountsE2E tests that feature mounts are applied to the container.
+func TestFeatureWithMountsE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	workspace := createWorkspaceWithMountsFeature(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Build and run
+	t.Run("up_installs_feature", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+	})
+
+	// Verify the docker socket is mounted
+	t.Run("docker_socket_mounted", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ls", "-la", "/var/run/docker.sock")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "docker.sock")
+	})
+
+	// Verify feature marker was installed
+	t.Run("feature_installed", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/dcx-features/with-mounts-marker.txt")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "with-mounts installed")
+	})
+}
+
+// createWorkspaceWithMountsFeature creates a workspace with a feature that has mounts.
+func createWorkspaceWithMountsFeature(t *testing.T) string {
+	t.Helper()
+
+	workspace := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(workspace, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "with-mounts")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Copy feature from testdata
+	featureFixture := helpers.FeatureFixture(t, "with-mounts")
+
+	// Copy devcontainer-feature.json
+	data, err := os.ReadFile(filepath.Join(featureFixture, "devcontainer-feature.json"))
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), data, 0644)
+	require.NoError(t, err)
+
+	// Copy install.sh
+	data, err = os.ReadFile(filepath.Join(featureFixture, "install.sh"))
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), data, 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json
+	devcontainerJSON := `{
+		"name": "Mounts Test",
+		"image": "alpine:latest",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/with-mounts": {}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	return workspace
+}
