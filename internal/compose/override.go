@@ -34,6 +34,8 @@ type ComposeOverride struct {
 type ServiceOverride struct {
 	Image       string            `yaml:"image,omitempty"`
 	PullPolicy  string            `yaml:"pull_policy,omitempty"`
+	Entrypoint  []string          `yaml:"entrypoint,omitempty"`
+	Command     []string          `yaml:"command,omitempty"`
 	Labels      map[string]string `yaml:"labels,omitempty"`
 	Environment map[string]string `yaml:"environment,omitempty"`
 	Volumes     []string          `yaml:"volumes,omitempty"`
@@ -105,6 +107,12 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 		// Set pull_policy to never to prevent compose from rebuilding this service
 		// when running with --build. We've already built the image with features installed.
 		svc.PullPolicy = "never"
+	}
+
+	// Apply overrideCommand if specified (keep container alive instead of running default command)
+	if g.cfg.OverrideCommand != nil && *g.cfg.OverrideCommand {
+		svc.Entrypoint = []string{"/bin/sh", "-c"}
+		svc.Command = []string{"while sleep 1000; do :; done"}
 	}
 
 	// Add DCX labels
