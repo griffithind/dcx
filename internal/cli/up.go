@@ -118,6 +118,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Handle state transitions
 	var isNewEnvironment bool
+	var needsRebuild bool // Track if we need to rebuild due to stale state
 	switch currentState {
 	case state.StateRunning:
 		if !recreate && !rebuild {
@@ -134,10 +135,12 @@ func runUp(cmd *cobra.Command, args []string) error {
 		if err := runDownWithOptions(ctx, dockerClient, projectName, envKey, true, false); err != nil {
 			return fmt.Errorf("failed to remove existing environment: %w", err)
 		}
+		// When recovering from stale state, always rebuild to ensure fresh images
+		needsRebuild = true
 		fallthrough
 	case state.StateAbsent:
-		// Create new environment
-		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash); err != nil {
+		// Create new environment with rebuild if state was stale or --rebuild flag was passed
+		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, rebuild || needsRebuild); err != nil {
 			return err
 		}
 		isNewEnvironment = true
@@ -209,18 +212,18 @@ func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *confi
 	return nil
 }
 
-func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
+func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
 	// Determine plan type
 	if cfg.IsComposePlan() {
-		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash)
+		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild)
 	}
 	if cfg.IsSinglePlan() {
-		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash)
+		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild)
 	}
 	return fmt.Errorf("invalid configuration: no build plan detected")
 }
 
-func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
+func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
 	fmt.Println("Creating compose-based environment...")
 
 	// Create compose runner
@@ -230,8 +233,10 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	}
 
 	// Generate override file and run compose up
+	// Rebuild is triggered by --rebuild flag OR when recovering from stale state
 	if err := runner.Up(ctx, compose.UpOptions{
 		Build:   rebuild,
+		Rebuild: forceRebuild,
 		Verbose: verbose,
 	}); err != nil {
 		return fmt.Errorf("failed to start compose environment: %w", err)
@@ -240,15 +245,16 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	return nil
 }
 
-func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
+func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
 	fmt.Println("Creating single-container environment...")
 
 	// Create single-container runner
 	runner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 
 	// Start the environment
+	// For single containers, rebuild means rebuild the image
 	if err := runner.Up(ctx, single.UpOptions{
-		Build:   rebuild,
+		Build:   rebuild || forceRebuild,
 		Verbose: verbose,
 	}); err != nil {
 		return fmt.Errorf("failed to start single-container environment: %w", err)
