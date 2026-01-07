@@ -20,6 +20,7 @@ import (
 type Resolver struct {
 	cacheDir  string
 	configDir string
+	forcePull bool
 }
 
 // NewResolver creates a new feature resolver.
@@ -34,6 +35,11 @@ func NewResolver(configDir string) (*Resolver, error) {
 		cacheDir:  cacheDir,
 		configDir: configDir,
 	}, nil
+}
+
+// SetForcePull configures the resolver to force re-fetch features from the registry.
+func (r *Resolver) SetForcePull(forcePull bool) {
+	r.forcePull = forcePull
 }
 
 // getCacheDir returns the feature cache directory.
@@ -123,15 +129,20 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 	cacheKey := computeCacheKey(ref.CanonicalID())
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	// Check if already cached
-	if _, err := os.Stat(cachePath); err == nil {
-		feature.CachePath = cachePath
-		metadata, err := r.loadMetadata(cachePath)
-		if err != nil {
-			return fmt.Errorf("failed to load cached feature metadata: %w", err)
+	// Check if already cached (unless force-pull is enabled)
+	if !r.forcePull {
+		if _, err := os.Stat(cachePath); err == nil {
+			feature.CachePath = cachePath
+			metadata, err := r.loadMetadata(cachePath)
+			if err != nil {
+				return fmt.Errorf("failed to load cached feature metadata: %w", err)
+			}
+			feature.Metadata = metadata
+			return nil
 		}
-		feature.Metadata = metadata
-		return nil
+	} else {
+		// Force-pull: remove existing cache to re-fetch
+		os.RemoveAll(cachePath)
 	}
 
 	// Fetch from OCI registry
@@ -159,15 +170,20 @@ func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
 	cacheKey := computeCacheKey(ref.URL)
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	// Check if already cached
-	if _, err := os.Stat(cachePath); err == nil {
-		feature.CachePath = cachePath
-		metadata, err := r.loadMetadata(cachePath)
-		if err != nil {
-			return fmt.Errorf("failed to load cached feature metadata: %w", err)
+	// Check if already cached (unless force-pull is enabled)
+	if !r.forcePull {
+		if _, err := os.Stat(cachePath); err == nil {
+			feature.CachePath = cachePath
+			metadata, err := r.loadMetadata(cachePath)
+			if err != nil {
+				return fmt.Errorf("failed to load cached feature metadata: %w", err)
+			}
+			feature.Metadata = metadata
+			return nil
 		}
-		feature.Metadata = metadata
-		return nil
+	} else {
+		// Force-pull: remove existing cache to re-fetch
+		os.RemoveAll(cachePath)
 	}
 
 	// Fetch from HTTP

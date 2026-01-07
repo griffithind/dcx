@@ -27,6 +27,11 @@ func NewManager(configDir string) (*Manager, error) {
 	}, nil
 }
 
+// SetForcePull configures the manager to force re-fetch features from the registry.
+func (m *Manager) SetForcePull(forcePull bool) {
+	m.resolver.SetForcePull(forcePull)
+}
+
 // ResolveAll resolves all features from a devcontainer.json features map.
 func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]interface{}, overrideOrder []string) ([]*Feature, error) {
 	if len(featuresConfig) == 0 {
