@@ -1,0 +1,106 @@
+// Package runner defines the common interface for devcontainer environment runners.
+package runner
+
+import (
+	"context"
+	"io"
+)
+
+// Environment represents a devcontainer environment that can be started, stopped, and managed.
+// This interface abstracts the differences between compose and single-container runners.
+type Environment interface {
+	// Up starts the environment, building images if necessary.
+	Up(ctx context.Context, opts UpOptions) error
+
+	// Start starts an existing stopped environment.
+	Start(ctx context.Context) error
+
+	// Stop stops a running environment.
+	Stop(ctx context.Context) error
+
+	// Down removes the environment and optionally its resources.
+	Down(ctx context.Context, opts DownOptions) error
+
+	// Build builds the environment images without starting containers.
+	Build(ctx context.Context, opts BuildOptions) error
+
+	// Exec executes a command in the running environment.
+	Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error)
+
+	// GetContainerWorkspaceFolder returns the workspace folder path inside the container.
+	GetContainerWorkspaceFolder() string
+
+	// GetPrimaryContainerName returns the name/ID of the primary container.
+	GetPrimaryContainerName() string
+}
+
+// UpOptions configures the Up operation.
+type UpOptions struct {
+	// Build builds images before starting containers.
+	Build bool
+	// Rebuild forces a rebuild of images.
+	Rebuild bool
+	// Pull forces re-fetch of remote resources (images, features).
+	Pull bool
+}
+
+// DownOptions configures the Down operation.
+type DownOptions struct {
+	// RemoveVolumes removes associated volumes.
+	RemoveVolumes bool
+	// RemoveOrphans removes containers not defined in compose file.
+	RemoveOrphans bool
+}
+
+// BuildOptions configures the Build operation.
+type BuildOptions struct {
+	// NoCache disables build cache.
+	NoCache bool
+	// Pull pulls base images before building.
+	Pull bool
+}
+
+// ExecOptions configures the Exec operation.
+type ExecOptions struct {
+	// WorkingDir sets the working directory for the command.
+	WorkingDir string
+	// User sets the user to run the command as.
+	User string
+	// Env sets additional environment variables.
+	Env []string
+	// Stdin provides input to the command.
+	Stdin io.Reader
+	// Stdout receives command output.
+	Stdout io.Writer
+	// Stderr receives command error output.
+	Stderr io.Writer
+	// TTY allocates a pseudo-TTY.
+	TTY bool
+	// SSHAgentEnabled enables SSH agent forwarding.
+	SSHAgentEnabled bool
+}
+
+// Info contains information about the running environment.
+type Info struct {
+	// ContainerID is the primary container's ID.
+	ContainerID string
+	// ContainerName is the primary container's name.
+	ContainerName string
+	// State is the current state of the environment.
+	State State
+	// WorkspaceFolder is the workspace path in the container.
+	WorkspaceFolder string
+}
+
+// State represents the current state of an environment.
+type State string
+
+const (
+	StateUnknown State = ""
+	StateAbsent  State = "absent"
+	StateCreated State = "created"
+	StateRunning State = "running"
+	StateStopped State = "stopped"
+	StateStale   State = "stale"
+	StateBroken  State = "broken"
+)
