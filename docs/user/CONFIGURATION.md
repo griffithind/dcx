@@ -77,7 +77,7 @@ Uses a single container with either a pre-built image or a Dockerfile.
 |-------|------|-------------|-----------|
 | `remoteUser` | string | User for remote operations | ✓ |
 | `containerUser` | string | User for container | ✓ |
-| `updateRemoteUserUID` | boolean | Update user UID | ✗ |
+| `updateRemoteUserUID` | boolean | Update user UID to match host (Linux only, default: true) | ✓ |
 
 ### Environment Variables
 
