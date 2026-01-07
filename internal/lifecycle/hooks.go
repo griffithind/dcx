@@ -7,11 +7,38 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
 )
+
+// WaitFor represents the lifecycle command to wait for before considering
+// the container ready. Commands after this point run in the background.
+type WaitFor string
+
+const (
+	// WaitForInitializeCommand waits only for initializeCommand.
+	WaitForInitializeCommand WaitFor = "initializeCommand"
+	// WaitForOnCreateCommand waits for onCreateCommand (and earlier).
+	WaitForOnCreateCommand WaitFor = "onCreateCommand"
+	// WaitForUpdateContentCommand waits for updateContentCommand (and earlier).
+	WaitForUpdateContentCommand WaitFor = "updateContentCommand"
+	// WaitForPostCreateCommand waits for postCreateCommand (and earlier).
+	WaitForPostCreateCommand WaitFor = "postCreateCommand"
+	// WaitForPostStartCommand waits for all commands (default behavior).
+	WaitForPostStartCommand WaitFor = "postStartCommand"
+)
+
+// waitForOrder defines the order of lifecycle commands for comparison.
+var waitForOrder = map[WaitFor]int{
+	WaitForInitializeCommand:    0,
+	WaitForOnCreateCommand:      1,
+	WaitForUpdateContentCommand: 2,
+	WaitForPostCreateCommand:    3,
+	WaitForPostStartCommand:     4,
+}
 
 // CommandSpec represents a parsed command that can be either a shell string
 // or an exec-style array of arguments.
@@ -77,6 +104,25 @@ func (r *HookRunner) SetFeatureHooks(onCreate, postCreate, postStart []FeatureHo
 	r.featurePostStartHooks = postStart
 }
 
+// getWaitFor returns the WaitFor value from config, defaulting to postStartCommand.
+func (r *HookRunner) getWaitFor() WaitFor {
+	if r.cfg.WaitFor == "" {
+		return WaitForPostStartCommand
+	}
+	wf := WaitFor(r.cfg.WaitFor)
+	if _, ok := waitForOrder[wf]; !ok {
+		// Invalid value, use default
+		return WaitForPostStartCommand
+	}
+	return wf
+}
+
+// shouldBlock returns true if the given command should block (wait for completion).
+func (r *HookRunner) shouldBlock(cmd WaitFor) bool {
+	waitFor := r.getWaitFor()
+	return waitForOrder[cmd] <= waitForOrder[waitFor]
+}
+
 // RunInitialize runs initializeCommand on the host.
 func (r *HookRunner) RunInitialize(ctx context.Context) error {
 	if r.cfg.InitializeCommand == nil {
@@ -132,45 +178,95 @@ func (r *HookRunner) RunPostAttach(ctx context.Context) error {
 }
 
 // RunAllCreateHooks runs all hooks needed when a container is first created.
+// Commands are run in order, but commands after the waitFor point run in the background.
 func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
+	waitFor := r.getWaitFor()
+	var backgroundWg sync.WaitGroup
+	var backgroundErrs []error
+	var backgroundMu sync.Mutex
+
+	// Helper to run a hook either blocking or in background based on waitFor
+	runHook := func(hookType WaitFor, name string, fn func() error) error {
+		if r.shouldBlock(hookType) {
+			// Run synchronously and return error immediately
+			return fn()
+		}
+		// Run in background
+		backgroundWg.Add(1)
+		go func() {
+			defer backgroundWg.Done()
+			if err := fn(); err != nil {
+				backgroundMu.Lock()
+				backgroundErrs = append(backgroundErrs, fmt.Errorf("%s: %w", name, err))
+				backgroundMu.Unlock()
+				fmt.Printf("Background %s failed: %v\n", name, err)
+			}
+		}()
+		return nil
+	}
+
+	// Log waitFor setting if not default
+	if waitFor != WaitForPostStartCommand {
+		fmt.Printf("Container will be ready after %s (remaining hooks run in background)\n", waitFor)
+	}
+
 	// initializeCommand runs on host before anything else
-	if err := r.RunInitialize(ctx); err != nil {
+	if err := runHook(WaitForInitializeCommand, "initializeCommand", func() error {
+		return r.RunInitialize(ctx)
+	}); err != nil {
 		return fmt.Errorf("initializeCommand failed: %w", err)
 	}
 
 	// onCreateCommand runs after container creation
-	if err := r.RunOnCreate(ctx); err != nil {
+	if err := runHook(WaitForOnCreateCommand, "onCreateCommand", func() error {
+		if err := r.RunOnCreate(ctx); err != nil {
+			return err
+		}
+		// Feature onCreateCommands run after devcontainer onCreateCommand
+		return r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand")
+	}); err != nil {
 		return fmt.Errorf("onCreateCommand failed: %w", err)
 	}
 
-	// Feature onCreateCommands run after devcontainer onCreateCommand
-	if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
-		return err
-	}
-
 	// updateContentCommand runs after onCreateCommand
-	if err := r.RunUpdateContent(ctx); err != nil {
+	if err := runHook(WaitForUpdateContentCommand, "updateContentCommand", func() error {
+		return r.RunUpdateContent(ctx)
+	}); err != nil {
 		return fmt.Errorf("updateContentCommand failed: %w", err)
 	}
 
 	// postCreateCommand runs after updateContentCommand
-	if err := r.RunPostCreate(ctx); err != nil {
+	if err := runHook(WaitForPostCreateCommand, "postCreateCommand", func() error {
+		if err := r.RunPostCreate(ctx); err != nil {
+			return err
+		}
+		// Feature postCreateCommands run after devcontainer postCreateCommand
+		return r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand")
+	}); err != nil {
 		return fmt.Errorf("postCreateCommand failed: %w", err)
 	}
 
-	// Feature postCreateCommands run after devcontainer postCreateCommand
-	if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
-		return err
-	}
-
 	// postStartCommand runs after postCreateCommand (on first start)
-	if err := r.RunPostStart(ctx); err != nil {
+	if err := runHook(WaitForPostStartCommand, "postStartCommand", func() error {
+		if err := r.RunPostStart(ctx); err != nil {
+			return err
+		}
+		// Feature postStartCommands run after devcontainer postStartCommand
+		return r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand")
+	}); err != nil {
 		return fmt.Errorf("postStartCommand failed: %w", err)
 	}
 
-	// Feature postStartCommands run after devcontainer postStartCommand
-	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
-		return err
+	// If we have background tasks, wait for them but don't block the user
+	if waitFor != WaitForPostStartCommand {
+		go func() {
+			backgroundWg.Wait()
+			if len(backgroundErrs) > 0 {
+				fmt.Printf("Warning: %d background lifecycle hook(s) failed\n", len(backgroundErrs))
+			} else {
+				fmt.Println("Background lifecycle hooks completed successfully")
+			}
+		}()
 	}
 
 	return nil
