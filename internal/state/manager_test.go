@@ -110,3 +110,91 @@ func TestComputeWorkspaceHash(t *testing.T) {
 	hash3 := ComputeWorkspaceHash("/home/user/other")
 	assert.NotEqual(t, hash, hash3)
 }
+
+func TestSanitizeProjectName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple lowercase name",
+			input:    "myproject",
+			expected: "myproject",
+		},
+		{
+			name:     "name with uppercase",
+			input:    "MyProject",
+			expected: "myproject",
+		},
+		{
+			name:     "name with spaces",
+			input:    "my project",
+			expected: "my_project",
+		},
+		{
+			name:     "name with hyphens",
+			input:    "my-project",
+			expected: "my-project",
+		},
+		{
+			name:     "name with underscores",
+			input:    "my_project",
+			expected: "my_project",
+		},
+		{
+			name:     "name starting with number",
+			input:    "123project",
+			expected: "dcx_123project",
+		},
+		{
+			name:     "name with special characters",
+			input:    "my@project#name!",
+			expected: "myprojectname",
+		},
+		{
+			name:     "name with mixed characters",
+			input:    "My Project-v2.0",
+			expected: "my_project-v20",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "only special characters",
+			input:    "@#$%",
+			expected: "",
+		},
+		{
+			name:     "ouzoerp style",
+			input:    "ouzoerp",
+			expected: "ouzoerp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SanitizeProjectName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestResolveIdentifier(t *testing.T) {
+	workspacePath := "/home/user/project"
+
+	// With project name
+	result := ResolveIdentifier(workspacePath, "myproject")
+	assert.Equal(t, "myproject", result)
+
+	// With project name that needs sanitization
+	result = ResolveIdentifier(workspacePath, "My Project")
+	assert.Equal(t, "my_project", result)
+
+	// Without project name - falls back to env key
+	result = ResolveIdentifier(workspacePath, "")
+	assert.Len(t, result, 12) // env key is 12 chars
+	assert.Equal(t, ComputeEnvKey(workspacePath), result)
+}

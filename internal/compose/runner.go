@@ -30,7 +30,9 @@ type Runner struct {
 }
 
 // NewRunner creates a new compose runner.
-func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig, envKey, configHash string) (*Runner, error) {
+// projectName is optional - if provided, it's used directly as the compose project name.
+// If empty, falls back to "dcx_" + envKey.
+func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig, projectName, envKey, configHash string) (*Runner, error) {
 	configDir := filepath.Dir(configPath)
 
 	// Resolve compose files
@@ -40,7 +42,11 @@ func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig,
 	}
 
 	// Generate compose project name
+	// Use project name if provided, otherwise fall back to dcx_ prefix
 	composeProject := "dcx_" + envKey
+	if projectName != "" {
+		composeProject = projectName
+	}
 
 	return &Runner{
 		workspacePath:  workspacePath,
@@ -55,8 +61,12 @@ func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig,
 }
 
 // NewRunnerFromEnvKey creates a runner for an existing environment.
-func NewRunnerFromEnvKey(workspacePath, envKey string) *Runner {
+// projectName is optional - if provided, it's used directly as the compose project name.
+func NewRunnerFromEnvKey(workspacePath, projectName, envKey string) *Runner {
 	composeProject := "dcx_" + envKey
+	if projectName != "" {
+		composeProject = projectName
+	}
 	return &Runner{
 		workspacePath:  workspacePath,
 		envKey:         envKey,

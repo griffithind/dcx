@@ -19,20 +19,32 @@ type Runner struct {
 	workspacePath string
 	configPath    string
 	cfg           *config.DevcontainerConfig
+	projectName   string // User-defined project name from dcx.json
 	envKey        string
 	configHash    string
 }
 
 // NewRunner creates a new single-container runner.
-func NewRunner(dockerClient *docker.Client, workspacePath, configPath string, cfg *config.DevcontainerConfig, envKey, configHash string) *Runner {
+// projectName is optional - if provided, it's used directly as the container name.
+// If empty, falls back to "dcx_" + envKey.
+func NewRunner(dockerClient *docker.Client, workspacePath, configPath string, cfg *config.DevcontainerConfig, projectName, envKey, configHash string) *Runner {
 	return &Runner{
 		dockerClient:  dockerClient,
 		workspacePath: workspacePath,
 		configPath:    configPath,
 		cfg:           cfg,
+		projectName:   projectName,
 		envKey:        envKey,
 		configHash:    configHash,
 	}
+}
+
+// getContainerName returns the container name based on project name or env key.
+func (r *Runner) getContainerName() string {
+	if r.projectName != "" {
+		return r.projectName
+	}
+	return fmt.Sprintf("dcx_%s", r.envKey)
 }
 
 // UpOptions contains options for bringing up the environment.
@@ -192,7 +204,7 @@ func (r *Runner) buildImage(ctx context.Context, imageTag string, opts UpOptions
 
 // createContainer creates a new container with the devcontainer configuration.
 func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, error) {
-	containerName := fmt.Sprintf("dcx_%s", r.envKey)
+	containerName := r.getContainerName()
 
 	// Prepare container configuration
 	createOpts := docker.CreateContainerOptions{
@@ -354,20 +366,17 @@ func (r *Runner) buildEnv() []string {
 
 // Start starts an existing stopped container.
 func (r *Runner) Start(ctx context.Context) error {
-	containerName := fmt.Sprintf("dcx_%s", r.envKey)
-	return r.dockerClient.StartContainer(ctx, containerName)
+	return r.dockerClient.StartContainer(ctx, r.getContainerName())
 }
 
 // Stop stops a running container.
 func (r *Runner) Stop(ctx context.Context) error {
-	containerName := fmt.Sprintf("dcx_%s", r.envKey)
-	return r.dockerClient.StopContainer(ctx, containerName, nil)
+	return r.dockerClient.StopContainer(ctx, r.getContainerName(), nil)
 }
 
 // Down removes the container.
 func (r *Runner) Down(ctx context.Context, removeVolumes bool) error {
-	containerName := fmt.Sprintf("dcx_%s", r.envKey)
-	return r.dockerClient.RemoveContainer(ctx, containerName, true)
+	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true)
 }
 
 // GetContainerWorkspaceFolder returns the workspace folder path in the container.

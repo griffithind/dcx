@@ -86,18 +86,18 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
 
-	// Check current state
-	currentState, containerInfo, err := stateMgr.GetState(ctx, containerName)
+	// Look up container by name
+	containerInfo, err := stateMgr.FindContainerByName(ctx, containerName)
 	if err != nil {
-		return fmt.Errorf("container not found: %s", containerName)
-	}
-
-	if currentState != state.StateRunning {
-		return fmt.Errorf("container is not running: %s (state: %s)", containerName, currentState)
+		return fmt.Errorf("failed to find container: %w", err)
 	}
 
 	if containerInfo == nil {
-		return fmt.Errorf("no primary container found for: %s", containerName)
+		return fmt.Errorf("container not found: %s", containerName)
+	}
+
+	if !containerInfo.Running {
+		return fmt.Errorf("container is not running: %s", containerName)
 	}
 
 	// Get workspace path from container labels (set during dcx up)

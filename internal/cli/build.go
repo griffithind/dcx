@@ -54,6 +54,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Loaded configuration from: %s\n", cfgPath)
 	}
 
+	// Load dcx.json configuration (optional)
+	dcxCfg, err := config.LoadDcxConfig(workspacePath)
+	if err != nil {
+		return fmt.Errorf("failed to load dcx.json: %w", err)
+	}
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		if verbose {
+			fmt.Printf("Project name: %s\n", projectName)
+		}
+	}
+
 	// Validate configuration
 	if err := config.Validate(cfg); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
@@ -73,7 +88,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 
 	// Build based on plan type
 	if cfg.IsComposePlan() {
-		return buildCompose(ctx, dockerClient, cfg, cfgPath, envKey, configHash)
+		return buildCompose(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash)
 	}
 
 	if cfg.IsSinglePlan() {
@@ -83,11 +98,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("invalid configuration: no build plan detected")
 }
 
-func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, envKey, configHash string) error {
+func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
 	fmt.Println("Building compose-based environment...")
 
 	// Create compose runner
-	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, envKey, configHash)
+	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}
