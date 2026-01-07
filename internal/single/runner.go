@@ -51,6 +51,7 @@ func (r *Runner) getContainerName() string {
 // UpOptions contains options for bringing up the environment.
 type UpOptions struct {
 	Build bool
+	Pull  bool // Force re-fetch of remote features
 }
 
 // Up creates and starts the single-container environment.
@@ -117,7 +118,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 	}
 
 	// Build derived image with features
-	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Build)
+	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Build, opts.Pull)
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image with features: %w", err)
 	}
@@ -126,12 +127,13 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 }
 
 // buildDerivedImage builds an image with features installed on top of the base image.
-func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceRebuild bool) (string, error) {
+func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceRebuild, forcePull bool) (string, error) {
 	// Determine derived image tag
 	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
 
-	// Check if derived image already exists (skip rebuild unless forced)
-	if !forceRebuild && r.imageExists(ctx, derivedTag) {
+	// Check if derived image already exists (skip rebuild unless forced or pull requested)
+	// When --pull is used, we need to rebuild to incorporate potentially updated features
+	if !forceRebuild && !forcePull && r.imageExists(ctx, derivedTag) {
 		fmt.Printf("Using cached derived image: %s\n", derivedTag)
 
 		// Still need to resolve features for runtime config (mounts, caps, etc.)
@@ -150,6 +152,9 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceR
 		return derivedTag, nil
 	}
 
+	if forcePull {
+		fmt.Println("Re-fetching features from registry...")
+	}
 	fmt.Println("Resolving features...")
 
 	// Create feature manager
@@ -157,6 +162,11 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceR
 	mgr, err := features.NewManager(configDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to create feature manager: %w", err)
+	}
+
+	// Set force-pull on the manager if --pull was specified
+	if forcePull {
+		mgr.SetForcePull(true)
 	}
 
 	// Resolve and order features

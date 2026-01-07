@@ -96,6 +96,7 @@ func (r *Runner) writeOverrideToTempFile(content string) (string, error) {
 type UpOptions struct {
 	Build   bool
 	Rebuild bool // Force rebuild of all services with build configs
+	Pull    bool // Force re-fetch of remote features
 }
 
 // Up runs docker compose up with the generated override file.
@@ -154,8 +155,9 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	// Determine derived image tag
 	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
 
-	// Check if derived image already exists (skip rebuild unless forced)
-	if !opts.Rebuild && imageExists(ctx, derivedTag) {
+	// Check if derived image already exists (skip rebuild unless forced or pull requested)
+	// When --pull is used, we need to rebuild to incorporate potentially updated features
+	if !opts.Rebuild && !opts.Pull && imageExists(ctx, derivedTag) {
 		fmt.Printf("Using cached derived image: %s\n", derivedTag)
 
 		// Still need to resolve features for runtime config (mounts, caps, etc.)
@@ -174,6 +176,9 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 		return nil
 	}
 
+	if opts.Pull {
+		fmt.Println("Re-fetching features from registry...")
+	}
 	fmt.Println("Building derived image with features...")
 
 	// Get base image from compose file
@@ -188,6 +193,11 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	mgr, err := features.NewManager(r.configDir)
 	if err != nil {
 		return fmt.Errorf("failed to create feature manager: %w", err)
+	}
+
+	// Set force-pull on the manager if --pull was specified
+	if opts.Pull {
+		mgr.SetForcePull(true)
 	}
 
 	// Resolve and order features
@@ -285,6 +295,7 @@ func (r *Runner) getBaseImage(ctx context.Context) (string, error) {
 // BuildOptions contains options for compose build.
 type BuildOptions struct {
 	NoCache bool
+	Pull    bool // Force re-fetch of remote features
 }
 
 // Build builds images without starting containers.

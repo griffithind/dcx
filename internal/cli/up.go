@@ -17,6 +17,7 @@ import (
 var (
 	recreate  bool
 	rebuild   bool
+	pull      bool
 	noAgent   bool
 	enableSSH bool
 )
@@ -39,6 +40,7 @@ This command may require network access for pulling images or features.`,
 func init() {
 	upCmd.Flags().BoolVar(&recreate, "recreate", false, "force recreate containers")
 	upCmd.Flags().BoolVar(&rebuild, "rebuild", false, "force rebuild images")
+	upCmd.Flags().BoolVar(&pull, "pull", false, "force re-fetch remote features (useful when feature tags like :latest are updated)")
 	upCmd.Flags().BoolVar(&noAgent, "no-agent", false, "disable SSH agent forwarding")
 	upCmd.Flags().BoolVar(&enableSSH, "ssh", false, "enable SSH server access")
 }
@@ -143,7 +145,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		fallthrough
 	case state.StateAbsent:
 		// Create new environment with rebuild if state was stale or --rebuild flag was passed
-		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, rebuild || needsRebuild); err != nil {
+		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, rebuild || needsRebuild, pull); err != nil {
 			return err
 		}
 		isNewEnvironment = true
@@ -227,18 +229,18 @@ func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *confi
 	return nil
 }
 
-func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
+func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
 	// Determine plan type
 	if cfg.IsComposePlan() {
-		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild)
+		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild, forcePull)
 	}
 	if cfg.IsSinglePlan() {
-		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild)
+		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild, forcePull)
 	}
 	return fmt.Errorf("invalid configuration: no build plan detected")
 }
 
-func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
+func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
 	fmt.Println("Creating compose-based environment...")
 
 	// Create compose runner
@@ -252,6 +254,7 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	if err := runner.Up(ctx, compose.UpOptions{
 		Build:   rebuild,
 		Rebuild: forceRebuild,
+		Pull:    forcePull,
 	}); err != nil {
 		return fmt.Errorf("failed to start compose environment: %w", err)
 	}
@@ -259,7 +262,7 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	return nil
 }
 
-func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild bool) error {
+func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
 	fmt.Println("Creating single-container environment...")
 
 	// Create single-container runner
@@ -269,6 +272,7 @@ func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, c
 	// For single containers, rebuild means rebuild the image
 	if err := runner.Up(ctx, single.UpOptions{
 		Build: rebuild || forceRebuild,
+		Pull:  forcePull,
 	}); err != nil {
 		return fmt.Errorf("failed to start single-container environment: %w", err)
 	}

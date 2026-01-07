@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	noCache bool
+	noCache   bool
+	pullBuild bool
 )
 
 var buildCmd = &cobra.Command{
@@ -31,6 +32,7 @@ This command may require network access for pulling base images.`,
 
 func init() {
 	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "build without using cache")
+	buildCmd.Flags().BoolVar(&pullBuild, "pull", false, "force re-fetch remote features (useful when feature tags like :latest are updated)")
 	rootCmd.AddCommand(buildCmd)
 }
 
@@ -110,6 +112,7 @@ func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.
 	// Run compose build
 	if err := runner.Build(ctx, compose.BuildOptions{
 		NoCache: noCache,
+		Pull:    pullBuild,
 	}); err != nil {
 		return fmt.Errorf("failed to build: %w", err)
 	}
