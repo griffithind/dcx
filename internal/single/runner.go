@@ -402,13 +402,64 @@ func (r *Runner) Stop(ctx context.Context) error {
 }
 
 // Down removes the container and optionally its volumes.
-func (r *Runner) Down(ctx context.Context, removeVolumes bool) error {
-	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true, removeVolumes)
+func (r *Runner) Down(ctx context.Context, opts DownOptions) error {
+	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true, opts.RemoveVolumes)
+}
+
+// DownOptions configures the Down operation.
+type DownOptions struct {
+	RemoveVolumes bool
+	RemoveOrphans bool // Not used for single containers
 }
 
 // GetContainerWorkspaceFolder returns the workspace folder path in the container.
 func (r *Runner) GetContainerWorkspaceFolder() string {
 	return config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
+}
+
+// GetPrimaryContainerName returns the name of the primary container.
+func (r *Runner) GetPrimaryContainerName() string {
+	return r.getContainerName()
+}
+
+// Build builds the container image without starting the container.
+func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
+	// Resolve the image (may involve building from Dockerfile or features)
+	_, err := r.resolveImage(ctx, UpOptions{
+		Build: true,
+		Pull:  opts.Pull,
+	})
+	return err
+}
+
+// BuildOptions configures the Build operation.
+type BuildOptions struct {
+	NoCache bool
+	Pull    bool
+}
+
+// Exec executes a command in the running container.
+func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error) {
+	containerName := r.getContainerName()
+
+	execConfig := docker.ExecConfig{
+		Cmd:        cmd,
+		WorkingDir: opts.WorkingDir,
+		User:       opts.User,
+		Env:        opts.Env,
+		Tty:        opts.TTY,
+	}
+
+	return r.dockerClient.Exec(ctx, containerName, execConfig)
+}
+
+// ExecOptions configures the Exec operation.
+type ExecOptions struct {
+	WorkingDir      string
+	User            string
+	Env             []string
+	TTY             bool
+	SSHAgentEnabled bool
 }
 
 // parseMountString parses a devcontainer mount string and returns a Docker-compatible format.

@@ -434,6 +434,17 @@ func (r *Runner) GetContainerWorkspaceFolder() string {
 	return config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 }
 
+// GetPrimaryContainerName returns the name of the primary container.
+// This constructs the container name using compose project and service name.
+func (r *Runner) GetPrimaryContainerName() string {
+	service := r.GetPrimaryService()
+	if service == "" {
+		return ""
+	}
+	// Compose container names follow pattern: project_service_1
+	return fmt.Sprintf("%s-%s-1", r.composeProject, service)
+}
+
 // GetPrimaryService returns the primary service name.
 func (r *Runner) GetPrimaryService() string {
 	if r.cfg != nil {
@@ -501,4 +512,36 @@ func (r *Runner) ensureServicesBuilt(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// Exec executes a command in the running environment's primary container.
+// This uses the docker API to run commands.
+func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error) {
+	containerName := r.GetPrimaryContainerName()
+	if containerName == "" {
+		return 1, fmt.Errorf("no primary container name available")
+	}
+
+	if r.dockerClient == nil {
+		return 1, fmt.Errorf("docker client required for exec")
+	}
+
+	execConfig := docker.ExecConfig{
+		Cmd:        cmd,
+		WorkingDir: opts.WorkingDir,
+		User:       opts.User,
+		Env:        opts.Env,
+		Tty:        opts.TTY,
+	}
+
+	return r.dockerClient.Exec(ctx, containerName, execConfig)
+}
+
+// ExecOptions mirrors runner.ExecOptions for compose-specific exec.
+type ExecOptions struct {
+	WorkingDir      string
+	User            string
+	Env             []string
+	TTY             bool
+	SSHAgentEnabled bool
 }
