@@ -245,8 +245,8 @@ func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *co
 func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
 	fmt.Println("Creating compose-based environment...")
 
-	// Create compose runner
-	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, projectName, envKey, configHash)
+	// Create compose runner with docker client for API operations
+	runner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}

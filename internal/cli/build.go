@@ -104,8 +104,8 @@ func runBuild(cmd *cobra.Command, args []string) error {
 func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
 	fmt.Println("Building compose-based environment...")
 
-	// Create compose runner
-	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, projectName, envKey, configHash)
+	// Create compose runner with docker client for API operations
+	runner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}

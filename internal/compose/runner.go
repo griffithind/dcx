@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
@@ -16,6 +17,7 @@ import (
 
 // Runner manages docker compose operations.
 type Runner struct {
+	dockerClient     *docker.Client // Docker client for API operations (optional)
 	workspacePath    string
 	configPath       string
 	configDir        string
@@ -30,9 +32,10 @@ type Runner struct {
 }
 
 // NewRunner creates a new compose runner.
+// dockerClient is optional - if provided, enables use of Docker API for image checks.
 // projectName is optional - if provided, it's used directly as the compose project name.
 // If empty, falls back to "dcx_" + envKey.
-func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig, projectName, envKey, configHash string) (*Runner, error) {
+func NewRunner(dockerClient *docker.Client, workspacePath, configPath string, cfg *config.DevcontainerConfig, projectName, envKey, configHash string) (*Runner, error) {
 	configDir := filepath.Dir(configPath)
 
 	// Resolve compose files
@@ -49,6 +52,7 @@ func NewRunner(workspacePath, configPath string, cfg *config.DevcontainerConfig,
 	}
 
 	return &Runner{
+		dockerClient:   dockerClient,
 		workspacePath:  workspacePath,
 		configPath:     configPath,
 		configDir:      configDir,
@@ -157,7 +161,7 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 
 	// Check if derived image already exists (skip rebuild unless forced or pull requested)
 	// When --pull is used, we need to rebuild to incorporate potentially updated features
-	if !opts.Rebuild && !opts.Pull && imageExists(ctx, derivedTag) {
+	if !opts.Rebuild && !opts.Pull && r.imageExists(ctx, derivedTag) {
 		fmt.Printf("Using cached derived image: %s\n", derivedTag)
 
 		// Still need to resolve features for runtime config (mounts, caps, etc.)
@@ -235,8 +239,17 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	return nil
 }
 
-// imageExists checks if a Docker image exists locally.
-func imageExists(ctx context.Context, imageTag string) bool {
+// imageExists checks if a Docker image exists locally using the Docker API.
+func (r *Runner) imageExists(ctx context.Context, imageTag string) bool {
+	if r.dockerClient != nil {
+		exists, err := r.dockerClient.ImageExists(ctx, imageTag)
+		if err == nil {
+			return exists
+		}
+		// Fall back to subprocess on error
+	}
+
+	// Fallback to subprocess (for cases where dockerClient is nil)
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageTag)
 	return cmd.Run() == nil
 }
