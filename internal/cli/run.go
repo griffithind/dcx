@@ -210,7 +210,9 @@ func executeInContainer(execArgs []string) error {
 		// Get UID/GID for the container user
 		uid, gid := ssh.GetContainerUserIDs(containerInfo.Name, user)
 
-		agentProxy, err = ssh.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
+		// Skip deployment since binary is pre-deployed during 'up'
+		opts := ssh.AgentProxyOptions{SkipDeploy: true}
+		agentProxy, err = ssh.NewAgentProxyWithOptions(containerInfo.ID, containerInfo.Name, uid, gid, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy setup failed: %v\n", err)
 		} else {
