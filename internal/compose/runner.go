@@ -151,6 +151,29 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 
 // buildDerivedImageWithFeatures builds a derived image with features installed.
 func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptions) error {
+	// Determine derived image tag
+	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
+
+	// Check if derived image already exists (skip rebuild unless forced)
+	if !opts.Rebuild && imageExists(ctx, derivedTag) {
+		fmt.Printf("Using cached derived image: %s\n", derivedTag)
+
+		// Still need to resolve features for runtime config (mounts, caps, etc.)
+		mgr, err := features.NewManager(r.configDir)
+		if err != nil {
+			return fmt.Errorf("failed to create feature manager: %w", err)
+		}
+
+		resolvedFeatures, err := mgr.ResolveAll(ctx, r.cfg.Features, r.cfg.OverrideFeatureInstallOrder)
+		if err != nil {
+			return fmt.Errorf("failed to resolve features: %w", err)
+		}
+
+		r.resolvedFeatures = resolvedFeatures
+		r.derivedImage = derivedTag
+		return nil
+	}
+
 	fmt.Println("Building derived image with features...")
 
 	// Get base image from compose file
@@ -185,9 +208,6 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 		fmt.Printf("  - %s\n", name)
 	}
 
-	// Determine derived image tag
-	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
-
 	// Create build directory
 	buildDir := filepath.Join(os.TempDir(), "dcx-features", r.envKey)
 	defer os.RemoveAll(buildDir)
@@ -203,6 +223,12 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptio
 	r.derivedImage = derivedTag
 
 	return nil
+}
+
+// imageExists checks if a Docker image exists locally.
+func imageExists(ctx context.Context, imageTag string) bool {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageTag)
+	return cmd.Run() == nil
 }
 
 // getBaseImage determines the base image for the primary service.

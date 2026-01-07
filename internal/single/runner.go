@@ -117,7 +117,7 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 	}
 
 	// Build derived image with features
-	derivedImage, err := r.buildDerivedImage(ctx, baseImage)
+	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Build)
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image with features: %w", err)
 	}
@@ -126,7 +126,30 @@ func (r *Runner) resolveImage(ctx context.Context, opts UpOptions) (string, erro
 }
 
 // buildDerivedImage builds an image with features installed on top of the base image.
-func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string) (string, error) {
+func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceRebuild bool) (string, error) {
+	// Determine derived image tag
+	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
+
+	// Check if derived image already exists (skip rebuild unless forced)
+	if !forceRebuild && r.imageExists(ctx, derivedTag) {
+		fmt.Printf("Using cached derived image: %s\n", derivedTag)
+
+		// Still need to resolve features for runtime config (mounts, caps, etc.)
+		configDir := filepath.Dir(r.configPath)
+		mgr, err := features.NewManager(configDir)
+		if err != nil {
+			return "", fmt.Errorf("failed to create feature manager: %w", err)
+		}
+
+		resolvedFeatures, err := mgr.ResolveAll(ctx, r.cfg.Features, r.cfg.OverrideFeatureInstallOrder)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve features: %w", err)
+		}
+
+		r.resolvedFeatures = resolvedFeatures
+		return derivedTag, nil
+	}
+
 	fmt.Println("Resolving features...")
 
 	// Create feature manager
@@ -154,9 +177,6 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string) (strin
 		fmt.Printf("  - %s\n", name)
 	}
 
-	// Determine derived image tag
-	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
-
 	// Create build directory
 	buildDir := filepath.Join(os.TempDir(), "dcx-features", r.envKey)
 	defer os.RemoveAll(buildDir)
@@ -169,6 +189,12 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string) (strin
 	}
 
 	return derivedTag, nil
+}
+
+// imageExists checks if a Docker image exists locally.
+func (r *Runner) imageExists(ctx context.Context, imageTag string) bool {
+	exists, err := r.dockerClient.ImageExists(ctx, imageTag)
+	return err == nil && exists
 }
 
 // buildImage builds an image from a Dockerfile.

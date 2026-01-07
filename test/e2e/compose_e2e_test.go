@@ -3,7 +3,9 @@
 package e2e
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -349,4 +351,417 @@ services:
 		labelValue := strings.TrimSpace(string(output))
 		assert.Equal(t, "true", labelValue, "managed label should be true")
 	})
+}
+
+// TestComposeWithFeaturesCachingE2E tests that features are cached between runs for compose environments.
+func TestComposeWithFeaturesCachingE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	workspace := createComposeWorkspaceWithFeatures(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see feature building output
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Second up - features should be cached (no "Building derived image" message expected
+	// since the container is already running and config hasn't changed)
+	t.Run("second_up_uses_cache", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		// Should see that environment is already running
+		assert.Contains(t, stdout, "already running")
+		// Should NOT see feature building output since container is running
+		assert.NotContains(t, stdout, "Building derived image")
+	})
+
+	// Verify feature is still active
+	t.Run("feature_still_active", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-marker")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "feature installed")
+	})
+}
+
+// TestComposeWithFeaturesAndProjectNameE2E tests feature caching with a dcx.json project name.
+func TestComposeWithFeaturesAndProjectNameE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	workspace := createComposeWorkspaceWithFeaturesAndProjectName(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see feature building output
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Second up - features should be cached
+	t.Run("second_up_uses_cache", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		// Should see that environment is already running
+		assert.Contains(t, stdout, "already running")
+		// Should NOT see feature building output since container is running
+		assert.NotContains(t, stdout, "Building derived image")
+	})
+}
+
+// createComposeWorkspaceWithFeaturesAndProjectName creates a workspace with project name.
+func createComposeWorkspaceWithFeaturesAndProjectName(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature metadata
+	featureJSON := `{
+		"id": "simple-marker",
+		"version": "1.0.0",
+		"name": "Simple Marker Feature",
+		"description": "Creates a marker file"
+	}`
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
+	require.NoError(t, err)
+
+	// Create install script
+	installScript := `#!/bin/sh
+set -e
+echo "feature installed" > /tmp/feature-marker
+`
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with compose and features
+	devcontainerJSON := `{
+		"name": "Compose Features Test",
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/simple-marker": {}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Create dcx.json with project name
+	dcxJSON := `{
+		"name": "my-test-project"
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "dcx.json"), []byte(dcxJSON), 0644)
+	require.NoError(t, err)
+
+	// Create docker-compose.yml
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// TestComposeWithFeaturesDownUpCycleE2E tests that features are cached across down/up cycles.
+func TestComposeWithFeaturesDownUpCycleE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	workspace := createComposeWorkspaceWithFeatures(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Down the environment
+	t.Run("down_removes_containers", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
+		assert.Contains(t, stdout, "removed")
+	})
+
+	// Up again - should use cached features image
+	t.Run("second_up_uses_cached_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should use cached derived image, NOT rebuild features
+		assert.Contains(t, stdout, "Using cached derived image")
+		assert.NotContains(t, stdout, "Building derived image")
+	})
+
+	// Verify feature is still active
+	t.Run("feature_still_active", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-marker")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "feature installed")
+	})
+}
+
+// TestComposeWithRemoteFeatureCachingE2E tests feature caching with a remote feature.
+func TestComposeWithRemoteFeatureCachingE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	workspace := createComposeWorkspaceWithRemoteFeature(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see feature building output
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Second up - should return early, not rebuild
+	t.Run("second_up_uses_cache", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		// Should see that environment is already running
+		assert.Contains(t, stdout, "already running")
+		// Should NOT see feature building output since container is running
+		assert.NotContains(t, stdout, "Building derived image")
+	})
+}
+
+// createComposeWorkspaceWithRemoteFeature creates a workspace with a remote feature.
+func createComposeWorkspaceWithRemoteFeature(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with compose and a remote feature
+	devcontainerJSON := `{
+		"name": "Compose Remote Feature Test",
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"ghcr.io/devcontainers/features/common-utils:2": {
+				"installZsh": false,
+				"installOhMyZsh": false,
+				"configureZshAsDefaultShell": false,
+				"upgradePackages": false
+			}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Create docker-compose.yml
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    image: ubuntu:22.04
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// TestComposeWithFeaturesAndDockerfileE2E tests feature caching with a service that has a Dockerfile.
+func TestComposeWithFeaturesAndDockerfileE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	workspace := createComposeWorkspaceWithFeaturesAndDockerfile(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// First up - features should be installed
+	t.Run("first_up_installs_features", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Environment is ready")
+		// Should see feature building output
+		assert.Contains(t, stdout, "Building derived image")
+	})
+
+	// Second up - should return early, not rebuild
+	t.Run("second_up_uses_cache", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		// Should see that environment is already running
+		assert.Contains(t, stdout, "already running")
+		// Should NOT see feature building output since container is running
+		assert.NotContains(t, stdout, "Building derived image")
+		// Should NOT see compose building output
+		assert.NotContains(t, stdout, "Building 1 service")
+	})
+}
+
+// createComposeWorkspaceWithFeaturesAndDockerfile creates a workspace with a service that has a Dockerfile.
+func createComposeWorkspaceWithFeaturesAndDockerfile(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature metadata
+	featureJSON := `{
+		"id": "simple-marker",
+		"version": "1.0.0",
+		"name": "Simple Marker Feature",
+		"description": "Creates a marker file"
+	}`
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
+	require.NoError(t, err)
+
+	// Create install script
+	installScript := `#!/bin/sh
+set -e
+echo "feature installed" > /tmp/feature-marker
+`
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
+	require.NoError(t, err)
+
+	// Create Dockerfile for the app service
+	dockerfile := `FROM alpine:latest
+RUN echo "built from dockerfile"
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with compose and features
+	devcontainerJSON := `{
+		"name": "Compose Features Test",
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/simple-marker": {}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Create docker-compose.yml with build context
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// createComposeWorkspaceWithFeatures creates a workspace with compose config and features.
+func createComposeWorkspaceWithFeatures(t *testing.T) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature metadata
+	featureJSON := `{
+		"id": "simple-marker",
+		"version": "1.0.0",
+		"name": "Simple Marker Feature",
+		"description": "Creates a marker file"
+	}`
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
+	require.NoError(t, err)
+
+	// Create install script
+	installScript := `#!/bin/sh
+set -e
+echo "feature installed" > /tmp/feature-marker
+`
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with compose and features
+	devcontainerJSON := `{
+		"name": "Compose Features Test",
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/simple-marker": {}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Create docker-compose.yml
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
 }
