@@ -185,6 +185,74 @@ func TestSSHServerWithoutFlagE2E(t *testing.T) {
 	assert.NotContains(t, stdout, "SSH configured", "SSH should not be configured without --ssh flag")
 }
 
+// TestSSHServerCleanupE2E tests that the SSH server process is cleaned up after SSH session ends.
+func TestSSHServerCleanupE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Start with SSH enabled
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	hostname := extractSSHHostname(t, stdout)
+
+	// Get container name for direct docker exec checks
+	statusOut, _, err := helpers.RunDCXInDir(t, workspace, "status")
+	require.NoError(t, err)
+
+	var containerName string
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, "Name:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				containerName = parts[1]
+			}
+		}
+	}
+	require.NotEmpty(t, containerName, "should find container name")
+
+	// Run SSH command (this starts ssh-server process in container)
+	t.Run("ssh_server_cleanup_after_session", func(t *testing.T) {
+		// Execute a command via SSH
+		_, _, err := runSSH(t, hostname, "echo", "test")
+		require.NoError(t, err)
+
+		// Give a moment for cleanup to complete
+		// (SSH session closes, docker exec exits, process terminates)
+
+		// Verify no dcx ssh-server processes remain in container
+		// Use [s] character class trick to prevent pgrep from matching itself
+		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "pgrep -f '[s]sh-server' || echo 'no-processes'")
+		output, _ := checkCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		assert.Equal(t, "no-processes", outputStr,
+			"No ssh-server processes should remain in container after SSH session, but found: %s", outputStr)
+	})
+
+	// Run multiple SSH sessions and verify cleanup
+	t.Run("multiple_sessions_cleanup", func(t *testing.T) {
+		// Run 3 SSH sessions sequentially
+		for i := 0; i < 3; i++ {
+			_, _, err := runSSH(t, hostname, "echo", "session", string(rune('1'+i)))
+			require.NoError(t, err)
+		}
+
+		// Verify no lingering processes
+		// Use [s] character class trick to prevent pgrep from matching itself
+		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "pgrep -f '[s]sh-server' || echo 'no-processes'")
+		output, _ := checkCmd.CombinedOutput()
+		outputStr := strings.TrimSpace(string(output))
+
+		assert.Equal(t, "no-processes", outputStr,
+			"No ssh-server processes should remain after multiple SSH sessions, but found: %s", outputStr)
+	})
+}
+
 // Helper functions
 
 func runSSH(t *testing.T, hostname string, args ...string) (string, string, error) {
