@@ -229,6 +229,79 @@ func CollectContainerEnv(features []*Feature) map[string]string {
 	return env
 }
 
+// FeatureHook represents a lifecycle hook from a feature.
+type FeatureHook struct {
+	// FeatureID identifies which feature this hook is from
+	FeatureID string
+	// FeatureName is the display name of the feature
+	FeatureName string
+	// Command is the command specification (string, array, or map)
+	Command interface{}
+}
+
+// CollectOnCreateCommands collects all onCreateCommand hooks from features.
+// These run after feature installation, in feature order.
+func CollectOnCreateCommands(features []*Feature) []FeatureHook {
+	var hooks []FeatureHook
+	for _, feature := range features {
+		if feature.Metadata == nil || feature.Metadata.OnCreateCommand == nil {
+			continue
+		}
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+		hooks = append(hooks, FeatureHook{
+			FeatureID:   feature.Metadata.ID,
+			FeatureName: name,
+			Command:     feature.Metadata.OnCreateCommand,
+		})
+	}
+	return hooks
+}
+
+// CollectPostCreateCommands collects all postCreateCommand hooks from features.
+// These run after all features are installed and container is ready.
+func CollectPostCreateCommands(features []*Feature) []FeatureHook {
+	var hooks []FeatureHook
+	for _, feature := range features {
+		if feature.Metadata == nil || feature.Metadata.PostCreateCommand == nil {
+			continue
+		}
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+		hooks = append(hooks, FeatureHook{
+			FeatureID:   feature.Metadata.ID,
+			FeatureName: name,
+			Command:     feature.Metadata.PostCreateCommand,
+		})
+	}
+	return hooks
+}
+
+// CollectPostStartCommands collects all postStartCommand hooks from features.
+// These run on each container start.
+func CollectPostStartCommands(features []*Feature) []FeatureHook {
+	var hooks []FeatureHook
+	for _, feature := range features {
+		if feature.Metadata == nil || feature.Metadata.PostStartCommand == nil {
+			continue
+		}
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+		hooks = append(hooks, FeatureHook{
+			FeatureID:   feature.Metadata.ID,
+			FeatureName: name,
+			Command:     feature.Metadata.PostStartCommand,
+		})
+	}
+	return hooks
+}
+
 // shellQuote quotes a string for use in shell.
 func shellQuote(s string) string {
 	// If string contains no special characters, return as-is

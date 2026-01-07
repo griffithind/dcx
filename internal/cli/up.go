@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/single"
 	"github.com/griffithind/dcx/internal/ssh"
@@ -169,7 +171,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run lifecycle hooks
-	if err := runLifecycleHooks(ctx, dockerClient, cfg, projectName, envKey, isNewEnvironment, sshAgentEnabled); err != nil {
+	if err := runLifecycleHooks(ctx, dockerClient, cfg, cfgPath, projectName, envKey, isNewEnvironment, sshAgentEnabled); err != nil {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
@@ -320,7 +322,7 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projec
 	})
 }
 
-func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string, isNew bool, sshAgentEnabled bool) error {
+func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey string, isNew bool, sshAgentEnabled bool) error {
 	// Get the primary container ID
 	stateMgr := state.NewManager(dockerClient)
 	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
@@ -333,6 +335,44 @@ func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *co
 
 	// Create hook runner (agent binary is pre-deployed, so skip deployment in hooks)
 	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, envKey, sshAgentEnabled, sshAgentEnabled)
+
+	// Resolve features to get their lifecycle hooks
+	if len(cfg.Features) > 0 {
+		configDir := filepath.Dir(cfgPath)
+		mgr, err := features.NewManager(configDir)
+		if err == nil {
+			// ResolveAll uses cache, so this is fast after initial resolution during build
+			resolvedFeatures, err := mgr.ResolveAll(ctx, cfg.Features, cfg.OverrideFeatureInstallOrder)
+			if err == nil && len(resolvedFeatures) > 0 {
+				// Convert feature hooks to lifecycle.FeatureHook
+				var onCreateHooks, postCreateHooks, postStartHooks []lifecycle.FeatureHook
+
+				for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
+					onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
+						FeatureID:   fh.FeatureID,
+						FeatureName: fh.FeatureName,
+						Command:     fh.Command,
+					})
+				}
+				for _, fh := range features.CollectPostCreateCommands(resolvedFeatures) {
+					postCreateHooks = append(postCreateHooks, lifecycle.FeatureHook{
+						FeatureID:   fh.FeatureID,
+						FeatureName: fh.FeatureName,
+						Command:     fh.Command,
+					})
+				}
+				for _, fh := range features.CollectPostStartCommands(resolvedFeatures) {
+					postStartHooks = append(postStartHooks, lifecycle.FeatureHook{
+						FeatureID:   fh.FeatureID,
+						FeatureName: fh.FeatureName,
+						Command:     fh.Command,
+					})
+				}
+
+				runner.SetFeatureHooks(onCreateHooks, postCreateHooks, postStartHooks)
+			}
+		}
+	}
 
 	// Run appropriate hooks based on whether this is a new environment
 	if isNew {

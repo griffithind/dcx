@@ -30,6 +30,14 @@ type CommandSpec struct {
 	Name string
 }
 
+// FeatureHook represents a lifecycle hook from a feature.
+// This mirrors features.FeatureHook to avoid import cycles.
+type FeatureHook struct {
+	FeatureID   string
+	FeatureName string
+	Command     interface{}
+}
+
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
 	dockerClient     *docker.Client
@@ -39,6 +47,11 @@ type HookRunner struct {
 	envKey           string
 	sshAgentEnabled  bool
 	agentPreDeployed bool
+
+	// Feature hooks (optional, set via SetFeatureHooks)
+	featureOnCreateHooks    []FeatureHook
+	featurePostCreateHooks  []FeatureHook
+	featurePostStartHooks   []FeatureHook
 }
 
 // NewHookRunner creates a new hook runner.
@@ -55,6 +68,13 @@ func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePat
 		sshAgentEnabled:  sshAgentEnabled,
 		agentPreDeployed: agentPreDeployed,
 	}
+}
+
+// SetFeatureHooks sets the feature lifecycle hooks to be executed.
+func (r *HookRunner) SetFeatureHooks(onCreate, postCreate, postStart []FeatureHook) {
+	r.featureOnCreateHooks = onCreate
+	r.featurePostCreateHooks = postCreate
+	r.featurePostStartHooks = postStart
 }
 
 // RunInitialize runs initializeCommand on the host.
@@ -123,6 +143,11 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 		return fmt.Errorf("onCreateCommand failed: %w", err)
 	}
 
+	// Feature onCreateCommands run after devcontainer onCreateCommand
+	if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
+		return err
+	}
+
 	// updateContentCommand runs after onCreateCommand
 	if err := r.RunUpdateContent(ctx); err != nil {
 		return fmt.Errorf("updateContentCommand failed: %w", err)
@@ -133,9 +158,19 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 		return fmt.Errorf("postCreateCommand failed: %w", err)
 	}
 
+	// Feature postCreateCommands run after devcontainer postCreateCommand
+	if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
+		return err
+	}
+
 	// postStartCommand runs after postCreateCommand (on first start)
 	if err := r.RunPostStart(ctx); err != nil {
 		return fmt.Errorf("postStartCommand failed: %w", err)
+	}
+
+	// Feature postStartCommands run after devcontainer postStartCommand
+	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
+		return err
 	}
 
 	return nil
@@ -143,7 +178,27 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 
 // RunStartHooks runs hooks needed when a container is started (not first time).
 func (r *HookRunner) RunStartHooks(ctx context.Context) error {
-	return r.RunPostStart(ctx)
+	if err := r.RunPostStart(ctx); err != nil {
+		return err
+	}
+
+	// Feature postStartCommands run after devcontainer postStartCommand
+	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// runFeatureHooks executes a list of feature hooks.
+func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []FeatureHook, hookType string) error {
+	for _, hook := range hooks {
+		fmt.Printf("Running %s from feature '%s'...\n", hookType, hook.FeatureName)
+		if err := r.runContainerCommand(ctx, hook.Command); err != nil {
+			return fmt.Errorf("feature '%s' %s failed: %w", hook.FeatureName, hookType, err)
+		}
+	}
+	return nil
 }
 
 // runHostCommand executes a command on the host machine.
