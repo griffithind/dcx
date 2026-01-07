@@ -306,7 +306,7 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projec
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
-		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true); err != nil {
+		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true, removeVolumes); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 		return nil

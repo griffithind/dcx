@@ -75,8 +75,8 @@ func runDown(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
-		// Remove container
-		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true); err != nil {
+		// Remove container (and optionally volumes)
+		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true, removeVolumes); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {

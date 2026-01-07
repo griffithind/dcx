@@ -176,8 +176,8 @@ func CleanupTestContainers(t *testing.T, envKey string) {
 			}
 		}
 
-		// Remove
-		if err := client.RemoveContainer(ctx, c.ID, true); err != nil {
+		// Remove container and volumes
+		if err := client.RemoveContainer(ctx, c.ID, true, true); err != nil {
 			t.Logf("Warning: failed to remove container %s: %v", c.ID[:12], err)
 		}
 	}

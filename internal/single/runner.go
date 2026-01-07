@@ -439,9 +439,9 @@ func (r *Runner) Stop(ctx context.Context) error {
 	return r.dockerClient.StopContainer(ctx, r.getContainerName(), nil)
 }
 
-// Down removes the container.
+// Down removes the container and optionally its volumes.
 func (r *Runner) Down(ctx context.Context, removeVolumes bool) error {
-	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true)
+	return r.dockerClient.RemoveContainer(ctx, r.getContainerName(), true, removeVolumes)
 }
 
 // GetContainerWorkspaceFolder returns the workspace folder path in the container.
