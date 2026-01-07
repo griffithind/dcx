@@ -3,17 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/features"
-	"github.com/griffithind/dcx/internal/lifecycle"
-	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/single"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -58,29 +52,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Parse devcontainer configuration
-	cfg, cfgPath, err := config.Load(workspacePath, configPath)
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	if verbose {
-		fmt.Printf("Loaded configuration from: %s\n", cfgPath)
-	}
-
-	// Load dcx.json configuration (optional)
+	// Load dcx.json configuration (optional) for up options
 	dcxCfg, err := config.LoadDcxConfig(workspacePath)
 	if err != nil {
 		return fmt.Errorf("failed to load dcx.json: %w", err)
-	}
-
-	// Get project name from dcx.json
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
-		if verbose {
-			fmt.Printf("Project name: %s\n", projectName)
-		}
 	}
 
 	// Apply dcx.json up options (CLI flags take precedence)
@@ -95,289 +70,17 @@ func runUp(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Validate configuration
-	if err := config.Validate(cfg); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
-	envKey := state.ComputeEnvKey(workspacePath)
-
-	// Compute config hash for staleness detection
-	configHash, err := config.ComputeHash(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to compute config hash: %w", err)
-	}
-
-	// Check current state with hash check for staleness (check both project name and env key)
-	currentState, _, err := stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
-
-	if verbose {
-		fmt.Printf("Config hash: %s\n", configHash[:12])
-		fmt.Printf("Current state: %s\n", currentState)
-	}
-
 	// Determine if SSH agent should be enabled
 	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
 
-	// Handle state transitions
-	var isNewEnvironment bool
-	var needsRebuild bool // Track if we need to rebuild due to stale state
-	switch currentState {
-	case state.StateRunning:
-		if !recreate && !rebuild {
-			fmt.Println("Environment is already running")
-			return nil
-		}
-		// Fall through to recreate
-		fallthrough
-	case state.StateStale, state.StateBroken:
-		if verbose {
-			fmt.Println("Removing existing environment...")
-		}
-		// Remove existing containers
-		if err := runDownWithOptions(ctx, dockerClient, projectName, envKey, true, false); err != nil {
-			return fmt.Errorf("failed to remove existing environment: %w", err)
-		}
-		// When recovering from stale state, always rebuild to ensure fresh images
-		needsRebuild = true
-		fallthrough
-	case state.StateAbsent:
-		// Create new environment with rebuild if state was stale or --rebuild flag was passed
-		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, rebuild || needsRebuild, pull); err != nil {
-			return err
-		}
-		isNewEnvironment = true
-	case state.StateCreated:
-		// Just start the existing containers
-		if err := startEnvironment(ctx, dockerClient, projectName, envKey); err != nil {
-			return err
-		}
-	}
+	// Create environment service and delegate to it
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
-	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
-	if sshAgentEnabled {
-		stateMgr := state.NewManager(dockerClient)
-		_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
-		if err == nil && containerInfo != nil {
-			fmt.Println("Installing dcx agent...")
-			if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
-				return fmt.Errorf("failed to install dcx agent: %w", err)
-			}
-		}
-	}
-
-	// Run lifecycle hooks
-	if err := runLifecycleHooks(ctx, dockerClient, cfg, cfgPath, projectName, envKey, isNewEnvironment, sshAgentEnabled); err != nil {
-		return fmt.Errorf("lifecycle hooks failed: %w", err)
-	}
-
-	// Setup SSH server access if requested
-	if effectiveSSH {
-		if err := setupSSHAccess(ctx, dockerClient, cfg, projectName, envKey); err != nil {
-			fmt.Printf("Warning: Failed to setup SSH access: %v\n", err)
-		}
-	}
-
-	fmt.Println("Environment is ready")
-	return nil
-}
-
-func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string) error {
-	// Get the primary container
-	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
-	if err != nil {
-		return fmt.Errorf("failed to get container state: %w", err)
-	}
-	if containerInfo == nil {
-		return fmt.Errorf("no primary container found")
-	}
-
-	// Deploy dcx binary to container
-	binaryPath := ssh.GetContainerBinaryPath()
-	if err := ssh.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
-		return fmt.Errorf("failed to deploy SSH server: %w", err)
-	}
-
-	// Determine user
-	user := "root"
-	if cfg != nil {
-		if cfg.RemoteUser != "" {
-			user = cfg.RemoteUser
-		} else if cfg.ContainerUser != "" {
-			user = cfg.ContainerUser
-		}
-		user = config.Substitute(user, &config.SubstitutionContext{
-			LocalWorkspaceFolder: workspacePath,
-		})
-	}
-
-	// Use project name as SSH host if available, otherwise env key
-	// Always add .dcx suffix for clarity
-	hostName := envKey
-	if projectName != "" {
-		hostName = projectName
-	}
-	hostName = hostName + ".dcx"
-	if err := ssh.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
-		return fmt.Errorf("failed to update SSH config: %w", err)
-	}
-
-	fmt.Printf("SSH configured: ssh %s\n", hostName)
-	return nil
-}
-
-func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
-	// Determine plan type
-	if cfg.IsComposePlan() {
-		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild, forcePull)
-	}
-	if cfg.IsSinglePlan() {
-		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash, forceRebuild, forcePull)
-	}
-	return fmt.Errorf("invalid configuration: no build plan detected")
-}
-
-func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
-	fmt.Println("Creating compose-based environment...")
-
-	// Create compose runner with docker client for API operations
-	composeRunner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
-	if err != nil {
-		return fmt.Errorf("failed to create compose runner: %w", err)
-	}
-
-	// Generate override file and run compose up
-	// Rebuild is triggered by --rebuild flag OR when recovering from stale state
-	if err := composeRunner.Up(ctx, runner.UpOptions{
-		Build:   rebuild,
-		Rebuild: forceRebuild,
-		Pull:    forcePull,
-	}); err != nil {
-		return fmt.Errorf("failed to start compose environment: %w", err)
-	}
-
-	return nil
-}
-
-func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string, forceRebuild, forcePull bool) error {
-	fmt.Println("Creating single-container environment...")
-
-	// Create single-container runner
-	singleRunner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
-
-	// Start the environment
-	// For single containers, rebuild means rebuild the image
-	if err := singleRunner.Up(ctx, runner.UpOptions{
-		Build: rebuild || forceRebuild,
-		Pull:  forcePull,
-	}); err != nil {
-		return fmt.Errorf("failed to start single-container environment: %w", err)
-	}
-
-	return nil
-}
-
-func startEnvironment(ctx context.Context, dockerClient *docker.Client, projectName, envKey string) error {
-	fmt.Println("Starting existing containers...")
-
-	runner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
-	if err := runner.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start containers: %w", err)
-	}
-
-	return nil
-}
-
-func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projectName, envKey string, removeVolumes, removeOrphans bool) error {
-	// First check what type of environment we have
-	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
-	if err != nil {
-		return err
-	}
-
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
-		// Single container - use Docker API directly
-		if containerInfo.Running {
-			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
-				return fmt.Errorf("failed to stop container: %w", err)
-			}
-		}
-		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true, removeVolumes); err != nil {
-			return fmt.Errorf("failed to remove container: %w", err)
-		}
-		return nil
-	}
-
-	// Compose plan - use docker compose
-	composeRunner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
-	return composeRunner.Down(ctx, runner.DownOptions{
-		RemoveVolumes: removeVolumes,
-		RemoveOrphans: removeOrphans,
+	return svc.Up(ctx, service.UpOptions{
+		Recreate:        recreate,
+		Rebuild:         rebuild,
+		Pull:            pull,
+		SSHAgentEnabled: sshAgentEnabled,
+		EnableSSH:       effectiveSSH,
 	})
-}
-
-func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey string, isNew bool, sshAgentEnabled bool) error {
-	// Get the primary container ID
-	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
-	if err != nil {
-		return fmt.Errorf("failed to get container state: %w", err)
-	}
-	if containerInfo == nil {
-		return fmt.Errorf("no primary container found")
-	}
-
-	// Create hook runner (agent binary is pre-deployed, so skip deployment in hooks)
-	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, envKey, sshAgentEnabled, sshAgentEnabled)
-
-	// Resolve features to get their lifecycle hooks
-	if len(cfg.Features) > 0 {
-		configDir := filepath.Dir(cfgPath)
-		mgr, err := features.NewManager(configDir)
-		if err == nil {
-			// ResolveAll uses cache, so this is fast after initial resolution during build
-			resolvedFeatures, err := mgr.ResolveAll(ctx, cfg.Features, cfg.OverrideFeatureInstallOrder)
-			if err == nil && len(resolvedFeatures) > 0 {
-				// Convert feature hooks to lifecycle.FeatureHook
-				var onCreateHooks, postCreateHooks, postStartHooks []lifecycle.FeatureHook
-
-				for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
-					onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectPostCreateCommands(resolvedFeatures) {
-					postCreateHooks = append(postCreateHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectPostStartCommands(resolvedFeatures) {
-					postStartHooks = append(postStartHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-
-				runner.SetFeatureHooks(onCreateHooks, postCreateHooks, postStartHooks)
-			}
-		}
-	}
-
-	// Run appropriate hooks based on whether this is a new environment
-	if isNew {
-		return runner.RunAllCreateHooks(ctx)
-	}
-	return runner.RunStartHooks(ctx)
 }
