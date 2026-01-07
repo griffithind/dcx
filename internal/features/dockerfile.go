@@ -8,17 +8,29 @@ import (
 
 // DockerfileGenerator generates Dockerfiles for feature installation.
 type DockerfileGenerator struct {
-	baseImage string
-	features  []*Feature
-	buildDir  string
+	baseImage      string
+	features       []*Feature
+	buildDir       string
+	remoteUser     string
+	remoteUserHome string
 }
 
 // NewDockerfileGenerator creates a new Dockerfile generator.
-func NewDockerfileGenerator(baseImage string, features []*Feature, buildDir string) *DockerfileGenerator {
+// remoteUser is the configured remoteUser from devcontainer.json (defaults to "root" if empty).
+func NewDockerfileGenerator(baseImage string, features []*Feature, buildDir, remoteUser string) *DockerfileGenerator {
+	if remoteUser == "" {
+		remoteUser = "root"
+	}
+	remoteUserHome := "/root"
+	if remoteUser != "root" {
+		remoteUserHome = "/home/" + remoteUser
+	}
 	return &DockerfileGenerator{
-		baseImage: baseImage,
-		features:  features,
-		buildDir:  buildDir,
+		baseImage:      baseImage,
+		features:       features,
+		buildDir:       buildDir,
+		remoteUser:     remoteUser,
+		remoteUserHome: remoteUserHome,
 	}
 }
 
@@ -36,11 +48,10 @@ func (g *DockerfileGenerator) Generate() string {
 	// Start from base image
 	sb.WriteString(fmt.Sprintf("FROM %s\n\n", g.baseImage))
 
-	// Set common environment variables
+	// Set build-time arguments for feature installation
 	sb.WriteString("# Feature installation environment\n")
-	sb.WriteString("ENV DEBIAN_FRONTEND=noninteractive\n")
-	sb.WriteString("ENV _REMOTE_USER=root\n")
-	sb.WriteString("ENV _REMOTE_USER_HOME=/root\n\n")
+	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER=%s\n", g.remoteUser))
+	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER_HOME=%s\n\n", g.remoteUserHome))
 
 	// Install each feature
 	for i, feature := range g.features {
@@ -56,10 +67,6 @@ func (g *DockerfileGenerator) Generate() string {
 		}
 		sb.WriteString("\n")
 	}
-
-	// Reset to interactive
-	sb.WriteString("# Reset frontend\n")
-	sb.WriteString("ENV DEBIAN_FRONTEND=dialog\n")
 
 	return sb.String()
 }
@@ -77,11 +84,11 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 	featureDir := fmt.Sprintf("feature_%d", index)
 	sb.WriteString(fmt.Sprintf("COPY %s /tmp/dcx-features/%s\n", featureDir, featureDir))
 
-	// Set option environment variables
+	// Set option environment variables as build args (not persisted in image)
 	envVars := feature.GetEnvVars()
 	if len(envVars) > 0 {
 		for key, value := range envVars {
-			sb.WriteString(fmt.Sprintf("ENV %s=%s\n", key, shellQuote(value)))
+			sb.WriteString(fmt.Sprintf("ARG %s=%s\n", key, shellQuote(value)))
 		}
 	}
 
