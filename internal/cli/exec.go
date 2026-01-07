@@ -29,36 +29,17 @@ Examples:
   dcx exec -- ls -la /workspace
   dcx exec -- git clone git@github.com:user/repo.git
   dcx exec --no-agent -- bash -c "echo hello"`,
-	RunE:               runExec,
-	DisableFlagParsing: true,
+	RunE: runExec,
+	// Args after "--" are passed directly to the command
+	Args: cobra.ArbitraryArgs,
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
-	// Parse our flags before "--" separator
-	var execArgs []string
-	execNoAgent = false // Reset for each invocation
-
-	foundSeparator := false
-	for i, arg := range args {
-		if arg == "--" {
-			execArgs = args[i+1:]
-			foundSeparator = true
-			break
-		}
-		// Parse our flags
-		if arg == "--no-agent" {
-			execNoAgent = true
-		}
-	}
-
-	if !foundSeparator {
-		// No separator found, treat all args as command
-		execArgs = args
-	}
-
-	if len(execArgs) == 0 {
+	// With cobra handling flags, args after "--" are passed directly
+	if len(args) == 0 {
 		return fmt.Errorf("no command specified; usage: dcx exec [--no-agent] -- <command> [args...]")
 	}
+	execArgs := args
 
 	ctx := context.Background()
 
@@ -177,5 +158,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
+	execCmd.Flags().BoolVar(&execNoAgent, "no-agent", false, "disable SSH agent forwarding")
 	rootCmd.AddCommand(execCmd)
 }

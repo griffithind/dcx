@@ -28,15 +28,14 @@ type AgentProxy struct {
 	gid           int
 
 	// Host-side
-	listener   net.Listener
-	port       int
-	done       chan struct{}
-	wg         sync.WaitGroup
-	agentSock  string
+	listener  net.Listener
+	port      int
+	done      chan struct{}
+	wg        sync.WaitGroup
+	agentSock string
 
 	// Container-side
 	socketPath string
-	clientPID  string // PID of the client process in container
 }
 
 // NewAgentProxy creates a new SSH agent proxy for the given container.
@@ -51,6 +50,10 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 		return nil, fmt.Errorf("SSH agent not accessible: %w", err)
 	}
 
+	// Generate unique ID for this proxy instance to avoid conflicts with concurrent execs
+	// Using process ID and timestamp ensures uniqueness
+	uniqueID := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+
 	return &AgentProxy{
 		containerID:   containerID,
 		containerName: containerName,
@@ -58,7 +61,7 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 		gid:           gid,
 		agentSock:     agentSock,
 		done:          make(chan struct{}),
-		socketPath:    fmt.Sprintf("/tmp/ssh-agent-%d.sock", uid),
+		socketPath:    fmt.Sprintf("/tmp/ssh-agent-%d-%s.sock", uid, uniqueID),
 	}, nil
 }
 
@@ -114,10 +117,11 @@ func (p *AgentProxy) Stop() {
 		p.listener.Close()
 	}
 
-	// Kill client in container
-	if p.clientPID != "" {
-		exec.Command("docker", "exec", p.containerName, "kill", p.clientPID).Run()
-	}
+	// Kill client process(es) in container using pkill with pattern matching
+	// This is more reliable than capturing PIDs as it handles multiple processes
+	// Run as root since the client was started as root
+	pkillPattern := fmt.Sprintf("ssh-agent-proxy client.*%s", p.socketPath)
+	exec.Command("docker", "exec", "--user", "root", p.containerName, "pkill", "-f", pkillPattern).Run()
 
 	// Clean up socket and ready file in container
 	exec.Command("docker", "exec", p.containerName, "rm", "-f", p.socketPath, p.socketPath+".ready").Run()
@@ -214,14 +218,6 @@ func (p *AgentProxy) deployAndStartClient() error {
 
 	if err := startCmd.Run(); err != nil {
 		return fmt.Errorf("failed to start client: %w", err)
-	}
-
-	// Get the PID of the client process
-	pidCmd := exec.CommandContext(ctx, "docker", "exec", p.containerName,
-		"sh", "-c", fmt.Sprintf("pgrep -f 'ssh-agent-proxy client.*%s'", p.socketPath))
-	output, err := pidCmd.Output()
-	if err == nil {
-		p.clientPID = strings.TrimSpace(string(output))
 	}
 
 	return nil
