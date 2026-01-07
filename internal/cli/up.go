@@ -10,6 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/single"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
@@ -246,14 +247,14 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	fmt.Println("Creating compose-based environment...")
 
 	// Create compose runner with docker client for API operations
-	runner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
+	composeRunner, err := compose.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}
 
 	// Generate override file and run compose up
 	// Rebuild is triggered by --rebuild flag OR when recovering from stale state
-	if err := runner.Up(ctx, compose.UpOptions{
+	if err := composeRunner.Up(ctx, runner.UpOptions{
 		Build:   rebuild,
 		Rebuild: forceRebuild,
 		Pull:    forcePull,
@@ -268,11 +269,11 @@ func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, c
 	fmt.Println("Creating single-container environment...")
 
 	// Create single-container runner
-	runner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
+	singleRunner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 
 	// Start the environment
 	// For single containers, rebuild means rebuild the image
-	if err := runner.Up(ctx, single.UpOptions{
+	if err := singleRunner.Up(ctx, runner.UpOptions{
 		Build: rebuild || forceRebuild,
 		Pull:  forcePull,
 	}); err != nil {
@@ -315,8 +316,8 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projec
 	}
 
 	// Compose plan - use docker compose
-	runner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
-	return runner.Down(ctx, compose.DownOptions{
+	composeRunner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
+	return composeRunner.Down(ctx, runner.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	})

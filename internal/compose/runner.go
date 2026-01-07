@@ -11,6 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -96,15 +97,8 @@ func (r *Runner) writeOverrideToTempFile(content string) (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// UpOptions contains options for compose up.
-type UpOptions struct {
-	Build   bool
-	Rebuild bool // Force rebuild of all services with build configs
-	Pull    bool // Force re-fetch of remote features
-}
-
 // Up runs docker compose up with the generated override file.
-func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
+func (r *Runner) Up(ctx context.Context, opts runner.UpOptions) error {
 	// Check if features are configured
 	hasFeatures := len(r.cfg.Features) > 0
 
@@ -155,7 +149,7 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) error {
 }
 
 // buildDerivedImageWithFeatures builds a derived image with features installed.
-func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts UpOptions) error {
+func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts runner.UpOptions) error {
 	// Determine derived image tag
 	derivedTag := features.GetDerivedImageTag(r.envKey, r.configHash)
 
@@ -305,14 +299,8 @@ func (r *Runner) getBaseImage(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("could not determine base image for service %q", serviceName)
 }
 
-// BuildOptions contains options for compose build.
-type BuildOptions struct {
-	NoCache bool
-	Pull    bool // Force re-fetch of remote features
-}
-
 // Build builds images without starting containers.
-func (r *Runner) Build(ctx context.Context, opts BuildOptions) error {
+func (r *Runner) Build(ctx context.Context, opts runner.BuildOptions) error {
 	// Generate override file if we have config
 	if r.cfg != nil {
 		override, err := r.generateOverride()
@@ -361,14 +349,8 @@ func (r *Runner) Stop(ctx context.Context) error {
 	return r.runCompose(ctx, args)
 }
 
-// DownOptions contains options for compose down.
-type DownOptions struct {
-	RemoveVolumes bool
-	RemoveOrphans bool
-}
-
 // Down stops and removes containers.
-func (r *Runner) Down(ctx context.Context, opts DownOptions) error {
+func (r *Runner) Down(ctx context.Context, opts runner.DownOptions) error {
 	args := []string{
 		"-p", r.composeProject,
 		"down",
@@ -516,7 +498,7 @@ func (r *Runner) ensureServicesBuilt(ctx context.Context) error {
 
 // Exec executes a command in the running environment's primary container.
 // This uses the docker API to run commands.
-func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error) {
+func (r *Runner) Exec(ctx context.Context, cmd []string, opts runner.ExecOptions) (int, error) {
 	containerName := r.GetPrimaryContainerName()
 	if containerName == "" {
 		return 1, fmt.Errorf("no primary container name available")
@@ -535,13 +517,4 @@ func (r *Runner) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int,
 	}
 
 	return r.dockerClient.Exec(ctx, containerName, execConfig)
-}
-
-// ExecOptions mirrors runner.ExecOptions for compose-specific exec.
-type ExecOptions struct {
-	WorkingDir      string
-	User            string
-	Env             []string
-	TTY             bool
-	SSHAgentEnabled bool
 }
