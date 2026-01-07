@@ -7,6 +7,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +34,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
+	// Load dcx.json configuration (optional)
+	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = state.SanitizeProjectName(dcxCfg.Name)
+	}
+
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
 
@@ -48,13 +58,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		// Config exists, check for staleness
 		configHash, hashErr := config.ComputeHash(cfg)
 		if hashErr == nil {
-			currentState, containerInfo, err = stateMgr.GetStateWithHashCheck(ctx, envKey, configHash)
+			currentState, containerInfo, err = stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
 		} else {
-			currentState, containerInfo, err = stateMgr.GetState(ctx, envKey)
+			currentState, containerInfo, err = stateMgr.GetStateWithProject(ctx, projectName, envKey)
 		}
 	} else {
 		// No config or error loading it, just get basic state
-		currentState, containerInfo, err = stateMgr.GetState(ctx, envKey)
+		currentState, containerInfo, err = stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	}
 
 	if err != nil {
@@ -63,8 +73,27 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Display status
 	fmt.Fprintf(os.Stdout, "Workspace:  %s\n", workspacePath)
+	if projectName != "" {
+		fmt.Fprintf(os.Stdout, "Project:    %s\n", projectName)
+	}
 	fmt.Fprintf(os.Stdout, "Env Key:    %s\n", envKey)
 	fmt.Fprintf(os.Stdout, "State:      %s\n", currentState)
+
+	// Show SSH status
+	if containerInfo != nil && ssh.HasSSHConfig(containerInfo.Name) {
+		sshHost := envKey
+		if projectName != "" {
+			sshHost = projectName
+		}
+		fmt.Fprintf(os.Stdout, "SSH:        ssh %s.dcx\n", sshHost)
+	} else if currentState != state.StateAbsent {
+		fmt.Fprintf(os.Stdout, "SSH:        not configured (use 'dcx up --ssh' to enable)\n")
+	}
+
+	// Show shortcuts count
+	if dcxCfg != nil && len(dcxCfg.Shortcuts) > 0 {
+		fmt.Fprintf(os.Stdout, "Shortcuts:  %d defined (use 'dcx run --list' to view)\n", len(dcxCfg.Shortcuts))
+	}
 
 	if containerInfo != nil {
 		fmt.Fprintf(os.Stdout, "\nPrimary Container:\n")

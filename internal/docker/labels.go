@@ -38,6 +38,9 @@ const (
 
 	// LabelImageTag is the deterministic image tag for single plans.
 	LabelImageTag = LabelPrefix + "image_tag"
+
+	// LabelProjectName is the user-defined project name from dcx.json.
+	LabelProjectName = LabelPrefix + "project_name"
 )
 
 // Plan types
@@ -62,6 +65,7 @@ type Labels struct {
 	ComposeProject    string
 	PrimaryService    string
 	ImageTag          string
+	ProjectName       string
 }
 
 // ToMap converts Labels to a map of string key-value pairs.
@@ -96,6 +100,9 @@ func (l Labels) ToMap() map[string]string {
 	if l.ImageTag != "" {
 		m[LabelImageTag] = l.ImageTag
 	}
+	if l.ProjectName != "" {
+		m[LabelProjectName] = l.ProjectName
+	}
 
 	return m
 }
@@ -114,6 +121,7 @@ func LabelsFromMap(m map[string]string) Labels {
 		ComposeProject:    m[LabelComposeProject],
 		PrimaryService:    m[LabelPrimaryService],
 		ImageTag:          m[LabelImageTag],
+		ProjectName:       m[LabelProjectName],
 	}
 }
 

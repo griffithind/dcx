@@ -20,6 +20,49 @@ func NewManager(client *docker.Client) *Manager {
 	return &Manager{client: client}
 }
 
+// SanitizeProjectName ensures the name is valid for Docker container/compose project names.
+// Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
+func SanitizeProjectName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// Convert to lowercase
+	name = strings.ToLower(name)
+
+	// Replace spaces with underscores and filter invalid characters
+	var result strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		} else if r == ' ' {
+			result.WriteRune('_')
+		}
+		// Skip other characters
+	}
+
+	sanitized := result.String()
+	if sanitized == "" {
+		return ""
+	}
+
+	// Ensure starts with a letter (Docker requirement)
+	if sanitized[0] >= '0' && sanitized[0] <= '9' {
+		sanitized = "dcx_" + sanitized
+	}
+
+	return sanitized
+}
+
+// ResolveIdentifier returns the project name if configured, otherwise computes env_key.
+// The projectName parameter is from dcx.json configuration.
+func ResolveIdentifier(workspacePath string, projectName string) string {
+	if projectName != "" {
+		return SanitizeProjectName(projectName)
+	}
+	return ComputeEnvKey(workspacePath)
+}
+
 // ComputeEnvKey generates a stable identifier from the workspace path.
 // Returns base32(sha256(realpath(workspace_root)))[0:12]
 func ComputeEnvKey(workspacePath string) string {
@@ -120,6 +163,73 @@ func (m *Manager) GetStateWithHashCheck(ctx context.Context, envKey, currentConf
 	return state, info, nil
 }
 
+// GetStateWithProject handles lookup for both project-named and env_key containers.
+// This enables migration from hash-based naming to project naming.
+func (m *Manager) GetStateWithProject(ctx context.Context, projectName, envKey string) (State, *ContainerInfo, error) {
+	// First try project name if set
+	if projectName != "" {
+		sanitized := SanitizeProjectName(projectName)
+		containers, err := m.client.ListContainers(ctx, map[string]string{
+			docker.LabelEnvKey: sanitized,
+		})
+		if err == nil && len(containers) > 0 {
+			return m.processContainers(containers)
+		}
+	}
+
+	// Fall back to env_key lookup (for migration)
+	return m.GetState(ctx, envKey)
+}
+
+// GetStateWithProjectAndHash combines project lookup with hash check.
+func (m *Manager) GetStateWithProjectAndHash(ctx context.Context, projectName, envKey, currentConfigHash string) (State, *ContainerInfo, error) {
+	state, info, err := m.GetStateWithProject(ctx, projectName, envKey)
+	if err != nil || info == nil {
+		return state, info, err
+	}
+
+	// Check if config has changed
+	if info.ConfigHash != "" && info.ConfigHash != currentConfigHash {
+		return StateStale, info, nil
+	}
+
+	return state, info, nil
+}
+
+// processContainers extracts state and info from a list of containers.
+func (m *Manager) processContainers(containers []docker.Container) (State, *ContainerInfo, error) {
+	if len(containers) == 0 {
+		return StateAbsent, nil, nil
+	}
+
+	// Find the primary container
+	var primary *docker.Container
+	for i := range containers {
+		labels := docker.LabelsFromMap(containers[i].Labels)
+		if labels.Primary {
+			primary = &containers[i]
+			break
+		}
+	}
+
+	// No primary container found - broken state
+	if primary == nil {
+		if len(containers) > 0 {
+			info := containerInfoFromDocker(&containers[0])
+			return StateBroken, info, nil
+		}
+		return StateBroken, nil, nil
+	}
+
+	info := containerInfoFromDocker(primary)
+
+	if primary.Running {
+		return StateRunning, info, nil
+	}
+
+	return StateCreated, info, nil
+}
+
 // FindContainers returns all containers for an environment.
 func (m *Manager) FindContainers(ctx context.Context, envKey string) ([]ContainerInfo, error) {
 	containers, err := m.client.ListContainers(ctx, map[string]string{
@@ -152,6 +262,25 @@ func (m *Manager) FindPrimaryContainer(ctx context.Context, envKey string) (*Con
 	}
 
 	return containerInfoFromDocker(&containers[0]), nil
+}
+
+// FindContainerByName returns a container by its name.
+// This is used by the SSH command to find a specific container.
+func (m *Manager) FindContainerByName(ctx context.Context, containerName string) (*ContainerInfo, error) {
+	containers, err := m.client.ListContainers(ctx, map[string]string{
+		docker.LabelManaged: "true",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range containers {
+		if containers[i].Name == containerName {
+			return containerInfoFromDocker(&containers[i]), nil
+		}
+	}
+
+	return nil, nil
 }
 
 func containerInfoFromDocker(c *docker.Container) *ContainerInfo {
