@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/griffithind/dcx/internal/ssh"
 )
@@ -246,14 +247,16 @@ func (c *Client) Exec(ctx context.Context, containerID string, config ExecConfig
 }
 
 // StdCopy demultiplexes Docker's multiplexed streams.
-// This is a simplified version - in production, use stdcopy.StdCopy from docker/docker/pkg/stdcopy
+// Docker multiplexes stdout and stderr into a single stream when not using a TTY.
+// This function properly separates them using the Docker protocol.
 func StdCopy(stdout, stderr io.Writer, src io.Reader) (written int64, err error) {
-	// For simplicity, just copy everything to stdout
-	// In production, properly demux using docker's stdcopy package
 	if stdout == nil {
 		stdout = io.Discard
 	}
-	return io.Copy(stdout, src)
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	return stdcopy.StdCopy(stdout, stderr, src)
 }
 
 // ImageExists checks if an image exists locally.
