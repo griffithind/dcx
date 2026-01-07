@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"testing"
 
+	"github.com/griffithind/dcx/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,6 +98,82 @@ func TestFormatCommandForDisplay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatCommandForDisplay(tt.cmd)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestWaitForOrder(t *testing.T) {
+	// Verify the order of lifecycle commands
+	assert.Less(t, waitForOrder[WaitForInitializeCommand], waitForOrder[WaitForOnCreateCommand])
+	assert.Less(t, waitForOrder[WaitForOnCreateCommand], waitForOrder[WaitForUpdateContentCommand])
+	assert.Less(t, waitForOrder[WaitForUpdateContentCommand], waitForOrder[WaitForPostCreateCommand])
+	assert.Less(t, waitForOrder[WaitForPostCreateCommand], waitForOrder[WaitForPostStartCommand])
+}
+
+func TestShouldBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		waitFor  string
+		hookType WaitFor
+		expected bool
+	}{
+		// Default (postStartCommand) - all hooks should block
+		{"default blocks initialize", "", WaitForInitializeCommand, true},
+		{"default blocks onCreate", "", WaitForOnCreateCommand, true},
+		{"default blocks updateContent", "", WaitForUpdateContentCommand, true},
+		{"default blocks postCreate", "", WaitForPostCreateCommand, true},
+		{"default blocks postStart", "", WaitForPostStartCommand, true},
+
+		// waitFor: onCreateCommand - only initialize and onCreate should block
+		{"onCreate blocks initialize", "onCreateCommand", WaitForInitializeCommand, true},
+		{"onCreate blocks onCreate", "onCreateCommand", WaitForOnCreateCommand, true},
+		{"onCreate doesn't block updateContent", "onCreateCommand", WaitForUpdateContentCommand, false},
+		{"onCreate doesn't block postCreate", "onCreateCommand", WaitForPostCreateCommand, false},
+		{"onCreate doesn't block postStart", "onCreateCommand", WaitForPostStartCommand, false},
+
+		// waitFor: initializeCommand - only initialize should block
+		{"initialize blocks initialize", "initializeCommand", WaitForInitializeCommand, true},
+		{"initialize doesn't block onCreate", "initializeCommand", WaitForOnCreateCommand, false},
+
+		// Invalid waitFor value should default to postStartCommand
+		{"invalid defaults to postStart", "invalidValue", WaitForPostStartCommand, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &HookRunner{
+				cfg: &config.DevcontainerConfig{
+					WaitFor: tt.waitFor,
+				},
+			}
+			result := runner.shouldBlock(tt.hookType)
+			assert.Equal(t, tt.expected, result, "shouldBlock(%s) with waitFor=%s", tt.hookType, tt.waitFor)
+		})
+	}
+}
+
+func TestGetWaitFor(t *testing.T) {
+	tests := []struct {
+		name     string
+		waitFor  string
+		expected WaitFor
+	}{
+		{"empty defaults to postStartCommand", "", WaitForPostStartCommand},
+		{"valid onCreateCommand", "onCreateCommand", WaitForOnCreateCommand},
+		{"valid postCreateCommand", "postCreateCommand", WaitForPostCreateCommand},
+		{"valid postStartCommand", "postStartCommand", WaitForPostStartCommand},
+		{"invalid defaults to postStartCommand", "invalidValue", WaitForPostStartCommand},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &HookRunner{
+				cfg: &config.DevcontainerConfig{
+					WaitFor: tt.waitFor,
+				},
+			}
+			result := runner.getWaitFor()
 			assert.Equal(t, tt.expected, result)
 		})
 	}
