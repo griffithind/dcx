@@ -63,6 +63,33 @@ func runUp(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Loaded configuration from: %s\n", cfgPath)
 	}
 
+	// Load dcx.json configuration (optional)
+	dcxCfg, err := config.LoadDcxConfig(workspacePath)
+	if err != nil {
+		return fmt.Errorf("failed to load dcx.json: %w", err)
+	}
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		if verbose {
+			fmt.Printf("Project name: %s\n", projectName)
+		}
+	}
+
+	// Apply dcx.json up options (CLI flags take precedence)
+	effectiveSSH := enableSSH
+	effectiveNoAgent := noAgent
+	if dcxCfg != nil {
+		if !cmd.Flags().Changed("ssh") && dcxCfg.Up.SSH {
+			effectiveSSH = true
+		}
+		if !cmd.Flags().Changed("no-agent") && dcxCfg.Up.NoAgent {
+			effectiveNoAgent = true
+		}
+	}
+
 	// Validate configuration
 	if err := config.Validate(cfg); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
@@ -78,8 +105,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to compute config hash: %w", err)
 	}
 
-	// Check current state with hash check for staleness
-	currentState, _, err := stateMgr.GetStateWithHashCheck(ctx, envKey, configHash)
+	// Check current state with hash check for staleness (check both project name and env key)
+	currentState, _, err := stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -104,31 +131,31 @@ func runUp(cmd *cobra.Command, args []string) error {
 			fmt.Println("Removing existing environment...")
 		}
 		// Remove existing containers
-		if err := runDownWithOptions(ctx, dockerClient, envKey, true, false); err != nil {
+		if err := runDownWithOptions(ctx, dockerClient, projectName, envKey, true, false); err != nil {
 			return fmt.Errorf("failed to remove existing environment: %w", err)
 		}
 		fallthrough
 	case state.StateAbsent:
 		// Create new environment
-		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, envKey, configHash); err != nil {
+		if err := createEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash); err != nil {
 			return err
 		}
 		isNewEnvironment = true
 	case state.StateCreated:
 		// Just start the existing containers
-		if err := startEnvironment(ctx, dockerClient, envKey); err != nil {
+		if err := startEnvironment(ctx, dockerClient, projectName, envKey); err != nil {
 			return err
 		}
 	}
 
 	// Run lifecycle hooks
-	if err := runLifecycleHooks(ctx, dockerClient, cfg, envKey, isNewEnvironment); err != nil {
+	if err := runLifecycleHooks(ctx, dockerClient, cfg, projectName, envKey, isNewEnvironment, effectiveNoAgent); err != nil {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
 	// Setup SSH server access if requested
-	if enableSSH {
-		if err := setupSSHAccess(ctx, dockerClient, cfg, envKey); err != nil {
+	if effectiveSSH {
+		if err := setupSSHAccess(ctx, dockerClient, cfg, projectName, envKey); err != nil {
 			fmt.Printf("Warning: Failed to setup SSH access: %v\n", err)
 		}
 	}
@@ -137,10 +164,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, envKey string) error {
+func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string) error {
 	// Get the primary container
 	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	if err != nil {
 		return fmt.Errorf("failed to get container state: %w", err)
 	}
@@ -167,9 +194,14 @@ func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *confi
 		})
 	}
 
-	// Add SSH config entry
-	hostName := envKey + ".dcx"
-	if err := ssh.AddSSHConfig(hostName, envKey, user); err != nil {
+	// Use project name as SSH host if available, otherwise env key
+	// Always add .dcx suffix for clarity
+	hostName := envKey
+	if projectName != "" {
+		hostName = projectName
+	}
+	hostName = hostName + ".dcx"
+	if err := ssh.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 
@@ -177,22 +209,22 @@ func setupSSHAccess(ctx context.Context, dockerClient *docker.Client, cfg *confi
 	return nil
 }
 
-func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, envKey, configHash string) error {
+func createEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
 	// Determine plan type
 	if cfg.IsComposePlan() {
-		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, envKey, configHash)
+		return createComposeEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash)
 	}
 	if cfg.IsSinglePlan() {
-		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, envKey, configHash)
+		return createSingleEnvironment(ctx, dockerClient, cfg, cfgPath, projectName, envKey, configHash)
 	}
 	return fmt.Errorf("invalid configuration: no build plan detected")
 }
 
-func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, envKey, configHash string) error {
+func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
 	fmt.Println("Creating compose-based environment...")
 
 	// Create compose runner
-	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, envKey, configHash)
+	runner, err := compose.NewRunner(workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create compose runner: %w", err)
 	}
@@ -208,11 +240,11 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	return nil
 }
 
-func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, envKey, configHash string) error {
+func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, cfgPath, projectName, envKey, configHash string) error {
 	fmt.Println("Creating single-container environment...")
 
 	// Create single-container runner
-	runner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, envKey, configHash)
+	runner := single.NewRunner(dockerClient, workspacePath, cfgPath, cfg, projectName, envKey, configHash)
 
 	// Start the environment
 	if err := runner.Up(ctx, single.UpOptions{
@@ -225,10 +257,10 @@ func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, c
 	return nil
 }
 
-func startEnvironment(ctx context.Context, dockerClient *docker.Client, envKey string) error {
+func startEnvironment(ctx context.Context, dockerClient *docker.Client, projectName, envKey string) error {
 	fmt.Println("Starting existing containers...")
 
-	runner := compose.NewRunnerFromEnvKey(workspacePath, envKey)
+	runner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
 	if err := runner.Start(ctx, compose.StartOptions{Verbose: verbose}); err != nil {
 		return fmt.Errorf("failed to start containers: %w", err)
 	}
@@ -236,10 +268,10 @@ func startEnvironment(ctx context.Context, dockerClient *docker.Client, envKey s
 	return nil
 }
 
-func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, envKey string, removeVolumes, removeOrphans bool) error {
+func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projectName, envKey string, removeVolumes, removeOrphans bool) error {
 	// First check what type of environment we have
 	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	if err != nil {
 		return err
 	}
@@ -258,7 +290,7 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, envKey
 	}
 
 	// Compose plan - use docker compose
-	runner := compose.NewRunnerFromEnvKey(workspacePath, envKey)
+	runner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
 	return runner.Down(ctx, compose.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
@@ -266,10 +298,10 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, envKey
 	})
 }
 
-func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, envKey string, isNew bool) error {
+func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *config.DevcontainerConfig, projectName, envKey string, isNew bool, effectiveNoAgent bool) error {
 	// Get the primary container ID
 	stateMgr := state.NewManager(dockerClient)
-	_, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	_, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	if err != nil {
 		return fmt.Errorf("failed to get container state: %w", err)
 	}
@@ -278,7 +310,7 @@ func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *co
 	}
 
 	// Determine if SSH agent should be enabled for lifecycle hooks
-	sshAgentEnabled := !noAgent && ssh.IsAgentAvailable()
+	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
 
 	// Create hook runner
 	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, verbose, envKey, sshAgentEnabled)

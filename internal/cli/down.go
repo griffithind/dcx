@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/compose"
+	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
@@ -41,12 +42,21 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
+	// Load dcx.json configuration (optional)
+	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = state.SanitizeProjectName(dcxCfg.Name)
+	}
+
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
 	envKey := state.ComputeEnvKey(workspacePath)
 
-	// Check current state
-	currentState, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	// Check current state (check both project name and env key for migration)
+	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -71,7 +81,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// Compose plan - use docker compose
-		runner := compose.NewRunnerFromEnvKey(workspacePath, envKey)
+		// Use the actual compose project from container labels for migration support
+		actualProject := containerInfo.ComposeProject
+		if actualProject == "" {
+			actualProject = projectName
+		}
+		runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
 		if err := runner.Down(ctx, compose.DownOptions{
 			RemoveVolumes: removeVolumes,
 			RemoveOrphans: removeOrphans,
@@ -81,9 +96,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Clean up SSH config entry if present
-	if err := ssh.RemoveSSHConfig(envKey); err != nil {
-		fmt.Printf("Warning: Failed to remove SSH config: %v\n", err)
+	// Clean up SSH config entry using container name (used in marker)
+	if containerInfo != nil {
+		ssh.RemoveSSHConfig(containerInfo.Name)
 	}
 
 	fmt.Println("Environment removed")

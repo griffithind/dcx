@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/compose"
+	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
@@ -31,12 +32,21 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
+	// Load dcx.json configuration (optional)
+	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = state.SanitizeProjectName(dcxCfg.Name)
+	}
+
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
 	envKey := state.ComputeEnvKey(workspacePath)
 
-	// Check current state
-	currentState, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	// Check current state (check both project name and env key for migration)
+	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -59,7 +69,12 @@ func runStop(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			// Compose plan - use docker compose
-			runner := compose.NewRunnerFromEnvKey(workspacePath, envKey)
+			// Use the actual compose project from container labels for migration support
+			actualProject := containerInfo.ComposeProject
+			if actualProject == "" {
+				actualProject = projectName
+			}
+			runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
 			if err := runner.Stop(ctx, compose.StopOptions{Verbose: verbose}); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}

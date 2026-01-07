@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/config"
@@ -164,4 +165,72 @@ func UniqueEnvKey(t *testing.T) string {
 		name = name[:12]
 	}
 	return TestPrefix + name
+}
+
+// CreateTempComposeWorkspaceWithDcx creates a temp workspace with compose files and dcx.json.
+func CreateTempComposeWorkspaceWithDcx(t *testing.T, devcontainerJSON, dockerComposeYAML, dcxJSON string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Write devcontainer.json
+	configPath := filepath.Join(devcontainerDir, "devcontainer.json")
+	err = os.WriteFile(configPath, []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Write docker-compose.yml
+	composePath := filepath.Join(devcontainerDir, "docker-compose.yml")
+	err = os.WriteFile(composePath, []byte(dockerComposeYAML), 0644)
+	require.NoError(t, err)
+
+	// Write dcx.json
+	dcxPath := filepath.Join(devcontainerDir, "dcx.json")
+	err = os.WriteFile(dcxPath, []byte(dcxJSON), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// CreateTempWorkspaceWithDcx creates a temp workspace with devcontainer.json and dcx.json.
+func CreateTempWorkspaceWithDcx(t *testing.T, devcontainerJSON, dcxJSON string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Write devcontainer.json
+	configPath := filepath.Join(devcontainerDir, "devcontainer.json")
+	err = os.WriteFile(configPath, []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Write dcx.json
+	dcxPath := filepath.Join(devcontainerDir, "dcx.json")
+	err = os.WriteFile(dcxPath, []byte(dcxJSON), 0644)
+	require.NoError(t, err)
+
+	return tmpDir
+}
+
+// GetStatusField extracts a field value from dcx status output.
+func GetStatusField(t *testing.T, statusOutput, fieldName string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(statusOutput, "\n") {
+		if strings.HasPrefix(line, fieldName+":") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) >= 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
 }
