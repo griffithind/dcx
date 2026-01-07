@@ -70,6 +70,31 @@ func (c *Client) ServerVersion(ctx context.Context) (string, error) {
 	return version.Version, nil
 }
 
+// SystemInfo contains information about the Docker daemon's resources.
+type SystemInfo struct {
+	NCPU        int    // Number of CPUs available to Docker
+	MemTotal    uint64 // Total memory available to Docker in bytes
+	OSType      string // Operating system type (linux, windows)
+	Architecture string // Architecture (x86_64, arm64, etc.)
+}
+
+// Info returns system-wide information about Docker.
+// This reflects Docker's configured resource limits, which may be less than the host's
+// actual resources (e.g., Docker Desktop VM limits, cgroup limits).
+func (c *Client) Info(ctx context.Context) (*SystemInfo, error) {
+	info, err := c.cli.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Docker info: %w", err)
+	}
+
+	return &SystemInfo{
+		NCPU:        info.NCPU,
+		MemTotal:    uint64(info.MemTotal),
+		OSType:      info.OSType,
+		Architecture: info.Architecture,
+	}, nil
+}
+
 // ListContainers returns containers matching the given label filters.
 func (c *Client) ListContainers(ctx context.Context, labelFilters map[string]string) ([]Container, error) {
 	filterArgs := filters.NewArgs()

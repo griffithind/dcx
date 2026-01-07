@@ -163,17 +163,38 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		return err
 	}
 
-	// Validate host requirements
+	// Validate host requirements using Docker's actual resources
+	// This accounts for Docker Desktop VM limits or cgroup restrictions
 	if info.Config.HostRequirements != nil {
-		result := config.ValidateHostRequirements(info.Config.HostRequirements)
-		for _, warning := range result.Warnings {
-			fmt.Printf("Warning: %s\n", warning)
-		}
-		if !result.Satisfied {
-			for _, errMsg := range result.Errors {
-				fmt.Printf("Error: %s\n", errMsg)
+		dockerInfo, err := s.dockerClient.Info(ctx)
+		if err != nil {
+			fmt.Printf("Warning: Could not get Docker info for resource validation: %v\n", err)
+			// Fall back to host-based check
+			result := config.ValidateHostRequirements(info.Config.HostRequirements)
+			for _, warning := range result.Warnings {
+				fmt.Printf("Warning: %s\n", warning)
 			}
-			return fmt.Errorf("host requirements not satisfied")
+			if !result.Satisfied {
+				for _, errMsg := range result.Errors {
+					fmt.Printf("Error: %s\n", errMsg)
+				}
+				return fmt.Errorf("host requirements not satisfied")
+			}
+		} else {
+			dockerRes := &config.DockerResources{
+				CPUs:   dockerInfo.NCPU,
+				Memory: dockerInfo.MemTotal,
+			}
+			result := config.ValidateHostRequirementsWithDocker(info.Config.HostRequirements, dockerRes)
+			for _, warning := range result.Warnings {
+				fmt.Printf("Warning: %s\n", warning)
+			}
+			if !result.Satisfied {
+				for _, errMsg := range result.Errors {
+					fmt.Printf("Error: %s\n", errMsg)
+				}
+				return fmt.Errorf("host requirements not satisfied")
+			}
 		}
 	}
 
