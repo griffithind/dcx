@@ -15,6 +15,9 @@ const (
 	// LabelWorkspaceRootHash is the full hash of the workspace path.
 	LabelWorkspaceRootHash = LabelPrefix + "workspace_root_hash"
 
+	// LabelWorkspacePath is the absolute path to the workspace.
+	LabelWorkspacePath = LabelPrefix + "workspace_path"
+
 	// LabelConfigHash is the hash of the devcontainer configuration.
 	LabelConfigHash = LabelPrefix + "config_hash"
 
@@ -51,6 +54,7 @@ type Labels struct {
 	Managed           bool
 	EnvKey            string
 	WorkspaceRootHash string
+	WorkspacePath     string
 	ConfigHash        string
 	Plan              string
 	Version           string
@@ -70,6 +74,9 @@ func (l Labels) ToMap() map[string]string {
 
 	if l.WorkspaceRootHash != "" {
 		m[LabelWorkspaceRootHash] = l.WorkspaceRootHash
+	}
+	if l.WorkspacePath != "" {
+		m[LabelWorkspacePath] = l.WorkspacePath
 	}
 	if l.ConfigHash != "" {
 		m[LabelConfigHash] = l.ConfigHash
@@ -99,6 +106,7 @@ func LabelsFromMap(m map[string]string) Labels {
 		Managed:           m[LabelManaged] == "true",
 		EnvKey:            m[LabelEnvKey],
 		WorkspaceRootHash: m[LabelWorkspaceRootHash],
+		WorkspacePath:     m[LabelWorkspacePath],
 		ConfigHash:        m[LabelConfigHash],
 		Plan:              m[LabelPlan],
 		Version:           m[LabelVersion],

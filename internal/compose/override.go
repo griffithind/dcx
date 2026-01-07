@@ -166,6 +166,7 @@ func (g *overrideGenerator) addLabels(labels map[string]string, isPrimary bool) 
 	labels[docker.LabelManaged] = "true"
 	labels[docker.LabelEnvKey] = g.envKey
 	labels[docker.LabelWorkspaceRootHash] = state.ComputeWorkspaceHash(g.workspacePath)
+	labels[docker.LabelWorkspacePath] = g.workspacePath
 	labels[docker.LabelConfigHash] = g.configHash
 	labels[docker.LabelPlan] = docker.PlanCompose
 	labels[docker.LabelComposeProject] = g.composeProject

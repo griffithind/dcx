@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -183,6 +184,97 @@ func TestSSHServerWithoutFlagE2E(t *testing.T) {
 	// Start without --ssh flag
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.NotContains(t, stdout, "SSH configured", "SSH should not be configured without --ssh flag")
+}
+
+// TestSSHFromDifferentDirectoryE2E tests that SSH works from any directory.
+// This simulates VS Code Remote SSH behavior where the ProxyCommand is executed
+// from an arbitrary working directory.
+func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	// Create workspace with a specific remoteUser to verify config is loaded correctly
+	devcontainerJSON := `{
+		"name": "ssh-dir-test",
+		"image": "alpine:latest",
+		"workspaceFolder": "/test-workspace",
+		"remoteUser": "root"
+	}`
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Start container with SSH
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	hostname := extractSSHHostname(t, stdout)
+	envKey := strings.TrimSuffix(hostname, ".dcx")
+
+	// Verify workspace_path label is set on container
+	t.Run("workspace_path_label_set", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
+			"dcx_"+envKey)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, workspace, labelValue,
+			"workspace_path label should be set to the workspace directory")
+	})
+
+	// Test SSH from /tmp (different directory than workspace)
+	t.Run("ssh_from_different_directory", func(t *testing.T) {
+		dcxBinary := helpers.GetDCXBinary(t)
+
+		// Run SSH with ProxyCommand explicitly from /tmp
+		sshArgs := []string{
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+			"-o", "LogLevel=ERROR",
+			"-o", "BatchMode=yes",
+			"-o", "ConnectTimeout=10",
+			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, envKey),
+			hostname,
+			"pwd",
+		}
+
+		cmd := exec.Command("ssh", sshArgs...)
+		cmd.Dir = "/tmp" // Run from different directory
+
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "SSH from /tmp failed: %s", output)
+
+		// Verify working directory is correct (from devcontainer.json)
+		assert.Contains(t, string(output), "/test-workspace",
+			"SSH should use correct working directory from config even when run from different directory")
+	})
+
+	// Test that correct user is used when running from different directory
+	t.Run("ssh_user_from_different_directory", func(t *testing.T) {
+		dcxBinary := helpers.GetDCXBinary(t)
+
+		sshArgs := []string{
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "UserKnownHostsFile=/dev/null",
+			"-o", "LogLevel=ERROR",
+			"-o", "BatchMode=yes",
+			"-o", "ConnectTimeout=10",
+			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, envKey),
+			hostname,
+			"whoami",
+		}
+
+		cmd := exec.Command("ssh", sshArgs...)
+		cmd.Dir = "/tmp"
+
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "SSH whoami from /tmp failed: %s", output)
+
+		// Verify user is correct (from devcontainer.json remoteUser)
+		assert.Contains(t, string(output), "root",
+			"SSH should use correct user from config even when run from different directory")
+	})
 }
 
 // TestSSHServerCleanupE2E tests that the SSH server process is cleaned up after SSH session ends.

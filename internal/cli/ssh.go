@@ -100,8 +100,15 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		return fmt.Errorf("no primary container found for: %s", containerName)
 	}
 
+	// Get workspace path from container labels (set during dcx up)
+	// This ensures SSH works regardless of the current directory
+	wsPath := containerInfo.Labels.WorkspacePath
+	if wsPath == "" {
+		wsPath = workspacePath // Fallback to current directory
+	}
+
 	// Load config to get user and workspace folder
-	cfg, _, _ := config.Load(workspacePath, configPath)
+	cfg, _, _ := config.Load(wsPath, configPath)
 
 	// Determine user and workdir
 	var user, workDir string
@@ -112,10 +119,10 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		}
 		if user != "" {
 			user = config.Substitute(user, &config.SubstitutionContext{
-				LocalWorkspaceFolder: workspacePath,
+				LocalWorkspaceFolder: wsPath,
 			})
 		}
-		workDir = config.DetermineContainerWorkspaceFolder(cfg, workspacePath)
+		workDir = config.DetermineContainerWorkspaceFolder(cfg, wsPath)
 	}
 
 	// Default values

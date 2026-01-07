@@ -166,6 +166,7 @@ func containerInfoFromDocker(c *docker.Container) *ContainerInfo {
 		Plan:           labels.Plan,
 		ComposeProject: labels.ComposeProject,
 		PrimaryService: labels.PrimaryService,
+		Labels:         labels,
 	}
 }
 

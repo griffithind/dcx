@@ -323,8 +323,9 @@ func (r *Runner) buildLabels() map[string]string {
 		docker.LabelVersion:    docker.LabelSchemaVersion,
 	}
 
-	// Add workspace root hash
+	// Add workspace root hash and path
 	labels[docker.LabelWorkspaceRootHash] = state.ComputeWorkspaceHash(r.workspacePath)
+	labels[docker.LabelWorkspacePath] = r.workspacePath
 
 	return labels
 }
