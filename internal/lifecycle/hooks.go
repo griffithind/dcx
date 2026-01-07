@@ -19,7 +19,6 @@ type HookRunner struct {
 	containerID     string
 	workspacePath   string
 	cfg             *config.DevcontainerConfig
-	verbose         bool
 	envKey          string
 	sshAgentEnabled bool
 }
@@ -27,13 +26,12 @@ type HookRunner struct {
 // NewHookRunner creates a new hook runner.
 // envKey is the environment key for SSH proxy directory.
 // sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevcontainerConfig, verbose bool, envKey string, sshAgentEnabled bool) *HookRunner {
+func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevcontainerConfig, envKey string, sshAgentEnabled bool) *HookRunner {
 	return &HookRunner{
 		dockerClient:    dockerClient,
 		containerID:     containerID,
 		workspacePath:   workspacePath,
 		cfg:             cfg,
-		verbose:         verbose,
 		envKey:          envKey,
 		sshAgentEnabled: sshAgentEnabled,
 	}
@@ -44,9 +42,7 @@ func (r *HookRunner) RunInitialize(ctx context.Context) error {
 	if r.cfg.InitializeCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running initializeCommand...")
-	}
+	fmt.Println("Running initializeCommand...")
 	return r.runHostCommand(ctx, r.cfg.InitializeCommand)
 }
 
@@ -55,9 +51,7 @@ func (r *HookRunner) RunOnCreate(ctx context.Context) error {
 	if r.cfg.OnCreateCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running onCreateCommand...")
-	}
+	fmt.Println("Running onCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.OnCreateCommand)
 }
 
@@ -66,9 +60,7 @@ func (r *HookRunner) RunUpdateContent(ctx context.Context) error {
 	if r.cfg.UpdateContentCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running updateContentCommand...")
-	}
+	fmt.Println("Running updateContentCommand...")
 	return r.runContainerCommand(ctx, r.cfg.UpdateContentCommand)
 }
 
@@ -77,9 +69,7 @@ func (r *HookRunner) RunPostCreate(ctx context.Context) error {
 	if r.cfg.PostCreateCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running postCreateCommand...")
-	}
+	fmt.Println("Running postCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostCreateCommand)
 }
 
@@ -88,9 +78,7 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 	if r.cfg.PostStartCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running postStartCommand...")
-	}
+	fmt.Println("Running postStartCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostStartCommand)
 }
 
@@ -99,9 +87,7 @@ func (r *HookRunner) RunPostAttach(ctx context.Context) error {
 	if r.cfg.PostAttachCommand == nil {
 		return nil
 	}
-	if r.verbose {
-		fmt.Println("Running postAttachCommand...")
-	}
+	fmt.Println("Running postAttachCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostAttachCommand)
 }
 
@@ -164,27 +150,20 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 
 // executeHostCommand runs a single command on the host.
 func (r *HookRunner) executeHostCommand(ctx context.Context, command string) error {
-	if r.verbose {
-		fmt.Printf("  > %s\n", command)
-	}
+	fmt.Printf("  > %s\n", command)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = r.workspacePath
 	cmd.Env = os.Environ()
-
-	if r.verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
 }
 
 // executeContainerCommand runs a single command in the container.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, command string) error {
-	if r.verbose {
-		fmt.Printf("  > %s\n", command)
-	}
+	fmt.Printf("  > %s\n", command)
 
 	workspaceFolder := config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 
@@ -200,6 +179,8 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, command string
 		Cmd:        []string{"sh", "-c", command},
 		WorkingDir: workspaceFolder,
 		User:       user,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
 	}
 
 	// Set USER environment variable if we have a user
@@ -228,11 +209,6 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, command string
 			agentProxy.Stop()
 		}
 	}()
-
-	if r.verbose {
-		execConfig.Stdout = os.Stdout
-		execConfig.Stderr = os.Stderr
-	}
 
 	exitCode, err := r.dockerClient.Exec(ctx, r.containerID, execConfig)
 	if err != nil {

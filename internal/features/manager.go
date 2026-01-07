@@ -76,7 +76,7 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 }
 
 // BuildDerivedImage builds a derived image with features installed.
-func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, buildDir string, verbose bool) error {
+func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, buildDir string) error {
 	if len(features) == 0 {
 		return nil
 	}
@@ -97,7 +97,7 @@ func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag str
 
 	// Build the image using docker CLI
 	dockerfilePath := filepath.Join(buildDir, "Dockerfile.dcx-features")
-	if err := buildImage(ctx, buildDir, dockerfilePath, imageTag, verbose); err != nil {
+	if err := buildImage(ctx, buildDir, dockerfilePath, imageTag); err != nil {
 		return fmt.Errorf("failed to build derived image: %w", err)
 	}
 
@@ -105,17 +105,14 @@ func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag str
 }
 
 // buildImage builds a Docker image using the CLI.
-func buildImage(ctx context.Context, contextDir, dockerfilePath, tag string, verbose bool) error {
-	// Use --no-cache to ensure features are always installed fresh
-	// This is necessary because the base image may have been rebuilt
-	args := []string{"build", "--no-cache", "-t", tag, "-f", dockerfilePath, contextDir}
+func buildImage(ctx context.Context, contextDir, dockerfilePath, tag string) error {
+	// Build derived image with features. Docker layer cache is used for performance.
+	// Cache is invalidated when config changes because the image tag includes configHash.
+	args := []string{"build", "-t", tag, "-f", dockerfilePath, contextDir}
 
 	cmd := execCommand(ctx, "docker", args...)
-
-	if verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
 }

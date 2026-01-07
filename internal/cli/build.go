@@ -110,7 +110,6 @@ func buildCompose(ctx context.Context, dockerClient *docker.Client, cfg *config.
 	// Run compose build
 	if err := runner.Build(ctx, compose.BuildOptions{
 		NoCache: noCache,
-		Verbose: verbose,
 	}); err != nil {
 		return fmt.Errorf("failed to build: %w", err)
 	}

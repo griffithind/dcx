@@ -90,7 +90,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 		if err := runner.Down(ctx, compose.DownOptions{
 			RemoveVolumes: removeVolumes,
 			RemoveOrphans: removeOrphans,
-			Verbose:       verbose,
 		}); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}

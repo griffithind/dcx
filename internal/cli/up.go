@@ -237,7 +237,6 @@ func createComposeEnvironment(ctx context.Context, dockerClient *docker.Client, 
 	if err := runner.Up(ctx, compose.UpOptions{
 		Build:   rebuild,
 		Rebuild: forceRebuild,
-		Verbose: verbose,
 	}); err != nil {
 		return fmt.Errorf("failed to start compose environment: %w", err)
 	}
@@ -254,8 +253,7 @@ func createSingleEnvironment(ctx context.Context, dockerClient *docker.Client, c
 	// Start the environment
 	// For single containers, rebuild means rebuild the image
 	if err := runner.Up(ctx, single.UpOptions{
-		Build:   rebuild || forceRebuild,
-		Verbose: verbose,
+		Build: rebuild || forceRebuild,
 	}); err != nil {
 		return fmt.Errorf("failed to start single-container environment: %w", err)
 	}
@@ -267,7 +265,7 @@ func startEnvironment(ctx context.Context, dockerClient *docker.Client, projectN
 	fmt.Println("Starting existing containers...")
 
 	runner := compose.NewRunnerFromEnvKey(workspacePath, projectName, envKey)
-	if err := runner.Start(ctx, compose.StartOptions{Verbose: verbose}); err != nil {
+	if err := runner.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start containers: %w", err)
 	}
 
@@ -300,7 +298,6 @@ func runDownWithOptions(ctx context.Context, dockerClient *docker.Client, projec
 	return runner.Down(ctx, compose.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
-		Verbose:       verbose,
 	})
 }
 
@@ -319,7 +316,7 @@ func runLifecycleHooks(ctx context.Context, dockerClient *docker.Client, cfg *co
 	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
 
 	// Create hook runner
-	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, verbose, envKey, sshAgentEnabled)
+	runner := lifecycle.NewHookRunner(dockerClient, containerInfo.ID, workspacePath, cfg, envKey, sshAgentEnabled)
 
 	// Run appropriate hooks based on whether this is a new environment
 	if isNew {

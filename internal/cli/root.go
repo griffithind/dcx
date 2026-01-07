@@ -14,8 +14,10 @@ import (
 var (
 	workspacePath string
 	configPath    string
-	verbose       bool
 )
+
+// verbose is always enabled - no flag needed
+const verbose = true
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
@@ -51,7 +53,6 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&workspacePath, "workspace", "w", "", "workspace directory (default: current directory)")
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to devcontainer.json (default: auto-detect)")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
 
 	// Add subcommands
 	rootCmd.AddCommand(statusCmd)
