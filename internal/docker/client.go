@@ -567,3 +567,26 @@ func execCommandReal(ctx context.Context, name string, args ...string) *execCmd 
 type execCmd struct {
 	*exec.Cmd
 }
+
+// LogsOptions contains options for retrieving container logs.
+type LogsOptions struct {
+	Follow     bool
+	Timestamps bool
+	Tail       string // Number of lines or "all"
+}
+
+// GetLogs retrieves logs from a container.
+func (c *Client) GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     opts.Follow,
+		Timestamps: opts.Timestamps,
+	}
+
+	if opts.Tail != "" && opts.Tail != "all" {
+		options.Tail = opts.Tail
+	}
+
+	return c.cli.ContainerLogs(ctx, containerID, options)
+}
