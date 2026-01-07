@@ -938,3 +938,141 @@ func TestNewDevcontainerFields(t *testing.T) {
 func boolPtr(b bool) *bool {
 	return &b
 }
+
+// TestOverrideCommandAndShutdownAction tests parsing of overrideCommand and shutdownAction fields.
+func TestOverrideCommandAndShutdownAction(t *testing.T) {
+	t.Run("overrideCommand true", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"overrideCommand": true
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.OverrideCommand)
+		assert.True(t, *cfg.OverrideCommand)
+	})
+
+	t.Run("overrideCommand false", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"overrideCommand": false
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.OverrideCommand)
+		assert.False(t, *cfg.OverrideCommand)
+	})
+
+	t.Run("overrideCommand not set", func(t *testing.T) {
+		input := `{
+			"image": "alpine"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		assert.Nil(t, cfg.OverrideCommand)
+	})
+
+	t.Run("shutdownAction stopContainer", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"shutdownAction": "stopContainer"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		assert.Equal(t, "stopContainer", cfg.ShutdownAction)
+	})
+
+	t.Run("shutdownAction none", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"shutdownAction": "none"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		assert.Equal(t, "none", cfg.ShutdownAction)
+	})
+
+	t.Run("shutdownAction not set", func(t *testing.T) {
+		input := `{
+			"image": "alpine"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		assert.Equal(t, "", cfg.ShutdownAction)
+	})
+
+	t.Run("both fields together", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"overrideCommand": true,
+			"shutdownAction": "none"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.OverrideCommand)
+		assert.True(t, *cfg.OverrideCommand)
+		assert.Equal(t, "none", cfg.ShutdownAction)
+	})
+}
+
+// TestHostRequirementsParsing tests parsing of hostRequirements field.
+func TestHostRequirementsParsing(t *testing.T) {
+	t.Run("all requirements", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"hostRequirements": {
+				"cpus": 4,
+				"memory": "8gb",
+				"storage": "50gb",
+				"gpu": true
+			}
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.HostRequirements)
+		assert.Equal(t, 4, cfg.HostRequirements.CPUs)
+		assert.Equal(t, "8gb", cfg.HostRequirements.Memory)
+		assert.Equal(t, "50gb", cfg.HostRequirements.Storage)
+		assert.Equal(t, true, cfg.HostRequirements.GPU)
+	})
+
+	t.Run("GPU optional", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"hostRequirements": {
+				"gpu": "optional"
+			}
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.HostRequirements)
+		assert.Equal(t, "optional", cfg.HostRequirements.GPU)
+	})
+
+	t.Run("GPU object", func(t *testing.T) {
+		input := `{
+			"image": "alpine",
+			"hostRequirements": {
+				"gpu": {
+					"cores": 4,
+					"memory": "8gb"
+				}
+			}
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.HostRequirements)
+		gpuMap, ok := cfg.HostRequirements.GPU.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, float64(4), gpuMap["cores"])
+	})
+
+	t.Run("no host requirements", func(t *testing.T) {
+		input := `{
+			"image": "alpine"
+		}`
+		cfg, err := Parse([]byte(input))
+		require.NoError(t, err)
+		assert.Nil(t, cfg.HostRequirements)
+	})
+}
