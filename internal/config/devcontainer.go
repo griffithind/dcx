@@ -27,8 +27,9 @@ type DevcontainerConfig struct {
 	WorkspaceMount  string `json:"workspaceMount,omitempty"`
 
 	// User configuration
-	RemoteUser    string `json:"remoteUser,omitempty"`
-	ContainerUser string `json:"containerUser,omitempty"`
+	RemoteUser          string `json:"remoteUser,omitempty"`
+	ContainerUser       string `json:"containerUser,omitempty"`
+	UpdateRemoteUserUID *bool  `json:"updateRemoteUserUID,omitempty"` // Auto-update UID to match host user
 
 	// Environment variables
 	ContainerEnv map[string]string `json:"containerEnv,omitempty"`
@@ -39,8 +40,9 @@ type DevcontainerConfig struct {
 	OverrideFeatureInstallOrder []string               `json:"overrideFeatureInstallOrder,omitempty"`
 
 	// Port forwarding
-	ForwardPorts    []interface{}          `json:"forwardPorts,omitempty"`
-	PortsAttributes map[string]interface{} `json:"portsAttributes,omitempty"`
+	ForwardPorts         []interface{}          `json:"forwardPorts,omitempty"`
+	PortsAttributes      map[string]interface{} `json:"portsAttributes,omitempty"`
+	OtherPortsAttributes interface{}            `json:"otherPortsAttributes,omitempty"` // Default attributes for unlisted ports
 
 	// Mounts
 	Mounts []string `json:"mounts,omitempty"`
@@ -49,12 +51,16 @@ type DevcontainerConfig struct {
 	RunArgs []string `json:"runArgs,omitempty"`
 
 	// Lifecycle hooks
-	InitializeCommand interface{} `json:"initializeCommand,omitempty"`
-	OnCreateCommand   interface{} `json:"onCreateCommand,omitempty"`
+	InitializeCommand    interface{} `json:"initializeCommand,omitempty"`
+	OnCreateCommand      interface{} `json:"onCreateCommand,omitempty"`
 	UpdateContentCommand interface{} `json:"updateContentCommand,omitempty"`
-	PostCreateCommand interface{} `json:"postCreateCommand,omitempty"`
-	PostStartCommand  interface{} `json:"postStartCommand,omitempty"`
-	PostAttachCommand interface{} `json:"postAttachCommand,omitempty"`
+	PostCreateCommand    interface{} `json:"postCreateCommand,omitempty"`
+	PostStartCommand     interface{} `json:"postStartCommand,omitempty"`
+	PostAttachCommand    interface{} `json:"postAttachCommand,omitempty"`
+	WaitFor              string      `json:"waitFor,omitempty"` // Which lifecycle command to wait for (onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand)
+
+	// User environment probing
+	UserEnvProbe string `json:"userEnvProbe,omitempty"` // How to probe user environment (none, loginShell, loginInteractiveShell, interactiveShell)
 
 	// Runtime options
 	OverrideCommand   *bool    `json:"overrideCommand,omitempty"`
