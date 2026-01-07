@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -231,4 +232,121 @@ func extractContainerID(status string) string {
 		}
 	}
 	return ""
+}
+
+// TestComposeContainerLabelsE2E tests that all required labels are set on compose containers.
+func TestComposeContainerLabelsE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+	helpers.RequireComposeAvailable(t)
+
+	devcontainerJSON := `{
+		"name": "Labels Test",
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace"
+	}`
+
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Bring up
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+	// Get container name from status
+	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
+	var containerName string
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, "Name:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				containerName = parts[1]
+			}
+		}
+	}
+	require.NotEmpty(t, containerName, "should find container name")
+
+	// Test workspace_path label is set correctly
+	t.Run("workspace_path_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, workspace, labelValue,
+			"workspace_path label should match the workspace directory")
+	})
+
+	// Test plan label is set to compose
+	t.Run("plan_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.plan"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, "compose", labelValue, "plan label should be compose")
+	})
+
+	// Test compose_project label is set
+	t.Run("compose_project_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.compose_project"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.NotEmpty(t, labelValue, "compose_project label should be set")
+	})
+
+	// Test primary_service label is set
+	t.Run("primary_service_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.primary_service"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, "app", labelValue, "primary_service label should be app")
+	})
+
+	// Test primary label is set
+	t.Run("primary_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.primary"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, "true", labelValue, "primary label should be true")
+	})
+
+	// Test managed label is set
+	t.Run("managed_label", func(t *testing.T) {
+		cmd := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "io.github.dcx.managed"}}`,
+			containerName)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", output)
+
+		labelValue := strings.TrimSpace(string(output))
+		assert.Equal(t, "true", labelValue, "managed label should be true")
+	})
 }

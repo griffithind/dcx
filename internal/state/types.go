@@ -1,7 +1,11 @@
 // Package state manages the lifecycle state of devcontainer environments.
 package state
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/griffithind/dcx/internal/docker"
+)
 
 // State represents the current state of a devcontainer environment.
 type State string
@@ -66,6 +70,7 @@ type ContainerInfo struct {
 	Plan           string
 	ComposeProject string
 	PrimaryService string
+	Labels         docker.Labels
 }
 
 // StateError represents an error related to environment state.
