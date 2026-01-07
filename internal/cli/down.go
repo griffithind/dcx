@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -52,55 +50,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 		projectName = state.SanitizeProjectName(dcxCfg.Name)
 	}
 
-	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
+	// Compute env key
 	envKey := state.ComputeEnvKey(workspacePath)
 
-	// Check current state (check both project name and env key for migration)
-	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
+	// Create environment service and delegate to it
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
-	if currentState == state.StateAbsent {
-		fmt.Println("No environment found")
-		return nil
-	}
-
-	// Determine plan type from container labels
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
-		// Single container - use Docker API directly
-		// Stop if running
-		if containerInfo.Running {
-			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
-				return fmt.Errorf("failed to stop container: %w", err)
-			}
-		}
-		// Remove container (and optionally volumes)
-		if err := dockerClient.RemoveContainer(ctx, containerInfo.ID, true, removeVolumes); err != nil {
-			return fmt.Errorf("failed to remove container: %w", err)
-		}
-	} else {
-		// Compose plan - use docker compose
-		// Use the actual compose project from container labels for migration support
-		actualProject := containerInfo.ComposeProject
-		if actualProject == "" {
-			actualProject = projectName
-		}
-		composeRunner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-		if err := composeRunner.Down(ctx, runner.DownOptions{
-			RemoveVolumes: removeVolumes,
-			RemoveOrphans: removeOrphans,
-		}); err != nil {
-			return fmt.Errorf("failed to remove environment: %w", err)
-		}
-	}
-
-	// Clean up SSH config entry using container name (used in marker)
-	if containerInfo != nil {
-		ssh.RemoveSSHConfig(containerInfo.Name)
-	}
-
-	fmt.Println("Environment removed")
-	return nil
+	return svc.DownWithEnvKey(ctx, projectName, envKey, service.DownOptions{
+		RemoveVolumes: removeVolumes,
+		RemoveOrphans: removeOrphans,
+	})
 }
