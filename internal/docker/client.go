@@ -311,6 +311,8 @@ type CreateContainerOptions struct {
 	Tmpfs          map[string]string
 	Sysctls        map[string]string
 	Ports          []string // Port bindings in format "hostPort:containerPort" or "containerPort"
+	Entrypoint     []string // Override container entrypoint
+	Cmd            []string // Override container command
 }
 
 // CreateContainer creates a new container.
@@ -400,6 +402,16 @@ func (c *Client) CreateContainer(ctx context.Context, opts CreateContainerOption
 		AttachStdout: true,
 		AttachStderr: true,
 		ExposedPorts: exposedPorts,
+	}
+
+	// Override entrypoint if specified
+	if len(opts.Entrypoint) > 0 {
+		containerConfig.Entrypoint = opts.Entrypoint
+	}
+
+	// Override command if specified
+	if len(opts.Cmd) > 0 {
+		containerConfig.Cmd = opts.Cmd
 	}
 
 	// Create container

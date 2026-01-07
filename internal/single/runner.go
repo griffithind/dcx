@@ -293,6 +293,12 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 		SecurityOpt:    securityOpt,
 	}
 
+	// Apply overrideCommand if specified (keep container alive instead of running default command)
+	if r.cfg.OverrideCommand != nil && *r.cfg.OverrideCommand {
+		createOpts.Entrypoint = []string{"/bin/sh", "-c"}
+		createOpts.Cmd = []string{"while sleep 1000; do :; done"}
+	}
+
 	// Parse runArgs for additional options
 	r.parseRunArgs(&createOpts)
 
