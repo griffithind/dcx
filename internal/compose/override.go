@@ -8,6 +8,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/parse"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/state"
 	"gopkg.in/yaml.v3"
@@ -238,154 +239,61 @@ func (g *overrideGenerator) formatMount(source, target string) string {
 }
 
 // parseMountString parses a devcontainer mount string and returns a compose-compatible format.
+// Uses the shared parse.ParseMount for consistent parsing.
 func (g *overrideGenerator) parseMountString(mount string) string {
-	// Devcontainer mount format: "source=...,target=...,type=bind,consistency=cached"
-	parts := strings.Split(mount, ",")
+	m := parse.ParseMount(mount)
+	if m == nil {
+		return ""
+	}
 
-	var source, target, mountType string
-	for _, part := range parts {
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-
-		switch key {
-		case "source", "src":
-			source = value
-		case "target", "dst", "destination":
-			target = value
-		case "type":
-			mountType = value
+	// Get SELinux suffix for bind mounts
+	suffix := ""
+	if m.Type == "bind" && runtime.GOOS == "linux" {
+		mode, err := selinux.GetMode()
+		if err == nil && mode == selinux.ModeEnforcing {
+			suffix = ":Z"
 		}
 	}
 
-	// Default type is bind
-	if mountType == "" {
-		mountType = "bind"
-	}
-
-	// For bind mounts, format as source:target
-	if mountType == "bind" && source != "" && target != "" {
-		return g.formatMount(source, target)
-	}
-
-	// For volume mounts, use named volume syntax
-	if mountType == "volume" && source != "" && target != "" {
-		return fmt.Sprintf("%s:%s", source, target)
-	}
-
-	// For tmpfs, return as-is (compose handles this differently)
-	if mountType == "tmpfs" && target != "" {
-		return fmt.Sprintf("tmpfs:%s", target)
-	}
-
-	// Can't parse, return empty
-	return ""
+	return m.ToComposeFormat(suffix)
 }
 
 // mapRunArgsToService maps devcontainer runArgs to compose service options.
+// Uses the shared parse.ParseRunArgs for consistent parsing.
 func (g *overrideGenerator) mapRunArgsToService(svc *ServiceOverride) {
-	for i := 0; i < len(g.cfg.RunArgs); i++ {
-		arg := g.cfg.RunArgs[i]
+	parsed := parse.ParseRunArgs(g.cfg.RunArgs)
+	if parsed != nil {
+		// Apply parsed values
+		svc.CapAdd = append(svc.CapAdd, parsed.CapAdd...)
+		svc.CapDrop = append(svc.CapDrop, parsed.CapDrop...)
+		svc.SecurityOpt = append(svc.SecurityOpt, parsed.SecurityOpt...)
 
-		switch {
-		case strings.HasPrefix(arg, "--cap-add="):
-			svc.CapAdd = append(svc.CapAdd, strings.TrimPrefix(arg, "--cap-add="))
-		case arg == "--cap-add" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.CapAdd = append(svc.CapAdd, g.cfg.RunArgs[i])
-
-		case strings.HasPrefix(arg, "--cap-drop="):
-			svc.CapDrop = append(svc.CapDrop, strings.TrimPrefix(arg, "--cap-drop="))
-		case arg == "--cap-drop" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.CapDrop = append(svc.CapDrop, g.cfg.RunArgs[i])
-
-		case strings.HasPrefix(arg, "--security-opt="):
-			svc.SecurityOpt = append(svc.SecurityOpt, strings.TrimPrefix(arg, "--security-opt="))
-		case arg == "--security-opt" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.SecurityOpt = append(svc.SecurityOpt, g.cfg.RunArgs[i])
-
-		case arg == "--privileged":
+		if parsed.Privileged {
 			t := true
 			svc.Privileged = &t
-
-		case arg == "--init":
+		}
+		if parsed.Init {
 			t := true
 			svc.Init = &t
+		}
 
-		case strings.HasPrefix(arg, "--shm-size="):
-			svc.ShmSize = strings.TrimPrefix(arg, "--shm-size=")
-		case arg == "--shm-size" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.ShmSize = g.cfg.RunArgs[i]
+		svc.ShmSize = parsed.ShmSize
+		svc.Devices = append(svc.Devices, parsed.Devices...)
+		svc.ExtraHosts = append(svc.ExtraHosts, parsed.ExtraHosts...)
+		svc.NetworkMode = parsed.NetworkMode
+		svc.IpcMode = parsed.IpcMode
+		svc.PidMode = parsed.PidMode
+		svc.Tmpfs = append(svc.Tmpfs, parsed.Tmpfs...)
+		svc.Ports = append(svc.Ports, parsed.Ports...)
 
-		case strings.HasPrefix(arg, "--device="):
-			svc.Devices = append(svc.Devices, strings.TrimPrefix(arg, "--device="))
-		case arg == "--device" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.Devices = append(svc.Devices, g.cfg.RunArgs[i])
-
-		case strings.HasPrefix(arg, "--add-host="):
-			svc.ExtraHosts = append(svc.ExtraHosts, strings.TrimPrefix(arg, "--add-host="))
-		case arg == "--add-host" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.ExtraHosts = append(svc.ExtraHosts, g.cfg.RunArgs[i])
-
-		// Network mode
-		case strings.HasPrefix(arg, "--network="):
-			svc.NetworkMode = strings.TrimPrefix(arg, "--network=")
-		case strings.HasPrefix(arg, "--net="):
-			svc.NetworkMode = strings.TrimPrefix(arg, "--net=")
-		case arg == "--network" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.NetworkMode = g.cfg.RunArgs[i]
-		case arg == "--net" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.NetworkMode = g.cfg.RunArgs[i]
-
-		// IPC mode
-		case strings.HasPrefix(arg, "--ipc="):
-			svc.IpcMode = strings.TrimPrefix(arg, "--ipc=")
-		case arg == "--ipc" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.IpcMode = g.cfg.RunArgs[i]
-
-		// PID mode
-		case strings.HasPrefix(arg, "--pid="):
-			svc.PidMode = strings.TrimPrefix(arg, "--pid=")
-		case arg == "--pid" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.PidMode = g.cfg.RunArgs[i]
-
-		// Tmpfs
-		case strings.HasPrefix(arg, "--tmpfs="):
-			svc.Tmpfs = append(svc.Tmpfs, strings.TrimPrefix(arg, "--tmpfs="))
-		case arg == "--tmpfs" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.Tmpfs = append(svc.Tmpfs, g.cfg.RunArgs[i])
-
-		// Sysctl
-		case strings.HasPrefix(arg, "--sysctl="):
-			g.parseSysctl(svc, strings.TrimPrefix(arg, "--sysctl="))
-		case arg == "--sysctl" && i+1 < len(g.cfg.RunArgs):
-			i++
-			g.parseSysctl(svc, g.cfg.RunArgs[i])
-
-		// Publish ports
-		case strings.HasPrefix(arg, "-p="):
-			svc.Ports = append(svc.Ports, strings.TrimPrefix(arg, "-p="))
-		case arg == "-p" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.Ports = append(svc.Ports, g.cfg.RunArgs[i])
-		case strings.HasPrefix(arg, "--publish="):
-			svc.Ports = append(svc.Ports, strings.TrimPrefix(arg, "--publish="))
-		case arg == "--publish" && i+1 < len(g.cfg.RunArgs):
-			i++
-			svc.Ports = append(svc.Ports, g.cfg.RunArgs[i])
+		// Copy sysctls
+		if len(parsed.Sysctls) > 0 {
+			if svc.Sysctls == nil {
+				svc.Sysctls = make(map[string]string)
+			}
+			for k, v := range parsed.Sysctls {
+				svc.Sysctls[k] = v
+			}
 		}
 	}
 
@@ -412,13 +320,3 @@ func (g *overrideGenerator) mapRunArgsToService(svc *ServiceOverride) {
 	}
 }
 
-// parseSysctl parses a sysctl key=value pair and adds it to the service.
-func (g *overrideGenerator) parseSysctl(svc *ServiceOverride, value string) {
-	parts := strings.SplitN(value, "=", 2)
-	if len(parts) == 2 {
-		if svc.Sysctls == nil {
-			svc.Sysctls = make(map[string]string)
-		}
-		svc.Sysctls[parts[0]] = parts[1]
-	}
-}

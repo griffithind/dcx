@@ -11,6 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/parse"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -309,91 +310,43 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 	return r.dockerClient.CreateContainer(ctx, createOpts)
 }
 
-// parseRunArgs extracts additional options from runArgs.
+// parseRunArgs extracts additional options from runArgs using the shared parser.
 func (r *Runner) parseRunArgs(opts *docker.CreateContainerOptions) {
-	for i := 0; i < len(r.cfg.RunArgs); i++ {
-		arg := r.cfg.RunArgs[i]
+	parsed := parse.ParseRunArgs(r.cfg.RunArgs)
+	if parsed == nil {
+		return
+	}
 
-		switch {
-		// Cap drop
-		case hasPrefix(arg, "--cap-drop="):
-			opts.CapDrop = append(opts.CapDrop, trimPrefix(arg, "--cap-drop="))
-		case arg == "--cap-drop" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.CapDrop = append(opts.CapDrop, r.cfg.RunArgs[i])
+	// Apply parsed values to options
+	opts.CapDrop = append(opts.CapDrop, parsed.CapDrop...)
+	opts.NetworkMode = parsed.NetworkMode
+	opts.IpcMode = parsed.IpcMode
+	opts.PidMode = parsed.PidMode
+	opts.Devices = append(opts.Devices, parsed.Devices...)
+	opts.ExtraHosts = append(opts.ExtraHosts, parsed.ExtraHosts...)
 
-		// Network mode
-		case hasPrefix(arg, "--network="):
-			opts.NetworkMode = trimPrefix(arg, "--network=")
-		case hasPrefix(arg, "--net="):
-			opts.NetworkMode = trimPrefix(arg, "--net=")
-		case arg == "--network" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.NetworkMode = r.cfg.RunArgs[i]
-		case arg == "--net" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.NetworkMode = r.cfg.RunArgs[i]
+	// Convert shm-size string to int64
+	if parsed.ShmSize != "" {
+		opts.ShmSize = parse.ParseShmSize(parsed.ShmSize)
+	}
 
-		// IPC mode
-		case hasPrefix(arg, "--ipc="):
-			opts.IpcMode = trimPrefix(arg, "--ipc=")
-		case arg == "--ipc" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.IpcMode = r.cfg.RunArgs[i]
+	// Convert tmpfs list to map
+	if len(parsed.Tmpfs) > 0 {
+		if opts.Tmpfs == nil {
+			opts.Tmpfs = make(map[string]string)
+		}
+		for _, spec := range parsed.Tmpfs {
+			parse.ParseTmpfs(opts.Tmpfs, spec)
+		}
+	}
 
-		// PID mode
-		case hasPrefix(arg, "--pid="):
-			opts.PidMode = trimPrefix(arg, "--pid=")
-		case arg == "--pid" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.PidMode = r.cfg.RunArgs[i]
-
-		// Shared memory size
-		case hasPrefix(arg, "--shm-size="):
-			opts.ShmSize = parseShmSize(trimPrefix(arg, "--shm-size="))
-		case arg == "--shm-size" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.ShmSize = parseShmSize(r.cfg.RunArgs[i])
-
-		// Devices
-		case hasPrefix(arg, "--device="):
-			opts.Devices = append(opts.Devices, trimPrefix(arg, "--device="))
-		case arg == "--device" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.Devices = append(opts.Devices, r.cfg.RunArgs[i])
-
-		// Extra hosts
-		case hasPrefix(arg, "--add-host="):
-			opts.ExtraHosts = append(opts.ExtraHosts, trimPrefix(arg, "--add-host="))
-		case arg == "--add-host" && i+1 < len(r.cfg.RunArgs):
-			i++
-			opts.ExtraHosts = append(opts.ExtraHosts, r.cfg.RunArgs[i])
-
-		// Tmpfs
-		case hasPrefix(arg, "--tmpfs="):
-			if opts.Tmpfs == nil {
-				opts.Tmpfs = make(map[string]string)
-			}
-			parseTmpfs(opts.Tmpfs, trimPrefix(arg, "--tmpfs="))
-		case arg == "--tmpfs" && i+1 < len(r.cfg.RunArgs):
-			i++
-			if opts.Tmpfs == nil {
-				opts.Tmpfs = make(map[string]string)
-			}
-			parseTmpfs(opts.Tmpfs, r.cfg.RunArgs[i])
-
-		// Sysctl
-		case hasPrefix(arg, "--sysctl="):
-			if opts.Sysctls == nil {
-				opts.Sysctls = make(map[string]string)
-			}
-			parseSysctl(opts.Sysctls, trimPrefix(arg, "--sysctl="))
-		case arg == "--sysctl" && i+1 < len(r.cfg.RunArgs):
-			i++
-			if opts.Sysctls == nil {
-				opts.Sysctls = make(map[string]string)
-			}
-			parseSysctl(opts.Sysctls, r.cfg.RunArgs[i])
+	// Copy sysctls
+	if len(parsed.Sysctls) > 0 {
+		if opts.Sysctls == nil {
+			opts.Sysctls = make(map[string]string)
+		}
+		for k, v := range parsed.Sysctls {
+			opts.Sysctls[k] = v
 		}
 	}
 }
@@ -458,181 +411,12 @@ func (r *Runner) GetContainerWorkspaceFolder() string {
 	return config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 }
 
-// Helper functions for parsing runArgs
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func trimPrefix(s, prefix string) string {
-	if hasPrefix(s, prefix) {
-		return s[len(prefix):]
-	}
-	return s
-}
-
-// parseShmSize parses a shared memory size string (e.g., "1g", "512m", "1024").
-func parseShmSize(size string) int64 {
-	if size == "" {
-		return 0
-	}
-
-	// Remove any whitespace
-	size = trimSpace(size)
-
-	var multiplier int64 = 1
-	lastChar := size[len(size)-1]
-
-	switch lastChar {
-	case 'k', 'K':
-		multiplier = 1024
-		size = size[:len(size)-1]
-	case 'm', 'M':
-		multiplier = 1024 * 1024
-		size = size[:len(size)-1]
-	case 'g', 'G':
-		multiplier = 1024 * 1024 * 1024
-		size = size[:len(size)-1]
-	case 'b', 'B':
-		size = size[:len(size)-1]
-	}
-
-	var num int64
-	for _, c := range size {
-		if c >= '0' && c <= '9' {
-			num = num*10 + int64(c-'0')
-		}
-	}
-
-	return num * multiplier
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
-}
-
-// parseTmpfs parses a tmpfs mount specification (e.g., "/run:size=100m").
-func parseTmpfs(tmpfs map[string]string, value string) {
-	// Format: /path or /path:options
-	parts := splitN(value, ":", 2)
-	if len(parts) == 1 {
-		tmpfs[parts[0]] = ""
-	} else {
-		tmpfs[parts[0]] = parts[1]
-	}
-}
-
-// parseSysctl parses a sysctl key=value pair.
-func parseSysctl(sysctls map[string]string, value string) {
-	parts := splitN(value, "=", 2)
-	if len(parts) == 2 {
-		sysctls[parts[0]] = parts[1]
-	}
-}
-
-func splitN(s, sep string, n int) []string {
-	if n <= 0 {
-		return nil
-	}
-	var result []string
-	for i := 0; i < n-1; i++ {
-		idx := indexOf(s, sep)
-		if idx < 0 {
-			break
-		}
-		result = append(result, s[:idx])
-		s = s[idx+len(sep):]
-	}
-	result = append(result, s)
-	return result
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
 // parseMountString parses a devcontainer mount string and returns a Docker-compatible format.
-// Devcontainer format: "source=/path,target=/path,type=bind,consistency=cached"
-// Docker format: "source:target" or "source:target:ro"
+// Uses the shared parse.ParseMount for consistent parsing.
 func parseMountString(mount string) string {
-	// If it already looks like Docker format (contains colon but no source= pattern), return as-is
-	if indexOf(mount, ":") >= 0 && indexOf(mount, "source=") < 0 {
-		return mount
+	m := parse.ParseMount(mount)
+	if m == nil {
+		return ""
 	}
-
-	parts := splitMountParts(mount, ",")
-
-	var source, target, mountType string
-	var readOnly bool
-	for _, part := range parts {
-		kv := splitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := trimSpace(kv[0])
-		value := trimSpace(kv[1])
-
-		switch key {
-		case "source", "src":
-			source = value
-		case "target", "dst", "destination":
-			target = value
-		case "type":
-			mountType = value
-		case "readonly", "ro":
-			readOnly = value == "true" || value == "1"
-		}
-	}
-
-	// Default type is bind
-	if mountType == "" {
-		mountType = "bind"
-	}
-
-	// For bind mounts, format as source:target
-	if mountType == "bind" && source != "" && target != "" {
-		if readOnly {
-			return source + ":" + target + ":ro"
-		}
-		return source + ":" + target
-	}
-
-	// For volume mounts, use named volume syntax
-	if mountType == "volume" && source != "" && target != "" {
-		if readOnly {
-			return source + ":" + target + ":ro"
-		}
-		return source + ":" + target
-	}
-
-	// Can't parse, return empty
-	return ""
-}
-
-// splitMountParts splits a string by separator with no limit.
-func splitMountParts(s, sep string) []string {
-	var result []string
-	for {
-		idx := indexOf(s, sep)
-		if idx < 0 {
-			result = append(result, s)
-			break
-		}
-		result = append(result, s[:idx])
-		s = s[idx+len(sep):]
-	}
-	return result
+	return m.ToDockerFormat()
 }
