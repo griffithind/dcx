@@ -345,7 +345,143 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 	})
 }
 
+// TestSSHCommandHandlingE2E tests that SSH properly handles complex shell commands.
+// This verifies the RawCommand() fix - commands with quotes and nested shells must work.
+func TestSSHCommandHandlingE2E(t *testing.T) {
+	helpers.RequireDockerAvailable(t)
+
+	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Start with SSH enabled
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	hostname := extractSSHHostname(t, stdout)
+
+	// Test simple echo
+	t.Run("simple_echo", func(t *testing.T) {
+		stdout, _, err := runSSH(t, hostname, "echo", "hello")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "hello")
+	})
+
+	// Test nested sh -c with quotes (the main fix)
+	t.Run("nested_sh_c_with_quotes", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `sh -c "echo nested_test"`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "nested_test")
+	})
+
+	// Test cd followed by command (Zed editor pattern)
+	t.Run("cd_and_command", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `cd; uname -sm`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "Linux")
+	})
+
+	// Test command with && operator
+	t.Run("and_operator", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo first && echo second`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "first")
+		assert.Contains(t, stdout, "second")
+	})
+
+	// Test command with || operator
+	t.Run("or_operator", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `false || echo fallback`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "fallback")
+	})
+
+	// Test command with pipe
+	t.Run("pipe_operator", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo "hello world" | tr ' ' '_'`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "hello_world")
+	})
+
+	// Test semicolon-separated commands
+	t.Run("semicolon_commands", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo one; echo two; echo three`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "one")
+		assert.Contains(t, stdout, "two")
+		assert.Contains(t, stdout, "three")
+	})
+
+	// Test command with single quotes inside double quotes
+	t.Run("nested_quotes", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo "it's working"`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "it's working")
+	})
+
+	// Test deeply nested sh -c (VS Code/Zed pattern)
+	t.Run("deeply_nested_sh", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `cd; sh -c 'echo "deep_nested"'`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "deep_nested")
+	})
+
+	// Test variable expansion
+	t.Run("variable_expansion", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `VAR=testval; echo $VAR`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "testval")
+	})
+
+	// Test glob expansion
+	t.Run("glob_expansion", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `ls /etc/*.conf 2>/dev/null | head -1`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		// Should return at least one .conf file
+		assert.Contains(t, stdout, ".conf")
+	})
+
+	// Test redirection
+	t.Run("redirection", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo redirect_test > /tmp/ssh_test.txt && cat /tmp/ssh_test.txt`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "redirect_test")
+	})
+
+	// Test subshell
+	t.Run("subshell", func(t *testing.T) {
+		stdout, stderr, err := runSSHRaw(t, hostname, `echo $(echo subshell_output)`)
+		require.NoError(t, err, "stderr: %s", stderr)
+		assert.Contains(t, stdout, "subshell_output")
+	})
+}
+
 // Helper functions
+
+// runSSHRaw runs an SSH command passing the command as a single string (like VS Code/Zed do).
+func runSSHRaw(t *testing.T, hostname string, command string) (string, string, error) {
+	t.Helper()
+
+	sshArgs := []string{
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		hostname,
+		command,
+	}
+
+	cmd := exec.Command("ssh", sshArgs...)
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
 
 func runSSH(t *testing.T, hostname string, args ...string) (string, string, error) {
 	t.Helper()

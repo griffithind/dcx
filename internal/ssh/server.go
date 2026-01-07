@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"strings"
 	"syscall"
 	"time"
 
@@ -123,16 +122,13 @@ func (s *Server) sessionHandler(sess ssh.Session) {
 func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
 	var cmd *exec.Cmd
 
-	// Check if there's a specific command to run
-	cmdArgs := sess.Command()
-	if len(cmdArgs) > 0 {
-		// Always run commands through the shell to handle:
-		// - Shell built-ins (cd, export, source)
-		// - Shell operators (;, &&, ||, |, >, <)
-		// - Variable expansion, globbing, etc.
-		// This matches OpenSSH behavior.
-		cmdStr := strings.Join(cmdArgs, " ")
-		cmd = exec.Command(s.shell, "-c", cmdStr)
+	// Check if there's a specific command to run.
+	// Use RawCommand() to get the exact command string as sent by the client,
+	// preserving quotes and special characters. This matches OpenSSH behavior
+	// where the command is passed as-is to the shell via -c.
+	rawCmd := sess.RawCommand()
+	if rawCmd != "" {
+		cmd = exec.Command(s.shell, "-c", rawCmd)
 	} else {
 		// Start a login shell
 		cmd = exec.Command(s.shell)
@@ -219,11 +215,29 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 
 // runWithoutPTY runs a command without a pseudo-terminal.
 func (s *Server) runWithoutPTY(sess ssh.Session, cmd *exec.Cmd) {
-	cmd.Stdin = sess
+	// Use pipes for proper stdin handling - this ensures stdin is closed
+	// when the session's stdin is closed, preventing commands from hanging.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		sess.Exit(1)
+		return
+	}
+
 	cmd.Stdout = sess
 	cmd.Stderr = sess.Stderr()
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		sess.Exit(1)
+		return
+	}
+
+	// Copy stdin in a goroutine and close when done
+	go func() {
+		io.Copy(stdin, sess)
+		stdin.Close()
+	}()
+
+	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				sess.Exit(status.ExitStatus())
