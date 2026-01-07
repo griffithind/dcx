@@ -171,3 +171,53 @@ func TestGetHostMemory(t *testing.T) {
 		assert.Greater(t, mem, uint64(0), "should detect memory on %s", runtime.GOOS)
 	}
 }
+
+func TestValidateHostRequirementsWithDocker(t *testing.T) {
+	t.Run("nil requirements", func(t *testing.T) {
+		dockerRes := &DockerResources{CPUs: 4, Memory: 8 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(nil, dockerRes)
+		assert.True(t, result.Satisfied)
+		assert.Empty(t, result.Errors)
+	})
+
+	t.Run("CPU requirement satisfied", func(t *testing.T) {
+		dockerRes := &DockerResources{CPUs: 4, Memory: 8 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(&HostRequirements{CPUs: 2}, dockerRes)
+		assert.True(t, result.Satisfied)
+		assert.Empty(t, result.Errors)
+	})
+
+	t.Run("CPU requirement not satisfied", func(t *testing.T) {
+		dockerRes := &DockerResources{CPUs: 2, Memory: 8 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(&HostRequirements{CPUs: 4}, dockerRes)
+		assert.False(t, result.Satisfied)
+		assert.NotEmpty(t, result.Errors)
+		assert.Contains(t, result.Errors[0], "Docker has 2")
+	})
+
+	t.Run("memory requirement satisfied", func(t *testing.T) {
+		dockerRes := &DockerResources{CPUs: 4, Memory: 8 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(&HostRequirements{Memory: "4gb"}, dockerRes)
+		assert.True(t, result.Satisfied)
+		assert.Empty(t, result.Errors)
+	})
+
+	t.Run("memory requirement not satisfied", func(t *testing.T) {
+		dockerRes := &DockerResources{CPUs: 4, Memory: 2 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(&HostRequirements{Memory: "8gb"}, dockerRes)
+		assert.False(t, result.Satisfied)
+		assert.NotEmpty(t, result.Errors)
+		assert.Contains(t, result.Errors[0], "Docker has")
+	})
+
+	t.Run("Docker Desktop limited resources", func(t *testing.T) {
+		// Simulating Docker Desktop with 4 CPUs and 4GB (less than host)
+		dockerRes := &DockerResources{CPUs: 4, Memory: 4 * 1024 * 1024 * 1024}
+		result := ValidateHostRequirementsWithDocker(&HostRequirements{
+			CPUs:   8,
+			Memory: "8gb",
+		}, dockerRes)
+		assert.False(t, result.Satisfied)
+		assert.Len(t, result.Errors, 2) // Both CPU and memory fail
+	})
+}

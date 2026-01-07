@@ -19,7 +19,88 @@ type HostRequirementsResult struct {
 	Errors    []string
 }
 
+// DockerResources represents the resources available to Docker.
+// This may be less than the host's actual resources (e.g., Docker Desktop VM limits).
+type DockerResources struct {
+	CPUs   int    // Number of CPUs available to Docker
+	Memory uint64 // Total memory available to Docker in bytes
+}
+
+// ValidateHostRequirementsWithDocker checks if Docker's configured resources meet the requirements.
+// This is the preferred method as it checks Docker's actual available resources,
+// which may be limited by Docker Desktop VM settings or cgroup limits.
+func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *DockerResources) *HostRequirementsResult {
+	result := &HostRequirementsResult{Satisfied: true}
+
+	if reqs == nil {
+		return result
+	}
+
+	// Check CPU cores against Docker's available CPUs
+	if reqs.CPUs > 0 {
+		availCPUs := dockerRes.CPUs
+		if availCPUs < reqs.CPUs {
+			result.Satisfied = false
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("CPU requirement not met: need %d cores, Docker has %d", reqs.CPUs, availCPUs))
+		}
+	}
+
+	// Check memory against Docker's available memory
+	if reqs.Memory != "" {
+		reqBytes, err := parseMemoryString(reqs.Memory)
+		if err != nil {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("Could not parse memory requirement '%s': %v", reqs.Memory, err))
+		} else {
+			availMemory := dockerRes.Memory
+			if availMemory > 0 && availMemory < reqBytes {
+				result.Satisfied = false
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("Memory requirement not met: need %s, Docker has %s",
+						reqs.Memory, formatBytes(availMemory)))
+			}
+		}
+	}
+
+	// Check GPU (GPU detection is still host-based as Docker doesn't report GPU info in system info)
+	if reqs.GPU != nil {
+		needsGPU := false
+		switch v := reqs.GPU.(type) {
+		case bool:
+			needsGPU = v
+		case string:
+			needsGPU = v == "true" || v == "optional"
+		case map[string]interface{}:
+			needsGPU = len(v) > 0
+		}
+
+		if needsGPU && !hasGPU() {
+			optional := false
+			if s, ok := reqs.GPU.(string); ok && s == "optional" {
+				optional = true
+			}
+			if optional {
+				result.Warnings = append(result.Warnings, "No GPU detected (optional requirement)")
+			} else {
+				result.Satisfied = false
+				result.Errors = append(result.Errors, "GPU requirement not met: no GPU detected")
+			}
+		}
+	}
+
+	// Storage cannot be validated meaningfully
+	if reqs.Storage != "" {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("Storage requirement (%s) cannot be validated automatically", reqs.Storage))
+	}
+
+	return result
+}
+
 // ValidateHostRequirements checks if the host meets the specified requirements.
+// Deprecated: Use ValidateHostRequirementsWithDocker for accurate Docker resource checking.
+// This function checks host resources directly, which may not reflect Docker's limits.
 func ValidateHostRequirements(reqs *HostRequirements) *HostRequirementsResult {
 	result := &HostRequirementsResult{Satisfied: true}
 
