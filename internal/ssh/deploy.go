@@ -28,8 +28,11 @@ func DeployToContainer(ctx context.Context, containerName, binaryPath string) er
 
 // copyBinaryToContainer copies the dcx binary to the container.
 func copyBinaryToContainer(ctx context.Context, containerName, binaryPath string) error {
-	// Try to get a Linux binary (embedded or from filesystem)
-	dcxPath := getLinuxBinaryPathStandalone()
+	// Detect container architecture
+	containerArch := getContainerArch(ctx, containerName)
+
+	// Try to get a Linux binary for the container's architecture
+	dcxPath := getLinuxBinaryPath(containerArch)
 	needsCleanup := false
 
 	if dcxPath == "" {
@@ -63,19 +66,16 @@ func copyBinaryToContainer(ctx context.Context, containerName, binaryPath string
 	return nil
 }
 
-// getLinuxBinaryPathStandalone returns the path to a Linux binary for the container architecture.
+// getLinuxBinaryPath returns the path to a Linux binary for the given architecture.
 // Returns empty string if not available.
-func getLinuxBinaryPathStandalone() string {
-	// Determine container architecture
-	arch := runtime.GOARCH
-
+func getLinuxBinaryPath(arch string) string {
 	// Check for embedded binaries first (not available on Linux builds)
 	if runtime.GOOS != "linux" {
 		var embeddedBinary []byte
 		switch arch {
-		case "amd64":
+		case "amd64", "x86_64":
 			embeddedBinary = dcxLinuxAmd64
-		case "arm64":
+		case "arm64", "aarch64":
 			embeddedBinary = dcxLinuxArm64
 		}
 
@@ -104,9 +104,9 @@ func getLinuxBinaryPathStandalone() string {
 
 	var binaryName string
 	switch arch {
-	case "amd64":
+	case "amd64", "x86_64":
 		binaryName = "dcx-linux-amd64"
-	case "arm64":
+	case "arm64", "aarch64":
 		binaryName = "dcx-linux-arm64"
 	default:
 		return ""
@@ -118,6 +118,17 @@ func getLinuxBinaryPathStandalone() string {
 	}
 
 	return ""
+}
+
+// getContainerArch returns the architecture of the container.
+func getContainerArch(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerName, "uname", "-m")
+	output, err := cmd.Output()
+	if err != nil {
+		// Fall back to host architecture
+		return runtime.GOARCH
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // GetContainerBinaryPath returns the path for dcx binary in the container.
