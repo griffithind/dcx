@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var stopForce bool
+
 var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop running containers",
@@ -18,7 +20,10 @@ var stopCmd = &cobra.Command{
 
 This is an offline-safe command that only stops running containers.
 The containers and their data are preserved and can be started again
-with 'dcx start'.`,
+with 'dcx start'.
+
+If the devcontainer.json has shutdownAction set to "none", the container
+will not be stopped unless --force is used.`,
 	RunE: runStop,
 }
 
@@ -61,6 +66,16 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return nil
 
 	case state.StateRunning, state.StateStale, state.StateBroken:
+		// Check shutdownAction setting if not forcing
+		if !stopForce {
+			cfg, _, loadErr := config.Load(workspacePath, configPath)
+			if loadErr == nil && cfg.ShutdownAction == "none" {
+				fmt.Println("Skipping stop: shutdownAction is set to 'none'")
+				fmt.Println("Use --force to stop anyway")
+				return nil
+			}
+		}
+
 		// Determine plan type from container labels
 		if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
 			// Single container - use Docker API directly
@@ -85,4 +100,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 	default:
 		return fmt.Errorf("unexpected state: %s", currentState)
 	}
+}
+
+func init() {
+	stopCmd.Flags().BoolVarP(&stopForce, "force", "f", false, "force stop even if shutdownAction is 'none'")
 }

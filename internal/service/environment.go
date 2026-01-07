@@ -394,8 +394,21 @@ func (s *EnvironmentService) Build(ctx context.Context, opts BuildOptions) error
 	return nil
 }
 
+// StopOptions configures the Stop operation.
+type StopOptions struct {
+	Force bool // Force stop even if shutdownAction is "none"
+}
+
 // Stop stops the running environment.
-func (s *EnvironmentService) Stop(ctx context.Context, info *EnvironmentInfo) error {
+// Respects the shutdownAction setting unless Force is true.
+func (s *EnvironmentService) Stop(ctx context.Context, info *EnvironmentInfo, opts StopOptions) error {
+	// Check shutdownAction setting
+	if !opts.Force && info.Config.ShutdownAction == "none" {
+		fmt.Println("Skipping stop: shutdownAction is set to 'none'")
+		fmt.Println("Use --force to stop anyway")
+		return nil
+	}
+
 	envRunner, err := s.CreateRunner(info)
 	if err != nil {
 		return err
