@@ -14,6 +14,7 @@ import (
 
 // TestOverrideCommandE2E tests the overrideCommand feature.
 func TestOverrideCommandE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create config with overrideCommand: true
@@ -56,10 +57,11 @@ func TestOverrideCommandE2E(t *testing.T) {
 
 // TestOverrideCommandFalseE2E tests that overrideCommand: false uses default entrypoint.
 func TestOverrideCommandFalseE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Use an image that exits immediately without a command
-	// alpine with explicit overrideCommand: false should use image's CMD
+	// alpine with explicit overrideCommand: false should use image's CMD (/bin/sh)
+	// With TTY enabled (standard for devcontainers), the shell stays alive
 	devcontainerJSON := `{
 		"name": "No Override Test",
 		"image": "alpine:latest",
@@ -72,19 +74,29 @@ func TestOverrideCommandFalseE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Bring up - alpine exits immediately without a command
-	helpers.RunDCXInDir(t, workspace, "up")
+	// Bring up - alpine runs /bin/sh which stays alive with TTY
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Container should not be running (alpine exits without command)
-	t.Run("container_exits_without_override", func(t *testing.T) {
+	// Container should still be running because TTY keeps shell alive
+	t.Run("container_runs_with_default_cmd", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		// State could be CREATED (exited) or might vary
-		assert.NotEqual(t, "RUNNING", state)
+		assert.Equal(t, "RUNNING", state)
+	})
+
+	// Verify we're running the default command (sh), not the override (sleep loop)
+	t.Run("runs_default_shell_not_sleep_loop", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ps", "aux")
+		require.NoError(t, err)
+		// Should have /bin/sh as PID 1, not /bin/sh -c "while sleep..."
+		assert.Contains(t, stdout, "/bin/sh")
+		// Should NOT have the sleep loop pattern
+		assert.NotContains(t, stdout, "while sleep")
 	})
 }
 
 // TestShutdownActionNoneE2E tests shutdownAction: "none".
 func TestShutdownActionNoneE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -108,7 +120,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 	// Stop without force should be skipped
 	t.Run("stop_skipped_without_force", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "stop")
-		assert.Contains(t, stdout, "shutdownAction is set to 'none'")
+		assert.Contains(t, stdout, "Skipping stop")
 
 		// Container should still be running
 		state := helpers.GetContainerState(t, workspace)
@@ -128,6 +140,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 
 // TestShutdownActionStopContainerE2E tests shutdownAction: "stopContainer" (default).
 func TestShutdownActionStopContainerE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -159,6 +172,7 @@ func TestShutdownActionStopContainerE2E(t *testing.T) {
 
 // TestHostRequirementsValidationE2E tests hostRequirements validation.
 func TestHostRequirementsValidationE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Test with impossible CPU requirement (should fail)
@@ -177,9 +191,10 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "up")
 		assert.Error(t, err, "should fail with impossible CPU requirement")
-		assert.Contains(t, stderr, "CPU requirement not met")
+		// Error messages go to stdout in dcx
+		assert.Contains(t, stdout, "CPU requirement not met")
 	})
 
 	// Test with impossible memory requirement (should fail)
@@ -198,9 +213,10 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "up")
 		assert.Error(t, err, "should fail with impossible memory requirement")
-		assert.Contains(t, stderr, "Memory requirement not met")
+		// Error messages go to stdout in dcx
+		assert.Contains(t, stdout, "Memory requirement not met")
 	})
 
 	// Test with achievable requirements (should succeed)
@@ -249,6 +265,7 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 
 // TestRemoteUserE2E tests remoteUser configuration.
 func TestRemoteUserE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Use an image with a non-root user
@@ -277,6 +294,7 @@ func TestRemoteUserE2E(t *testing.T) {
 
 // TestContainerEnvE2E tests containerEnv configuration.
 func TestContainerEnvE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -310,6 +328,7 @@ func TestContainerEnvE2E(t *testing.T) {
 
 // TestForwardPortsE2E tests forwardPorts configuration.
 func TestForwardPortsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{

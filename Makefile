@@ -54,9 +54,9 @@ test-unit:
 test-integration:
 	go test -v -tags=integration ./test/integration/...
 
-# Run end-to-end tests (requires Docker)
+# Run end-to-end tests (requires Docker) with parallel execution
 test-e2e:
-	go test -v -tags=e2e ./test/e2e/...
+	go test -v -tags=e2e -parallel=4 ./test/e2e/...
 
 # Run tests with coverage
 test-coverage:
@@ -106,7 +106,7 @@ help:
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
 	@echo "  test-integration   - Run integration tests (requires Docker)"
-	@echo "  test-e2e           - Run end-to-end tests (requires Docker)"
+	@echo "  test-e2e           - Run end-to-end tests with parallel execution (requires Docker)"
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  lint               - Run golangci-lint"
 	@echo "  docs               - Generate API documentation"

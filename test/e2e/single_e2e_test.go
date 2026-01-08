@@ -16,6 +16,7 @@ import (
 
 // TestSingleImageBasedE2E tests the full lifecycle of an image-based devcontainer.
 func TestSingleImageBasedE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create a temp workspace with image-based config
@@ -79,6 +80,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 
 // TestSingleDockerfileBasedE2E tests devcontainer with Dockerfile.
 func TestSingleDockerfileBasedE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create temp workspace with Dockerfile config
@@ -137,6 +139,7 @@ RUN echo "built from dockerfile" > /built-marker
 
 // TestSingleContainerWithEnv tests environment variables.
 func TestSingleContainerWithEnv(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -165,6 +168,7 @@ func TestSingleContainerWithEnv(t *testing.T) {
 
 // TestSingleContainerWithMounts tests volume mounts.
 func TestSingleContainerWithMounts(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -195,6 +199,7 @@ func TestSingleContainerWithMounts(t *testing.T) {
 
 // TestSingleContainerRebuild tests the --rebuild flag.
 func TestSingleContainerRebuild(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create temp workspace with Dockerfile
@@ -252,6 +257,7 @@ RUN echo "version2" > /version
 
 // TestSingleContainerLabelsE2E tests that all required labels are set on containers.
 func TestSingleContainerLabelsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")

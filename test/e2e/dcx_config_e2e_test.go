@@ -14,6 +14,7 @@ import (
 
 // TestDcxConfigProjectNameE2E tests that the project name from dcx.json is used for container naming.
 func TestDcxConfigProjectNameE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
@@ -83,6 +84,7 @@ services:
 
 // TestDcxConfigShortcutsE2E tests the shortcuts functionality from dcx.json.
 func TestDcxConfigShortcutsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
@@ -176,6 +178,7 @@ services:
 
 // TestDcxConfigUpOptionsE2E tests that up options from dcx.json are respected.
 func TestDcxConfigUpOptionsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
@@ -225,6 +228,7 @@ services:
 
 // TestDcxConfigMigrationE2E tests that existing containers (without project name) are still found.
 func TestDcxConfigMigrationE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
@@ -308,6 +312,7 @@ services:
 
 // TestDcxConfigFlagPassthroughE2E tests that flags are passed through to shortcuts.
 func TestDcxConfigFlagPassthroughE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
@@ -354,6 +359,7 @@ services:
 
 // TestDcxConfigStatusWithoutEnvironmentE2E tests status output when no environment exists.
 func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -384,6 +390,7 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 
 // TestDcxConfigNoShortcutsE2E tests run command when no shortcuts are defined.
 func TestDcxConfigNoShortcutsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
