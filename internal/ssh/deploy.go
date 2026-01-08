@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -67,52 +66,29 @@ func copyBinaryToContainer(ctx context.Context, containerName, binaryPath string
 // getLinuxBinaryPath returns the path to a Linux binary for the given architecture.
 // Returns empty string if not available.
 func getLinuxBinaryPath(arch string) string {
-	// Check for embedded binaries first (not available on Linux builds)
-	if runtime.GOOS != "linux" {
-		var embeddedBinary []byte
-		switch arch {
-		case "amd64", "x86_64":
-			embeddedBinary = dcxLinuxAmd64
-		case "arm64", "aarch64":
-			embeddedBinary = dcxLinuxArm64
+	// On Linux, we can use the current executable directly
+	if runtime.GOOS == "linux" {
+		exe, err := os.Executable()
+		if err == nil {
+			return exe
 		}
+	}
 
-		if len(embeddedBinary) > 0 {
-			// Write embedded binary to temp file
-			tmpFile, err := os.CreateTemp("", "dcx-linux-*")
-			if err != nil {
-				return ""
-			}
-			if _, err := tmpFile.Write(embeddedBinary); err != nil {
-				tmpFile.Close()
-				os.Remove(tmpFile.Name())
-				return ""
-			}
+	// Use embedded binaries (compressed and decompressed on first access)
+	embeddedBinary, err := GetEmbeddedBinary(arch)
+	if err == nil && len(embeddedBinary) > 0 {
+		// Write embedded binary to temp file
+		tmpFile, err := os.CreateTemp("", "dcx-linux-*")
+		if err != nil {
+			return ""
+		}
+		if _, err := tmpFile.Write(embeddedBinary); err != nil {
 			tmpFile.Close()
-			return tmpFile.Name()
+			os.Remove(tmpFile.Name())
+			return ""
 		}
-	}
-
-	// Check for pre-built binaries next to current executable
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	exeDir := filepath.Dir(exe)
-
-	var binaryName string
-	switch arch {
-	case "amd64", "x86_64":
-		binaryName = "dcx-linux-amd64"
-	case "arm64", "aarch64":
-		binaryName = "dcx-linux-arm64"
-	default:
-		return ""
-	}
-
-	linuxBinaryPath := filepath.Join(exeDir, binaryName)
-	if _, err := os.Stat(linuxBinaryPath); err == nil {
-		return linuxBinaryPath
+		tmpFile.Close()
+		return tmpFile.Name()
 	}
 
 	return ""

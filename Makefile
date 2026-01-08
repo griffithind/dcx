@@ -9,35 +9,41 @@ LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$
 # Default target
 all: build
 
-# Build the binary for current platform + Linux binaries for SSH agent forwarding
+# Build Linux binaries, compress for embedding, then build host binary
 # CGO_ENABLED=0 ensures static linking for compatibility with all Linux distros (including Alpine/musl)
-build:
+# All builds now include embedded compressed Linux binaries for SSH agent forwarding
+build: build-linux-compress
 	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dcx
+
+# Build and compress Linux binaries for embedding
+# Uses small placeholders for Linux build to avoid recursive embedding
+build-linux-compress:
+	@mkdir -p $(BUILD_DIR) internal/ssh/bin
+	@# Always use small placeholders for Linux build (avoids recursive embedding)
+	@echo "placeholder" | gzip > internal/ssh/bin/$(BINARY_NAME)-linux-amd64.gz
+	@echo "placeholder" | gzip > internal/ssh/bin/$(BINARY_NAME)-linux-arm64.gz
+	@echo "Building Linux binaries (with placeholder embeds)..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
+	@echo "Compressing for embedding..."
+	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 > internal/ssh/bin/$(BINARY_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 > internal/ssh/bin/$(BINARY_NAME)-linux-arm64.gz
 
-# Build Linux binaries for container deployment (SSH agent proxy)
+# Build Linux binaries only (for standalone distribution)
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
-# Build Linux binaries to embed directory (for release builds)
-build-linux-embed:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o internal/ssh/bin/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o internal/ssh/bin/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
+# Build all platform binaries for release (all include embedded Linux binaries)
+build-release: build-linux-compress
+	@echo "Building release binaries..."
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
-# Build macOS binaries with embedded Linux binaries (for distribution)
-build-darwin-embed: build-linux-embed
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -tags embed $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags embed $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/dcx
-
-# Build all binaries (host + Linux for containers)
-build-all: build build-linux
-
-# Build release binaries (Linux + macOS with embedding)
-build-release: build-linux-embed build-darwin-embed
-	cp internal/ssh/bin/$(BINARY_NAME)-linux-amd64 $(BUILD_DIR)/
-	cp internal/ssh/bin/$(BINARY_NAME)-linux-arm64 $(BUILD_DIR)/
+# Build all binaries for current platform + release
+build-all: build build-release
 
 # Install to GOPATH/bin
 install:
@@ -97,11 +103,10 @@ vet:
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  build              - Build the dcx binary for current platform"
-	@echo "  build-linux        - Build Linux binaries (amd64/arm64) for containers"
-	@echo "  build-all          - Build all binaries (host + Linux)"
-	@echo "  build-release      - Build release binaries (macOS with embedded Linux)"
-	@echo "  build-darwin-embed - Build macOS binaries with embedded Linux binaries"
+	@echo "  build              - Build dcx with embedded Linux binaries (default)"
+	@echo "  build-linux        - Build Linux binaries only (for standalone distribution)"
+	@echo "  build-release      - Build all platform binaries for release"
+	@echo "  build-all          - Build all binaries (current platform + release)"
 	@echo "  install            - Install dcx to GOPATH/bin"
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
