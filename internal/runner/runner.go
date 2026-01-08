@@ -363,6 +363,12 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 		l.DerivedImage = r.derivedImage
 	}
 
+	// Set compose-specific labels
+	if ws.Resolved.Compose != nil {
+		l.ComposeProject = ws.Resolved.ServiceName // ServiceName is used as compose project
+		l.ComposeService = ws.Resolved.Compose.Service
+	}
+
 	// Store installed features
 	if len(ws.Resolved.Features) > 0 {
 		featureIDs := make([]string, len(ws.Resolved.Features))
