@@ -53,8 +53,18 @@ func TestSSHServerE2E(t *testing.T) {
 
 	hostname := envKey + ".dcx"
 
-	// The container name used in SSH config is dcx_<envKey> for single containers
-	containerName := "dcx_" + envKey
+	// Get the actual container name from status
+	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
+	var containerName string
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, "Name:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				containerName = parts[1]
+			}
+		}
+	}
+	require.NotEmpty(t, containerName, "should find container name in status output")
 
 	// Verify SSH config entry was added
 	t.Run("ssh_config_entry_added", func(t *testing.T) {
@@ -138,10 +148,11 @@ func TestSSHServerE2E(t *testing.T) {
 func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	// Create two separate workspaces
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
-	workspace1 := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	workspace2 := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	// Create two separate workspaces with unique container names
+	devcontainerJSON1 := helpers.SimpleImageConfigWithName("alpine:latest", helpers.UniqueTestName(t)+"_1")
+	devcontainerJSON2 := helpers.SimpleImageConfigWithName("alpine:latest", helpers.UniqueTestName(t)+"_2")
+	workspace1 := helpers.CreateTempWorkspace(t, devcontainerJSON1)
+	workspace2 := helpers.CreateTempWorkspace(t, devcontainerJSON2)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace1, "down")
@@ -211,14 +222,24 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	// Start container with SSH
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
 	hostname := extractSSHHostname(t, stdout)
-	envKey := strings.TrimSuffix(hostname, ".dcx")
-	// The container name used in SSH config is dcx_<envKey> for single containers
-	containerName := "dcx_" + envKey
+
+	// Get the actual container name from status
+	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
+	var containerName string
+	for _, line := range strings.Split(statusOut, "\n") {
+		if strings.Contains(line, "Name:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				containerName = parts[1]
+			}
+		}
+	}
+	require.NotEmpty(t, containerName, "should find container name in status output")
 
 	// Verify workspace_path label is set on container
 	t.Run("workspace_path_label_set", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)

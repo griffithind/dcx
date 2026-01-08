@@ -264,7 +264,7 @@ func TestStatusCommandE2E(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:")
 		assert.Contains(t, stdout, "RUNNING")
-		assert.Contains(t, stdout, "Primary Container:")
+		assert.Contains(t, stdout, "Primary Container")
 		assert.Contains(t, stdout, "ID:")
 		assert.Contains(t, stdout, "Name:")
 	})

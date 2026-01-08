@@ -44,6 +44,9 @@ type BuildOptions struct {
 
 	// SubstitutionContext provides variable substitution values
 	SubstitutionContext *SubstitutionContext
+
+	// ProjectName overrides the workspace name (from dcx.json)
+	ProjectName string
 }
 
 // FeatureResolver resolves features to their local paths and metadata.
@@ -76,7 +79,12 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 	ws.ConfigDir = filepath.Dir(opts.ConfigPath)
 	ws.LocalRoot = opts.WorkspaceRoot
 	ws.ID = ComputeID(opts.WorkspaceRoot)
-	ws.Name = ComputeName(opts.WorkspaceRoot, opts.Config)
+	// Use project name from dcx.json if provided, otherwise compute from config
+	if opts.ProjectName != "" {
+		ws.Name = opts.ProjectName
+	} else {
+		ws.Name = ComputeName(opts.WorkspaceRoot, opts.Config)
+	}
 	ws.RawConfig = opts.Config
 
 	// Build substitution context if not provided
