@@ -1039,6 +1039,61 @@ func TestOverrideCommandAndShutdownAction(t *testing.T) {
 	})
 }
 
+// TestPortAttributesParsing tests parsing of portsAttributes with all fields.
+func TestPortAttributesParsing(t *testing.T) {
+	input := `{
+		"image": "alpine",
+		"forwardPorts": [3000, 5432, 8080],
+		"portsAttributes": {
+			"3000": {
+				"label": "Web",
+				"protocol": "http",
+				"onAutoForward": "notify",
+				"requireLocalPort": true,
+				"elevateIfNeeded": false
+			},
+			"5432": {
+				"label": "Database",
+				"requireLocalPort": false,
+				"elevateIfNeeded": true
+			},
+			"8080": {
+				"label": "API"
+			}
+		}
+	}`
+
+	cfg, err := Parse([]byte(input))
+	require.NoError(t, err)
+
+	// Test port 3000 - all fields
+	attr := cfg.GetPortAttribute("3000")
+	require.NotNil(t, attr)
+	assert.Equal(t, "Web", attr.Label)
+	assert.Equal(t, "http", attr.Protocol)
+	assert.Equal(t, "notify", attr.OnAutoForward)
+	assert.True(t, attr.RequireLocalPort)
+	assert.False(t, attr.ElevateIfNeeded)
+
+	// Test port 5432 - requireLocalPort false, elevateIfNeeded true
+	attr = cfg.GetPortAttribute("5432")
+	require.NotNil(t, attr)
+	assert.Equal(t, "Database", attr.Label)
+	assert.False(t, attr.RequireLocalPort)
+	assert.True(t, attr.ElevateIfNeeded)
+
+	// Test port 8080 - only label
+	attr = cfg.GetPortAttribute("8080")
+	require.NotNil(t, attr)
+	assert.Equal(t, "API", attr.Label)
+	assert.False(t, attr.RequireLocalPort) // default
+	assert.False(t, attr.ElevateIfNeeded)  // default
+
+	// Test non-existent port
+	attr = cfg.GetPortAttribute("9999")
+	assert.Nil(t, attr)
+}
+
 // TestHostRequirementsParsing tests parsing of hostRequirements field.
 func TestHostRequirementsParsing(t *testing.T) {
 	t.Run("all requirements", func(t *testing.T) {
