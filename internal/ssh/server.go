@@ -141,28 +141,7 @@ func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
 	cmd.Dir = s.workDir
 	cmd.Env = s.buildEnvironment()
 
-	// Switch to target user if specified and not root
-	if s.user != "" && s.user != "root" {
-		if u, err := user.Lookup(s.user); err == nil {
-			uid := parseUint32(u.Uid)
-			gid := parseUint32(u.Gid)
-			cmd.SysProcAttr = &syscall.SysProcAttr{
-				Credential: &syscall.Credential{
-					Uid: uid,
-					Gid: gid,
-				},
-			}
-		}
-	}
-
 	return cmd
-}
-
-// parseUint32 parses a string to uint32, returning 0 on error.
-func parseUint32(s string) uint32 {
-	var n uint32
-	fmt.Sscanf(s, "%d", &n)
-	return n
 }
 
 // buildEnvironment creates the environment for the shell.
