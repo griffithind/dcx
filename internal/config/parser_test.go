@@ -228,6 +228,32 @@ func TestSubstitute(t *testing.T) {
 	}
 }
 
+func TestUserHomeSubstitution(t *testing.T) {
+	// Test with explicit UserHome in context
+	ctx := &SubstitutionContext{
+		UserHome: "/home/testuser",
+	}
+
+	result := Substitute("${userHome}/.config", ctx)
+	assert.Equal(t, "/home/testuser/.config", result)
+
+	// Test fallback to os.UserHomeDir when context doesn't have UserHome
+	ctxNoHome := &SubstitutionContext{}
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result = Substitute("${userHome}/workspace", ctxNoHome)
+	assert.Equal(t, home+"/workspace", result)
+
+	// Test mixed substitution
+	ctxMixed := &SubstitutionContext{
+		UserHome:             "/home/user",
+		LocalWorkspaceFolder: "/projects/myapp",
+	}
+	result = Substitute("${userHome}/cache/${localWorkspaceFolderBasename}", ctxMixed)
+	assert.Equal(t, "/home/user/cache/myapp", result)
+}
+
 func TestDetermineContainerWorkspaceFolder(t *testing.T) {
 	tests := []struct {
 		name           string
