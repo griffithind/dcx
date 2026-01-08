@@ -153,9 +153,9 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 		resolved.WorkspaceMount = substituteVars(cfg.WorkspaceMount, subCtx)
 	}
 
-	// User configuration
-	resolved.RemoteUser = cfg.RemoteUser
-	resolved.ContainerUser = cfg.ContainerUser
+	// User configuration (with substitution for ${localEnv:USER} etc.)
+	resolved.RemoteUser = substituteVars(cfg.RemoteUser, subCtx)
+	resolved.ContainerUser = substituteVars(cfg.ContainerUser, subCtx)
 	if cfg.UpdateRemoteUserUID != nil {
 		resolved.UpdateRemoteUserUID = *cfg.UpdateRemoteUserUID
 	}
