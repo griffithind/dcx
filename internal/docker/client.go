@@ -486,8 +486,15 @@ func (c *Client) CreateContainer(ctx context.Context, opts CreateContainerOption
 	}
 
 	// Add workspace bind mount
-	if opts.WorkspacePath != "" && opts.WorkspaceMount != "" {
-		hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s", opts.WorkspacePath, opts.WorkspaceMount))
+	if opts.WorkspaceMount != "" {
+		// Parse Docker --mount format (type=bind,source=...,target=...)
+		bind := parseMountSpec(opts.WorkspaceMount)
+		if bind != "" {
+			hostConfig.Binds = append(hostConfig.Binds, bind)
+		}
+	} else if opts.WorkspacePath != "" && opts.WorkspaceFolder != "" {
+		// Default simple bind mount
+		hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s", opts.WorkspacePath, opts.WorkspaceFolder))
 	}
 
 	// Add SSH mount if provided
@@ -798,4 +805,50 @@ func (c *Client) AttachContainer(ctx context.Context, containerID string, opts A
 // KillContainer sends a signal to a container.
 func (c *Client) KillContainer(ctx context.Context, containerID, signal string) error {
 	return c.cli.ContainerKill(ctx, containerID, signal)
+}
+
+// parseMountSpec parses a Docker --mount format string into a bind mount string.
+// Input format: type=bind,source=/path,target=/workspace[,consistency=cached][,readonly]
+// Output format: source:target[:options]
+func parseMountSpec(spec string) string {
+	parts := strings.Split(spec, ",")
+	var source, target string
+	var options []string
+
+	for _, part := range parts {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			// Handle standalone options like "readonly"
+			if part == "readonly" || part == "ro" {
+				options = append(options, "ro")
+			}
+			continue
+		}
+		key, value := kv[0], kv[1]
+		switch key {
+		case "source", "src":
+			source = value
+		case "target", "dst", "destination":
+			target = value
+		case "readonly", "ro":
+			if value == "true" || value == "1" {
+				options = append(options, "ro")
+			}
+		case "consistency":
+			// macOS consistency option (cached, delegated, consistent)
+			options = append(options, value)
+		case "type":
+			// Skip type=bind, we only support bind mounts here
+		}
+	}
+
+	if source == "" || target == "" {
+		return ""
+	}
+
+	result := source + ":" + target
+	if len(options) > 0 {
+		result += ":" + strings.Join(options, ",")
+	}
+	return result
 }

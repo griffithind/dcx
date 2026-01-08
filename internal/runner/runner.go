@@ -307,8 +307,11 @@ func (r *UnifiedRunner) createContainer(ctx context.Context, imageRef string) (s
 	// Build environment
 	env := r.buildEnvironment()
 
-	// Build workspace mount string
-	workspaceMount := fmt.Sprintf("type=bind,source=%s,target=%s", ws.LocalRoot, workspaceFolder)
+	// Use custom workspaceMount if provided, otherwise build default
+	workspaceMount := ws.Resolved.WorkspaceMount
+	if workspaceMount == "" {
+		workspaceMount = fmt.Sprintf("type=bind,source=%s,target=%s", ws.LocalRoot, workspaceFolder)
+	}
 
 	// Create container config
 	createOpts := docker.CreateContainerOptions{
