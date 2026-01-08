@@ -142,8 +142,10 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	}
 
 	// Run docker exec with SSH server (stdio mode)
+	// Run as the target user so the SSH server process has the correct identity
 	dockerArgs := []string{
 		"exec", "-i",
+		"-u", user,
 		containerInfo.Name,
 		binaryPath, "ssh-server",
 		"--user", user,
