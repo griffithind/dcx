@@ -532,7 +532,12 @@ func (r *UnifiedRunner) GetResolvedFeatures() []*features.Feature {
 func (r *UnifiedRunner) composeBaseArgs() []string {
 	ws := r.workspace
 
-	args := []string{"-p", ws.Resolved.ServiceName}
+	// Use compose project name for -p flag
+	projectName := ws.Resolved.ServiceName
+	if ws.Resolved.Compose != nil && ws.Resolved.Compose.ProjectName != "" {
+		projectName = ws.Resolved.Compose.ProjectName
+	}
+	args := []string{"-p", projectName}
 
 	// Add compose files
 	if ws.Resolved.Compose != nil {

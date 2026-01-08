@@ -20,7 +20,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create a temp workspace with image-based config
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Setup cleanup
@@ -260,7 +260,7 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

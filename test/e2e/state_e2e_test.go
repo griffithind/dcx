@@ -17,7 +17,7 @@ func TestStateTransitionsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -145,7 +145,7 @@ func TestUpFromAbsentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -167,7 +167,7 @@ func TestExecOnStoppedFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -188,7 +188,7 @@ func TestExecOnAbsentFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Ensure nothing exists
@@ -204,7 +204,7 @@ func TestStopIdempotentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -225,7 +225,7 @@ func TestDownIdempotentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Ensure nothing exists
@@ -241,7 +241,7 @@ func TestStatusCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -284,7 +284,7 @@ func TestDoctorCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

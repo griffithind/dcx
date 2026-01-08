@@ -4,12 +4,33 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+// sanitizeNameRegexp matches characters not allowed in Docker container names
+var sanitizeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
+
+// UniqueTestName generates a unique name for a test suitable for container naming.
+// It uses a sanitized version of the test name, which is unique for each test.
+func UniqueTestName(t *testing.T) string {
+	t.Helper()
+
+	// Get base test name and sanitize it
+	name := t.Name()
+	// Replace path separators and other invalid chars with underscore
+	name = sanitizeNameRegexp.ReplaceAllString(name, "_")
+	// Limit length to avoid overly long container names
+	if len(name) > 50 {
+		name = name[:50]
+	}
+
+	return name
+}
 
 // FixtureDir returns the path to the testdata directory.
 func FixtureDir(t *testing.T) string {
@@ -98,9 +119,16 @@ func CreateTempWorkspaceFromFixture(t *testing.T, fixtureName string) string {
 }
 
 // SimpleImageConfig returns a minimal devcontainer.json for an image-based config.
-func SimpleImageConfig(image string) string {
+// Uses a unique name based on the test name to avoid parallel test conflicts.
+func SimpleImageConfig(t *testing.T, image string) string {
+	t.Helper()
+	return SimpleImageConfigWithName(image, UniqueTestName(t))
+}
+
+// SimpleImageConfigWithName returns a minimal devcontainer.json with a custom name.
+func SimpleImageConfigWithName(image, name string) string {
 	cfg := map[string]interface{}{
-		"name":            "test",
+		"name":            name,
 		"image":           image,
 		"workspaceFolder": "/workspace",
 	}
@@ -109,9 +137,16 @@ func SimpleImageConfig(image string) string {
 }
 
 // SimpleComposeConfig returns a devcontainer.json for a compose-based config.
-func SimpleComposeConfig(composeFile, service string) string {
+// Uses a unique name based on the test name to avoid parallel test conflicts.
+func SimpleComposeConfig(t *testing.T, composeFile, service string) string {
+	t.Helper()
+	return SimpleComposeConfigWithName(composeFile, service, UniqueTestName(t))
+}
+
+// SimpleComposeConfigWithName returns a devcontainer.json for a compose-based config with a custom name.
+func SimpleComposeConfigWithName(composeFile, service, name string) string {
 	cfg := map[string]interface{}{
-		"name":              "test",
+		"name":              name,
 		"dockerComposeFile": composeFile,
 		"service":           service,
 		"workspaceFolder":   "/workspace",
@@ -121,9 +156,16 @@ func SimpleComposeConfig(composeFile, service string) string {
 }
 
 // ConfigWithFeatures returns a devcontainer.json with features.
-func ConfigWithFeatures(image string, features map[string]interface{}) string {
+// Uses a unique name based on the test name to avoid parallel test conflicts.
+func ConfigWithFeatures(t *testing.T, image string, features map[string]interface{}) string {
+	t.Helper()
+	return ConfigWithFeaturesAndName(image, features, UniqueTestName(t))
+}
+
+// ConfigWithFeaturesAndName returns a devcontainer.json with features and a custom name.
+func ConfigWithFeaturesAndName(image string, features map[string]interface{}, name string) string {
 	cfg := map[string]interface{}{
-		"name":            "test",
+		"name":            name,
 		"image":           image,
 		"workspaceFolder": "/workspace",
 		"features":        features,

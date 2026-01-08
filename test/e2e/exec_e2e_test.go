@@ -15,7 +15,7 @@ import (
 func TestExecE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
