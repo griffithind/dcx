@@ -159,7 +159,7 @@ echo "feature installed" > /tmp/feature-marker
 
 	// Create devcontainer.json
 	devcontainerJSON := `{
-		"name": "Feature Test",
+		"name": "Local Feature Test",
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"features": {
@@ -205,7 +205,7 @@ func createWorkspaceWithOptionsFeature(t *testing.T) string {
 
 	// Create devcontainer.json with options
 	devcontainerJSON := `{
-		"name": "Options Test",
+		"name": "Feature Options Test",
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"features": {
@@ -358,7 +358,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	workspace := createWorkspaceWithOptionsFeature(t)
+	workspace := createWorkspaceForCachingTest(t)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
@@ -388,7 +388,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 		// Change the feature options in devcontainer.json
 		devcontainerDir := filepath.Join(workspace, ".devcontainer")
 		devcontainerJSON := `{
-		"name": "Options Test",
+		"name": "Feature Caching Test",
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"features": {
@@ -486,6 +486,56 @@ func createWorkspaceWithMountsFeature(t *testing.T) string {
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-mounts": {}
+		}
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	return workspace
+}
+
+// createWorkspaceForCachingTest creates a workspace for the caching test with a unique name.
+func createWorkspaceForCachingTest(t *testing.T) string {
+	t.Helper()
+
+	workspace := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(workspace, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "with-options")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Copy feature from testdata
+	featureFixture := helpers.FeatureFixture(t, "with-options")
+
+	// Copy devcontainer-feature.json
+	data, err := os.ReadFile(filepath.Join(featureFixture, "devcontainer-feature.json"))
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), data, 0644)
+	require.NoError(t, err)
+
+	// Copy install.sh
+	data, err = os.ReadFile(filepath.Join(featureFixture, "install.sh"))
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), data, 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with unique name for caching test
+	devcontainerJSON := `{
+		"name": "Feature Caching Test",
+		"image": "alpine:latest",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/with-options": {
+				"greeting": "CustomHello",
+				"enabled": true,
+				"count": "5"
+			}
 		}
 	}`
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)

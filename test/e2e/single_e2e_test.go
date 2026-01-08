@@ -143,7 +143,7 @@ func TestSingleContainerWithEnv(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Env Test",
+		"name": "Single Container Env Test",
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {
