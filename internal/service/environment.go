@@ -492,10 +492,17 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		if err == nil {
 			resolvedFeatures, err := mgr.ResolveAll(ctx, info.Config.Features, info.Config.OverrideFeatureInstallOrder)
 			if err == nil && len(resolvedFeatures) > 0 {
-				var onCreateHooks, postCreateHooks, postStartHooks []lifecycle.FeatureHook
+				var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
 
 				for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
 					onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
+						FeatureID:   fh.FeatureID,
+						FeatureName: fh.FeatureName,
+						Command:     fh.Command,
+					})
+				}
+				for _, fh := range features.CollectUpdateContentCommands(resolvedFeatures) {
+					updateContentHooks = append(updateContentHooks, lifecycle.FeatureHook{
 						FeatureID:   fh.FeatureID,
 						FeatureName: fh.FeatureName,
 						Command:     fh.Command,
@@ -515,8 +522,15 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 						Command:     fh.Command,
 					})
 				}
+				for _, fh := range features.CollectPostAttachCommands(resolvedFeatures) {
+					postAttachHooks = append(postAttachHooks, lifecycle.FeatureHook{
+						FeatureID:   fh.FeatureID,
+						FeatureName: fh.FeatureName,
+						Command:     fh.Command,
+					})
+				}
 
-				hookRunner.SetFeatureHooks(onCreateHooks, postCreateHooks, postStartHooks)
+				hookRunner.SetFeatureHooks(onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks)
 			}
 		}
 	}
