@@ -105,6 +105,11 @@ func (r *UnifiedRunner) upCompose(ctx context.Context, opts UpOptions, hasFeatur
 		if err := r.buildDerivedImageForCompose(ctx, opts); err != nil {
 			return fmt.Errorf("failed to build derived image with features: %w", err)
 		}
+	} else {
+		// Even without features, we may need to apply UID update layer for compose
+		if err := r.applyUIDUpdateForCompose(ctx, opts); err != nil {
+			return fmt.Errorf("failed to apply UID update: %w", err)
+		}
 	}
 
 	// Generate override file
@@ -828,6 +833,47 @@ func (r *UnifiedRunner) buildDerivedImageForCompose(ctx context.Context, opts Up
 	}
 
 	r.derivedImage = derivedImage
+	return nil
+}
+
+// applyUIDUpdateForCompose applies UID update layer for compose without features.
+func (r *UnifiedRunner) applyUIDUpdateForCompose(ctx context.Context, opts UpOptions) error {
+	ws := r.workspace
+
+	// Get user config
+	remoteUser := ws.Resolved.RemoteUser
+	containerUser := ws.Resolved.ContainerUser
+
+	// Check if we need UID update
+	effectiveUser := remoteUser
+	if effectiveUser == "" {
+		effectiveUser = containerUser
+	}
+	if effectiveUser == "" {
+		return nil // No user to update
+	}
+
+	hostUID := os.Getuid()
+	if !features.ShouldUpdateRemoteUserUID(ws.RawConfig, effectiveUser, hostUID) {
+		return nil
+	}
+
+	// Get the base image from compose
+	baseImage, err := r.getComposeBaseImage(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine base image: %w", err)
+	}
+
+	// Apply UID update layer
+	uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, remoteUser, containerUser, opts.Rebuild)
+	if err != nil {
+		return err
+	}
+
+	if uidImage != baseImage {
+		r.derivedImage = uidImage
+	}
+
 	return nil
 }
 

@@ -14,8 +14,10 @@ import (
 // updateUIDDockerfile is the Dockerfile template for updating user UID/GID.
 // This matches the devcontainers/cli reference implementation.
 // See: https://github.com/devcontainers/cli/blob/main/scripts/updateUID.Dockerfile
-const updateUIDDockerfile = `ARG BASE_IMAGE
-FROM $BASE_IMAGE
+const updateUIDDockerfile = `# syntax=docker/dockerfile:1
+# check=skip=InvalidDefaultArgInFrom
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 
 USER root
 
@@ -61,6 +63,14 @@ USER $IMAGE_USER
 //   - hostUID: the host user's UID to match
 //   - hostGID: the host user's GID to match
 func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, imageUser string, hostUID, hostGID int) error {
+	// Validate inputs
+	if baseImage == "" {
+		return fmt.Errorf("baseImage is required for UID update")
+	}
+	if remoteUser == "" {
+		return fmt.Errorf("remoteUser is required for UID update")
+	}
+
 	// Create temporary build directory
 	tempBuildDir, err := os.MkdirTemp("", "dcx-updateuid-*")
 	if err != nil {
