@@ -302,6 +302,50 @@ func TestFeatureOptionsHandling(t *testing.T) {
 	assert.Equal(t, "false", env["UPGRADEPACKAGES"])
 }
 
+// TestFeatureMetadataFields tests parsing of all feature metadata fields.
+func TestFeatureMetadataFields(t *testing.T) {
+	metadata := &FeatureMetadata{
+		ID:               "my-feature",
+		Version:          "1.2.3",
+		Name:             "My Feature",
+		Description:      "A test feature",
+		DocumentationURL: "https://example.com/docs",
+		LicenseURL:       "https://example.com/license",
+		Keywords:         []string{"dev", "tools", "testing"},
+		LegacyIds:        []string{"old-feature-name", "very-old-name"},
+		Deprecated:       true,
+		Options: map[string]OptionDefinition{
+			"version": {Type: "string", Default: "latest"},
+		},
+		InstallsAfter: []string{"common-utils"},
+		DependsOn:     []string{"base-feature"},
+		ContainerEnv:  map[string]string{"MY_VAR": "value"},
+		CapAdd:        []string{"SYS_PTRACE"},
+		SecurityOpt:   []string{"seccomp=unconfined"},
+		Privileged:    false,
+		Init:          true,
+	}
+
+	// Verify all fields are set correctly
+	assert.Equal(t, "my-feature", metadata.ID)
+	assert.Equal(t, "1.2.3", metadata.Version)
+	assert.Equal(t, "My Feature", metadata.Name)
+	assert.Equal(t, "A test feature", metadata.Description)
+	assert.Equal(t, "https://example.com/docs", metadata.DocumentationURL)
+	assert.Equal(t, "https://example.com/license", metadata.LicenseURL)
+	assert.Equal(t, []string{"dev", "tools", "testing"}, metadata.Keywords)
+	assert.Equal(t, []string{"old-feature-name", "very-old-name"}, metadata.LegacyIds)
+	assert.True(t, metadata.Deprecated)
+	assert.Len(t, metadata.Options, 1)
+	assert.Equal(t, []string{"common-utils"}, metadata.InstallsAfter)
+	assert.Equal(t, []string{"base-feature"}, metadata.DependsOn)
+	assert.Equal(t, "value", metadata.ContainerEnv["MY_VAR"])
+	assert.Equal(t, []string{"SYS_PTRACE"}, metadata.CapAdd)
+	assert.Equal(t, []string{"seccomp=unconfined"}, metadata.SecurityOpt)
+	assert.False(t, metadata.Privileged)
+	assert.True(t, metadata.Init)
+}
+
 // TestFeatureOptionsWithBooleans tests boolean option handling.
 func TestFeatureOptionsWithBooleans(t *testing.T) {
 	tests := []struct {
