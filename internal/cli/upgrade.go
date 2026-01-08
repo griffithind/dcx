@@ -30,6 +30,7 @@ the latest, no action is taken.`,
 }
 
 func init() {
+	upgradeCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(upgradeCmd)
 }
 

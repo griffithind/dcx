@@ -34,6 +34,7 @@ var (
 func init() {
 	sshCmd.Flags().BoolVar(&sshStdio, "stdio", false, "Stdio transport for SSH ProxyCommand")
 	sshCmd.Flags().BoolVar(&sshConnect, "connect", false, "Connect directly via ssh")
+	sshCmd.GroupID = "utilities"
 	rootCmd.AddCommand(sshCmd)
 }
 

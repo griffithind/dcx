@@ -35,6 +35,7 @@ Examples:
 }
 
 func init() {
+	planCmd.GroupID = "info"
 	rootCmd.AddCommand(planCmd)
 }
 

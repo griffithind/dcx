@@ -24,6 +24,7 @@ func init() {
 	sshServerCmd.Flags().StringVar(&sshServerUser, "user", "", "User to run as")
 	sshServerCmd.Flags().StringVar(&sshServerWorkDir, "workdir", "/workspace", "Working directory")
 	sshServerCmd.Flags().StringVar(&sshServerShell, "shell", "", "Shell to use (auto-detected if empty)")
+	sshServerCmd.Hidden = true
 	rootCmd.AddCommand(sshServerCmd)
 }
 

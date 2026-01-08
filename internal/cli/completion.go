@@ -64,5 +64,6 @@ PowerShell:
 }
 
 func init() {
+	completionCmd.GroupID = "utilities"
 	rootCmd.AddCommand(completionCmd)
 }

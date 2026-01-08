@@ -83,10 +83,26 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "minimal output (errors only)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
-	// Add subcommands
-	rootCmd.AddCommand(statusCmd)
+	// Define command groups
+	rootCmd.AddGroup(&cobra.Group{ID: "lifecycle", Title: "Lifecycle Commands:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "execution", Title: "Execution Commands:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "info", Title: "Information Commands:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "maintenance", Title: "Build & Maintenance:"})
+	rootCmd.AddGroup(&cobra.Group{ID: "utilities", Title: "Utilities:"})
+
+	// Lifecycle commands
+	upCmd.GroupID = "lifecycle"
+	stopCmd.GroupID = "lifecycle"
+	downCmd.GroupID = "lifecycle"
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(downCmd)
+
+	// Information commands
+	statusCmd.GroupID = "info"
+	rootCmd.AddCommand(statusCmd)
+
+	// Utilities
+	doctorCmd.GroupID = "utilities"
 	rootCmd.AddCommand(doctorCmd)
 }

@@ -200,5 +200,6 @@ func formatListState(s string) string {
 
 func init() {
 	listCmd.Flags().BoolVar(&listShowAll, "all", false, "show all environments (including stopped)")
+	listCmd.GroupID = "info"
 	rootCmd.AddCommand(listCmd)
 }

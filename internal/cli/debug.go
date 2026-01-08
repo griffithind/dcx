@@ -46,6 +46,7 @@ Examples:
 
 func init() {
 	debugCmd.Flags().BoolVar(&debugOutputJSON, "json", false, "output debug info as JSON")
+	debugCmd.Hidden = true
 	rootCmd.AddCommand(debugCmd)
 }
 
