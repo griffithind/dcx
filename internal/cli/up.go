@@ -6,6 +6,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/spf13/cobra"
@@ -44,6 +45,7 @@ func init() {
 
 func runUp(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -73,14 +75,32 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Determine if SSH agent should be enabled
 	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
 
-	// Create environment service and delegate to it
+	// Create environment service
 	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
-	return svc.Up(ctx, service.UpOptions{
+	// Start spinner for progress feedback
+	spinner := output.NewSpinner("Starting devcontainer...")
+	if !out.IsQuiet() && !out.IsJSON() {
+		spinner.Start()
+	}
+
+	// Execute up
+	upErr := svc.Up(ctx, service.UpOptions{
 		Recreate:        recreate,
 		Rebuild:         rebuild,
 		Pull:            pull,
 		SSHAgentEnabled: sshAgentEnabled,
 		EnableSSH:       effectiveSSH,
 	})
+
+	// Stop spinner with appropriate message
+	if !out.IsQuiet() && !out.IsJSON() {
+		if upErr != nil {
+			spinner.StopWithError("Failed to start devcontainer")
+		} else {
+			spinner.StopWithSuccess("Devcontainer started successfully")
+		}
+	}
+
+	return upErr
 }
