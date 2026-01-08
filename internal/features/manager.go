@@ -125,6 +125,32 @@ func (m *Manager) resolveDependencies(ctx context.Context, resolved map[string]*
 func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) map[string]map[string]interface{} {
 	unresolved := make(map[string]map[string]interface{})
 
+	// Helper to check if a dependency is already resolved
+	// Dependencies can be specified as full OCI paths or short IDs
+	isResolved := func(depID string) bool {
+		// Check exact match first
+		if _, exists := resolved[depID]; exists {
+			return true
+		}
+		// Check if any resolved feature's metadata ID matches the dependency
+		// This handles cases where depID is "ghcr.io/.../common-utils" but
+		// the feature is stored under its metadata ID "common-utils"
+		for _, f := range resolved {
+			if f.Metadata != nil && f.Metadata.ID != "" {
+				// Check if the dependency ends with the metadata ID
+				// e.g., "ghcr.io/devcontainers/features/common-utils" ends with "common-utils"
+				if f.Metadata.ID == depID {
+					return true
+				}
+				// Also check if the full OCI path ends with /metadataID
+				if len(depID) > len(f.Metadata.ID) && depID[len(depID)-len(f.Metadata.ID)-1] == '/' && depID[len(depID)-len(f.Metadata.ID):] == f.Metadata.ID {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	for _, feature := range resolved {
 		if feature.Metadata == nil {
 			continue
@@ -132,7 +158,7 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 
 		// Check hard dependencies (dependsOn)
 		for depID, depOptionsRaw := range feature.Metadata.DependsOn {
-			if _, exists := resolved[depID]; !exists {
+			if !isResolved(depID) {
 				// Parse options from dependency config
 				var depOptions map[string]interface{}
 				if opts, ok := depOptionsRaw.(map[string]interface{}); ok {
@@ -146,7 +172,7 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 
 		// Check soft dependencies (installsAfter) - these are also resolved if specified
 		for _, depID := range feature.Metadata.InstallsAfter {
-			if _, exists := resolved[depID]; !exists {
+			if !isResolved(depID) {
 				// Soft dependencies don't have options specified
 				if _, alreadyQueued := unresolved[depID]; !alreadyQueued {
 					unresolved[depID] = make(map[string]interface{})
