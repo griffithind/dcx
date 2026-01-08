@@ -9,6 +9,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/shortcuts"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
@@ -88,9 +89,13 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 }
 
 func listShortcuts(dcxCfg *config.DcxConfig) error {
+	out := output.Global()
+	c := out.Color()
+
 	if dcxCfg == nil || len(dcxCfg.Shortcuts) == 0 {
-		fmt.Println("No shortcuts defined.")
-		fmt.Println("\nTo define shortcuts, create .devcontainer/dcx.json with a \"shortcuts\" key.")
+		out.Println("No shortcuts defined.")
+		out.Println()
+		out.Println("To define shortcuts, create .devcontainer/dcx.json with a \"shortcuts\" key.")
 		return nil
 	}
 
@@ -101,8 +106,8 @@ func listShortcuts(dcxCfg *config.DcxConfig) error {
 		return infos[i].Name < infos[j].Name
 	})
 
-	fmt.Println("Available shortcuts:")
-	fmt.Println()
+	out.Println(c.Header("Available shortcuts:"))
+	out.Println()
 
 	// Calculate column widths
 	maxName := 0
@@ -114,10 +119,10 @@ func listShortcuts(dcxCfg *config.DcxConfig) error {
 
 	for _, info := range infos {
 		if info.Description != "" {
-			fmt.Printf("  %-*s  %s\n", maxName, info.Name, info.Description)
-			fmt.Printf("  %-*s  -> %s\n", maxName, "", info.Expansion)
+			out.Printf("  %s  %s", c.Code(fmt.Sprintf("%-*s", maxName, info.Name)), info.Description)
+			out.Printf("  %-*s  %s", maxName, "", c.Dim("-> "+info.Expansion))
 		} else {
-			fmt.Printf("  %-*s  -> %s\n", maxName, info.Name, info.Expansion)
+			out.Printf("  %s  %s", c.Code(fmt.Sprintf("%-*s", maxName, info.Name)), c.Dim("-> "+info.Expansion))
 		}
 	}
 
