@@ -139,6 +139,8 @@ func (r *UnifiedRunner) upCompose(ctx context.Context, opts UpOptions, hasFeatur
 
 // upSingle handles single-container configurations (image or Dockerfile).
 func (r *UnifiedRunner) upSingle(ctx context.Context, opts UpOptions, hasFeatures bool) error {
+	ws := r.workspace
+
 	// Resolve the base image
 	baseImage, err := r.resolveBaseImage(ctx, opts)
 	if err != nil {
@@ -154,6 +156,18 @@ func (r *UnifiedRunner) upSingle(ctx context.Context, opts UpOptions, hasFeature
 		}
 		finalImage = derivedImage
 		r.derivedImage = derivedImage
+	} else {
+		// Even without features, we may need to apply UID update layer
+		remoteUser := ws.Resolved.RemoteUser
+		containerUser := ws.Resolved.ContainerUser
+		uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, remoteUser, containerUser, opts.Rebuild)
+		if err != nil {
+			return fmt.Errorf("failed to apply UID update: %w", err)
+		}
+		if uidImage != baseImage {
+			finalImage = uidImage
+			r.derivedImage = uidImage
+		}
 	}
 
 	// Create the container
@@ -254,6 +268,10 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		}
 	}
 
+	// Get user config early for UID update decisions
+	remoteUser := ws.Resolved.RemoteUser
+	containerUser := ws.Resolved.ContainerUser
+
 	// Always resolve features to get metadata (mounts, env, etc.)
 	// This is needed even when using cached images
 	resolvedFeatures, err := r.resolveFeatures(ctx, pull)
@@ -270,7 +288,8 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		exists, err := r.docker.ImageExists(ctx, derivedTag)
 		if err == nil && exists {
 			fmt.Printf("Using cached derived image: %s\n", derivedTag)
-			return derivedTag, nil
+			// Still need to apply UID update layer (may be cached too)
+			return r.applyUIDUpdateLayer(ctx, derivedTag, remoteUser, containerUser, rebuild)
 		}
 	}
 
@@ -281,14 +300,69 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 	if err != nil {
 		return "", fmt.Errorf("failed to create feature manager: %w", err)
 	}
-	remoteUser := ws.Resolved.RemoteUser
-	containerUser := ws.Resolved.ContainerUser
 
 	if err := featureMgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, ws.ConfigDir, remoteUser, containerUser); err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
 	}
 
-	return derivedTag, nil
+	// Apply UID update layer if needed (after features, per devcontainer spec)
+	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedTag, remoteUser, containerUser, rebuild)
+	if err != nil {
+		return "", err
+	}
+
+	return finalImage, nil
+}
+
+// applyUIDUpdateLayer applies a UID update layer to match host UID/GID.
+// This is done at build time per the devcontainer spec.
+// Returns the final image tag (may be same as input if no update needed).
+func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remoteUser, containerUser string, rebuild bool) (string, error) {
+	ws := r.workspace
+
+	// Determine effective user for UID update
+	effectiveUser := remoteUser
+	if effectiveUser == "" {
+		effectiveUser = containerUser
+	}
+	if effectiveUser == "" {
+		return baseImage, nil // No user to update
+	}
+
+	// Get host UID/GID
+	hostUID := os.Getuid()
+	hostGID := os.Getgid()
+
+	// Check if we should update UID
+	if !features.ShouldUpdateRemoteUserUID(ws.RawConfig, effectiveUser, hostUID) {
+		return baseImage, nil
+	}
+
+	// Build UID update image tag
+	uidTag := fmt.Sprintf("%s-uid%d", baseImage, hostUID)
+
+	// Check if UID update image already exists
+	if !rebuild {
+		exists, err := r.docker.ImageExists(ctx, uidTag)
+		if err == nil && exists {
+			fmt.Printf("Using cached UID-updated image: %s\n", uidTag)
+			return uidTag, nil
+		}
+	}
+
+	fmt.Printf("Updating UID/GID to %d:%d for user %s...\n", hostUID, hostGID, effectiveUser)
+
+	// Determine the user the container should run as after UID update
+	imageUser := containerUser
+	if imageUser == "" {
+		imageUser = effectiveUser
+	}
+
+	if err := features.BuildUpdateUIDImage(ctx, baseImage, uidTag, effectiveUser, imageUser, hostUID, hostGID); err != nil {
+		return "", fmt.Errorf("failed to build UID update image: %w", err)
+	}
+
+	return uidTag, nil
 }
 
 // resolveFeatures resolves and orders features for installation.
