@@ -133,6 +133,9 @@ type FeatureMetadata struct {
 
 	// PostAttachCommand runs when attaching to the container
 	PostAttachCommand interface{} `json:"postAttachCommand,omitempty"`
+
+	// Customizations contains tool-specific configuration
+	Customizations map[string]interface{} `json:"customizations,omitempty"`
 }
 
 // OptionDefinition defines a feature option.
