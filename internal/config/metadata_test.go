@@ -236,3 +236,114 @@ func TestUnionStrings(t *testing.T) {
 		})
 	}
 }
+
+func TestDeepMergeVSCodeCustomizations(t *testing.T) {
+	t.Run("extensions are unioned", func(t *testing.T) {
+		local := &DevcontainerConfig{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"extensions": []interface{}{"local.ext1", "shared.ext"},
+				},
+			},
+		}
+		image := []DevcontainerConfig{{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"extensions": []interface{}{"image.ext1", "shared.ext"},
+				},
+			},
+		}}
+		result := MergeMetadata(local, image)
+		vscode := result.Customizations["vscode"].(map[string]interface{})
+		extensions := vscode["extensions"].([]interface{})
+		// Should have: local.ext1, shared.ext, image.ext1 (no duplicate shared.ext)
+		assert.Len(t, extensions, 3)
+		assert.Contains(t, extensions, "local.ext1")
+		assert.Contains(t, extensions, "shared.ext")
+		assert.Contains(t, extensions, "image.ext1")
+	})
+
+	t.Run("settings are merged with local taking precedence", func(t *testing.T) {
+		local := &DevcontainerConfig{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"settings": map[string]interface{}{
+						"editor.fontSize":   14,
+						"editor.tabSize":    4,
+						"local.setting":     "localValue",
+					},
+				},
+			},
+		}
+		image := []DevcontainerConfig{{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"settings": map[string]interface{}{
+						"editor.fontSize": 12,        // local wins
+						"image.setting":   "imageValue",
+					},
+				},
+			},
+		}}
+		result := MergeMetadata(local, image)
+		vscode := result.Customizations["vscode"].(map[string]interface{})
+		settings := vscode["settings"].(map[string]interface{})
+		assert.Equal(t, 14, settings["editor.fontSize"])         // local wins
+		assert.Equal(t, 4, settings["editor.tabSize"])           // local only
+		assert.Equal(t, "localValue", settings["local.setting"]) // local only
+		assert.Equal(t, "imageValue", settings["image.setting"]) // image only
+	})
+
+	t.Run("both extensions and settings are merged together", func(t *testing.T) {
+		local := &DevcontainerConfig{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"extensions": []interface{}{"local.ext"},
+					"settings": map[string]interface{}{
+						"editor.fontSize": 14,
+					},
+				},
+			},
+		}
+		image := []DevcontainerConfig{{
+			Customizations: map[string]interface{}{
+				"vscode": map[string]interface{}{
+					"extensions": []interface{}{"image.ext"},
+					"settings": map[string]interface{}{
+						"editor.fontSize": 12,
+						"image.setting":   "value",
+					},
+				},
+			},
+		}}
+		result := MergeMetadata(local, image)
+		vscode := result.Customizations["vscode"].(map[string]interface{})
+		extensions := vscode["extensions"].([]interface{})
+		settings := vscode["settings"].(map[string]interface{})
+		assert.Len(t, extensions, 2)
+		assert.Equal(t, 14, settings["editor.fontSize"]) // local wins
+		assert.Equal(t, "value", settings["image.setting"])
+	})
+
+	t.Run("non-vscode customizations use simple merge", func(t *testing.T) {
+		local := &DevcontainerConfig{
+			Customizations: map[string]interface{}{
+				"jetbrains": map[string]interface{}{
+					"localSetting": "value",
+				},
+			},
+		}
+		image := []DevcontainerConfig{{
+			Customizations: map[string]interface{}{
+				"jetbrains": map[string]interface{}{
+					"imageSetting": "value",
+				},
+			},
+		}}
+		result := MergeMetadata(local, image)
+		jetbrains := result.Customizations["jetbrains"].(map[string]interface{})
+		// Local customization wins entirely (not deep merged)
+		assert.Equal(t, "value", jetbrains["localSetting"])
+		assert.NotContains(t, jetbrains, "imageSetting")
+	})
+}

@@ -65,6 +65,9 @@ var (
 
 	// ${pathSeparator}
 	pathSeparatorPattern = regexp.MustCompile(`\$\{pathSeparator\}`)
+
+	// ${userHome}
+	userHomePattern = regexp.MustCompile(`\$\{userHome\}`)
 )
 
 // SubstitutionContext provides values for variable substitution.
@@ -72,6 +75,7 @@ type SubstitutionContext struct {
 	LocalWorkspaceFolder     string
 	ContainerWorkspaceFolder string
 	DevcontainerID           string
+	UserHome                 string            // User's home directory for ${userHome}
 	ContainerEnv             map[string]string // Container environment variables for ${containerEnv:VAR}
 }
 
@@ -147,6 +151,16 @@ func Substitute(s string, ctx *SubstitutionContext) string {
 
 	// ${pathSeparator}
 	s = pathSeparatorPattern.ReplaceAllString(s, string(filepath.Separator))
+
+	// ${userHome}
+	if ctx != nil && ctx.UserHome != "" {
+		s = userHomePattern.ReplaceAllString(s, ctx.UserHome)
+	} else {
+		// Fallback to os.UserHomeDir if not provided in context
+		if home, err := os.UserHomeDir(); err == nil {
+			s = userHomePattern.ReplaceAllString(s, home)
+		}
+	}
 
 	return s
 }

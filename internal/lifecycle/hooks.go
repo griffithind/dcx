@@ -346,8 +346,12 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 		return nil
 	}
 
-	// Parallel execution for map commands
+	// Parallel execution for map commands with context cancellation
+	// Per spec, if one parallel command fails, cancel the others
 	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(cmds))
 
@@ -356,8 +360,14 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := r.executeHostCommand(ctx, cmd); err != nil {
-				errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+			select {
+			case <-ctx.Done():
+				return // Context cancelled, stop execution
+			default:
+				if err := r.executeHostCommand(ctx, cmd); err != nil {
+					errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+					cancel() // Cancel other parallel commands
+				}
 			}
 		}()
 	}
@@ -409,8 +419,12 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 		return nil
 	}
 
-	// Parallel execution for map commands
+	// Parallel execution for map commands with context cancellation
+	// Per spec, if one parallel command fails, cancel the others
 	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(cmds))
 
@@ -419,8 +433,14 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := r.executeContainerCommand(ctx, cmd); err != nil {
-				errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+			select {
+			case <-ctx.Done():
+				return // Context cancelled, stop execution
+			default:
+				if err := r.executeContainerCommand(ctx, cmd); err != nil {
+					errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+					cancel() // Cancel other parallel commands
+				}
 			}
 		}()
 	}

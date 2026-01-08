@@ -138,9 +138,15 @@ func mergeConfig(target, source *DevcontainerConfig) {
 	if target.Customizations == nil && source.Customizations != nil {
 		target.Customizations = make(map[string]interface{})
 	}
-	for k, v := range source.Customizations {
-		if _, exists := target.Customizations[k]; !exists {
-			target.Customizations[k] = v
+	for tool, sourceConfig := range source.Customizations {
+		if targetConfig, exists := target.Customizations[tool]; exists {
+			// Deep merge for VS Code customizations
+			if tool == "vscode" {
+				deepMergeVSCode(targetConfig, sourceConfig)
+			}
+			// For other tools, target takes precedence (already exists)
+		} else {
+			target.Customizations[tool] = sourceConfig
 		}
 	}
 
@@ -282,6 +288,68 @@ func unionMounts(a, b []Mount) []Mount {
 		if !seen[m.Target] {
 			seen[m.Target] = true
 			result = append(result, m)
+		}
+	}
+
+	return result
+}
+
+// deepMergeVSCode performs deep merging for VS Code customizations per spec:
+// - extensions: union arrays
+// - settings: merge maps, target (local config) wins for conflicts
+func deepMergeVSCode(target, source interface{}) {
+	targetMap, targetOk := target.(map[string]interface{})
+	sourceMap, sourceOk := source.(map[string]interface{})
+	if !targetOk || !sourceOk {
+		return
+	}
+
+	// Extensions: union arrays (add source extensions not in target)
+	if sourceExt, ok := sourceMap["extensions"]; ok {
+		sourceExtArr, sourceIsArr := sourceExt.([]interface{})
+		if sourceIsArr {
+			targetExtArr, _ := targetMap["extensions"].([]interface{})
+			targetMap["extensions"] = unionExtensions(targetExtArr, sourceExtArr)
+		}
+	}
+
+	// Settings: merge maps, target wins for conflicts
+	if sourceSettings, ok := sourceMap["settings"].(map[string]interface{}); ok {
+		targetSettings, targetHasSettings := targetMap["settings"].(map[string]interface{})
+		if !targetHasSettings {
+			targetSettings = make(map[string]interface{})
+			targetMap["settings"] = targetSettings
+		}
+		for k, v := range sourceSettings {
+			if _, exists := targetSettings[k]; !exists {
+				targetSettings[k] = v
+			}
+		}
+	}
+}
+
+// unionExtensions returns a union of extension arrays without duplicates.
+func unionExtensions(target, source []interface{}) []interface{} {
+	seen := make(map[string]bool)
+	var result []interface{}
+
+	// Add all target extensions first
+	for _, ext := range target {
+		if extStr, ok := ext.(string); ok {
+			if !seen[extStr] {
+				seen[extStr] = true
+				result = append(result, ext)
+			}
+		}
+	}
+
+	// Add source extensions that aren't duplicates
+	for _, ext := range source {
+		if extStr, ok := ext.(string); ok {
+			if !seen[extStr] {
+				seen[extStr] = true
+				result = append(result, ext)
+			}
 		}
 	}
 
