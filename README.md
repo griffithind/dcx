@@ -1,11 +1,15 @@
 # dcx - Devcontainer Executor
 
-A CLI that parses, validates, and runs devcontainers without using the @devcontainers/cli. Designed for offline-safe operations with full support for docker compose devcontainers and Features.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> **Warning:** This project is new and under active development. APIs and features may change without notice.
+
+A lightweight, single-binary CLI for running devcontainers. Works offline, tracks state via Docker labels, and includes built-in SSH support—agent forwarding for Git operations and an SSH server for remote development with any editor.
 
 ## Features
 
 - **Native Docker integration** - Uses Docker Engine API and docker compose CLI directly
-- **Offline-safe operations** - `start`, `stop`, `exec`, and `shell` commands work without network access
+- **Offline-safe operations** - `stop`, `exec`, `shell`, and more commands work without network access
 - **Labels as database** - Container state tracked via Docker labels, no local state files required
 - **SSH agent forwarding** - Automatic forwarding of SSH agent to containers via TCP proxy
 - **SELinux support** - Automatic detection and :Z relabeling on enforcing systems
@@ -45,7 +49,6 @@ dcx status                # Check current state
 dcx exec -- npm install   # Run a command
 dcx shell                 # Open an interactive shell
 dcx stop                  # Stop containers (offline-safe)
-dcx start                 # Start containers (offline-safe)
 dcx down                  # Remove containers
 ```
 
@@ -53,14 +56,20 @@ dcx down                  # Remove containers
 
 | Command | Offline-Safe | Description |
 |---------|--------------|-------------|
-| `dcx up` | No | Build/pull images and start environment |
+| `dcx up` | Partial | Build/pull images and start environment |
 | `dcx build` | No | Build images without starting |
-| `dcx start` | Yes | Start existing containers |
 | `dcx stop` | Yes | Stop running containers |
+| `dcx restart` | No | Stop and start containers |
 | `dcx exec` | Yes | Run command in container |
 | `dcx shell` | Yes | Interactive shell |
+| `dcx run` | Yes | Execute shortcuts from dcx.json |
 | `dcx down` | Yes | Stop and remove containers |
 | `dcx status` | Yes | Show environment state |
+| `dcx list` | Yes | List managed environments |
+| `dcx logs` | Yes | View container logs |
+| `dcx config` | Yes | Show resolved configuration |
+| `dcx clean` | Yes | Remove orphaned dcx images |
+| `dcx ssh` | Yes | SSH access to container |
 | `dcx doctor` | Partial | Check system requirements |
 | `dcx upgrade` | No | Update dcx to latest version |
 
@@ -70,6 +79,9 @@ dcx down                  # Remove containers
 -w, --workspace   Workspace directory (default: current directory)
 -c, --config      Path to devcontainer.json
 -v, --verbose     Enable verbose output
+-q, --quiet       Minimal output (errors only)
+    --json        Output as JSON
+    --no-color    Disable colored output
     --version     Show version
 ```
 
@@ -140,7 +152,7 @@ dcx automatically forwards your SSH agent to containers using a TCP-based proxy:
 
 This approach works across all platforms (Docker Desktop, native Linux, Colima, Podman) without socket mounting issues.
 
-Use `--no-agent` on `exec`, `shell`, or `up` commands to disable SSH forwarding.
+Use `--no-agent` on `exec`, `shell`, `run`, or `up` commands to disable SSH forwarding.
 
 ## SELinux Support
 
@@ -187,8 +199,8 @@ make build-release
 - [Quick Start Guide](docs/user/QUICKSTART.md)
 - [Command Reference](docs/user/COMMANDS.md)
 - [Configuration Guide](docs/user/CONFIGURATION.md)
-- [Architecture](docs/design/ARCHITECTURE.md)
+- [Design Overview](docs/design/DESIGN.md)
 
 ## License
 
-[MIT License](LICENSE)
+[MIT License](LICENSE) - Copyright (c) 2026 Griffith Industries Inc

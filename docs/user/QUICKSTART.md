@@ -111,14 +111,14 @@ dcx exec -- npm install
 dcx shell
 ```
 
-### 6. Stop and Start (Offline-Safe)
+### 6. Stop and Restart
 
 ```bash
-# Stop the environment
+# Stop the environment (offline-safe)
 dcx stop
 
-# Start again (works offline!)
-dcx start
+# Start again - if containers exist and config unchanged, this is offline-safe
+dcx up
 ```
 
 ### 7. Remove the Environment
@@ -182,7 +182,7 @@ dcx up      # Start the container
 
 ```bash
 # Start your day
-dcx start
+dcx up
 
 # Work...
 dcx exec -- npm run dev
