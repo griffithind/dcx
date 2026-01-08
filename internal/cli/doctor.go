@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/spf13/cobra"
@@ -26,15 +27,25 @@ This command checks:
 	RunE: runDoctor,
 }
 
-type checkResult struct {
-	name    string
-	ok      bool
-	message string
+// CheckResult represents a single check result.
+type CheckResult struct {
+	Name    string `json:"name"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+// DoctorOutput represents the doctor output for JSON.
+type DoctorOutput struct {
+	Checks  []CheckResult `json:"checks"`
+	AllOK   bool          `json:"allOk"`
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	var results []checkResult
+	out := output.Global()
+	c := out.Color()
+
+	var results []CheckResult
 
 	// Check Docker daemon
 	results = append(results, checkDocker(ctx))
@@ -50,163 +61,180 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		results = append(results, checkSELinux())
 	}
 
-	// Print results
-	fmt.Println("dcx doctor")
-	fmt.Println("==========")
-	fmt.Println()
-
+	// Calculate overall status
 	allOK := true
 	for _, r := range results {
-		status := "✓"
-		if !r.ok {
-			status = "✗"
+		if !r.OK {
 			allOK = false
+			break
 		}
-		fmt.Printf("[%s] %s: %s\n", status, r.name, r.message)
 	}
 
-	fmt.Println()
+	// JSON output mode
+	if out.IsJSON() {
+		return out.JSON(DoctorOutput{
+			Checks: results,
+			AllOK:  allOK,
+		})
+	}
+
+	// Text output mode
+	out.Println(c.Header("dcx doctor"))
+	out.Println(c.Dim("=========="))
+	out.Println()
+
+	for _, r := range results {
+		var status string
+		if r.OK {
+			status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
+		} else {
+			status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+		}
+		out.Println(status)
+	}
+
+	out.Println()
 	if allOK {
-		fmt.Println("All checks passed!")
+		out.Println(output.FormatSuccess("All checks passed!"))
 		return nil
 	}
 
 	return fmt.Errorf("some checks failed")
 }
 
-func checkDocker(ctx context.Context) checkResult {
+func checkDocker(ctx context.Context) CheckResult {
 	client, err := docker.NewClient()
 	if err != nil {
-		return checkResult{
-			name:    "Docker",
-			ok:      false,
-			message: fmt.Sprintf("failed to connect: %v", err),
+		return CheckResult{
+			Name:    "Docker",
+			OK:      false,
+			Message: fmt.Sprintf("failed to connect: %v", err),
 		}
 	}
 	defer client.Close()
 
 	if err := client.Ping(ctx); err != nil {
-		return checkResult{
-			name:    "Docker",
-			ok:      false,
-			message: fmt.Sprintf("daemon not responding: %v", err),
+		return CheckResult{
+			Name:    "Docker",
+			OK:      false,
+			Message: fmt.Sprintf("daemon not responding: %v", err),
 		}
 	}
 
 	version, err := client.ServerVersion(ctx)
 	if err != nil {
-		return checkResult{
-			name:    "Docker",
-			ok:      true,
-			message: "connected (version unknown)",
+		return CheckResult{
+			Name:    "Docker",
+			OK:      true,
+			Message: "connected (version unknown)",
 		}
 	}
 
-	return checkResult{
-		name:    "Docker",
-		ok:      true,
-		message: fmt.Sprintf("version %s", version),
+	return CheckResult{
+		Name:    "Docker",
+		OK:      true,
+		Message: fmt.Sprintf("version %s", version),
 	}
 }
 
-func checkCompose() checkResult {
+func checkCompose() CheckResult {
 	// Check for docker compose (v2 plugin)
 	cmd := exec.Command("docker", "compose", "version", "--short")
-	output, err := cmd.Output()
+	cmdOutput, err := cmd.Output()
 	if err == nil {
-		return checkResult{
-			name:    "Docker Compose",
-			ok:      true,
-			message: fmt.Sprintf("version %s", string(output[:len(output)-1])),
+		return CheckResult{
+			Name:    "Docker Compose",
+			OK:      true,
+			Message: fmt.Sprintf("version %s", string(cmdOutput[:len(cmdOutput)-1])),
 		}
 	}
 
 	// Check for docker-compose (standalone)
 	cmd = exec.Command("docker-compose", "version", "--short")
-	output, err = cmd.Output()
+	cmdOutput, err = cmd.Output()
 	if err == nil {
-		return checkResult{
-			name:    "Docker Compose",
-			ok:      true,
-			message: fmt.Sprintf("version %s (standalone)", string(output[:len(output)-1])),
+		return CheckResult{
+			Name:    "Docker Compose",
+			OK:      true,
+			Message: fmt.Sprintf("version %s (standalone)", string(cmdOutput[:len(cmdOutput)-1])),
 		}
 	}
 
-	return checkResult{
-		name:    "Docker Compose",
-		ok:      false,
-		message: "not found (install docker compose plugin or docker-compose)",
+	return CheckResult{
+		Name:    "Docker Compose",
+		OK:      false,
+		Message: "not found (install docker compose plugin or docker-compose)",
 	}
 }
 
-func checkSSHAgent() checkResult {
+func checkSSHAgent() CheckResult {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock == "" {
-		return checkResult{
-			name:    "SSH Agent",
-			ok:      false,
-			message: "SSH_AUTH_SOCK not set",
+		return CheckResult{
+			Name:    "SSH Agent",
+			OK:      false,
+			Message: "SSH_AUTH_SOCK not set",
 		}
 	}
 
 	if _, err := os.Stat(sock); err != nil {
-		return checkResult{
-			name:    "SSH Agent",
-			ok:      false,
-			message: fmt.Sprintf("socket not accessible: %v", err),
+		return CheckResult{
+			Name:    "SSH Agent",
+			OK:      false,
+			Message: fmt.Sprintf("socket not accessible: %v", err),
 		}
 	}
 
 	// Validate it's actually a socket
 	if err := ssh.ValidateSocket(sock); err != nil {
-		return checkResult{
-			name:    "SSH Agent",
-			ok:      false,
-			message: fmt.Sprintf("invalid socket: %v", err),
+		return CheckResult{
+			Name:    "SSH Agent",
+			OK:      false,
+			Message: fmt.Sprintf("invalid socket: %v", err),
 		}
 	}
 
-	return checkResult{
-		name:    "SSH Agent",
-		ok:      true,
-		message: fmt.Sprintf("available at %s", sock),
+	return CheckResult{
+		Name:    "SSH Agent",
+		OK:      true,
+		Message: fmt.Sprintf("available at %s", sock),
 	}
 }
 
-func checkSELinux() checkResult {
+func checkSELinux() CheckResult {
 	mode, err := selinux.GetMode()
 	if err != nil {
-		return checkResult{
-			name:    "SELinux",
-			ok:      true,
-			message: "not available (expected on non-SELinux systems)",
+		return CheckResult{
+			Name:    "SELinux",
+			OK:      true,
+			Message: "not available (expected on non-SELinux systems)",
 		}
 	}
 
 	switch mode {
 	case selinux.ModeEnforcing:
-		return checkResult{
-			name:    "SELinux",
-			ok:      true,
-			message: "enforcing (will use :Z bind mount option)",
+		return CheckResult{
+			Name:    "SELinux",
+			OK:      true,
+			Message: "enforcing (will use :Z bind mount option)",
 		}
 	case selinux.ModePermissive:
-		return checkResult{
-			name:    "SELinux",
-			ok:      true,
-			message: "permissive",
+		return CheckResult{
+			Name:    "SELinux",
+			OK:      true,
+			Message: "permissive",
 		}
 	case selinux.ModeDisabled:
-		return checkResult{
-			name:    "SELinux",
-			ok:      true,
-			message: "disabled",
+		return CheckResult{
+			Name:    "SELinux",
+			OK:      true,
+			Message: "disabled",
 		}
 	default:
-		return checkResult{
-			name:    "SELinux",
-			ok:      true,
-			message: fmt.Sprintf("mode: %s", mode),
+		return CheckResult{
+			Name:    "SELinux",
+			OK:      true,
+			Message: fmt.Sprintf("mode: %s", mode),
 		}
 	}
 }

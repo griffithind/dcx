@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
@@ -24,8 +24,35 @@ This is an offline-safe command that does not require network access.`,
 	RunE: runStatus,
 }
 
+// StatusOutput represents status information for JSON output.
+type StatusOutput struct {
+	Workspace   string           `json:"workspace"`
+	Project     string           `json:"project,omitempty"`
+	EnvKey      string           `json:"envKey"`
+	State       string           `json:"state"`
+	SSH         *SSHStatus       `json:"ssh,omitempty"`
+	Shortcuts   int              `json:"shortcuts,omitempty"`
+	Container   *ContainerOutput `json:"container,omitempty"`
+}
+
+// SSHStatus represents SSH configuration status.
+type SSHStatus struct {
+	Configured bool   `json:"configured"`
+	Host       string `json:"host,omitempty"`
+}
+
+// ContainerOutput represents container info for JSON output.
+type ContainerOutput struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	ConfigHash string `json:"configHash,omitempty"`
+}
+
 func runStatus(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	out := output.Global()
+	c := out.Color()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -71,13 +98,60 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
 
-	// Display status
-	fmt.Fprintf(os.Stdout, "Workspace:  %s\n", workspacePath)
-	if projectName != "" {
-		fmt.Fprintf(os.Stdout, "Project:    %s\n", projectName)
+	// JSON output mode
+	if out.IsJSON() {
+		status := StatusOutput{
+			Workspace: workspacePath,
+			Project:   projectName,
+			EnvKey:    envKey,
+			State:     string(currentState),
+		}
+
+		// SSH status
+		if containerInfo != nil && ssh.HasSSHConfig(containerInfo.Name) {
+			sshHost := envKey
+			if projectName != "" {
+				sshHost = projectName
+			}
+			status.SSH = &SSHStatus{
+				Configured: true,
+				Host:       sshHost + ".dcx",
+			}
+		} else if currentState != state.StateAbsent {
+			status.SSH = &SSHStatus{
+				Configured: false,
+			}
+		}
+
+		// Shortcuts
+		if dcxCfg != nil && len(dcxCfg.Shortcuts) > 0 {
+			status.Shortcuts = len(dcxCfg.Shortcuts)
+		}
+
+		// Container info
+		if containerInfo != nil {
+			status.Container = &ContainerOutput{
+				ID:         containerInfo.ID[:12],
+				Name:       containerInfo.Name,
+				Status:     containerInfo.Status,
+				ConfigHash: containerInfo.ConfigHash,
+			}
+			if len(containerInfo.ConfigHash) > 12 {
+				status.Container.ConfigHash = containerInfo.ConfigHash[:12]
+			}
+		}
+
+		return out.JSON(status)
 	}
-	fmt.Fprintf(os.Stdout, "Env Key:    %s\n", envKey)
-	fmt.Fprintf(os.Stdout, "State:      %s\n", currentState)
+
+	// Text output mode
+	kv := output.NewKeyValueTable(out.Writer())
+	kv.Add("Workspace", c.Code(workspacePath))
+	if projectName != "" {
+		kv.Add("Project", projectName)
+	}
+	kv.Add("Env Key", envKey)
+	kv.Add("State", formatState(currentState))
 
 	// Show SSH status
 	if containerInfo != nil && ssh.HasSSHConfig(containerInfo.Name) {
@@ -85,25 +159,52 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		if projectName != "" {
 			sshHost = projectName
 		}
-		fmt.Fprintf(os.Stdout, "SSH:        ssh %s.dcx\n", sshHost)
+		kv.Add("SSH", c.Code(fmt.Sprintf("ssh %s.dcx", sshHost)))
 	} else if currentState != state.StateAbsent {
-		fmt.Fprintf(os.Stdout, "SSH:        not configured (use 'dcx up --ssh' to enable)\n")
+		kv.Add("SSH", c.Dim("not configured (use 'dcx up --ssh' to enable)"))
 	}
 
 	// Show shortcuts count
 	if dcxCfg != nil && len(dcxCfg.Shortcuts) > 0 {
-		fmt.Fprintf(os.Stdout, "Shortcuts:  %d defined (use 'dcx run --list' to view)\n", len(dcxCfg.Shortcuts))
+		kv.Add("Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", len(dcxCfg.Shortcuts)))
 	}
 
+	kv.Render()
+
+	// Container details
 	if containerInfo != nil {
-		fmt.Fprintf(os.Stdout, "\nPrimary Container:\n")
-		fmt.Fprintf(os.Stdout, "  ID:       %s\n", containerInfo.ID[:12])
-		fmt.Fprintf(os.Stdout, "  Name:     %s\n", containerInfo.Name)
-		fmt.Fprintf(os.Stdout, "  Status:   %s\n", containerInfo.Status)
+		out.Println()
+		out.Println(c.Header("Primary Container"))
+
+		cKV := output.NewKeyValueTable(out.Writer())
+		cKV.Add("  ID", containerInfo.ID[:12])
+		cKV.Add("  Name", containerInfo.Name)
+		cKV.Add("  Status", containerInfo.Status)
 		if containerInfo.ConfigHash != "" {
-			fmt.Fprintf(os.Stdout, "  Config:   %s\n", containerInfo.ConfigHash[:12])
+			cKV.Add("  Config", containerInfo.ConfigHash[:12])
 		}
+		cKV.Render()
 	}
 
 	return nil
+}
+
+// formatState returns a colored state string.
+func formatState(s state.State) string {
+	c := output.Color()
+	stateStr := string(s)
+	switch s {
+	case state.StateRunning:
+		return c.StateRunning(stateStr)
+	case state.StateCreated:
+		return c.StateStopped(stateStr)
+	case state.StateStale:
+		return c.Warning(stateStr)
+	case state.StateBroken:
+		return c.StateError(stateStr)
+	case state.StateAbsent:
+		return c.StateUnknown(stateStr)
+	default:
+		return stateStr
+	}
 }
