@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
@@ -182,8 +182,8 @@ func quickStart(ctx context.Context, dockerClient *docker.Client, containerInfo 
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-		if err := runner.Start(ctx); err != nil {
+		r := runner.NewUnifiedRunnerForExisting(workspacePath, actualProject, envKey)
+		if err := r.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start containers: %w", err)
 		}
 	}

@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
@@ -127,8 +127,8 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		runner := compose.NewRunnerFromEnvKey(workspacePath, actualProject, envKey)
-		if err := runner.Restart(ctx); err != nil {
+		r := runner.NewUnifiedRunnerForExisting(workspacePath, actualProject, envKey)
+		if err := r.Restart(ctx); err != nil {
 			restartErr = fmt.Errorf("failed to restart containers: %w", err)
 		}
 	}
