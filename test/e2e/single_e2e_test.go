@@ -286,7 +286,7 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 	// Test workspace_path label is set correctly
 	t.Run("workspace_path_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
@@ -296,23 +296,23 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 			"workspace_path label should match the workspace directory")
 	})
 
-	// Test env_key label is set
-	t.Run("env_key_label", func(t *testing.T) {
+	// Test workspace_id label is set
+	t.Run("workspace_id_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.env_key"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.workspace.id"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 
 		labelValue := strings.TrimSpace(string(output))
-		assert.NotEmpty(t, labelValue, "env_key label should be set")
-		assert.Len(t, labelValue, 12, "env_key should be 12 characters")
+		assert.NotEmpty(t, labelValue, "workspace_id label should be set")
+		assert.Len(t, labelValue, 12, "workspace_id should be 12 characters")
 	})
 
 	// Test managed label is set
 	t.Run("managed_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.managed"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.managed"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
@@ -321,22 +321,22 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 		assert.Equal(t, "true", labelValue, "managed label should be true")
 	})
 
-	// Test plan label is set to single
-	t.Run("plan_label", func(t *testing.T) {
+	// Test build_method label is set to image
+	t.Run("build_method_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.plan"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.build.method"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 
 		labelValue := strings.TrimSpace(string(output))
-		assert.Equal(t, "single", labelValue, "plan label should be single")
+		assert.Equal(t, "image", labelValue, "build_method label should be image")
 	})
 
 	// Test primary label is set
 	t.Run("primary_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.primary"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.container.primary"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
@@ -348,7 +348,7 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 	// Test config_hash label is set
 	t.Run("config_hash_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.config_hash"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.hash.config"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
@@ -357,15 +357,15 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 		assert.NotEmpty(t, labelValue, "config_hash label should be set")
 	})
 
-	// Test workspace_root_hash label is set
-	t.Run("workspace_root_hash_label", func(t *testing.T) {
+	// Test overall_hash label is set
+	t.Run("overall_hash_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.workspace_root_hash"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.hash.overall"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 
 		labelValue := strings.TrimSpace(string(output))
-		assert.NotEmpty(t, labelValue, "workspace_root_hash label should be set")
+		assert.NotEmpty(t, labelValue, "overall_hash label should be set")
 	})
 }
