@@ -409,3 +409,110 @@ func TestFeatureOptionsWithBooleans(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeOptionName tests option name normalization per devcontainer spec.
+func TestNormalizeOptionName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple lowercase",
+			input:    "version",
+			expected: "VERSION",
+		},
+		{
+			name:     "camelCase",
+			input:    "installZsh",
+			expected: "INSTALLZSH",
+		},
+		{
+			name:     "hyphenated option",
+			input:    "my-option",
+			expected: "MY_OPTION",
+		},
+		{
+			name:     "option with dots",
+			input:    "my.option.name",
+			expected: "MY_OPTION_NAME",
+		},
+		{
+			name:     "leading digit",
+			input:    "2fast",
+			expected: "_FAST",
+		},
+		{
+			name:     "leading underscore",
+			input:    "_private",
+			expected: "_PRIVATE",
+		},
+		{
+			name:     "leading digits and underscores",
+			input:    "123_test",
+			expected: "_TEST",
+		},
+		{
+			name:     "special characters",
+			input:    "foo@bar#baz",
+			expected: "FOO_BAR_BAZ",
+		},
+		{
+			name:     "mixed case with hyphen",
+			input:    "Install-Oh-My-Zsh",
+			expected: "INSTALL_OH_MY_ZSH",
+		},
+		{
+			name:     "already uppercase",
+			input:    "VERSION",
+			expected: "VERSION",
+		},
+		{
+			name:     "underscores preserved",
+			input:    "my_option_name",
+			expected: "MY_OPTION_NAME",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizeOptionName(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestGetEnvVarsWithNormalization tests that GetEnvVars uses normalized option names.
+func TestGetEnvVarsWithNormalization(t *testing.T) {
+	feature := &Feature{
+		ID: "test-feature",
+		Options: map[string]interface{}{
+			"my-option":    "value1",
+			"another.opt":  "value2",
+			"2fast2furious": "value3",
+		},
+		Metadata: &FeatureMetadata{
+			Options: map[string]OptionDefinition{
+				"my-option": {
+					Type:    "string",
+					Default: "default1",
+				},
+				"another.opt": {
+					Type:    "string",
+					Default: "default2",
+				},
+				"2fast2furious": {
+					Type:    "string",
+					Default: "default3",
+				},
+			},
+		},
+	}
+
+	env := feature.GetEnvVars()
+
+	// Options should be normalized
+	assert.Equal(t, "value1", env["MY_OPTION"])
+	assert.Equal(t, "value2", env["ANOTHER_OPT"])
+	assert.Equal(t, "value3", env["_FAST2FURIOUS"])
+}
