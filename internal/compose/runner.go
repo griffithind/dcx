@@ -388,6 +388,15 @@ func (r *Runner) Stop(ctx context.Context) error {
 	return r.runCompose(ctx, args)
 }
 
+// Restart restarts containers.
+func (r *Runner) Restart(ctx context.Context) error {
+	args := []string{
+		"-p", r.composeProject,
+		"restart",
+	}
+	return r.runCompose(ctx, args)
+}
+
 // Down stops and removes containers.
 func (r *Runner) Down(ctx context.Context, opts runner.DownOptions) error {
 	args := []string{
