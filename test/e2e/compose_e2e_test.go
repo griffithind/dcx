@@ -288,15 +288,15 @@ services:
 	t.Run("labels", func(t *testing.T) {
 		// workspace_path label
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.workspace_path"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`,
 			containerName)
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 		assert.Equal(t, workspace, strings.TrimSpace(string(output)))
 
-		// plan label
+		// build_method label
 		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.plan"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.build.method"}}`,
 			containerName)
 		output, err = cmd.CombinedOutput()
 		require.NoError(t, err)
@@ -304,15 +304,15 @@ services:
 
 		// compose_project label
 		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.compose_project"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`,
 			containerName)
 		output, err = cmd.CombinedOutput()
 		require.NoError(t, err)
 		assert.NotEmpty(t, strings.TrimSpace(string(output)))
 
-		// primary_service label
+		// compose_service label
 		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.primary_service"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.compose.service"}}`,
 			containerName)
 		output, err = cmd.CombinedOutput()
 		require.NoError(t, err)
@@ -320,7 +320,7 @@ services:
 
 		// primary label
 		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.primary"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.container.primary"}}`,
 			containerName)
 		output, err = cmd.CombinedOutput()
 		require.NoError(t, err)
@@ -328,7 +328,7 @@ services:
 
 		// managed label
 		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.managed"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.managed"}}`,
 			containerName)
 		output, err = cmd.CombinedOutput()
 		require.NoError(t, err)
