@@ -139,9 +139,16 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 		}
 	}
 
-	// Add mounts from features
+	// Add mounts from features (with variable substitution)
 	if len(g.resolvedFeatures) > 0 {
-		featureMounts := features.CollectMounts(g.resolvedFeatures)
+		subCtx := &config.SubstitutionContext{
+			LocalWorkspaceFolder:     g.workspacePath,
+			ContainerWorkspaceFolder: config.DetermineContainerWorkspaceFolder(g.cfg, g.workspacePath),
+			DevcontainerID:           g.envKey,
+		}
+		featureMounts := features.CollectMounts(g.resolvedFeatures, func(s string) string {
+			return config.Substitute(s, subCtx)
+		})
 		for _, mount := range featureMounts {
 			parsed := g.parseMountString(mount)
 			if parsed != "" {

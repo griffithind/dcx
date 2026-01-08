@@ -278,8 +278,12 @@ func NeedsInit(features []*Feature) bool {
 	return false
 }
 
+// MountSubstituteFunc is a function that performs variable substitution on mount strings.
+type MountSubstituteFunc func(string) string
+
 // CollectMounts collects all mounts needed by features.
-func CollectMounts(features []*Feature) []string {
+// If substitute is provided, it will be applied to each mount string for variable substitution.
+func CollectMounts(features []*Feature, substitute MountSubstituteFunc) []string {
 	mounts := make([]string, 0)
 
 	for _, feature := range features {
@@ -287,7 +291,11 @@ func CollectMounts(features []*Feature) []string {
 			continue
 		}
 		for _, m := range feature.Metadata.Mounts {
-			mounts = append(mounts, m.String())
+			mount := m.String()
+			if substitute != nil {
+				mount = substitute(mount)
+			}
+			mounts = append(mounts, mount)
 		}
 	}
 
