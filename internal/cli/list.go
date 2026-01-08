@@ -2,23 +2,18 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
 
-var (
-	listOutputJSON bool
-	listShowAll    bool
-)
+var listShowAll bool
 
 var listCmd = &cobra.Command{
 	Use:     "list",
@@ -38,13 +33,13 @@ Examples:
 
 // EnvironmentInfo represents a dcx-managed environment for listing.
 type EnvironmentInfo struct {
-	EnvKey        string          `json:"env_key"`
-	ProjectName   string          `json:"project_name,omitempty"`
-	WorkspacePath string          `json:"workspace_path"`
+	EnvKey        string          `json:"envKey"`
+	ProjectName   string          `json:"projectName,omitempty"`
+	WorkspacePath string          `json:"workspacePath"`
 	State         string          `json:"state"`
 	Plan          string          `json:"plan"`
 	Containers    []ContainerItem `json:"containers"`
-	CreatedAt     time.Time       `json:"created_at"`
+	CreatedAt     time.Time       `json:"createdAt"`
 }
 
 // ContainerItem represents a container in the environment.
@@ -52,12 +47,14 @@ type ContainerItem struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Status    string    `json:"status"`
-	IsPrimary bool      `json:"is_primary"`
-	CreatedAt time.Time `json:"created_at"`
+	IsPrimary bool      `json:"isPrimary"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 func runListEnvironments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	out := output.Global()
+	c := out.Color()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -76,11 +73,11 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 
 	// Group containers by environment
 	envMap := make(map[string]*EnvironmentInfo)
-	for _, c := range containers {
-		labels := docker.LabelsFromMap(c.Labels)
+	for _, cont := range containers {
+		labels := docker.LabelsFromMap(cont.Labels)
 
 		// Skip non-running containers unless --all is specified
-		if !listShowAll && !c.Running {
+		if !listShowAll && !cont.Running {
 			continue
 		}
 
@@ -97,23 +94,23 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 				WorkspacePath: labels.WorkspacePath,
 				Plan:          labels.Plan,
 				Containers:    []ContainerItem{},
-				CreatedAt:     c.Created,
+				CreatedAt:     cont.Created,
 			}
 			envMap[envKey] = env
 		}
 
 		// Add container to environment
 		env.Containers = append(env.Containers, ContainerItem{
-			ID:        c.ID[:12],
-			Name:      c.Name,
-			Status:    c.Status,
+			ID:        cont.ID[:12],
+			Name:      cont.Name,
+			Status:    cont.Status,
 			IsPrimary: labels.Primary,
-			CreatedAt: c.Created,
+			CreatedAt: cont.Created,
 		})
 
 		// Track oldest creation time for the environment
-		if c.Created.Before(env.CreatedAt) {
-			env.CreatedAt = c.Created
+		if cont.Created.Before(env.CreatedAt) {
+			env.CreatedAt = cont.Created
 		}
 	}
 
@@ -133,38 +130,27 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		return environments[i].WorkspacePath < environments[j].WorkspacePath
 	})
 
-	if listOutputJSON {
-		return outputJSON(environments)
+	// JSON output mode
+	if out.IsJSON() {
+		return out.JSON(environments)
 	}
 
-	return outputTable(environments)
-}
-
-func outputJSON(environments []*EnvironmentInfo) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(environments)
-}
-
-func outputTable(environments []*EnvironmentInfo) error {
+	// Text output mode
 	if len(environments) == 0 {
-		fmt.Println("No dcx-managed environments found.")
+		out.Println("No dcx-managed environments found.")
 		if !listShowAll {
-			fmt.Println("Use --all to include stopped environments.")
+			out.Println(c.Dim("Use --all to include stopped environments."))
 		}
 		return nil
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ENV KEY\tSTATE\tCONTAINERS\tWORKSPACE")
-	fmt.Fprintln(w, "-------\t-----\t----------\t---------")
-
+	table := output.NewTable(out.Writer(), []string{"Name", "State", "Containers", "Workspace"})
 	for _, env := range environments {
 		// Build container summary
 		containerNames := make([]string, 0, len(env.Containers))
-		for _, c := range env.Containers {
-			name := c.Name
-			if c.IsPrimary {
+		for _, cont := range env.Containers {
+			name := cont.Name
+			if cont.IsPrimary {
 				name = name + "*"
 			}
 			containerNames = append(containerNames, name)
@@ -182,19 +168,37 @@ func outputTable(environments []*EnvironmentInfo) error {
 			identifier = env.ProjectName
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		table.AddRow(
 			identifier,
-			env.State,
+			formatListState(env.State),
 			strings.Join(containerNames, ", "),
-			workspace,
+			c.Code(workspace),
 		)
 	}
 
-	return w.Flush()
+	return table.RenderWithDivider()
+}
+
+// formatListState returns a colored state string.
+func formatListState(s string) string {
+	c := output.Color()
+	switch state.State(s) {
+	case state.StateRunning:
+		return c.StateRunning(s)
+	case state.StateCreated:
+		return c.StateStopped(s)
+	case state.StateStale:
+		return c.Warning(s)
+	case state.StateBroken:
+		return c.StateError(s)
+	case state.StateAbsent:
+		return c.StateUnknown(s)
+	default:
+		return s
+	}
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listOutputJSON, "json", false, "output as JSON")
 	listCmd.Flags().BoolVar(&listShowAll, "all", false, "show all environments (including stopped)")
 	rootCmd.AddCommand(listCmd)
 }

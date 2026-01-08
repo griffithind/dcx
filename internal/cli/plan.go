@@ -2,22 +2,16 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/pipeline"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
-)
-
-var (
-	planOutputJSON bool
 )
 
 var planCmd = &cobra.Command{
@@ -36,17 +30,36 @@ No changes are made to your environment.
 Examples:
   dcx plan              # Show execution plan for current directory
   dcx plan --json       # Output plan as JSON for scripting
-  dcx plan -p /path     # Show plan for specific workspace`,
+  dcx plan -w /path     # Show plan for specific workspace`,
 	RunE: runPlan,
 }
 
 func init() {
-	planCmd.Flags().BoolVar(&planOutputJSON, "json", false, "output plan as JSON")
 	rootCmd.AddCommand(planCmd)
+}
+
+// PlanOutput represents the plan output for JSON.
+type PlanOutput struct {
+	Action      string                    `json:"action"`
+	Reason      string                    `json:"reason"`
+	Changes     []string                  `json:"changes,omitempty"`
+	Workspace   WorkspacePlanOutput       `json:"workspace"`
+	ImagesBuild []pipeline.ImageBuildPlan `json:"imagesToBuild,omitempty"`
+	Containers  []pipeline.ContainerPlan  `json:"containersToCreate,omitempty"`
+	Services    []string                  `json:"servicesToStart,omitempty"`
+}
+
+// WorkspacePlanOutput represents workspace info for plan output.
+type WorkspacePlanOutput struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 func runPlan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+	out := output.Global()
+	c := out.Color()
 
 	// Find config path
 	cfgPath := configPath
@@ -128,11 +141,138 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if planOutputJSON {
-		return outputPlanJSON(plan)
+	// JSON output mode
+	if out.IsJSON() {
+		return out.JSON(PlanOutput{
+			Action:  string(plan.Action),
+			Reason:  plan.Reason,
+			Changes: plan.Changes,
+			Workspace: WorkspacePlanOutput{
+				ID:   plan.Workspace.ID,
+				Name: plan.Workspace.Name,
+				Path: plan.Workspace.LocalRoot,
+			},
+			ImagesBuild: plan.ImagesToBuild,
+			Containers:  plan.ContainersToCreate,
+			Services:    plan.ServicesToStart,
+		})
 	}
 
-	return outputPlanTable(plan)
+	// Text output mode
+	out.Println(c.Header("Devcontainer Execution Plan"))
+	out.Println(c.Dim("==========================="))
+	out.Println()
+
+	// Workspace info
+	kv := output.NewKeyValueTable(out.Writer())
+	kv.Add("Workspace", ws.Name)
+	kv.Add("Path", c.Code(ws.LocalRoot))
+	kv.Add("ID", c.Dim(ws.ID))
+	kv.Render()
+	out.Println()
+
+	// Action
+	if plan.Action == pipeline.ActionNone {
+		out.Println(output.FormatSuccess("Up to date - no changes needed"))
+		return nil
+	}
+
+	// Show action with color
+	var actionStr string
+	switch plan.Action {
+	case pipeline.ActionCreate:
+		actionStr = c.StateRunning(string(plan.Action))
+	case pipeline.ActionRecreate:
+		actionStr = c.Warning(string(plan.Action))
+	case pipeline.ActionRebuild:
+		actionStr = c.StateError(string(plan.Action))
+	case pipeline.ActionStart:
+		actionStr = c.Info(string(plan.Action))
+	default:
+		actionStr = string(plan.Action)
+	}
+
+	actionKV := output.NewKeyValueTable(out.Writer())
+	actionKV.Add("Action", actionStr)
+	actionKV.Add("Reason", plan.Reason)
+	actionKV.Render()
+	out.Println()
+
+	// Changes detected
+	if len(plan.Changes) > 0 {
+		out.Println(c.Header("Changes Detected"))
+		for _, change := range plan.Changes {
+			out.Printf("  %s %s", output.Symbols.Bullet, change)
+		}
+		out.Println()
+	}
+
+	// Images to build
+	if len(plan.ImagesToBuild) > 0 {
+		out.Println(c.Header("Images to Build"))
+		table := output.NewTable(out.Writer(), []string{"Tag", "Base", "Reason"})
+		for _, img := range plan.ImagesToBuild {
+			base := img.BaseImage
+			if base == "" && img.Dockerfile != "" {
+				base = "(Dockerfile)"
+			}
+			table.AddRow(img.Tag, base, img.Reason)
+		}
+		table.RenderWithDivider()
+		out.Println()
+	}
+
+	// Features
+	if len(ws.Resolved.Features) > 0 {
+		out.Println(c.Header("Features to Install"))
+		for i, f := range ws.Resolved.Features {
+			out.Printf("  %d. %s", i+1, c.Code(f.ID))
+		}
+		out.Println()
+	}
+
+	// Containers
+	if len(plan.ContainersToCreate) > 0 {
+		out.Println(c.Header("Containers to Create"))
+		for _, cont := range plan.ContainersToCreate {
+			primary := ""
+			if cont.IsPrimary {
+				primary = c.Dim(" (primary)")
+			}
+			out.Printf("  %s %s%s", output.Symbols.Bullet, cont.Name, primary)
+		}
+		out.Println()
+	}
+
+	// Services (compose)
+	if len(plan.ServicesToStart) > 0 {
+		out.Println(c.Header("Services to Start"))
+		out.Printf("  %s", strings.Join(plan.ServicesToStart, ", "))
+		out.Println()
+	}
+
+	// Hashes (verbose only)
+	if out.IsVerbose() {
+		out.Println(c.Header("Configuration Hashes"))
+		hashKV := output.NewKeyValueTable(out.Writer())
+		hashKV.Add("  Config", ws.Hashes.Config)
+		if ws.Hashes.Dockerfile != "" {
+			hashKV.Add("  Dockerfile", ws.Hashes.Dockerfile)
+		}
+		if ws.Hashes.Compose != "" {
+			hashKV.Add("  Compose", ws.Hashes.Compose)
+		}
+		if ws.Hashes.Features != "" {
+			hashKV.Add("  Features", ws.Hashes.Features)
+		}
+		hashKV.Add("  Overall", ws.Hashes.Overall)
+		hashKV.Render()
+		out.Println()
+	}
+
+	out.Println(c.Dim("Run 'dcx up' to execute this plan."))
+
+	return nil
 }
 
 func buildImagePlans(ws *workspace.Workspace) []pipeline.ImageBuildPlan {
@@ -189,138 +329,4 @@ func buildImagePlans(ws *workspace.Workspace) []pipeline.ImageBuildPlan {
 	}
 
 	return plans
-}
-
-func outputPlanJSON(plan *pipeline.PlanResult) error {
-	output := map[string]interface{}{
-		"action":  plan.Action,
-		"reason":  plan.Reason,
-		"changes": plan.Changes,
-		"workspace": map[string]interface{}{
-			"id":   plan.Workspace.ID,
-			"name": plan.Workspace.Name,
-			"path": plan.Workspace.LocalRoot,
-		},
-		"images_to_build":     plan.ImagesToBuild,
-		"containers_to_create": plan.ContainersToCreate,
-		"services_to_start":    plan.ServicesToStart,
-	}
-
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
-}
-
-func outputPlanTable(plan *pipeline.PlanResult) error {
-	ws := plan.Workspace
-
-	fmt.Println("Devcontainer Execution Plan")
-	fmt.Println("===========================")
-	fmt.Println()
-
-	// Workspace info
-	fmt.Printf("Workspace: %s\n", ws.Name)
-	fmt.Printf("Path:      %s\n", ws.LocalRoot)
-	fmt.Printf("ID:        %s\n", ws.ID)
-	fmt.Println()
-
-	// Action
-	actionColor := ""
-	actionReset := ""
-	switch plan.Action {
-	case pipeline.ActionNone:
-		fmt.Println("Status: Up to date - no changes needed")
-		return nil
-	case pipeline.ActionCreate:
-		actionColor = "\033[32m" // green
-	case pipeline.ActionRecreate:
-		actionColor = "\033[33m" // yellow
-	case pipeline.ActionRebuild:
-		actionColor = "\033[31m" // red
-	case pipeline.ActionStart:
-		actionColor = "\033[36m" // cyan
-	}
-	if actionColor != "" {
-		actionReset = "\033[0m"
-	}
-
-	fmt.Printf("Action: %s%s%s\n", actionColor, plan.Action, actionReset)
-	fmt.Printf("Reason: %s\n", plan.Reason)
-	fmt.Println()
-
-	// Changes detected
-	if len(plan.Changes) > 0 {
-		fmt.Println("Changes Detected:")
-		for _, change := range plan.Changes {
-			fmt.Printf("  - %s\n", change)
-		}
-		fmt.Println()
-	}
-
-	// Images to build
-	if len(plan.ImagesToBuild) > 0 {
-		fmt.Println("Images to Build:")
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  TAG\tBASE\tREASON")
-		fmt.Fprintln(w, "  ---\t----\t------")
-		for _, img := range plan.ImagesToBuild {
-			base := img.BaseImage
-			if base == "" && img.Dockerfile != "" {
-				base = "(Dockerfile)"
-			}
-			fmt.Fprintf(w, "  %s\t%s\t%s\n", img.Tag, base, img.Reason)
-		}
-		w.Flush()
-		fmt.Println()
-	}
-
-	// Features
-	if len(ws.Resolved.Features) > 0 {
-		fmt.Println("Features to Install:")
-		for i, f := range ws.Resolved.Features {
-			fmt.Printf("  %d. %s\n", i+1, f.ID)
-		}
-		fmt.Println()
-	}
-
-	// Containers
-	if len(plan.ContainersToCreate) > 0 {
-		fmt.Println("Containers to Create:")
-		for _, c := range plan.ContainersToCreate {
-			primary := ""
-			if c.IsPrimary {
-				primary = " (primary)"
-			}
-			fmt.Printf("  - %s%s\n", c.Name, primary)
-		}
-		fmt.Println()
-	}
-
-	// Services (compose)
-	if len(plan.ServicesToStart) > 0 {
-		fmt.Println("Services to Start:")
-		fmt.Printf("  %s\n", strings.Join(plan.ServicesToStart, ", "))
-		fmt.Println()
-	}
-
-	// Hashes
-	if verbose {
-		fmt.Println("Configuration Hashes:")
-		fmt.Printf("  Config:     %s\n", ws.Hashes.Config)
-		if ws.Hashes.Dockerfile != "" {
-			fmt.Printf("  Dockerfile: %s\n", ws.Hashes.Dockerfile)
-		}
-		if ws.Hashes.Compose != "" {
-			fmt.Printf("  Compose:    %s\n", ws.Hashes.Compose)
-		}
-		if ws.Hashes.Features != "" {
-			fmt.Printf("  Features:   %s\n", ws.Hashes.Features)
-		}
-		fmt.Printf("  Overall:    %s\n", ws.Hashes.Overall)
-		fmt.Println()
-	}
-
-	fmt.Println("Run 'dcx up' to execute this plan.")
-
-	return nil
 }
