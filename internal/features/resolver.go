@@ -14,7 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// httpClient is the HTTP client with timeout for registry requests.
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
 
 // Resolver handles feature resolution and caching.
 type Resolver struct {
@@ -146,6 +152,7 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 	}
 
 	// Fetch from OCI registry
+	fmt.Printf("    Fetching feature from registry: %s\n", ref.CanonicalID())
 	if err := r.fetchOCI(ctx, ref, cachePath); err != nil {
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
@@ -230,7 +237,7 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureRef, destPath string
 	}
 
 	// Make request
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch manifest: %w", err)
 	}
@@ -287,7 +294,7 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureRef, destPath string
 		blobReq.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	blobResp, err := http.DefaultClient.Do(blobReq)
+	blobResp, err := httpClient.Do(blobReq)
 	if err != nil {
 		return fmt.Errorf("failed to fetch blob: %w", err)
 	}
@@ -325,7 +332,7 @@ func (r *Resolver) fetchHTTP(ctx context.Context, url, destPath string) error {
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch: %w", err)
 	}
@@ -466,7 +473,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureRef) (string
 		return "", err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -500,7 +507,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureRef) (string
 		return "", err
 	}
 
-	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	tokenResp, err := httpClient.Do(tokenReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to request token: %w", err)
 	}

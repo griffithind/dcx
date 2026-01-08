@@ -464,12 +464,18 @@ func (s *EnvironmentService) Stop(ctx context.Context, info *EnvironmentInfo, op
 
 // runLifecycleHooks runs appropriate lifecycle hooks based on whether this is a new environment.
 func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *EnvironmentInfo, isNew bool, sshAgentEnabled bool) error {
+	if s.verbose {
+		fmt.Println("  [hooks] Getting container state...")
+	}
 	_, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
 	if err != nil {
 		return fmt.Errorf("failed to get container state: %w", err)
 	}
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
+	}
+	if s.verbose {
+		fmt.Printf("  [hooks] Container: %s\n", containerInfo.Name)
 	}
 
 	// Create hook runner (agent binary is pre-deployed, so skip deployment in hooks)
@@ -485,10 +491,22 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 
 	// Resolve features to get their lifecycle hooks
 	if len(info.Config.Features) > 0 {
+		if s.verbose {
+			fmt.Printf("  [hooks] Resolving %d features...\n", len(info.Config.Features))
+			for id := range info.Config.Features {
+				fmt.Printf("  [hooks]   - %s\n", id)
+			}
+		}
 		configDir := filepath.Dir(info.ConfigPath)
 		mgr, err := features.NewManager(configDir)
 		if err == nil {
+			if s.verbose {
+				fmt.Println("  [hooks] Calling ResolveAll...")
+			}
 			resolvedFeatures, err := mgr.ResolveAll(ctx, info.Config.Features, info.Config.OverrideFeatureInstallOrder)
+			if s.verbose {
+				fmt.Printf("  [hooks] ResolveAll returned %d features, err=%v\n", len(resolvedFeatures), err)
+			}
 			if err == nil && len(resolvedFeatures) > 0 {
 				var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
 
@@ -535,7 +553,13 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 
 	// Run appropriate hooks based on whether this is a new environment
 	if isNew {
+		if s.verbose {
+			fmt.Println("  [hooks] Running create hooks...")
+		}
 		return hookRunner.RunAllCreateHooks(ctx)
+	}
+	if s.verbose {
+		fmt.Println("  [hooks] Running start hooks...")
 	}
 	return hookRunner.RunStartHooks(ctx)
 }
