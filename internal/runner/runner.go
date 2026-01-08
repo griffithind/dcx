@@ -312,13 +312,14 @@ func (r *UnifiedRunner) createContainer(ctx context.Context, imageRef string) (s
 
 	// Create container config
 	createOpts := docker.CreateContainerOptions{
-		Name:           containerName,
-		Image:          imageRef,
-		Labels:         containerLabels,
-		Env:            env,
-		WorkspacePath:  ws.LocalRoot,
-		WorkspaceMount: workspaceMount,
-		Mounts:         mounts,
+		Name:            containerName,
+		Image:           imageRef,
+		Labels:          containerLabels,
+		Env:             env,
+		WorkspacePath:   ws.LocalRoot,
+		WorkspaceFolder: workspaceFolder,
+		WorkspaceMount:  workspaceMount,
+		Mounts:          mounts,
 		CapAdd:         ws.Resolved.CapAdd,
 		SecurityOpt:    ws.Resolved.SecurityOpt,
 		Privileged:     ws.Resolved.Privileged,
