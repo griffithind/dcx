@@ -77,6 +77,18 @@ type FeatureMetadata struct {
 	// DocumentationURL links to documentation
 	DocumentationURL string `json:"documentationURL,omitempty"`
 
+	// LicenseURL links to the license
+	LicenseURL string `json:"licenseURL,omitempty"`
+
+	// Keywords for searchability
+	Keywords []string `json:"keywords,omitempty"`
+
+	// LegacyIds lists old identifiers that should resolve to this feature
+	LegacyIds []string `json:"legacyIds,omitempty"`
+
+	// Deprecated indicates this feature should not be used
+	Deprecated bool `json:"deprecated,omitempty"`
+
 	// Options defines available options
 	Options map[string]OptionDefinition `json:"options,omitempty"`
 
