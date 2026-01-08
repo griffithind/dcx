@@ -273,7 +273,15 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 		mounts = append(mounts, m.String())
 	}
 	if len(r.resolvedFeatures) > 0 {
-		featureMounts := features.CollectMounts(r.resolvedFeatures)
+		// Create substitution context for feature mounts
+		subCtx := &config.SubstitutionContext{
+			LocalWorkspaceFolder:     r.workspacePath,
+			ContainerWorkspaceFolder: config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath),
+			DevcontainerID:           r.envKey,
+		}
+		featureMounts := features.CollectMounts(r.resolvedFeatures, func(s string) string {
+			return config.Substitute(s, subCtx)
+		})
 		for _, mount := range featureMounts {
 			parsed := parseMountString(mount)
 			if parsed != "" {
