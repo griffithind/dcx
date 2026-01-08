@@ -14,8 +14,8 @@ import (
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/docker"
 	dcxerrors "github.com/griffithind/dcx/internal/errors"
-	"github.com/griffithind/dcx/internal/state"
 )
 
 // Builder constructs a Workspace from configuration and resolves all references.
@@ -130,7 +130,7 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 	resolved := ws.Resolved
 
 	// Service name (sanitized for Docker container naming requirements)
-	resolved.ServiceName = state.SanitizeProjectName(ws.Name)
+	resolved.ServiceName = docker.SanitizeProjectName(ws.Name)
 
 	// Workspace paths
 	resolved.WorkspaceFolder = subCtx.ContainerWorkspaceFolder
@@ -216,7 +216,7 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 			Files:       absolutePaths,
 			Service:     cfg.Service,
 			RunServices: cfg.RunServices,
-			ProjectName: state.SanitizeProjectName(ws.Name),
+			ProjectName: docker.SanitizeProjectName(ws.Name),
 			WorkDir:     ws.ConfigDir,
 		}
 		resolved.ServiceName = cfg.Service

@@ -56,6 +56,40 @@ func (c *Client) Close() error {
 	return c.cli.Close()
 }
 
+// SanitizeProjectName ensures the name is valid for Docker container/compose project names.
+// Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
+func SanitizeProjectName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// Convert to lowercase
+	name = strings.ToLower(name)
+
+	// Replace spaces with underscores and filter invalid characters
+	var result strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		} else if r == ' ' {
+			result.WriteRune('_')
+		}
+		// Skip other characters
+	}
+
+	sanitized := result.String()
+	if sanitized == "" {
+		return ""
+	}
+
+	// Ensure starts with a letter (Docker requirement)
+	if sanitized[0] >= '0' && sanitized[0] <= '9' {
+		sanitized = "dcx_" + sanitized
+	}
+
+	return sanitized
+}
+
 // Ping checks if the Docker daemon is accessible.
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.cli.Ping(ctx)

@@ -7,8 +7,10 @@ import (
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -45,12 +47,12 @@ func runStop(cmd *cobra.Command, args []string) error {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
-	envKey := state.ComputeEnvKey(workspacePath)
+	envKey := workspace.ComputeID(workspacePath)
 
 	// Check current state (check both project name and env key for migration)
 	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
@@ -85,7 +87,11 @@ func runStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Determine plan type from container labels
-		if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
+		// Check for both legacy ("single") and new ("image"/"dockerfile") label values
+		isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
+			containerInfo.Plan == labels.BuildMethodImage ||
+			containerInfo.Plan == labels.BuildMethodDockerfile)
+		if isSingleContainer {
 			// Single container - use Docker API directly
 			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)

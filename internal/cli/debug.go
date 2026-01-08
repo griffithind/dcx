@@ -249,7 +249,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	// Try to find container by workspace ID
 	envKey := debug.Workspace.ID
 	if envKey == "" {
-		envKey = state.ComputeEnvKey(workspacePath)
+		envKey = workspace.ComputeID(workspacePath)
 	}
 
 	s, info, _ := stateMgr.GetState(ctx, envKey)
@@ -266,16 +266,16 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 
 		// Get labels
 		debug.Container.Labels = info.Labels.ToMap()
-		debug.Container.LegacyLabels = info.Labels.Version == "" || info.Labels.Version == "1"
+		debug.Container.LegacyLabels = info.Labels.SchemaVersion == "" || info.Labels.SchemaVersion == "1"
 
 		// Check staleness
 		if debug.Config.Hashes.Overall != "" {
-			if info.Labels.ConfigHash != debug.Config.Hashes.Config {
+			if info.Labels.HashConfig != debug.Config.Hashes.Config {
 				debug.Staleness.IsStale = true
 				debug.Staleness.Reason = "Configuration changed"
-				if info.Labels.ConfigHash != "" {
+				if info.Labels.HashConfig != "" {
 					debug.Staleness.Changes = append(debug.Staleness.Changes,
-						fmt.Sprintf("config hash: %s -> %s", info.Labels.ConfigHash, debug.Config.Hashes.Config))
+						fmt.Sprintf("config hash: %s -> %s", info.Labels.HashConfig, debug.Config.Hashes.Config))
 				}
 			}
 		}

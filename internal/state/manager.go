@@ -2,12 +2,10 @@ package state
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base32"
-	"strings"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/util"
+	"github.com/griffithind/dcx/internal/labels"
+	"github.com/griffithind/dcx/internal/workspace"
 )
 
 // Manager handles state detection and management for devcontainer environments.
@@ -20,96 +18,33 @@ func NewManager(client *docker.Client) *Manager {
 	return &Manager{client: client}
 }
 
-// SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
-func SanitizeProjectName(name string) string {
-	if name == "" {
-		return ""
-	}
-
-	// Convert to lowercase
-	name = strings.ToLower(name)
-
-	// Replace spaces with underscores and filter invalid characters
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			result.WriteRune(r)
-		} else if r == ' ' {
-			result.WriteRune('_')
-		}
-		// Skip other characters
-	}
-
-	sanitized := result.String()
-	if sanitized == "" {
-		return ""
-	}
-
-	// Ensure starts with a letter (Docker requirement)
-	if sanitized[0] >= '0' && sanitized[0] <= '9' {
-		sanitized = "dcx_" + sanitized
-	}
-
-	return sanitized
-}
-
-// ResolveIdentifier returns the project name if configured, otherwise computes env_key.
+// ResolveIdentifier returns the project name if configured, otherwise computes workspace ID.
 // The projectName parameter is from dcx.json configuration.
 func ResolveIdentifier(workspacePath string, projectName string) string {
 	if projectName != "" {
-		return SanitizeProjectName(projectName)
+		return docker.SanitizeProjectName(projectName)
 	}
-	return ComputeEnvKey(workspacePath)
-}
-
-// ComputeEnvKey generates a stable identifier from the workspace path.
-// Returns base32(sha256(realpath(workspace_root)))[0:12]
-func ComputeEnvKey(workspacePath string) string {
-	// Get the real path (resolve symlinks)
-	realPath, err := util.RealPath(workspacePath)
-	if err != nil {
-		// Fall back to the original path if we can't resolve
-		realPath = workspacePath
-	}
-
-	// Normalize the path
-	realPath = util.NormalizePath(realPath)
-
-	// Compute SHA256
-	hash := sha256.Sum256([]byte(realPath))
-
-	// Encode as base32 and take first 12 characters
-	encoded := base32.StdEncoding.EncodeToString(hash[:])
-	encoded = strings.ToLower(encoded)
-
-	if len(encoded) > 12 {
-		encoded = encoded[:12]
-	}
-
-	return encoded
-}
-
-// ComputeWorkspaceHash computes the full hash of the workspace path.
-func ComputeWorkspaceHash(workspacePath string) string {
-	realPath, err := util.RealPath(workspacePath)
-	if err != nil {
-		realPath = workspacePath
-	}
-	realPath = util.NormalizePath(realPath)
-
-	hash := sha256.Sum256([]byte(realPath))
-	return base32.StdEncoding.EncodeToString(hash[:])
+	return workspace.ComputeID(workspacePath)
 }
 
 // GetState determines the current state of the devcontainer environment.
-func (m *Manager) GetState(ctx context.Context, envKey string) (State, *ContainerInfo, error) {
-	// Find all containers with our env_key
+func (m *Manager) GetState(ctx context.Context, workspaceID string) (State, *ContainerInfo, error) {
+	// Try new labels first (com.griffithind.dcx.workspace.id)
 	containers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey: envKey,
+		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return StateAbsent, nil, err
+	}
+
+	// Fall back to legacy labels (io.github.dcx.env_key)
+	if len(containers) == 0 {
+		containers, err = m.client.ListContainers(ctx, map[string]string{
+			docker.LabelEnvKey: workspaceID,
+		})
+		if err != nil {
+			return StateAbsent, nil, err
+		}
 	}
 
 	// No containers found
@@ -117,11 +52,10 @@ func (m *Manager) GetState(ctx context.Context, envKey string) (State, *Containe
 		return StateAbsent, nil, nil
 	}
 
-	// Find the primary container
+	// Find the primary container (check both new and legacy labels)
 	var primary *docker.Container
 	for i := range containers {
-		labels := docker.LabelsFromMap(containers[i].Labels)
-		if labels.Primary {
+		if isPrimaryContainer(containers[i].Labels) {
 			primary = &containers[i]
 			break
 		}
@@ -163,13 +97,23 @@ func (m *Manager) GetStateWithHashCheck(ctx context.Context, envKey, currentConf
 	return state, info, nil
 }
 
-// GetStateWithProject handles lookup for both project-named and env_key containers.
+// GetStateWithProject handles lookup for both project-named and workspace ID containers.
 // This enables migration from hash-based naming to project naming.
-func (m *Manager) GetStateWithProject(ctx context.Context, projectName, envKey string) (State, *ContainerInfo, error) {
-	// First try project name if set
+func (m *Manager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (State, *ContainerInfo, error) {
+	// First try project name if set (search both new and legacy labels)
 	if projectName != "" {
-		sanitized := SanitizeProjectName(projectName)
+		sanitized := docker.SanitizeProjectName(projectName)
+
+		// Try new labels first
 		containers, err := m.client.ListContainers(ctx, map[string]string{
+			labels.LabelWorkspaceID: sanitized,
+		})
+		if err == nil && len(containers) > 0 {
+			return m.processContainers(containers)
+		}
+
+		// Fall back to legacy labels
+		containers, err = m.client.ListContainers(ctx, map[string]string{
 			docker.LabelEnvKey: sanitized,
 		})
 		if err == nil && len(containers) > 0 {
@@ -177,8 +121,8 @@ func (m *Manager) GetStateWithProject(ctx context.Context, projectName, envKey s
 		}
 	}
 
-	// Fall back to env_key lookup (for migration)
-	return m.GetState(ctx, envKey)
+	// Fall back to workspace ID lookup
+	return m.GetState(ctx, workspaceID)
 }
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
@@ -202,11 +146,10 @@ func (m *Manager) processContainers(containers []docker.Container) (State, *Cont
 		return StateAbsent, nil, nil
 	}
 
-	// Find the primary container
+	// Find the primary container (check both new and legacy labels)
 	var primary *docker.Container
 	for i := range containers {
-		labels := docker.LabelsFromMap(containers[i].Labels)
-		if labels.Primary {
+		if isPrimaryContainer(containers[i].Labels) {
 			primary = &containers[i]
 			break
 		}
@@ -231,12 +174,23 @@ func (m *Manager) processContainers(containers []docker.Container) (State, *Cont
 }
 
 // FindContainers returns all containers for an environment.
-func (m *Manager) FindContainers(ctx context.Context, envKey string) ([]ContainerInfo, error) {
+func (m *Manager) FindContainers(ctx context.Context, workspaceID string) ([]ContainerInfo, error) {
+	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey: envKey,
+		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Fall back to legacy labels
+	if len(containers) == 0 {
+		containers, err = m.client.ListContainers(ctx, map[string]string{
+			docker.LabelEnvKey: workspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	result := make([]ContainerInfo, 0, len(containers))
@@ -248,13 +202,25 @@ func (m *Manager) FindContainers(ctx context.Context, envKey string) ([]Containe
 }
 
 // FindPrimaryContainer returns the primary container for an environment.
-func (m *Manager) FindPrimaryContainer(ctx context.Context, envKey string) (*ContainerInfo, error) {
+func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) (*ContainerInfo, error) {
+	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey:  envKey,
-		docker.LabelPrimary: "true",
+		labels.LabelWorkspaceID: workspaceID,
+		labels.LabelIsPrimary:   "true",
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Fall back to legacy labels
+	if len(containers) == 0 {
+		containers, err = m.client.ListContainers(ctx, map[string]string{
+			docker.LabelEnvKey:  workspaceID,
+			docker.LabelPrimary: "true",
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if len(containers) == 0 {
@@ -267,11 +233,20 @@ func (m *Manager) FindPrimaryContainer(ctx context.Context, envKey string) (*Con
 // FindContainerByName returns a container by its name.
 // This is used by the SSH command to find a specific container.
 func (m *Manager) FindContainerByName(ctx context.Context, containerName string) (*ContainerInfo, error) {
+	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelManaged: "true",
+		labels.LabelManaged: "true",
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Also include legacy-labeled containers
+	legacyContainers, err := m.client.ListContainers(ctx, map[string]string{
+		docker.LabelManaged: "true",
+	})
+	if err == nil {
+		containers = append(containers, legacyContainers...)
 	}
 
 	for i := range containers {
@@ -283,31 +258,65 @@ func (m *Manager) FindContainerByName(ctx context.Context, containerName string)
 	return nil, nil
 }
 
+// containerInfoFromDocker creates ContainerInfo from a Docker container.
+// Handles both new labels and legacy labels.
 func containerInfoFromDocker(c *docker.Container) *ContainerInfo {
-	labels := docker.LabelsFromMap(c.Labels)
+	// Try to parse as new labels first
+	l := labels.FromMap(c.Labels)
+
+	// If new labels are empty, try legacy migration
+	if l.WorkspaceID == "" && labels.IsLegacy(c.Labels) {
+		l = labels.MigrateFromLegacy(c.Labels)
+	}
+
+	// Fall back to reading legacy labels directly if still empty
+	if l.WorkspaceID == "" {
+		legacyLabels := docker.LabelsFromMap(c.Labels)
+		l.WorkspaceID = legacyLabels.EnvKey
+		l.HashConfig = legacyLabels.ConfigHash
+		l.IsPrimary = legacyLabels.Primary
+		l.ComposeProject = legacyLabels.ComposeProject
+		l.ComposeService = legacyLabels.PrimaryService
+		l.BuildMethod = legacyLabels.Plan
+	}
+
 	return &ContainerInfo{
 		ID:             c.ID,
 		Name:           c.Name,
 		Status:         c.Status,
 		Running:        c.Running,
-		ConfigHash:     labels.ConfigHash,
-		EnvKey:         labels.EnvKey,
-		Plan:           labels.Plan,
-		ComposeProject: labels.ComposeProject,
-		PrimaryService: labels.PrimaryService,
-		Labels:         labels,
+		ConfigHash:     l.HashConfig,
+		WorkspaceID:    l.WorkspaceID,
+		Plan:           l.BuildMethod,
+		ComposeProject: l.ComposeProject,
+		PrimaryService: l.ComposeService,
+		Labels:         l,
 	}
+}
+
+// isPrimaryContainer checks if a container is marked as primary (supports both label formats).
+func isPrimaryContainer(labelMap map[string]string) bool {
+	return labels.IsPrimaryContainer(labelMap)
 }
 
 // Cleanup removes all containers for an environment.
 // This is useful for recovering from broken states.
 // If removeVolumes is true, anonymous volumes attached to containers are also removed.
-func (m *Manager) Cleanup(ctx context.Context, envKey string, removeVolumes bool) error {
+func (m *Manager) Cleanup(ctx context.Context, workspaceID string, removeVolumes bool) error {
+	// Find containers with new labels
 	containers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey: envKey,
+		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return err
+	}
+
+	// Also find containers with legacy labels
+	legacyContainers, err := m.client.ListContainers(ctx, map[string]string{
+		docker.LabelEnvKey: workspaceID,
+	})
+	if err == nil {
+		containers = append(containers, legacyContainers...)
 	}
 
 	var lastErr error

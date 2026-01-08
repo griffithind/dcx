@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	runnerPkg "github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/ssh"
@@ -70,7 +71,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 		if s.verbose {
 			fmt.Printf("Project name: %s\n", projectName)
 		}
@@ -82,10 +83,11 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	// Compute identifiers
-	envKey := state.ComputeEnvKey(s.workspacePath)
-	configHash, err := config.ComputeHash(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute config hash: %w", err)
+	envKey := workspace.ComputeID(s.workspacePath)
+	// Use simple hash of raw JSON to match workspace builder
+	var configHash string
+	if raw := cfg.GetRawJSON(); len(raw) > 0 {
+		configHash = config.ComputeSimpleHash(raw)
 	}
 
 	if s.verbose {
@@ -340,7 +342,11 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 	}
 
 	// Handle based on plan type
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
+	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
+		containerInfo.Plan == labels.BuildMethodImage ||
+		containerInfo.Plan == labels.BuildMethodDockerfile)
+	if isSingleContainer {
 		if containerInfo.Running {
 			if err := s.dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)
@@ -384,7 +390,11 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 	}
 
 	// Handle based on plan type
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
+	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
+		containerInfo.Plan == labels.BuildMethodImage ||
+		containerInfo.Plan == labels.BuildMethodDockerfile)
+	if isSingleContainer {
 		if containerInfo.Running {
 			if err := s.dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)

@@ -13,7 +13,7 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/ssh"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 )
 
 // Runner manages docker compose operations.
@@ -498,7 +498,7 @@ func (r *Runner) Cleanup() error {
 
 // ComputeWorkspaceRootHash computes the hash of the workspace root.
 func ComputeWorkspaceRootHash(workspacePath string) string {
-	return state.ComputeWorkspaceHash(workspacePath)
+	return workspace.ComputeFullHash(workspacePath)
 }
 
 // ensureServicesBuilt builds all services that have build configurations.

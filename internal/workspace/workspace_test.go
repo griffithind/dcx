@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 )
 
@@ -19,8 +20,9 @@ func TestComputeID(t *testing.T) {
 	if id1 != id3 {
 		t.Error("same path should produce same ID")
 	}
-	if len(id1) != 16 {
-		t.Errorf("ID should be 16 hex chars, got %d", len(id1))
+	// ID should be 12 lowercase base32 characters
+	if len(id1) != 12 {
+		t.Errorf("ID should be 12 base32 chars, got %d", len(id1))
 	}
 }
 
@@ -471,15 +473,15 @@ func TestSanitizeProjectName(t *testing.T) {
 		expected string
 	}{
 		{"my-project", "my-project"},
-		{"My Project", "my-project"},
+		{"My Project", "my_project"},
 		{"my_project", "my_project"},
-		{"My Project 123", "my-project-123"},
+		{"My Project 123", "my_project_123"},
 		{"Special@#$chars", "specialchars"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			result := sanitizeProjectName(tc.input)
+			result := docker.SanitizeProjectName(tc.input)
 			if result != tc.expected {
 				t.Errorf("expected %q, got %q", tc.expected, result)
 			}

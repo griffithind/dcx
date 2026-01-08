@@ -7,7 +7,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -47,11 +47,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 	}
 
-	// Compute env key
-	envKey := state.ComputeEnvKey(workspacePath)
+	// Compute workspace ID
+	envKey := workspace.ComputeID(workspacePath)
 
 	// Create environment service and delegate to it
 	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)

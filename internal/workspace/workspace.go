@@ -5,13 +5,15 @@ package workspace
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base32"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/labels"
+	"github.com/griffithind/dcx/internal/util"
 )
 
 // Workspace represents a fully resolved devcontainer workspace.
@@ -255,9 +257,46 @@ func New() *Workspace {
 }
 
 // ComputeID generates a stable workspace identifier from the workspace path.
+// Returns base32(sha256(realpath(workspace_root)))[0:12].
+// This is the canonical identifier used for container labels, compose projects,
+// SSH hosts, and all workspace lookups.
 func ComputeID(workspacePath string) string {
-	h := sha256.Sum256([]byte(workspacePath))
-	return hex.EncodeToString(h[:8]) // Use first 8 bytes (16 hex chars)
+	// Get the real path (resolve symlinks)
+	realPath, err := util.RealPath(workspacePath)
+	if err != nil {
+		// Fall back to the original path if we can't resolve
+		realPath = workspacePath
+	}
+
+	// Normalize the path
+	realPath = util.NormalizePath(realPath)
+
+	// Compute SHA256
+	hash := sha256.Sum256([]byte(realPath))
+
+	// Encode as base32 and take first 12 characters
+	encoded := base32.StdEncoding.EncodeToString(hash[:])
+	encoded = strings.ToLower(encoded)
+
+	if len(encoded) > 12 {
+		encoded = encoded[:12]
+	}
+
+	return encoded
+}
+
+// ComputeFullHash computes the full base32-encoded hash of the workspace path.
+// This is used for the workspace_root_hash label.
+func ComputeFullHash(workspacePath string) string {
+	// Get the real path (resolve symlinks)
+	realPath, err := util.RealPath(workspacePath)
+	if err != nil {
+		realPath = workspacePath
+	}
+	realPath = util.NormalizePath(realPath)
+
+	hash := sha256.Sum256([]byte(realPath))
+	return base32.StdEncoding.EncodeToString(hash[:])
 }
 
 // ComputeName derives a workspace name from the path or config.

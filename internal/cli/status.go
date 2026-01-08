@@ -10,6 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -101,14 +102,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
 
-	// Compute env key from workspace
-	envKey := state.ComputeEnvKey(workspacePath)
+	// Compute workspace ID
+	envKey := workspace.ComputeID(workspacePath)
 
 	// Try to load config and compute hash for staleness detection
 	var currentState state.State
@@ -119,7 +120,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	cfg, _, err = config.Load(workspacePath, configPath)
 	if err == nil {
 		// Config exists, check for staleness
-		configHash, _ = config.ComputeHash(cfg)
+		// Use simple hash of raw JSON to match workspace builder
+		if raw := cfg.GetRawJSON(); len(raw) > 0 {
+			configHash = config.ComputeSimpleHash(raw)
+		}
 		if configHash != "" {
 			currentState, containerInfo, err = stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
 		} else {

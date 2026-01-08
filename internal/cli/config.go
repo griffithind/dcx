@@ -7,7 +7,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/output"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -68,9 +68,13 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Compute env key and config hash
-	envKey := state.ComputeEnvKey(workspacePath)
-	configHash, _ := config.ComputeHash(cfg)
+	// Compute workspace ID and config hash
+	envKey := workspace.ComputeID(workspacePath)
+	// Use simple hash of raw JSON to match workspace builder
+	var configHash string
+	if raw := cfg.GetRawJSON(); len(raw) > 0 {
+		configHash = config.ComputeSimpleHash(raw)
+	}
 
 	// Determine plan type
 	planType := "unknown"

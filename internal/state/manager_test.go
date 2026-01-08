@@ -3,52 +3,10 @@ package state
 import (
 	"testing"
 
+	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestComputeEnvKey(t *testing.T) {
-	tests := []struct {
-		name          string
-		workspacePath string
-	}{
-		{
-			name:          "simple path",
-			workspacePath: "/home/user/project",
-		},
-		{
-			name:          "path with spaces",
-			workspacePath: "/home/user/my project",
-		},
-		{
-			name:          "nested path",
-			workspacePath: "/home/user/projects/myapp/src",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			key := ComputeEnvKey(tt.workspacePath)
-
-			// Should be 12 characters
-			assert.Len(t, key, 12)
-
-			// Should be lowercase
-			assert.Equal(t, key, key)
-
-			// Should be deterministic
-			key2 := ComputeEnvKey(tt.workspacePath)
-			assert.Equal(t, key, key2)
-		})
-	}
-}
-
-func TestComputeEnvKeyDifferentPaths(t *testing.T) {
-	key1 := ComputeEnvKey("/home/user/project1")
-	key2 := ComputeEnvKey("/home/user/project2")
-
-	// Different paths should produce different keys
-	assert.NotEqual(t, key1, key2)
-}
 
 func TestStateString(t *testing.T) {
 	tests := []struct {
@@ -93,22 +51,6 @@ func TestStateNeedsRecreate(t *testing.T) {
 	for _, s := range noRecreate {
 		assert.False(t, s.NeedsRecreate(), "expected %s to not need recreate", s)
 	}
-}
-
-func TestComputeWorkspaceHash(t *testing.T) {
-	path := "/home/user/project"
-	hash := ComputeWorkspaceHash(path)
-
-	// Should be non-empty
-	assert.NotEmpty(t, hash)
-
-	// Should be deterministic
-	hash2 := ComputeWorkspaceHash(path)
-	assert.Equal(t, hash, hash2)
-
-	// Different paths should produce different hashes
-	hash3 := ComputeWorkspaceHash("/home/user/other")
-	assert.NotEqual(t, hash, hash3)
 }
 
 func TestSanitizeProjectName(t *testing.T) {
@@ -176,7 +118,7 @@ func TestSanitizeProjectName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := SanitizeProjectName(tt.input)
+			result := docker.SanitizeProjectName(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -193,8 +135,8 @@ func TestResolveIdentifier(t *testing.T) {
 	result = ResolveIdentifier(workspacePath, "My Project")
 	assert.Equal(t, "my_project", result)
 
-	// Without project name - falls back to env key
+	// Without project name - falls back to workspace ID
 	result = ResolveIdentifier(workspacePath, "")
-	assert.Len(t, result, 12) // env key is 12 chars
-	assert.Equal(t, ComputeEnvKey(workspacePath), result)
+	assert.Len(t, result, 12) // workspace ID is 12 chars
+	assert.Equal(t, workspace.ComputeID(workspacePath), result)
 }
