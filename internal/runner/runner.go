@@ -365,7 +365,7 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 
 	// Set compose-specific labels
 	if ws.Resolved.Compose != nil {
-		l.ComposeProject = ws.Resolved.ServiceName // ServiceName is used as compose project
+		l.ComposeProject = ws.Resolved.Compose.ProjectName
 		l.ComposeService = ws.Resolved.Compose.Service
 	}
 
