@@ -95,8 +95,9 @@ type FeatureMetadata struct {
 	// InstallsAfter lists features this should install after (soft dependency)
 	InstallsAfter []string `json:"installsAfter,omitempty"`
 
-	// DependsOn lists required features (hard dependency)
-	DependsOn []string `json:"dependsOn,omitempty"`
+	// DependsOn specifies required features (hard dependency) with optional options
+	// Map keys are feature IDs, values are feature options (can be empty object {})
+	DependsOn map[string]interface{} `json:"dependsOn,omitempty"`
 
 	// ContainerEnv specifies environment variables to set
 	ContainerEnv map[string]string `json:"containerEnv,omitempty"`

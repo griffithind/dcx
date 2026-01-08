@@ -88,8 +88,8 @@ func buildDependencyGraph(features []*Feature, featureMap map[string]*Feature) *
 		}
 
 		if f.Metadata != nil {
-			// Add hard dependencies
-			for _, dep := range f.Metadata.DependsOn {
+			// Add hard dependencies (iterate over map keys)
+			for dep := range f.Metadata.DependsOn {
 				graph.hardDeps[id] = append(graph.hardDeps[id], dep)
 			}
 
@@ -245,7 +245,7 @@ func ValidateDependencies(features []*Feature) error {
 			continue
 		}
 
-		for _, dep := range f.Metadata.DependsOn {
+		for dep := range f.Metadata.DependsOn {
 			if !available[dep] {
 				return fmt.Errorf("feature %q requires missing dependency %q", f.ID, dep)
 			}
