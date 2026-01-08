@@ -21,9 +21,9 @@ func TestOrderFeatures_NoDependencies(t *testing.T) {
 
 func TestOrderFeatures_HardDependencies(t *testing.T) {
 	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: []string{"b"}}},
+		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"b": map[string]interface{}{}}}},
 		{ID: "feature-b", Metadata: &FeatureMetadata{ID: "b"}},
-		{ID: "feature-c", Metadata: &FeatureMetadata{ID: "c", DependsOn: []string{"a"}}},
+		{ID: "feature-c", Metadata: &FeatureMetadata{ID: "c", DependsOn: map[string]interface{}{"a": map[string]interface{}{}}}},
 	}
 
 	ordered, err := OrderFeatures(features, nil)
@@ -77,8 +77,8 @@ func TestOrderFeatures_OverrideOrder(t *testing.T) {
 
 func TestOrderFeatures_CycleDetection(t *testing.T) {
 	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: []string{"b"}}},
-		{ID: "feature-b", Metadata: &FeatureMetadata{ID: "b", DependsOn: []string{"a"}}},
+		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"b": map[string]interface{}{}}}},
+		{ID: "feature-b", Metadata: &FeatureMetadata{ID: "b", DependsOn: map[string]interface{}{"a": map[string]interface{}{}}}},
 	}
 
 	_, err := OrderFeatures(features, nil)
@@ -88,7 +88,7 @@ func TestOrderFeatures_CycleDetection(t *testing.T) {
 
 func TestValidateDependencies_MissingDep(t *testing.T) {
 	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: []string{"missing"}}},
+		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"missing": map[string]interface{}{}}}},
 	}
 
 	err := ValidateDependencies(features)
@@ -98,7 +98,7 @@ func TestValidateDependencies_MissingDep(t *testing.T) {
 
 func TestValidateDependencies_AllPresent(t *testing.T) {
 	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: []string{"b"}}},
+		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"b": map[string]interface{}{}}}},
 		{ID: "feature-b", Metadata: &FeatureMetadata{ID: "b"}},
 	}
 

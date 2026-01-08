@@ -318,7 +318,7 @@ func TestFeatureMetadataFields(t *testing.T) {
 			"version": {Type: "string", Default: "latest"},
 		},
 		InstallsAfter: []string{"common-utils"},
-		DependsOn:     []string{"base-feature"},
+		DependsOn:     map[string]interface{}{"base-feature": map[string]interface{}{}},
 		ContainerEnv:  map[string]string{"MY_VAR": "value"},
 		CapAdd:        []string{"SYS_PTRACE"},
 		SecurityOpt:   []string{"seccomp=unconfined"},
@@ -338,7 +338,7 @@ func TestFeatureMetadataFields(t *testing.T) {
 	assert.True(t, metadata.Deprecated)
 	assert.Len(t, metadata.Options, 1)
 	assert.Equal(t, []string{"common-utils"}, metadata.InstallsAfter)
-	assert.Equal(t, []string{"base-feature"}, metadata.DependsOn)
+	assert.Contains(t, metadata.DependsOn, "base-feature")
 	assert.Equal(t, "value", metadata.ContainerEnv["MY_VAR"])
 	assert.Equal(t, []string{"SYS_PTRACE"}, metadata.CapAdd)
 	assert.Equal(t, []string{"seccomp=unconfined"}, metadata.SecurityOpt)
