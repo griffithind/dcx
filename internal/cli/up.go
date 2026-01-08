@@ -165,9 +165,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 // quickStart starts existing containers without going through the full up sequence.
 // This is an offline-safe operation.
 func quickStart(ctx context.Context, dockerClient *docker.Client, containerInfo *state.ContainerInfo, projectName, envKey string) error {
-	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
-		containerInfo.Plan == labels.BuildMethodImage ||
+	// Determine plan type (single-container vs compose)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 		containerInfo.Plan == labels.BuildMethodDockerfile)
 	if isSingleContainer {
 		// Single container - use Docker API directly

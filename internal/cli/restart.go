@@ -7,6 +7,7 @@ import (
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/workspace"
@@ -102,8 +103,10 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 	var restartErr error
 
-	// Determine plan type from container labels
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
+	// Determine plan type from container labels (single-container vs compose)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
+		containerInfo.Plan == labels.BuildMethodDockerfile)
+	if isSingleContainer {
 		// Single container - use Docker API directly
 		if containerInfo.Running {
 			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {

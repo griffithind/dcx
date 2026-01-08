@@ -86,10 +86,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Determine plan type from container labels
-		// Check for both legacy ("single") and new ("image"/"dockerfile") label values
-		isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
-			containerInfo.Plan == labels.BuildMethodImage ||
+		// Determine plan type from container labels (single-container vs compose)
+		isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 			containerInfo.Plan == labels.BuildMethodDockerfile)
 		if isSingleContainer {
 			// Single container - use Docker API directly

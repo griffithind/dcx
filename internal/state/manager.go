@@ -8,6 +8,9 @@ import (
 	"github.com/griffithind/dcx/internal/workspace"
 )
 
+// Note: Legacy label support (io.github.dcx.*) has been removed.
+// Containers with legacy labels must be rebuilt using 'dcx down && dcx up'.
+
 // Manager handles state detection and management for devcontainer environments.
 type Manager struct {
 	client *docker.Client
@@ -29,7 +32,6 @@ func ResolveIdentifier(workspacePath string, projectName string) string {
 
 // GetState determines the current state of the devcontainer environment.
 func (m *Manager) GetState(ctx context.Context, workspaceID string) (State, *ContainerInfo, error) {
-	// Try new labels first (com.griffithind.dcx.workspace.id)
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		labels.LabelWorkspaceID: workspaceID,
 	})
@@ -37,22 +39,12 @@ func (m *Manager) GetState(ctx context.Context, workspaceID string) (State, *Con
 		return StateAbsent, nil, err
 	}
 
-	// Fall back to legacy labels (io.github.dcx.env_key)
-	if len(containers) == 0 {
-		containers, err = m.client.ListContainers(ctx, map[string]string{
-			docker.LabelEnvKey: workspaceID,
-		})
-		if err != nil {
-			return StateAbsent, nil, err
-		}
-	}
-
 	// No containers found
 	if len(containers) == 0 {
 		return StateAbsent, nil, nil
 	}
 
-	// Find the primary container (check both new and legacy labels)
+	// Find the primary container
 	var primary *docker.Container
 	for i := range containers {
 		if isPrimaryContainer(containers[i].Labels) {
@@ -100,21 +92,11 @@ func (m *Manager) GetStateWithHashCheck(ctx context.Context, envKey, currentConf
 // GetStateWithProject handles lookup for both project-named and workspace ID containers.
 // This enables migration from hash-based naming to project naming.
 func (m *Manager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (State, *ContainerInfo, error) {
-	// First try project name if set (search both new and legacy labels)
+	// First try project name if set
 	if projectName != "" {
 		sanitized := docker.SanitizeProjectName(projectName)
-
-		// Try new labels first
 		containers, err := m.client.ListContainers(ctx, map[string]string{
 			labels.LabelWorkspaceID: sanitized,
-		})
-		if err == nil && len(containers) > 0 {
-			return m.processContainers(containers)
-		}
-
-		// Fall back to legacy labels
-		containers, err = m.client.ListContainers(ctx, map[string]string{
-			docker.LabelEnvKey: sanitized,
 		})
 		if err == nil && len(containers) > 0 {
 			return m.processContainers(containers)
@@ -146,7 +128,7 @@ func (m *Manager) processContainers(containers []docker.Container) (State, *Cont
 		return StateAbsent, nil, nil
 	}
 
-	// Find the primary container (check both new and legacy labels)
+	// Find the primary container
 	var primary *docker.Container
 	for i := range containers {
 		if isPrimaryContainer(containers[i].Labels) {
@@ -175,22 +157,11 @@ func (m *Manager) processContainers(containers []docker.Container) (State, *Cont
 
 // FindContainers returns all containers for an environment.
 func (m *Manager) FindContainers(ctx context.Context, workspaceID string) ([]ContainerInfo, error) {
-	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Fall back to legacy labels
-	if len(containers) == 0 {
-		containers, err = m.client.ListContainers(ctx, map[string]string{
-			docker.LabelEnvKey: workspaceID,
-		})
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	result := make([]ContainerInfo, 0, len(containers))
@@ -203,24 +174,12 @@ func (m *Manager) FindContainers(ctx context.Context, workspaceID string) ([]Con
 
 // FindPrimaryContainer returns the primary container for an environment.
 func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) (*ContainerInfo, error) {
-	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		labels.LabelWorkspaceID: workspaceID,
 		labels.LabelIsPrimary:   "true",
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Fall back to legacy labels
-	if len(containers) == 0 {
-		containers, err = m.client.ListContainers(ctx, map[string]string{
-			docker.LabelEnvKey:  workspaceID,
-			docker.LabelPrimary: "true",
-		})
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	if len(containers) == 0 {
@@ -233,20 +192,11 @@ func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) 
 // FindContainerByName returns a container by its name.
 // This is used by the SSH command to find a specific container.
 func (m *Manager) FindContainerByName(ctx context.Context, containerName string) (*ContainerInfo, error) {
-	// Try new labels first
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		labels.LabelManaged: "true",
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Also include legacy-labeled containers
-	legacyContainers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelManaged: "true",
-	})
-	if err == nil {
-		containers = append(containers, legacyContainers...)
 	}
 
 	for i := range containers {
@@ -259,26 +209,8 @@ func (m *Manager) FindContainerByName(ctx context.Context, containerName string)
 }
 
 // containerInfoFromDocker creates ContainerInfo from a Docker container.
-// Handles both new labels and legacy labels.
 func containerInfoFromDocker(c *docker.Container) *ContainerInfo {
-	// Try to parse as new labels first
 	l := labels.FromMap(c.Labels)
-
-	// If new labels are empty, try legacy migration
-	if l.WorkspaceID == "" && labels.IsLegacy(c.Labels) {
-		l = labels.MigrateFromLegacy(c.Labels)
-	}
-
-	// Fall back to reading legacy labels directly if still empty
-	if l.WorkspaceID == "" {
-		legacyLabels := docker.LabelsFromMap(c.Labels)
-		l.WorkspaceID = legacyLabels.EnvKey
-		l.HashConfig = legacyLabels.ConfigHash
-		l.IsPrimary = legacyLabels.Primary
-		l.ComposeProject = legacyLabels.ComposeProject
-		l.ComposeService = legacyLabels.PrimaryService
-		l.BuildMethod = legacyLabels.Plan
-	}
 
 	return &ContainerInfo{
 		ID:             c.ID,
@@ -303,20 +235,11 @@ func isPrimaryContainer(labelMap map[string]string) bool {
 // This is useful for recovering from broken states.
 // If removeVolumes is true, anonymous volumes attached to containers are also removed.
 func (m *Manager) Cleanup(ctx context.Context, workspaceID string, removeVolumes bool) error {
-	// Find containers with new labels
 	containers, err := m.client.ListContainers(ctx, map[string]string{
 		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return err
-	}
-
-	// Also find containers with legacy labels
-	legacyContainers, err := m.client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey: workspaceID,
-	})
-	if err == nil {
-		containers = append(containers, legacyContainers...)
 	}
 
 	var lastErr error

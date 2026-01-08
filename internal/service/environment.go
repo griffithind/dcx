@@ -323,10 +323,8 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 		return nil
 	}
 
-	// Handle based on plan type
-	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
-		containerInfo.Plan == labels.BuildMethodImage ||
+	// Handle based on plan type (single-container vs compose)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 		containerInfo.Plan == labels.BuildMethodDockerfile)
 	if isSingleContainer {
 		if containerInfo.Running {
@@ -371,10 +369,8 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 		return nil
 	}
 
-	// Handle based on plan type
-	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
-		containerInfo.Plan == labels.BuildMethodImage ||
+	// Handle based on plan type (single-container vs compose)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 		containerInfo.Plan == labels.BuildMethodDockerfile)
 	if isSingleContainer {
 		if containerInfo.Running {

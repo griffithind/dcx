@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/parse"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/workspace"
@@ -223,19 +223,19 @@ func (g *overrideGenerator) generateRunServiceOverride(serviceName string) Servi
 }
 
 // addLabels adds DCX labels to the service.
-func (g *overrideGenerator) addLabels(labels map[string]string, isPrimary bool) {
-	labels[docker.LabelManaged] = "true"
-	labels[docker.LabelEnvKey] = g.envKey
-	labels[docker.LabelWorkspaceRootHash] = workspace.ComputeFullHash(g.workspacePath)
-	labels[docker.LabelWorkspacePath] = g.workspacePath
-	labels[docker.LabelConfigHash] = g.configHash
-	labels[docker.LabelPlan] = docker.PlanCompose
-	labels[docker.LabelComposeProject] = g.composeProject
-	labels[docker.LabelPrimaryService] = g.cfg.Service
-	labels[docker.LabelVersion] = docker.LabelSchemaVersion
+func (g *overrideGenerator) addLabels(lbls map[string]string, isPrimary bool) {
+	lbls[labels.LabelManaged] = "true"
+	lbls[labels.LabelSchemaVersion] = labels.SchemaVersion
+	lbls[labels.LabelWorkspaceID] = g.envKey
+	lbls[labels.LabelWorkspacePath] = g.workspacePath
+	lbls[labels.LabelHashConfig] = g.configHash
+	lbls[labels.LabelHashOverall] = workspace.ComputeFullHash(g.workspacePath)
+	lbls[labels.LabelBuildMethod] = labels.BuildMethodCompose
+	lbls[labels.LabelComposeProject] = g.composeProject
+	lbls[labels.LabelComposeService] = g.cfg.Service
 
 	if isPrimary {
-		labels[docker.LabelPrimary] = "true"
+		lbls[labels.LabelIsPrimary] = "true"
 	}
 }
 
