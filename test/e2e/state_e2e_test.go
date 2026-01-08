@@ -43,9 +43,9 @@ func TestStateTransitionsE2E(t *testing.T) {
 		assert.Equal(t, "CREATED", state)
 	})
 
-	// CREATED -> RUNNING (via start)
+	// CREATED -> RUNNING (via up - smart start)
 	t.Run("created_to_running", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "start")
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 		state := helpers.GetContainerState(t, workspace)
 		assert.Equal(t, "RUNNING", state)
@@ -140,20 +140,26 @@ func TestStaleDetectionE2E(t *testing.T) {
 	})
 }
 
-// TestStartFromAbsentFailsE2E tests that start fails when no container exists.
-func TestStartFromAbsentFailsE2E(t *testing.T) {
+// TestUpFromAbsentE2E tests that up works when no container exists.
+func TestUpFromAbsentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
 	// Ensure nothing exists
 	helpers.RunDCXInDir(t, workspace, "down")
 
-	// Start should fail
-	_, _, err := helpers.RunDCXInDir(t, workspace, "start")
-	assert.Error(t, err, "start should fail when no container exists")
+	// Up should succeed and create container
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+	state := helpers.GetContainerState(t, workspace)
+	assert.Equal(t, "RUNNING", state)
 }
 
 // TestExecOnStoppedFailsE2E tests that exec fails on stopped container.
