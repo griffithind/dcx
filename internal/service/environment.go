@@ -115,39 +115,20 @@ func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, env
 	return s.stateMgr.GetStateWithProject(ctx, projectName, envKey)
 }
 
-// CreateRunner creates the appropriate runner based on configuration.
+// CreateRunner creates the unified runner for all configuration types.
+// The unified runner handles both compose and single-container plans.
 func (s *EnvironmentService) CreateRunner(info *EnvironmentInfo) (runnerPkg.Environment, error) {
-	if info.Config.IsComposePlan() {
-		r, err := compose.NewRunner(
-			s.dockerClient,
-			s.workspacePath,
-			info.ConfigPath,
-			info.Config,
-			info.ProjectName,
-			info.EnvKey,
-			info.ConfigHash,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create compose runner: %w", err)
-		}
-		return r, nil
+	// Build a workspace for the unified runner (works for both compose and single)
+	ws, err := s.buildWorkspace(info)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build workspace: %w", err)
 	}
 
-	if info.Config.IsSinglePlan() {
-		// Build a workspace for the unified runner
-		ws, err := s.buildWorkspace(info)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build workspace: %w", err)
-		}
-
-		r, err := runnerPkg.NewUnifiedRunner(ws, s.dockerClient)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create runner: %w", err)
-		}
-		return r, nil
+	r, err := runnerPkg.NewUnifiedRunner(ws, s.dockerClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runner: %w", err)
 	}
-
-	return nil, fmt.Errorf("invalid configuration: no build plan detected")
+	return r, nil
 }
 
 // buildWorkspace constructs a workspace from environment info.
