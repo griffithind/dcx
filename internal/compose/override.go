@@ -133,7 +133,7 @@ func (g *overrideGenerator) generatePrimaryServiceOverride() (ServiceOverride, e
 
 	// Add additional mounts from config
 	for _, mount := range g.cfg.Mounts {
-		parsed := g.parseMountString(mount)
+		parsed := g.parseMountString(mount.String())
 		if parsed != "" {
 			svc.Volumes = append(svc.Volumes, parsed)
 		}

@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // DevcontainerConfig represents the parsed devcontainer.json configuration.
@@ -45,8 +46,8 @@ type DevcontainerConfig struct {
 	PortsAttributes      map[string]interface{} `json:"portsAttributes,omitempty"`
 	OtherPortsAttributes interface{}            `json:"otherPortsAttributes,omitempty"` // Default attributes for unlisted ports
 
-	// Mounts
-	Mounts []string `json:"mounts,omitempty"`
+	// Mounts - can be strings or objects
+	Mounts []Mount `json:"mounts,omitempty"`
 
 	// Docker run arguments
 	RunArgs []string `json:"runArgs,omitempty"`
@@ -221,6 +222,74 @@ type PortAttribute struct {
 	OnAutoForward    string `json:"onAutoForward,omitempty"`
 	RequireLocalPort bool   `json:"requireLocalPort,omitempty"`
 	ElevateIfNeeded  bool   `json:"elevateIfNeeded,omitempty"`
+}
+
+// Mount represents a mount specification that can be either a string or an object.
+type Mount struct {
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target,omitempty"`
+	Type     string `json:"type,omitempty"`
+	ReadOnly bool   `json:"readonly,omitempty"`
+	// Raw holds the original string if mount was specified as a string
+	Raw string `json:"-"`
+}
+
+// UnmarshalJSON handles both string and object forms of mount specifications.
+func (m *Mount) UnmarshalJSON(data []byte) error {
+	// Try string first
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		m.Raw = s
+		// Parse the mount string: "source=...,target=...,type=...,readonly"
+		parts := strings.Split(s, ",")
+		for _, part := range parts {
+			if part == "readonly" || part == "ro" {
+				m.ReadOnly = true
+				continue
+			}
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(kv[0])
+			value := strings.TrimSpace(kv[1])
+			switch key {
+			case "source", "src":
+				m.Source = value
+			case "target", "dst", "destination":
+				m.Target = value
+			case "type":
+				m.Type = value
+			case "readonly", "ro":
+				m.ReadOnly = value == "true" || value == "1"
+			}
+		}
+		return nil
+	}
+
+	// Try object form
+	type mountAlias Mount
+	var obj mountAlias
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	*m = Mount(obj)
+	return nil
+}
+
+// String returns the mount as a docker-style string.
+func (m Mount) String() string {
+	if m.Raw != "" {
+		return m.Raw
+	}
+	if m.Type == "" {
+		m.Type = "bind"
+	}
+	result := fmt.Sprintf("type=%s,source=%s,target=%s", m.Type, m.Source, m.Target)
+	if m.ReadOnly {
+		result += ",readonly"
+	}
+	return result
 }
 
 // GetPortAttribute returns the attributes for a specific port.
