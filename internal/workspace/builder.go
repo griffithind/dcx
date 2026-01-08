@@ -131,6 +131,12 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 		return nil, err
 	}
 
+	// Initialize build plan with derived image tag
+	ws.Build = &BuildPlan{}
+	if ws.Hashes != nil && ws.Hashes.Config != "" && len(ws.Hashes.Config) >= 12 {
+		ws.Build.DerivedImage = fmt.Sprintf("dcx/%s:%s-features", ws.ID, ws.Hashes.Config[:12])
+	}
+
 	return ws, nil
 }
 
