@@ -45,6 +45,9 @@ var (
 	// ${env:VAR} or ${env:VAR:default} (alias for localEnv)
 	envPattern = regexp.MustCompile(`\$\{env:([^}:]+)(?::([^}]*))?\}`)
 
+	// ${containerEnv:VAR} or ${containerEnv:VAR:default}
+	containerEnvPattern = regexp.MustCompile(`\$\{containerEnv:([^}:]+)(?::([^}]*))?\}`)
+
 	// ${localWorkspaceFolder}
 	localWorkspaceFolderPattern = regexp.MustCompile(`\$\{localWorkspaceFolder\}`)
 
@@ -66,6 +69,7 @@ type SubstitutionContext struct {
 	LocalWorkspaceFolder     string
 	ContainerWorkspaceFolder string
 	DevcontainerID           string
+	ContainerEnv             map[string]string // Container environment variables for ${containerEnv:VAR}
 }
 
 // Substitute performs variable substitution on a string.
@@ -95,6 +99,21 @@ func Substitute(s string, ctx *SubstitutionContext) string {
 		}
 		return match
 	})
+
+	// ${containerEnv:VAR} or ${containerEnv:VAR:default}
+	if ctx != nil && ctx.ContainerEnv != nil {
+		s = containerEnvPattern.ReplaceAllStringFunc(s, func(match string) string {
+			parts := containerEnvPattern.FindStringSubmatch(match)
+			if len(parts) >= 2 {
+				value := ctx.ContainerEnv[parts[1]]
+				if value == "" && len(parts) >= 3 {
+					value = parts[2] // default value
+				}
+				return value
+			}
+			return match
+		})
+	}
 
 	// ${localWorkspaceFolder}
 	if ctx != nil && ctx.LocalWorkspaceFolder != "" {

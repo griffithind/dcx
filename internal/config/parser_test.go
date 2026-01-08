@@ -137,6 +137,10 @@ func TestSubstitute(t *testing.T) {
 		LocalWorkspaceFolder:     "/home/user/project",
 		ContainerWorkspaceFolder: "/workspace",
 		DevcontainerID:           "test123",
+		ContainerEnv: map[string]string{
+			"DB_HOST": "localhost",
+			"DB_PORT": "5432",
+		},
 	}
 
 	tests := []struct {
@@ -180,9 +184,29 @@ func TestSubstitute(t *testing.T) {
 			expected: "test123",
 		},
 		{
+			name:     "containerEnv substitution",
+			input:    "${containerEnv:DB_HOST}",
+			expected: "localhost",
+		},
+		{
+			name:     "containerEnv with default",
+			input:    "${containerEnv:NONEXISTENT:mydefault}",
+			expected: "mydefault",
+		},
+		{
+			name:     "containerEnv existing ignores default",
+			input:    "${containerEnv:DB_PORT:9999}",
+			expected: "5432",
+		},
+		{
 			name:     "mixed substitution",
 			input:    "${localWorkspaceFolder}/src/${localEnv:TEST_VAR}",
 			expected: "/home/user/project/src/test_value",
+		},
+		{
+			name:     "mixed containerEnv and localEnv",
+			input:    "postgres://${containerEnv:DB_HOST}:${containerEnv:DB_PORT}/${localEnv:TEST_VAR}",
+			expected: "postgres://localhost:5432/test_value",
 		},
 		{
 			name:     "no substitution needed",
