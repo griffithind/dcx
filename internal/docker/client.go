@@ -372,9 +372,17 @@ func (d *progressDisplay) processPullOutput(reader io.Reader) error {
 		// Show meaningful status updates
 		status := event.Status
 		if event.ID != "" && event.Progress != "" {
-			status = fmt.Sprintf("%s: %s %s", event.ID[:12], event.Status, event.Progress)
+			id := event.ID
+			if len(id) > 12 {
+				id = id[:12]
+			}
+			status = fmt.Sprintf("%s: %s %s", id, event.Status, event.Progress)
 		} else if event.ID != "" {
-			status = fmt.Sprintf("%s: %s", event.ID[:12], event.Status)
+			id := event.ID
+			if len(id) > 12 {
+				id = id[:12]
+			}
+			status = fmt.Sprintf("%s: %s", id, event.Status)
 		}
 
 		if status != "" && status != lastStatus {

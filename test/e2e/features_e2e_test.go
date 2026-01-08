@@ -14,6 +14,7 @@ import (
 
 // TestLocalFeatureE2E tests installing a local feature.
 func TestLocalFeatureE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create workspace with local feature
@@ -42,6 +43,7 @@ func TestLocalFeatureE2E(t *testing.T) {
 
 // TestLocalFeatureWithOptionsE2E tests a feature that accepts options.
 func TestLocalFeatureWithOptionsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithOptionsFeature(t)
@@ -66,6 +68,7 @@ func TestLocalFeatureWithOptionsE2E(t *testing.T) {
 
 // TestLocalFeatureWithDependenciesE2E tests feature installation ordering.
 func TestLocalFeatureWithDependenciesE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithDependentFeatures(t)
@@ -94,6 +97,7 @@ func TestLocalFeatureWithDependenciesE2E(t *testing.T) {
 
 // TestMultipleFeaturesE2E tests installing multiple features.
 func TestMultipleFeaturesE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithMultipleFeatures(t)
@@ -351,6 +355,7 @@ echo "simple-marker installed" > /tmp/simple-marker
 
 // TestFeatureCachingE2E tests that features are cached between runs.
 func TestFeatureCachingE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithOptionsFeature(t)
@@ -413,6 +418,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 
 // TestFeatureWithMountsE2E tests that feature mounts are applied to the container.
 func TestFeatureWithMountsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithMountsFeature(t)

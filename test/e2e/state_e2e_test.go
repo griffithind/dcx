@@ -14,6 +14,7 @@ import (
 
 // TestStateTransitionsE2E tests all valid state transitions.
 func TestStateTransitionsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -82,6 +83,7 @@ func TestStateTransitionsE2E(t *testing.T) {
 
 // TestStaleDetectionE2E tests that config changes result in STALE state.
 func TestStaleDetectionE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create initial config
@@ -140,6 +142,7 @@ func TestStaleDetectionE2E(t *testing.T) {
 
 // TestStartFromAbsentFailsE2E tests that start fails when no container exists.
 func TestStartFromAbsentFailsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -155,6 +158,7 @@ func TestStartFromAbsentFailsE2E(t *testing.T) {
 
 // TestExecOnStoppedFailsE2E tests that exec fails on stopped container.
 func TestExecOnStoppedFailsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -175,6 +179,7 @@ func TestExecOnStoppedFailsE2E(t *testing.T) {
 
 // TestExecOnAbsentFailsE2E tests that exec fails when no container exists.
 func TestExecOnAbsentFailsE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -190,6 +195,7 @@ func TestExecOnAbsentFailsE2E(t *testing.T) {
 
 // TestStopIdempotentE2E tests that stop is idempotent.
 func TestStopIdempotentE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -210,6 +216,7 @@ func TestStopIdempotentE2E(t *testing.T) {
 
 // TestDownIdempotentE2E tests that down is idempotent.
 func TestDownIdempotentE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -225,6 +232,7 @@ func TestDownIdempotentE2E(t *testing.T) {
 
 // TestStatusCommandE2E tests the status command output.
 func TestStatusCommandE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -267,6 +275,7 @@ func TestStatusCommandE2E(t *testing.T) {
 
 // TestDoctorCommandE2E tests the doctor command.
 func TestDoctorCommandE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")

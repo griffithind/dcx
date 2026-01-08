@@ -10,8 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestExecBasicE2E tests basic exec functionality.
-func TestExecBasicE2E(t *testing.T) {
+// TestExecE2E tests exec functionality with a shared container.
+// This consolidates basic exec, shell commands, and exit code tests.
+func TestExecE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
@@ -21,132 +22,100 @@ func TestExecBasicE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Bring up the container
+	// Bring up the container once for all subtests
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Test simple exec
-	t.Run("simple_echo", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "hello")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "hello")
+	// Basic exec tests
+	t.Run("basic", func(t *testing.T) {
+		t.Run("simple_echo", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "hello")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "hello")
+		})
+
+		t.Run("multiple_args", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "one", "two", "three")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "one two three")
+		})
+
+		t.Run("pwd", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "pwd")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "/workspace")
+		})
 	})
 
-	// Test exec with multiple args
-	t.Run("multiple_args", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "one", "two", "three")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "one two three")
+	// Shell command tests
+	t.Run("shell_commands", func(t *testing.T) {
+		t.Run("sh_c_echo", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo nested_test")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "nested_test")
+		})
+
+		t.Run("sh_c_multiple_commands", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo one && echo two")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "one")
+			assert.Contains(t, stdout, "two")
+		})
+
+		t.Run("sh_c_pipe", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo hello_world | tr '_' ' '")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "hello world")
+		})
+
+		t.Run("sh_c_variable", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "VAR=test123; echo $VAR")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "test123")
+		})
+
+		t.Run("sh_c_semicolon", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo a; echo b; echo c")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "a")
+			assert.Contains(t, stdout, "b")
+			assert.Contains(t, stdout, "c")
+		})
+
+		t.Run("bash_c_quotes", func(t *testing.T) {
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo \"it's working\"")
+			require.NoError(t, err)
+			assert.Contains(t, stdout, "it's working")
+		})
 	})
 
-	// Test exec pwd
-	t.Run("pwd", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "pwd")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "/workspace")
-	})
-}
+	// Exit code tests
+	t.Run("exit_codes", func(t *testing.T) {
+		t.Run("exit_0", func(t *testing.T) {
+			_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "exit 0")
+			require.NoError(t, err)
+		})
 
-// TestExecShellCommandsE2E tests exec with shell commands.
-func TestExecShellCommandsE2E(t *testing.T) {
-	helpers.RequireDockerAvailable(t)
+		t.Run("exit_1", func(t *testing.T) {
+			_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "exit 1")
+			require.Error(t, err)
+		})
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+		t.Run("false_command", func(t *testing.T) {
+			_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "false")
+			require.Error(t, err)
+		})
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test exec with sh -c
-	t.Run("sh_c_echo", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo nested_test")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "nested_test")
-	})
-
-	// Test exec with sh -c and multiple commands
-	t.Run("sh_c_multiple_commands", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo one && echo two")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "one")
-		assert.Contains(t, stdout, "two")
-	})
-
-	// Test exec with pipe
-	t.Run("sh_c_pipe", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo hello_world | tr '_' ' '")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "hello world")
-	})
-
-	// Test exec with variable
-	t.Run("sh_c_variable", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "VAR=test123; echo $VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "test123")
-	})
-
-	// Test exec with semicolon
-	t.Run("sh_c_semicolon", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo a; echo b; echo c")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "a")
-		assert.Contains(t, stdout, "b")
-		assert.Contains(t, stdout, "c")
-	})
-
-	// Test bash -c with quotes in string
-	t.Run("bash_c_quotes", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo \"it's working\"")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "it's working")
-	})
-}
-
-// TestExecExitCodeE2E tests that exec returns correct exit codes.
-func TestExecExitCodeE2E(t *testing.T) {
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test exit 0
-	t.Run("exit_0", func(t *testing.T) {
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "exit 0")
-		require.NoError(t, err)
-	})
-
-	// Test exit 1
-	t.Run("exit_1", func(t *testing.T) {
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "exit 1")
-		require.Error(t, err)
-	})
-
-	// Test false command
-	t.Run("false_command", func(t *testing.T) {
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "false")
-		require.Error(t, err)
-	})
-
-	// Test true command
-	t.Run("true_command", func(t *testing.T) {
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "true")
-		require.NoError(t, err)
+		t.Run("true_command", func(t *testing.T) {
+			_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "true")
+			require.NoError(t, err)
+		})
 	})
 }
 
 // TestExecWithEnvE2E tests exec with environment variables from config.
+// This needs its own container due to the different containerEnv configuration.
 func TestExecWithEnvE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
@@ -167,9 +136,7 @@ func TestExecWithEnvE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Test env var is accessible
-	t.Run("env_var_accessible", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "MY_TEST_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "exec-test-value")
-	})
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "MY_TEST_VAR")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "exec-test-value")
 }
