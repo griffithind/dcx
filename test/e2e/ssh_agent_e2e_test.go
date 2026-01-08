@@ -26,7 +26,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	}
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -151,7 +151,7 @@ func TestSSHAgentDisabledE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -179,7 +179,7 @@ func TestSSHAgentProxyCleanupE2E(t *testing.T) {
 	}
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Get container name for direct docker exec checks
@@ -262,7 +262,7 @@ func TestSSHAgentExecNoAgentFlag(t *testing.T) {
 	}
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -299,7 +299,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 	}
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

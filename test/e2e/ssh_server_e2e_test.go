@@ -20,7 +20,7 @@ func TestSSHServerE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -139,7 +139,7 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create two separate workspaces
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace1 := helpers.CreateTempWorkspace(t, devcontainerJSON)
 	workspace2 := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
@@ -177,7 +177,7 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 func TestSSHServerWithoutFlagE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -287,7 +287,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 func TestSSHServerCleanupE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -356,7 +356,7 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 func TestSSHCommandHandlingE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig("alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

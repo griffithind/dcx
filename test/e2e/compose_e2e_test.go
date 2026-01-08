@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,12 +22,12 @@ func TestComposeWorkflowE2E(t *testing.T) {
 	helpers.RequireComposeAvailable(t)
 
 	// Create a temp workspace with compose config
-	devcontainerJSON := `{
-		"name": "E2E Compose Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace"
-	}`
+	}`, helpers.UniqueTestName(t))
 
 	dockerComposeYAML := `version: '3.8'
 services:
@@ -100,13 +101,13 @@ func TestComposeMultiServiceE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
-	devcontainerJSON := `{
-		"name": "Multi-Service Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"runServices": ["app", "db"],
 		"workspaceFolder": "/workspace"
-	}`
+	}`, helpers.UniqueTestName(t))
 
 	dockerComposeYAML := `version: '3.8'
 services:
@@ -148,12 +149,12 @@ func TestComposeUpIdempotent(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
-	devcontainerJSON := `{
-		"name": "Idempotent Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace"
-	}`
+	}`, helpers.UniqueTestName(t))
 
 	dockerComposeYAML := `version: '3.8'
 services:
@@ -188,12 +189,12 @@ func TestComposeRecreate(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
-	devcontainerJSON := `{
-		"name": "Recreate Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace"
-	}`
+	}`, helpers.UniqueTestName(t))
 
 	dockerComposeYAML := `version: '3.8'
 services:
@@ -246,12 +247,12 @@ func TestComposeContainerLabelsE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
-	devcontainerJSON := `{
-		"name": "Labels Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace"
-	}`
+	}`, helpers.UniqueTestName(t))
 
 	dockerComposeYAML := `version: '3.8'
 services:
@@ -431,8 +432,8 @@ func createComposeWorkspaceWithRemoteFeature(t *testing.T) string {
 	require.NoError(t, err)
 
 	// Create devcontainer.json with compose and a remote feature
-	devcontainerJSON := `{
-		"name": "Compose Remote Feature Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace",
@@ -444,7 +445,7 @@ func createComposeWorkspaceWithRemoteFeature(t *testing.T) string {
 				"upgradePackages": false
 			}
 		}
-	}`
+	}`, helpers.UniqueTestName(t))
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
@@ -498,15 +499,15 @@ echo "feature installed" > /tmp/feature-marker
 	require.NoError(t, err)
 
 	// Create devcontainer.json with compose and features
-	devcontainerJSON := `{
-		"name": "Compose Features Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/simple-marker": {}
 		}
-	}`
+	}`, helpers.UniqueTestName(t))
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
