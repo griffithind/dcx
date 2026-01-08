@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
 	dcxerrors "github.com/griffithind/dcx/internal/errors"
+	"github.com/griffithind/dcx/internal/state"
 )
 
 // Builder constructs a Workspace from configuration and resolves all references.
@@ -128,8 +129,8 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig, subCtx *SubstitutionContext) error {
 	resolved := ws.Resolved
 
-	// Service name
-	resolved.ServiceName = ws.Name
+	// Service name (sanitized for Docker container naming requirements)
+	resolved.ServiceName = state.SanitizeProjectName(ws.Name)
 
 	// Workspace paths
 	resolved.WorkspaceFolder = subCtx.ContainerWorkspaceFolder
@@ -215,7 +216,7 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 			Files:       absolutePaths,
 			Service:     cfg.Service,
 			RunServices: cfg.RunServices,
-			ProjectName: sanitizeProjectName(ws.Name),
+			ProjectName: state.SanitizeProjectName(ws.Name),
 			WorkDir:     ws.ConfigDir,
 		}
 		resolved.ServiceName = cfg.Service
@@ -558,21 +559,6 @@ func parseGPURequirements(hr *config.HostRequirements) *GPURequirements {
 	}
 
 	return gpu
-}
-
-func sanitizeProjectName(name string) string {
-	// Docker Compose project names must be lowercase and can only contain
-	// alphanumeric characters, hyphens, and underscores
-	name = strings.ToLower(name)
-	var result strings.Builder
-	for _, c := range name {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
-			result.WriteRune(c)
-		} else if c == ' ' {
-			result.WriteRune('-')
-		}
-	}
-	return result.String()
 }
 
 func unionStrings(a, b []string) []string {
