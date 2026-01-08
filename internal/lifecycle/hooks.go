@@ -55,6 +55,10 @@ type CommandSpec struct {
 
 	// Name is an optional name for named commands (from map format).
 	Name string
+
+	// Parallel indicates this command is part of a parallel execution group.
+	// Per the devcontainer spec, named commands in map format run in parallel.
+	Parallel bool
 }
 
 // FeatureHook represents a lifecycle hook from a feature.
@@ -316,24 +320,128 @@ func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []FeatureHook, h
 }
 
 // runHostCommand executes a command on the host machine.
+// Per spec, named commands (map format) run in parallel.
 func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) error {
 	cmds := parseCommand(command)
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	// Check if any commands are parallel (map commands)
+	hasParallel := false
 	for _, cmd := range cmds {
-		if err := r.executeHostCommand(ctx, cmd); err != nil {
-			return err
+		if cmd.Parallel {
+			hasParallel = true
+			break
 		}
 	}
+
+	// Sequential execution for non-parallel commands
+	if !hasParallel {
+		for _, cmd := range cmds {
+			if err := r.executeHostCommand(ctx, cmd); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Parallel execution for map commands
+	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(cmds))
+
+	for _, cmd := range cmds {
+		cmd := cmd // capture for goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.executeHostCommand(ctx, cmd); err != nil {
+				errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// Collect errors
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		// Return first error, but log all
+		for _, err := range errs {
+			fmt.Printf("  Error: %v\n", err)
+		}
+		return errs[0]
+	}
+
 	return nil
 }
 
 // runContainerCommand executes a command inside the container.
+// Per spec, named commands (map format) run in parallel.
 func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{}) error {
 	cmds := parseCommand(command)
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	// Check if any commands are parallel (map commands)
+	hasParallel := false
 	for _, cmd := range cmds {
-		if err := r.executeContainerCommand(ctx, cmd); err != nil {
-			return err
+		if cmd.Parallel {
+			hasParallel = true
+			break
 		}
 	}
+
+	// Sequential execution for non-parallel commands
+	if !hasParallel {
+		for _, cmd := range cmds {
+			if err := r.executeContainerCommand(ctx, cmd); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Parallel execution for map commands
+	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(cmds))
+
+	for _, cmd := range cmds {
+		cmd := cmd // capture for goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.executeContainerCommand(ctx, cmd); err != nil {
+				errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// Collect errors
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		// Return first error, but log all
+		for _, err := range errs {
+			fmt.Printf("  Error: %v\n", err)
+		}
+		return errs[0]
+	}
+
 	return nil
 }
 
@@ -487,7 +595,7 @@ func parseCommand(command interface{}) []CommandSpec {
 		}}
 
 	case map[string]interface{}:
-		// Named commands - execute each one
+		// Named commands - per spec, these run in parallel
 		var cmds []CommandSpec
 		for name, cmd := range v {
 			if cmdStr, ok := cmd.(string); ok {
@@ -496,6 +604,7 @@ func parseCommand(command interface{}) []CommandSpec {
 					Args:     []string{cmdStr},
 					UseShell: true,
 					Name:     name,
+					Parallel: true, // Map commands run in parallel per spec
 				})
 			} else if cmdArr, ok := cmd.([]interface{}); ok {
 				// Named array command: exec-style
@@ -510,6 +619,7 @@ func parseCommand(command interface{}) []CommandSpec {
 						Args:     args,
 						UseShell: false,
 						Name:     name,
+						Parallel: true, // Map commands run in parallel per spec
 					})
 				}
 			}
