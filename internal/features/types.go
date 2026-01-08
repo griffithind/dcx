@@ -310,8 +310,8 @@ func (f *Feature) GetEnvVars() map[string]string {
 	for name := range f.Metadata.Options {
 		val := f.GetOptionValue(name)
 		if val != nil {
-			// Convert to string and uppercase the option name
-			envName := strings.ToUpper(name)
+			// Normalize option name per devcontainer spec
+			envName := NormalizeOptionName(name)
 			strVal := fmt.Sprintf("%v", val)
 			// Apply variable substitution
 			env[envName] = substituteVariables(strVal)
@@ -319,6 +319,24 @@ func (f *Feature) GetEnvVars() map[string]string {
 	}
 
 	return env
+}
+
+// optionNameNonWord matches any character that is not alphanumeric or underscore
+var optionNameNonWord = regexp.MustCompile(`[^\w_]`)
+
+// optionNameLeadingInvalid matches leading digits and underscores
+var optionNameLeadingInvalid = regexp.MustCompile(`^[\d_]+`)
+
+// NormalizeOptionName transforms an option name to a valid environment variable name
+// per the devcontainer features specification:
+// str.replace(/[^\w_]/g, '_').replace(/^[\d_]+/g, '_').toUpperCase()
+func NormalizeOptionName(name string) string {
+	// Replace non-word characters with underscores
+	name = optionNameNonWord.ReplaceAllString(name, "_")
+	// Replace leading digits and underscores with a single underscore
+	name = optionNameLeadingInvalid.ReplaceAllString(name, "_")
+	// Convert to uppercase
+	return strings.ToUpper(name)
 }
 
 // substituteVariables performs devcontainer variable substitution.
