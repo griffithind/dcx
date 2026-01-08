@@ -3,8 +3,10 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -539,6 +541,152 @@ func createWorkspaceForCachingTest(t *testing.T) string {
 		}
 	}`
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	return workspace
+}
+
+// TestNoGeneratedFilesInDevcontainerE2E verifies that dcx up does not
+// pollute .devcontainer with generated build files like Dockerfile.dcx-features
+// or feature_N directories.
+func TestNoGeneratedFilesInDevcontainerE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	t.Run("single_container", func(t *testing.T) {
+		t.Parallel()
+
+		workspace := createWorkspaceWithLocalFeature(t)
+
+		t.Cleanup(func() {
+			helpers.RunDCXInDir(t, workspace, "down")
+		})
+
+		// Record files before up
+		devcontainerDir := filepath.Join(workspace, ".devcontainer")
+		filesBefore := listFilesInDir(t, devcontainerDir)
+
+		// Run dcx up (this triggers feature installation which previously created files)
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+		// Verify no new files created in .devcontainer
+		filesAfter := listFilesInDir(t, devcontainerDir)
+		assert.Equal(t, filesBefore, filesAfter, "dcx up should not create files in .devcontainer")
+
+		// Explicitly check for known generated files that should NOT exist
+		assert.NoFileExists(t, filepath.Join(devcontainerDir, "Dockerfile.dcx-features"))
+		assert.NoDirExists(t, filepath.Join(devcontainerDir, "feature_0"))
+	})
+
+	t.Run("compose", func(t *testing.T) {
+		t.Parallel()
+		helpers.RequireComposeAvailable(t)
+
+		workspace := createComposeWorkspaceWithLocalFeature(t)
+
+		t.Cleanup(func() {
+			helpers.RunDCXInDir(t, workspace, "down")
+		})
+
+		// Record files before up
+		devcontainerDir := filepath.Join(workspace, ".devcontainer")
+		filesBefore := listFilesInDir(t, devcontainerDir)
+
+		// Run dcx up
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+		// Verify no new files created in .devcontainer
+		filesAfter := listFilesInDir(t, devcontainerDir)
+		assert.Equal(t, filesBefore, filesAfter, "dcx up should not create files in .devcontainer")
+
+		// Explicitly check for known generated files that should NOT exist
+		assert.NoFileExists(t, filepath.Join(devcontainerDir, "Dockerfile.dcx-features"))
+		assert.NoDirExists(t, filepath.Join(devcontainerDir, "feature_0"))
+	})
+}
+
+// listFilesInDir returns a sorted list of all files and directories in a directory (recursive).
+func listFilesInDir(t *testing.T, dir string) []string {
+	t.Helper()
+
+	var files []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Store relative path from dir
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if relPath != "." {
+			files = append(files, relPath)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	sort.Strings(files)
+	return files
+}
+
+// createComposeWorkspaceWithLocalFeature creates a workspace with compose config and a local feature.
+func createComposeWorkspaceWithLocalFeature(t *testing.T) string {
+	t.Helper()
+
+	workspace := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(workspace, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature metadata
+	featureJSON := `{
+		"id": "simple-marker",
+		"version": "1.0.0",
+		"name": "Simple Marker Feature",
+		"description": "Creates a marker file"
+	}`
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
+	require.NoError(t, err)
+
+	// Create install script
+	installScript := `#!/bin/sh
+set -e
+echo "feature installed" > /tmp/feature-marker
+`
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json with compose and features
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
+		"dockerComposeFile": "docker-compose.yml",
+		"service": "app",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/simple-marker": {}
+		}
+	}`, "no-gen-files-compose-"+helpers.UniqueTestName(t))
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	// Create docker-compose.yml
+	dockerComposeYAML := `version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: sleep infinity
+    volumes:
+      - ..:/workspace:cached
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
 	require.NoError(t, err)
 
 	return workspace
