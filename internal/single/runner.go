@@ -226,7 +226,7 @@ func (r *Runner) buildDerivedImage(ctx context.Context, baseImage string, forceR
 	fmt.Printf("Building derived image: %s\n", derivedTag)
 
 	// Build the derived image
-	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir, r.cfg.RemoteUser); err != nil {
+	if err := mgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, buildDir, r.cfg.RemoteUser, r.cfg.ContainerUser); err != nil {
 		return "", err
 	}
 

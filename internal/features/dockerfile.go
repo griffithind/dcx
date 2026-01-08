@@ -8,29 +8,45 @@ import (
 
 // DockerfileGenerator generates Dockerfiles for feature installation.
 type DockerfileGenerator struct {
-	baseImage      string
-	features       []*Feature
-	buildDir       string
-	remoteUser     string
-	remoteUserHome string
+	baseImage         string
+	features          []*Feature
+	buildDir          string
+	remoteUser        string
+	remoteUserHome    string
+	containerUser     string
+	containerUserHome string
 }
 
 // NewDockerfileGenerator creates a new Dockerfile generator.
-// remoteUser is the configured remoteUser from devcontainer.json (defaults to "root" if empty).
-func NewDockerfileGenerator(baseImage string, features []*Feature, buildDir, remoteUser string) *DockerfileGenerator {
+// remoteUser is the configured remoteUser from devcontainer.json (defaults to containerUser if empty).
+// containerUser is the container's user account (defaults to "root" if empty).
+func NewDockerfileGenerator(baseImage string, features []*Feature, buildDir, remoteUser, containerUser string) *DockerfileGenerator {
+	// Container user defaults to root
+	if containerUser == "" {
+		containerUser = "root"
+	}
+	containerUserHome := "/root"
+	if containerUser != "root" {
+		containerUserHome = "/home/" + containerUser
+	}
+
+	// Remote user defaults to container user per spec
 	if remoteUser == "" {
-		remoteUser = "root"
+		remoteUser = containerUser
 	}
 	remoteUserHome := "/root"
 	if remoteUser != "root" {
 		remoteUserHome = "/home/" + remoteUser
 	}
+
 	return &DockerfileGenerator{
-		baseImage:      baseImage,
-		features:       features,
-		buildDir:       buildDir,
-		remoteUser:     remoteUser,
-		remoteUserHome: remoteUserHome,
+		baseImage:         baseImage,
+		features:          features,
+		buildDir:          buildDir,
+		remoteUser:        remoteUser,
+		remoteUserHome:    remoteUserHome,
+		containerUser:     containerUser,
+		containerUserHome: containerUserHome,
 	}
 }
 
@@ -48,10 +64,12 @@ func (g *DockerfileGenerator) Generate() string {
 	// Start from base image
 	sb.WriteString(fmt.Sprintf("FROM %s\n\n", g.baseImage))
 
-	// Set build-time arguments for feature installation
+	// Set build-time arguments for feature installation per devcontainer spec
 	sb.WriteString("# Feature installation environment\n")
 	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER=%s\n", g.remoteUser))
-	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER_HOME=%s\n\n", g.remoteUserHome))
+	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER_HOME=%s\n", g.remoteUserHome))
+	sb.WriteString(fmt.Sprintf("ARG _CONTAINER_USER=%s\n", g.containerUser))
+	sb.WriteString(fmt.Sprintf("ARG _CONTAINER_USER_HOME=%s\n\n", g.containerUserHome))
 
 	// Install each feature
 	for i, feature := range g.features {

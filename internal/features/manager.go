@@ -81,8 +81,9 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 }
 
 // BuildDerivedImage builds a derived image with features installed.
-// remoteUser is the configured remoteUser from devcontainer.json (can be empty to default to "root").
-func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, buildDir, remoteUser string) error {
+// remoteUser is the configured remoteUser from devcontainer.json (can be empty to default to containerUser).
+// containerUser is the container's user account (can be empty to default to "root").
+func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, buildDir, remoteUser, containerUser string) error {
 	if len(features) == 0 {
 		return nil
 	}
@@ -93,7 +94,7 @@ func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag str
 	}
 
 	// Generate Dockerfile
-	generator := NewDockerfileGenerator(baseImage, features, buildDir, remoteUser)
+	generator := NewDockerfileGenerator(baseImage, features, buildDir, remoteUser, containerUser)
 	dockerfile := generator.Generate()
 
 	// Prepare build context
