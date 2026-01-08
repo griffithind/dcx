@@ -7,6 +7,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
+	"github.com/griffithind/dcx/internal/util"
 )
 
 func TestComputeID(t *testing.T) {
@@ -493,7 +494,7 @@ func TestUnionStrings(t *testing.T) {
 	a := []string{"a", "b", "c"}
 	b := []string{"b", "c", "d"}
 
-	result := unionStrings(a, b)
+	result := util.UnionStrings(a, b)
 
 	if len(result) != 4 {
 		t.Errorf("expected 4 items, got %d", len(result))

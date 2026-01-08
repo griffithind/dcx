@@ -16,6 +16,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	dcxerrors "github.com/griffithind/dcx/internal/errors"
+	"github.com/griffithind/dcx/internal/util"
 )
 
 // Builder constructs a Workspace from configuration and resolves all references.
@@ -272,10 +273,10 @@ func (b *Builder) mergeFeatureMetadata(ws *Workspace) {
 		}
 
 		// CapAdd: union
-		ws.Resolved.CapAdd = unionStrings(ws.Resolved.CapAdd, f.Metadata.CapAdd)
+		ws.Resolved.CapAdd = util.UnionStrings(ws.Resolved.CapAdd, f.Metadata.CapAdd)
 
 		// SecurityOpt: union
-		ws.Resolved.SecurityOpt = unionStrings(ws.Resolved.SecurityOpt, f.Metadata.SecurityOpt)
+		ws.Resolved.SecurityOpt = util.UnionStrings(ws.Resolved.SecurityOpt, f.Metadata.SecurityOpt)
 
 		// Privileged: true wins
 		if f.Metadata.Privileged {
@@ -569,26 +570,6 @@ func parseGPURequirements(hr *config.HostRequirements) *GPURequirements {
 	return gpu
 }
 
-func unionStrings(a, b []string) []string {
-	seen := make(map[string]bool)
-	result := make([]string, 0, len(a)+len(b))
-
-	for _, s := range a {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	for _, s := range b {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-
-	return result
-}
-
 func deepMergeCustomizations(target, source map[string]interface{}) {
 	if source == nil {
 		return
@@ -613,7 +594,7 @@ func deepMergeToolConfig(target, source map[string]interface{}) {
 		if targetVal, exists := target[key]; exists {
 			// Array union for extensions
 			if key == "extensions" {
-				target[key] = unionInterfaces(targetVal, sourceVal)
+				target[key] = util.UnionInterfaces(targetVal, sourceVal)
 				continue
 			}
 			// Map merge for settings (target wins for same key)
@@ -630,25 +611,4 @@ func deepMergeToolConfig(target, source map[string]interface{}) {
 		}
 		target[key] = sourceVal
 	}
-}
-
-func unionInterfaces(a, b interface{}) []interface{} {
-	seen := make(map[string]bool)
-	result := []interface{}{}
-
-	addItems := func(items interface{}) {
-		if arr, ok := items.([]interface{}); ok {
-			for _, item := range arr {
-				key := fmt.Sprint(item)
-				if !seen[key] {
-					seen[key] = true
-					result = append(result, item)
-				}
-			}
-		}
-	}
-
-	addItems(a)
-	addItems(b)
-	return result
 }
