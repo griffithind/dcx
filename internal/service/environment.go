@@ -138,6 +138,7 @@ func (s *EnvironmentService) buildWorkspace(info *EnvironmentInfo) (*workspace.W
 		ConfigPath:    info.ConfigPath,
 		WorkspaceRoot: s.workspacePath,
 		Config:        info.Config,
+		ProjectName:   info.ProjectName,
 	})
 }
 

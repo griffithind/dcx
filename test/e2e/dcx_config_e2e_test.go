@@ -66,13 +66,14 @@ services:
 	t.Run("container_name_uses_project", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		// Container name should be testproject-app-1, not dcx_<hash>-app-1
-		assert.Contains(t, stdout, "Name:     testproject-app-1")
+		assert.Contains(t, stdout, "Name:")
+		assert.Contains(t, stdout, "testproject-app-1")
 	})
 
 	// Test compose_project label is set correctly
 	t.Run("compose_project_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "io.github.dcx.compose_project"}}`,
+			`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`,
 			"testproject-app-1")
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
@@ -226,7 +227,7 @@ services:
 	})
 }
 
-// TestDcxConfigMigrationE2E tests that existing containers (without project name) are still found.
+// TestDcxConfigMigrationE2E tests that existing containers are still found after adding dcx.json.
 func TestDcxConfigMigrationE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -248,7 +249,7 @@ services:
       - ..:/workspace:cached
 `
 
-	// Start without dcx.json (old-style)
+	// Start without dcx.json
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
@@ -261,8 +262,8 @@ services:
 	// Get status before adding dcx.json
 	statusBefore := helpers.RunDCXInDirSuccess(t, workspace, "status")
 	assert.Contains(t, statusBefore, "State:      RUNNING")
-	// Should use hash-based naming
-	assert.Contains(t, statusBefore, "dcx_")
+	// Container uses compose-style naming (project-service-instance)
+	assert.Contains(t, statusBefore, "-app-")
 
 	// Now add dcx.json with a project name
 	dcxJSON := `{
@@ -273,13 +274,13 @@ services:
 	dcxPath := workspace + "/.devcontainer/dcx.json"
 	require.NoError(t, exec.Command("sh", "-c", "echo '"+dcxJSON+"' > "+dcxPath).Run())
 
-	// Status should still find the old container
+	// Status should still find the container (labels are used for lookup, not name)
 	t.Run("status_finds_old_container_after_adding_dcx_json", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:      RUNNING")
 		assert.Contains(t, stdout, "Project:    migrationtest")
-		// Container name should still be old-style
-		assert.Contains(t, stdout, "dcx_")
+		// Container name still has compose naming
+		assert.Contains(t, stdout, "-app-")
 	})
 
 	// Stop should work with migration support

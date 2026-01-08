@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
+	composecli "github.com/compose-spec/compose-go/v2/cli"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
@@ -48,7 +51,8 @@ func (r *UnifiedRunner) Up(ctx context.Context, opts UpOptions) error {
 	ws := r.workspace
 
 	// Check if we need to handle features
-	hasFeatures := len(ws.Resolved.Features) > 0
+	// Check raw config if resolved features are empty (when no FeatureResolver was provided)
+	hasFeatures := len(ws.Resolved.Features) > 0 || (ws.RawConfig != nil && len(ws.RawConfig.Features) > 0)
 
 	// Determine the approach based on plan type
 	switch ws.Resolved.PlanType {
@@ -211,18 +215,28 @@ func (r *UnifiedRunner) buildDockerfile(ctx context.Context, imageTag string) er
 func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string, rebuild, pull bool) (string, error) {
 	ws := r.workspace
 
-	derivedTag := fmt.Sprintf("dcx-derived-%s:%s", ws.ID[:8], ws.Hashes.Features[:8])
+	// Generate derived image tag using workspace ID and config hash
+	var derivedTag string
+	if ws.ID != "" && ws.Hashes != nil && ws.Hashes.Config != "" {
+		derivedTag = features.GetDerivedImageTag(ws.ID, ws.Hashes.Config)
+	} else {
+		// Fallback: use workspace ID with random suffix
+		derivedTag = fmt.Sprintf("dcx-derived-%s:latest", ws.ID)
+		if ws.ID == "" {
+			derivedTag = fmt.Sprintf("dcx-derived-temp:%d", time.Now().UnixNano())
+		}
+	}
 
 	// Check if derived image already exists and is up-to-date
 	if !rebuild {
 		exists, err := r.docker.ImageExists(ctx, derivedTag)
 		if err == nil && exists {
-			fmt.Printf("Using existing derived image: %s\n", derivedTag)
+			fmt.Printf("Using cached derived image: %s\n", derivedTag)
 			return derivedTag, nil
 		}
 	}
 
-	fmt.Printf("Building derived image with features: %s\n", derivedTag)
+	fmt.Printf("Building derived image: %s\n", derivedTag)
 
 	// Resolve and order features
 	resolvedFeatures, err := r.resolveFeatures(ctx, pull)
@@ -251,16 +265,31 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 func (r *UnifiedRunner) resolveFeatures(ctx context.Context, pull bool) ([]*features.Feature, error) {
 	ws := r.workspace
 
-	if len(ws.Resolved.Features) == 0 {
-		return nil, nil
+	// Check resolved features first, then fall back to raw config
+	var featureList []*features.Feature
+	if len(ws.Resolved.Features) > 0 {
+		for _, f := range ws.Resolved.Features {
+			featureList = append(featureList, &features.Feature{
+				ID:      f.ID,
+				Options: f.Options,
+			})
+		}
+	} else if ws.RawConfig != nil && len(ws.RawConfig.Features) > 0 {
+		// Use raw config features if resolved features are empty
+		for id, opts := range ws.RawConfig.Features {
+			options := make(map[string]interface{})
+			if optsMap, ok := opts.(map[string]interface{}); ok {
+				options = optsMap
+			}
+			featureList = append(featureList, &features.Feature{
+				ID:      id,
+				Options: options,
+			})
+		}
 	}
 
-	var featureList []*features.Feature
-	for _, f := range ws.Resolved.Features {
-		featureList = append(featureList, &features.Feature{
-			ID:      f.ID,
-			Options: f.Options,
-		})
+	if len(featureList) == 0 {
+		return nil, nil
 	}
 
 	// Order features by dependencies
@@ -313,6 +342,9 @@ func (r *UnifiedRunner) createContainer(ctx context.Context, imageRef string) (s
 		workspaceMount = fmt.Sprintf("type=bind,source=%s,target=%s", ws.LocalRoot, workspaceFolder)
 	}
 
+	// Build port bindings
+	ports := r.buildPortBindings()
+
 	// Create container config
 	createOpts := docker.CreateContainerOptions{
 		Name:            containerName,
@@ -323,6 +355,7 @@ func (r *UnifiedRunner) createContainer(ctx context.Context, imageRef string) (s
 		WorkspaceFolder: workspaceFolder,
 		WorkspaceMount:  workspaceMount,
 		Mounts:          mounts,
+		Ports:           ports,
 		CapAdd:         ws.Resolved.CapAdd,
 		SecurityOpt:    ws.Resolved.SecurityOpt,
 		Privileged:     ws.Resolved.Privileged,
@@ -381,7 +414,7 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
-// buildMounts builds the container mounts as strings.
+// buildMounts builds the container mounts as strings in Docker bind format (source:target[:ro]).
 func (r *UnifiedRunner) buildMounts() []string {
 	ws := r.workspace
 
@@ -389,11 +422,21 @@ func (r *UnifiedRunner) buildMounts() []string {
 
 	// Add configured mounts
 	for _, m := range ws.Resolved.Mounts {
-		mountStr := fmt.Sprintf("type=%s,source=%s,target=%s", m.Type, m.Source, m.Target)
+		mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
 		if m.ReadOnly {
-			mountStr += ",readonly"
+			mountStr += ":ro"
 		}
 		mounts = append(mounts, mountStr)
+	}
+
+	// Add feature mounts from resolved features
+	for _, f := range r.resolvedFeatures {
+		if f.Metadata != nil {
+			for _, m := range f.Metadata.Mounts {
+				mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
+				mounts = append(mounts, mountStr)
+			}
+		}
 	}
 
 	return mounts
@@ -408,6 +451,24 @@ func (r *UnifiedRunner) buildEnvironment() []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env
+}
+
+// buildPortBindings builds port bindings from forward ports.
+func (r *UnifiedRunner) buildPortBindings() []string {
+	ws := r.workspace
+	if len(ws.Resolved.ForwardPorts) == 0 {
+		return nil
+	}
+
+	ports := make([]string, 0, len(ws.Resolved.ForwardPorts))
+	for _, p := range ws.Resolved.ForwardPorts {
+		if p.HostPort == p.ContainerPort || p.HostPort == 0 {
+			ports = append(ports, fmt.Sprintf("%d", p.ContainerPort))
+		} else {
+			ports = append(ports, fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
+		}
+	}
+	return ports
 }
 
 // Start starts an existing stopped environment.
@@ -582,6 +643,18 @@ func (r *UnifiedRunner) generateComposeOverride() (string, error) {
 		sb.WriteString(fmt.Sprintf("    image: %s\n", r.derivedImage))
 	}
 
+	// Add forwardPorts
+	if len(ws.Resolved.ForwardPorts) > 0 {
+		sb.WriteString("    ports:\n")
+		for _, port := range ws.Resolved.ForwardPorts {
+			if port.HostPort == port.ContainerPort {
+				sb.WriteString(fmt.Sprintf("      - \"%d\"\n", port.ContainerPort))
+			} else {
+				sb.WriteString(fmt.Sprintf("      - \"%d:%d\"\n", port.HostPort, port.ContainerPort))
+			}
+		}
+	}
+
 	return sb.String(), nil
 }
 
@@ -592,13 +665,10 @@ func (r *UnifiedRunner) ensureServicesBuilt(ctx context.Context) error {
 }
 
 func (r *UnifiedRunner) buildDerivedImageForCompose(ctx context.Context, opts UpOptions) error {
-	ws := r.workspace
-
 	// Get the base image from the primary service
-	baseImage := ws.Resolved.Image
-	if baseImage == "" && ws.Resolved.Compose != nil {
-		// For compose, we need to get the image from the built service
-		baseImage = fmt.Sprintf("%s-%s", ws.Resolved.ServiceName, ws.Resolved.Compose.Service)
+	baseImage, err := r.getComposeBaseImage(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine base image: %w", err)
 	}
 
 	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild, opts.Pull)
@@ -608,6 +678,72 @@ func (r *UnifiedRunner) buildDerivedImageForCompose(ctx context.Context, opts Up
 
 	r.derivedImage = derivedImage
 	return nil
+}
+
+// getComposeBaseImage determines the base image for the primary service.
+func (r *UnifiedRunner) getComposeBaseImage(ctx context.Context) (string, error) {
+	ws := r.workspace
+
+	// First check if image is directly specified in resolved config
+	if ws.Resolved.Image != "" {
+		return ws.Resolved.Image, nil
+	}
+
+	if ws.Resolved.Compose == nil {
+		return "", fmt.Errorf("no compose configuration found")
+	}
+
+	paths := ws.Resolved.Compose.Files
+	if len(paths) == 0 {
+		return "", fmt.Errorf("no compose files specified")
+	}
+
+	// Get the directory of the first compose file as working directory
+	workDir := filepath.Dir(paths[0])
+
+	// Parse compose files using compose-go
+	options, err := composecli.NewProjectOptions(
+		paths,
+		composecli.WithWorkingDirectory(workDir),
+		composecli.WithOsEnv,
+		composecli.WithDotEnv,
+		composecli.WithInterpolation(true),
+		composecli.WithResolvedPaths(true),
+		composecli.WithProfiles([]string{}),
+		composecli.WithDiscardEnvFile,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create project options: %w", err)
+	}
+
+	project, err := options.LoadProject(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to load compose project: %w", err)
+	}
+
+	serviceName := ws.Resolved.Compose.Service
+	if serviceName == "" {
+		return "", fmt.Errorf("no primary service specified")
+	}
+
+	// Find the service in the project
+	for _, svc := range project.Services {
+		if svc.Name == serviceName {
+			// If service has an image, use it
+			if svc.Image != "" {
+				return svc.Image, nil
+			}
+			// If service has a build, we can't determine base image without building
+			// Return the built image name format: <project>-<service>:latest
+			projectName := ws.Resolved.Compose.ProjectName
+			if projectName == "" {
+				projectName = ws.Resolved.ServiceName
+			}
+			return fmt.Sprintf("%s-%s", projectName, serviceName), nil
+		}
+	}
+
+	return "", fmt.Errorf("service %q not found in compose file", serviceName)
 }
 
 func (r *UnifiedRunner) writeToTempFile(content, pattern string) (string, error) {
