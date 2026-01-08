@@ -86,7 +86,6 @@ func init() {
 	// Add subcommands
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(upCmd)
-	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(downCmd)
 	rootCmd.AddCommand(doctorCmd)
