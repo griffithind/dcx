@@ -118,9 +118,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		// Get UID/GID for the container user
 		uid, gid := ssh.GetContainerUserIDs(containerInfo.Name, user)
 
-		// Skip deployment since binary is pre-deployed during 'up'
-		opts := ssh.AgentProxyOptions{SkipDeploy: true}
-		agentProxy, err = ssh.NewAgentProxyWithOptions(containerInfo.ID, containerInfo.Name, uid, gid, opts)
+		agentProxy, err = ssh.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy setup failed: %v\n", err)
 		} else {
