@@ -14,9 +14,9 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	runnerPkg "github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/single"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 )
 
 // EnvironmentService orchestrates devcontainer environment operations.
@@ -132,19 +132,30 @@ func (s *EnvironmentService) CreateRunner(info *EnvironmentInfo) (runnerPkg.Envi
 	}
 
 	if info.Config.IsSinglePlan() {
-		r := single.NewRunner(
-			s.dockerClient,
-			s.workspacePath,
-			info.ConfigPath,
-			info.Config,
-			info.ProjectName,
-			info.EnvKey,
-			info.ConfigHash,
-		)
+		// Build a workspace for the unified runner
+		ws, err := s.buildWorkspace(info)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build workspace: %w", err)
+		}
+
+		r, err := runnerPkg.NewUnifiedRunner(ws, s.dockerClient)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create runner: %w", err)
+		}
 		return r, nil
 	}
 
 	return nil, fmt.Errorf("invalid configuration: no build plan detected")
+}
+
+// buildWorkspace constructs a workspace from environment info.
+func (s *EnvironmentService) buildWorkspace(info *EnvironmentInfo) (*workspace.Workspace, error) {
+	builder := workspace.NewBuilder(nil)
+	return builder.Build(context.Background(), workspace.BuildOptions{
+		ConfigPath:    info.ConfigPath,
+		WorkspaceRoot: s.workspacePath,
+		Config:        info.Config,
+	})
 }
 
 // UpOptions configures the Up operation.
