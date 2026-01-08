@@ -408,11 +408,12 @@ func (d *progressDisplay) processPullOutput(reader io.Reader) error {
 
 // CreateContainerOptions contains options for creating a container.
 type CreateContainerOptions struct {
-	Name           string
-	Image          string
-	WorkspacePath  string
-	WorkspaceMount string
-	Labels         map[string]string
+	Name            string
+	Image           string
+	WorkspacePath   string
+	WorkspaceFolder string // Container working directory (e.g., /workspaces/project)
+	WorkspaceMount  string // Mount specification (e.g., type=bind,source=...,target=...)
+	Labels          map[string]string
 	Env            []string
 	Mounts         []string
 	RunArgs        []string
@@ -517,7 +518,7 @@ func (c *Client) CreateContainer(ctx context.Context, opts CreateContainerOption
 		Labels:       opts.Labels,
 		Env:          opts.Env,
 		User:         opts.User,
-		WorkingDir:   opts.WorkspaceMount,
+		WorkingDir:   opts.WorkspaceFolder,
 		Tty:          true,
 		OpenStdin:    true,
 		AttachStdin:  true,
