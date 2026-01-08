@@ -297,6 +297,18 @@ func (c *Client) ImageExists(ctx context.Context, imageRef string) (bool, error)
 	return true, nil
 }
 
+// GetImageLabels returns the labels for an image.
+func (c *Client) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
+	info, _, err := c.cli.ImageInspectWithRaw(ctx, imageRef)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect image: %w", err)
+	}
+	if info.Config == nil {
+		return nil, nil
+	}
+	return info.Config.Labels, nil
+}
+
 // PullImage pulls an image from a registry.
 func (c *Client) PullImage(ctx context.Context, imageRef string) error {
 	return c.PullImageWithProgress(ctx, imageRef, nil)
