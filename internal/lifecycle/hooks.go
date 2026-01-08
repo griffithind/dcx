@@ -76,9 +76,11 @@ type HookRunner struct {
 	agentPreDeployed bool
 
 	// Feature hooks (optional, set via SetFeatureHooks)
-	featureOnCreateHooks    []FeatureHook
-	featurePostCreateHooks  []FeatureHook
-	featurePostStartHooks   []FeatureHook
+	featureOnCreateHooks      []FeatureHook
+	featureUpdateContentHooks []FeatureHook
+	featurePostCreateHooks    []FeatureHook
+	featurePostStartHooks     []FeatureHook
+	featurePostAttachHooks    []FeatureHook
 }
 
 // NewHookRunner creates a new hook runner.
@@ -98,10 +100,12 @@ func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePat
 }
 
 // SetFeatureHooks sets the feature lifecycle hooks to be executed.
-func (r *HookRunner) SetFeatureHooks(onCreate, postCreate, postStart []FeatureHook) {
+func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postStart, postAttach []FeatureHook) {
 	r.featureOnCreateHooks = onCreate
+	r.featureUpdateContentHooks = updateContent
 	r.featurePostCreateHooks = postCreate
 	r.featurePostStartHooks = postStart
+	r.featurePostAttachHooks = postAttach
 }
 
 // getWaitFor returns the WaitFor value from config, defaulting to postStartCommand.
@@ -170,11 +174,15 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 
 // RunPostAttach runs postAttachCommand in the container.
 func (r *HookRunner) RunPostAttach(ctx context.Context) error {
-	if r.cfg.PostAttachCommand == nil {
-		return nil
+	if r.cfg.PostAttachCommand != nil {
+		fmt.Println("Running postAttachCommand...")
+		if err := r.runContainerCommand(ctx, r.cfg.PostAttachCommand); err != nil {
+			return err
+		}
 	}
-	fmt.Println("Running postAttachCommand...")
-	return r.runContainerCommand(ctx, r.cfg.PostAttachCommand)
+
+	// Feature postAttachCommands run after devcontainer postAttachCommand
+	return r.runFeatureHooks(ctx, r.featurePostAttachHooks, "postAttachCommand")
 }
 
 // RunAllCreateHooks runs all hooks needed when a container is first created.
@@ -230,7 +238,11 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 
 	// updateContentCommand runs after onCreateCommand
 	if err := runHook(WaitForUpdateContentCommand, "updateContentCommand", func() error {
-		return r.RunUpdateContent(ctx)
+		if err := r.RunUpdateContent(ctx); err != nil {
+			return err
+		}
+		// Feature updateContentCommands run after devcontainer updateContentCommand
+		return r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand")
 	}); err != nil {
 		return fmt.Errorf("updateContentCommand failed: %w", err)
 	}

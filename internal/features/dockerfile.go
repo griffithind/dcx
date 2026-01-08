@@ -365,6 +365,48 @@ func CollectPostStartCommands(features []*Feature) []FeatureHook {
 	return hooks
 }
 
+// CollectUpdateContentCommands collects all updateContentCommand hooks from features.
+// These run after onCreateCommand and before postCreateCommand.
+func CollectUpdateContentCommands(features []*Feature) []FeatureHook {
+	var hooks []FeatureHook
+	for _, feature := range features {
+		if feature.Metadata == nil || feature.Metadata.UpdateContentCommand == nil {
+			continue
+		}
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+		hooks = append(hooks, FeatureHook{
+			FeatureID:   feature.Metadata.ID,
+			FeatureName: name,
+			Command:     feature.Metadata.UpdateContentCommand,
+		})
+	}
+	return hooks
+}
+
+// CollectPostAttachCommands collects all postAttachCommand hooks from features.
+// These run when attaching to the container.
+func CollectPostAttachCommands(features []*Feature) []FeatureHook {
+	var hooks []FeatureHook
+	for _, feature := range features {
+		if feature.Metadata == nil || feature.Metadata.PostAttachCommand == nil {
+			continue
+		}
+		name := feature.Metadata.Name
+		if name == "" {
+			name = feature.Metadata.ID
+		}
+		hooks = append(hooks, FeatureHook{
+			FeatureID:   feature.Metadata.ID,
+			FeatureName: name,
+			Command:     feature.Metadata.PostAttachCommand,
+		})
+	}
+	return hooks
+}
+
 // shellQuote quotes a string for use in shell.
 func shellQuote(s string) string {
 	// If string contains no special characters, return as-is

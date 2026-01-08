@@ -122,11 +122,17 @@ type FeatureMetadata struct {
 	// OnCreateCommand runs after feature installation
 	OnCreateCommand interface{} `json:"onCreateCommand,omitempty"`
 
+	// UpdateContentCommand runs after onCreateCommand
+	UpdateContentCommand interface{} `json:"updateContentCommand,omitempty"`
+
 	// PostCreateCommand runs after all features installed
 	PostCreateCommand interface{} `json:"postCreateCommand,omitempty"`
 
 	// PostStartCommand runs on each container start
 	PostStartCommand interface{} `json:"postStartCommand,omitempty"`
+
+	// PostAttachCommand runs when attaching to the container
+	PostAttachCommand interface{} `json:"postAttachCommand,omitempty"`
 }
 
 // OptionDefinition defines a feature option.
