@@ -254,6 +254,17 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		}
 	}
 
+	// Always resolve features to get metadata (mounts, env, etc.)
+	// This is needed even when using cached images
+	resolvedFeatures, err := r.resolveFeatures(ctx, pull)
+	if err != nil {
+		return "", err
+	}
+	r.resolvedFeatures = resolvedFeatures
+
+	// Merge feature mounts into workspace resolved mounts
+	r.mergeFeatureMounts()
+
 	// Check if derived image already exists and is up-to-date
 	if !rebuild {
 		exists, err := r.docker.ImageExists(ctx, derivedTag)
@@ -264,17 +275,6 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 	}
 
 	fmt.Printf("Building derived image: %s\n", derivedTag)
-
-	// Resolve and order features
-	resolvedFeatures, err := r.resolveFeatures(ctx, pull)
-	if err != nil {
-		return "", err
-	}
-
-	r.resolvedFeatures = resolvedFeatures
-
-	// Merge feature mounts into workspace resolved mounts
-	r.mergeFeatureMounts()
 
 	// Build the derived image using features manager
 	featureMgr, err := features.NewManager(ws.ConfigDir)
