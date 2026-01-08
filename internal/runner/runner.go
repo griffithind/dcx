@@ -11,6 +11,7 @@ import (
 	"time"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
@@ -272,6 +273,9 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 
 	r.resolvedFeatures = resolvedFeatures
 
+	// Merge feature mounts into workspace resolved mounts
+	r.mergeFeatureMounts()
+
 	// Build the derived image using features manager
 	featureMgr, err := features.NewManager(ws.ConfigDir)
 	if err != nil {
@@ -440,13 +444,41 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
+// mergeFeatureMounts merges mounts from resolved features into ws.Resolved.Mounts.
+// Deduplicates by target path (feature mounts override base config mounts with same target).
+func (r *UnifiedRunner) mergeFeatureMounts() {
+	ws := r.workspace
+
+	// Build a map of existing mounts by target for deduplication
+	existingTargets := make(map[string]bool)
+	for _, m := range ws.Resolved.Mounts {
+		existingTargets[m.Target] = true
+	}
+
+	// Add feature mounts that don't already exist
+	for _, f := range r.resolvedFeatures {
+		if f.Metadata == nil {
+			continue
+		}
+		for _, fm := range f.Metadata.Mounts {
+			if existingTargets[fm.Target] {
+				continue // Skip duplicates
+			}
+			existingTargets[fm.Target] = true
+			ws.Resolved.Mounts = append(ws.Resolved.Mounts, mount.Mount{
+				Type:   mount.Type(fm.Type),
+				Source: fm.Source,
+				Target: fm.Target,
+			})
+		}
+	}
+}
+
 // buildMounts builds the container mounts as strings in Docker bind format (source:target[:ro]).
 func (r *UnifiedRunner) buildMounts() []string {
 	ws := r.workspace
 
 	var mounts []string
-
-	// Add configured mounts
 	for _, m := range ws.Resolved.Mounts {
 		mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
 		if m.ReadOnly {
@@ -454,17 +486,6 @@ func (r *UnifiedRunner) buildMounts() []string {
 		}
 		mounts = append(mounts, mountStr)
 	}
-
-	// Add feature mounts from resolved features
-	for _, f := range r.resolvedFeatures {
-		if f.Metadata != nil {
-			for _, m := range f.Metadata.Mounts {
-				mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
-				mounts = append(mounts, mountStr)
-			}
-		}
-	}
-
 	return mounts
 }
 
@@ -699,6 +720,15 @@ func (r *UnifiedRunner) generateComposeOverride() (string, error) {
 			} else {
 				sb.WriteString(fmt.Sprintf("      - \"%d:%d\"\n", port.HostPort, port.ContainerPort))
 			}
+		}
+	}
+
+	// Add mounts (from base config and features)
+	mounts := r.buildMounts()
+	if len(mounts) > 0 {
+		sb.WriteString("    volumes:\n")
+		for _, m := range mounts {
+			sb.WriteString(fmt.Sprintf("      - %q\n", m))
 		}
 	}
 
