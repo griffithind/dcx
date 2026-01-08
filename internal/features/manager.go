@@ -207,11 +207,6 @@ func execCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-// GetDerivedImageTag returns a deterministic tag for a derived image.
-func GetDerivedImageTag(envKey, configHash string) string {
-	return fmt.Sprintf("dcx/%s:%s-features", envKey, configHash[:12])
-}
-
 // HasFeatures returns true if the config has any features.
 func HasFeatures(featuresConfig map[string]interface{}) bool {
 	return len(featuresConfig) > 0

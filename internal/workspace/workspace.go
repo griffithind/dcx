@@ -285,20 +285,6 @@ func ComputeID(workspacePath string) string {
 	return encoded
 }
 
-// ComputeFullHash computes the full base32-encoded hash of the workspace path.
-// This is used for the workspace_root_hash label.
-func ComputeFullHash(workspacePath string) string {
-	// Get the real path (resolve symlinks)
-	realPath, err := util.RealPath(workspacePath)
-	if err != nil {
-		realPath = workspacePath
-	}
-	realPath = util.NormalizePath(realPath)
-
-	hash := sha256.Sum256([]byte(realPath))
-	return base32.StdEncoding.EncodeToString(hash[:])
-}
-
 // ComputeName derives a workspace name from the path or config.
 func ComputeName(workspacePath string, cfg *config.DevcontainerConfig) string {
 	if cfg != nil && cfg.Name != "" {

@@ -238,12 +238,15 @@ func (r *UnifiedRunner) buildDockerfile(ctx context.Context, imageTag string) er
 func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string, rebuild, pull bool) (string, error) {
 	ws := r.workspace
 
-	// Generate derived image tag using workspace ID and config hash
+	// Use pre-computed derived image tag from workspace
 	var derivedTag string
-	if ws.ID != "" && ws.Hashes != nil && ws.Hashes.Config != "" {
-		derivedTag = features.GetDerivedImageTag(ws.ID, ws.Hashes.Config)
+	if ws.Build != nil && ws.Build.DerivedImage != "" {
+		derivedTag = ws.Build.DerivedImage
+	} else if ws.ID != "" && ws.Hashes != nil && ws.Hashes.Config != "" && len(ws.Hashes.Config) >= 12 {
+		// Fallback: compute if not pre-computed
+		derivedTag = fmt.Sprintf("dcx/%s:%s-features", ws.ID, ws.Hashes.Config[:12])
 	} else {
-		// Fallback: use workspace ID with random suffix
+		// Last resort fallback
 		derivedTag = fmt.Sprintf("dcx-derived-%s:latest", ws.ID)
 		if ws.ID == "" {
 			derivedTag = fmt.Sprintf("dcx-derived-temp:%d", time.Now().UnixNano())
