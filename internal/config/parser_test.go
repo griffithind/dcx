@@ -1039,6 +1039,64 @@ func TestOverrideCommandAndShutdownAction(t *testing.T) {
 	})
 }
 
+// TestAppPortParsing tests parsing of appPort with various formats.
+func TestAppPortParsing(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedPorts []string
+	}{
+		{
+			name: "single port as number",
+			input: `{
+				"image": "alpine",
+				"appPort": 3000
+			}`,
+			expectedPorts: []string{"3000:3000"},
+		},
+		{
+			name: "single port as string",
+			input: `{
+				"image": "alpine",
+				"appPort": "8080"
+			}`,
+			expectedPorts: []string{"8080"},
+		},
+		{
+			name: "multiple ports as array",
+			input: `{
+				"image": "alpine",
+				"appPort": [3000, 5432, 6379]
+			}`,
+			expectedPorts: []string{"3000:3000", "5432:5432", "6379:6379"},
+		},
+		{
+			name: "mixed array",
+			input: `{
+				"image": "alpine",
+				"appPort": [3000, "8080:80"]
+			}`,
+			expectedPorts: []string{"3000:3000", "8080:80"},
+		},
+		{
+			name: "no app port",
+			input: `{
+				"image": "alpine"
+			}`,
+			expectedPorts: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse([]byte(tt.input))
+			require.NoError(t, err)
+			ports := cfg.GetAppPorts()
+			assert.Equal(t, tt.expectedPorts, ports)
+		})
+	}
+}
+
 // TestPortAttributesParsing tests parsing of portsAttributes with all fields.
 func TestPortAttributesParsing(t *testing.T) {
 	input := `{

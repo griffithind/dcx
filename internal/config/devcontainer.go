@@ -41,6 +41,7 @@ type DevcontainerConfig struct {
 
 	// Port forwarding
 	ForwardPorts         []interface{}          `json:"forwardPorts,omitempty"`
+	AppPort              interface{}            `json:"appPort,omitempty"` // integer, string, or array - published application ports
 	PortsAttributes      map[string]interface{} `json:"portsAttributes,omitempty"`
 	OtherPortsAttributes interface{}            `json:"otherPortsAttributes,omitempty"` // Default attributes for unlisted ports
 
@@ -175,6 +176,42 @@ func (c *DevcontainerConfig) GetForwardPorts() []string {
 func formatPort(port int) string {
 	// For devcontainer ports, we expose on the same host port
 	return fmt.Sprintf("%d:%d", port, port)
+}
+
+// GetAppPorts returns the app ports as a slice of strings.
+// AppPort can be an integer, string, or array of integers/strings.
+// Each element is in the format "hostPort:containerPort".
+func (c *DevcontainerConfig) GetAppPorts() []string {
+	if c.AppPort == nil {
+		return nil
+	}
+
+	var result []string
+
+	switch v := c.AppPort.(type) {
+	case float64:
+		// Single port number
+		result = append(result, formatPort(int(v)))
+	case int:
+		result = append(result, formatPort(v))
+	case string:
+		// Single port as string
+		result = append(result, v)
+	case []interface{}:
+		// Array of ports
+		for _, port := range v {
+			switch p := port.(type) {
+			case float64:
+				result = append(result, formatPort(int(p)))
+			case int:
+				result = append(result, formatPort(p))
+			case string:
+				result = append(result, p)
+			}
+		}
+	}
+
+	return result
 }
 
 // PortAttribute represents attributes for a specific port.
