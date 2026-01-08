@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
@@ -340,7 +339,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 		if actualProject == "" {
 			actualProject = info.ProjectName
 		}
-		r := compose.NewRunnerFromEnvKey(s.workspacePath, actualProject, info.EnvKey)
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, info.EnvKey)
 		if err := r.Down(ctx, runnerPkg.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,
@@ -389,7 +388,7 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		r := compose.NewRunnerFromEnvKey(s.workspacePath, actualProject, envKey)
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, envKey)
 		if err := r.Down(ctx, runnerPkg.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,

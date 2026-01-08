@@ -46,6 +46,29 @@ func NewUnifiedRunner(ws *workspace.Workspace, dockerClient *docker.Client) (*Un
 	}, nil
 }
 
+// NewUnifiedRunnerForExisting creates a lightweight runner for operating on existing environments.
+// This is used for simple operations (stop, start, restart, down) where we don't need a full workspace.
+// The projectName is the compose project name, envKey is the workspace ID.
+func NewUnifiedRunnerForExisting(workspacePath, projectName, envKey string) *UnifiedRunner {
+	// Create a minimal workspace for compose operations
+	ws := &workspace.Workspace{
+		LocalRoot: workspacePath,
+		ID:        envKey,
+		Resolved: &workspace.ResolvedConfig{
+			PlanType:    workspace.PlanTypeCompose,
+			ServiceName: projectName,
+			Compose: &workspace.ComposePlan{
+				ProjectName: projectName,
+			},
+		},
+	}
+
+	return &UnifiedRunner{
+		workspace: ws,
+		// docker client is nil - operations will use compose CLI
+	}
+}
+
 // Up starts the devcontainer environment.
 func (r *UnifiedRunner) Up(ctx context.Context, opts UpOptions) error {
 	ws := r.workspace
@@ -499,6 +522,27 @@ func (r *UnifiedRunner) Stop(ctx context.Context) error {
 	// Single container
 	containerName := ws.Resolved.ServiceName
 	return r.docker.StopContainer(ctx, containerName, nil)
+}
+
+// Restart restarts a running environment.
+func (r *UnifiedRunner) Restart(ctx context.Context) error {
+	ws := r.workspace
+
+	if ws.Resolved.PlanType == workspace.PlanTypeCompose {
+		args := r.composeBaseArgs()
+		args = append(args, "restart")
+		return r.runCompose(ctx, args)
+	}
+
+	// Single container - stop then start
+	containerName := ws.Resolved.ServiceName
+	if r.docker != nil {
+		if err := r.docker.StopContainer(ctx, containerName, nil); err != nil {
+			return fmt.Errorf("failed to stop container: %w", err)
+		}
+		return r.docker.StartContainer(ctx, containerName)
+	}
+	return fmt.Errorf("docker client required for single container restart")
 }
 
 // Down removes the environment.
