@@ -102,5 +102,6 @@ func runConfig(cmd *cobra.Command, args []string) error {
 func init() {
 	configCmd.Flags().BoolVar(&configValidateOnly, "validate", false, "only validate configuration (no output)")
 	configCmd.Flags().BoolVar(&configShowRaw, "raw", false, "show original config without variable substitution")
+	configCmd.GroupID = "utilities"
 	rootCmd.AddCommand(configCmd)
 }

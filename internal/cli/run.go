@@ -55,6 +55,7 @@ func init() {
 	runCmd.Flags().BoolVarP(&runList, "list", "l", false, "list available shortcuts")
 	// Stop parsing flags after the shortcut name so args like --version pass through
 	runCmd.Flags().SetInterspersed(false)
+	runCmd.GroupID = "execution"
 	rootCmd.AddCommand(runCmd)
 }
 

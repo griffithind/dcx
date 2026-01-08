@@ -49,6 +49,7 @@ func init() {
 
 	sshAgentProxyCmd.AddCommand(sshProxyServerCmd)
 	sshAgentProxyCmd.AddCommand(sshProxyClientCmd)
+	sshAgentProxyCmd.Hidden = true
 	rootCmd.AddCommand(sshAgentProxyCmd)
 }
 

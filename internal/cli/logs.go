@@ -98,6 +98,7 @@ func init() {
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "follow log output")
 	logsCmd.Flags().StringVar(&logsTail, "tail", "100", "number of lines to show from the end (use 'all' for all logs)")
 	logsCmd.Flags().BoolVarP(&logsTimestamps, "timestamps", "t", false, "show timestamps")
+	logsCmd.GroupID = "info"
 	rootCmd.AddCommand(logsCmd)
 }
 

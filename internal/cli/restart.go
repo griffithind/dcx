@@ -35,6 +35,7 @@ Use --rebuild to perform a full rebuild instead of just restart.`,
 func init() {
 	restartCmd.Flags().BoolVarP(&restartForce, "force", "f", false, "force restart even if shutdownAction is 'none'")
 	restartCmd.Flags().BoolVar(&restartRebuild, "rebuild", false, "perform full rebuild instead of restart")
+	restartCmd.GroupID = "lifecycle"
 	rootCmd.AddCommand(restartCmd)
 }
 

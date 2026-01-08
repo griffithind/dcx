@@ -34,6 +34,7 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "also clean dangling images")
 	cleanCmd.Flags().BoolVar(&cleanDangling, "dangling", false, "only clean dangling images")
 	cleanCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be cleaned without removing")
+	cleanCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(cleanCmd)
 }
 

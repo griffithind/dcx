@@ -161,5 +161,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 func init() {
 	execCmd.Flags().BoolVar(&execNoAgent, "no-agent", false, "disable SSH agent forwarding")
+	execCmd.GroupID = "execution"
 	rootCmd.AddCommand(execCmd)
 }

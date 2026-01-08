@@ -30,6 +30,7 @@ The shell used is /bin/bash if available, otherwise /bin/sh.`,
 
 func init() {
 	shellCmd.Flags().BoolVar(&shellNoAgent, "no-agent", false, "disable SSH agent forwarding")
+	shellCmd.GroupID = "execution"
 	rootCmd.AddCommand(shellCmd)
 }
 
