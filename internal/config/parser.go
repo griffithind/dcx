@@ -57,6 +57,9 @@ var (
 	// ${localWorkspaceFolderBasename}
 	localWorkspaceFolderBasenamePattern = regexp.MustCompile(`\$\{localWorkspaceFolderBasename\}`)
 
+	// ${containerWorkspaceFolderBasename}
+	containerWorkspaceFolderBasenamePattern = regexp.MustCompile(`\$\{containerWorkspaceFolderBasename\}`)
+
 	// ${devcontainerId}
 	devcontainerIdPattern = regexp.MustCompile(`\$\{devcontainerId\}`)
 
@@ -129,6 +132,12 @@ func Substitute(s string, ctx *SubstitutionContext) string {
 	if ctx != nil && ctx.LocalWorkspaceFolder != "" {
 		basename := filepath.Base(ctx.LocalWorkspaceFolder)
 		s = localWorkspaceFolderBasenamePattern.ReplaceAllString(s, basename)
+	}
+
+	// ${containerWorkspaceFolderBasename}
+	if ctx != nil && ctx.ContainerWorkspaceFolder != "" {
+		basename := filepath.Base(ctx.ContainerWorkspaceFolder)
+		s = containerWorkspaceFolderBasenamePattern.ReplaceAllString(s, basename)
 	}
 
 	// ${devcontainerId}
