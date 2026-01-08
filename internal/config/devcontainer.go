@@ -179,9 +179,11 @@ func formatPort(port int) string {
 
 // PortAttribute represents attributes for a specific port.
 type PortAttribute struct {
-	Label         string `json:"label,omitempty"`
-	Protocol      string `json:"protocol,omitempty"`
-	OnAutoForward string `json:"onAutoForward,omitempty"`
+	Label            string `json:"label,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	OnAutoForward    string `json:"onAutoForward,omitempty"`
+	RequireLocalPort bool   `json:"requireLocalPort,omitempty"`
+	ElevateIfNeeded  bool   `json:"elevateIfNeeded,omitempty"`
 }
 
 // GetPortAttribute returns the attributes for a specific port.
@@ -209,6 +211,12 @@ func (c *DevcontainerConfig) GetPortAttribute(port string) *PortAttribute {
 	}
 	if onAutoForward, ok := attrMap["onAutoForward"].(string); ok {
 		result.OnAutoForward = onAutoForward
+	}
+	if requireLocalPort, ok := attrMap["requireLocalPort"].(bool); ok {
+		result.RequireLocalPort = requireLocalPort
+	}
+	if elevateIfNeeded, ok := attrMap["elevateIfNeeded"].(bool); ok {
+		result.ElevateIfNeeded = elevateIfNeeded
 	}
 
 	return result
