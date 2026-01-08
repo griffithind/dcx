@@ -127,8 +127,8 @@ func ShouldUpdateRemoteUserUID(cfg *config.DevcontainerConfig, remoteUser string
 		return false
 	}
 
-	// If explicitly set, use that value
-	if cfg.UpdateRemoteUserUID != nil {
+	// If explicitly set in config, use that value
+	if cfg != nil && cfg.UpdateRemoteUserUID != nil {
 		return *cfg.UpdateRemoteUserUID
 	}
 
