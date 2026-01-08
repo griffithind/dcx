@@ -233,7 +233,10 @@ func (r *Runner) createContainer(ctx context.Context, imageRef string) (string, 
 	containerName := r.getContainerName()
 
 	// Collect mounts from config and features
-	mounts := append([]string{}, r.cfg.Mounts...)
+	var mounts []string
+	for _, m := range r.cfg.Mounts {
+		mounts = append(mounts, m.String())
+	}
 	if len(r.resolvedFeatures) > 0 {
 		featureMounts := features.CollectMounts(r.resolvedFeatures)
 		for _, mount := range featureMounts {

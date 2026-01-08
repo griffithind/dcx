@@ -172,8 +172,12 @@ func SubstituteConfig(cfg *DevcontainerConfig, ctx *SubstitutionContext) {
 	}
 
 	// Substitute in mounts
-	for i, m := range cfg.Mounts {
-		cfg.Mounts[i] = Substitute(m, ctx)
+	for i := range cfg.Mounts {
+		cfg.Mounts[i].Source = Substitute(cfg.Mounts[i].Source, ctx)
+		cfg.Mounts[i].Target = Substitute(cfg.Mounts[i].Target, ctx)
+		if cfg.Mounts[i].Raw != "" {
+			cfg.Mounts[i].Raw = Substitute(cfg.Mounts[i].Raw, ctx)
+		}
 	}
 
 	// Substitute in runArgs
