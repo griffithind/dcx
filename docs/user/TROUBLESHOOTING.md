@@ -11,7 +11,7 @@ dcx tracks the state of your devcontainer environment. Understanding these state
 | State | Description | Recovery |
 |-------|-------------|----------|
 | `ABSENT` | No containers exist for this environment | Run `dcx up` to create |
-| `CREATED` | Container exists but is stopped | Run `dcx start` to start |
+| `CREATED` | Container exists but is stopped | Run `dcx up` to start |
 | `RUNNING` | Container is running normally | No action needed |
 | `STALE` | Configuration has changed since container was created | Run `dcx up --rebuild` to apply changes |
 | `BROKEN` | Environment is in an inconsistent state | Run `dcx down` then `dcx up` |
@@ -34,7 +34,7 @@ This shows the current state, container info, and recommended recovery actions.
 
 **Solution:**
 ```bash
-dcx start
+dcx up
 ```
 
 ### "No container found for this environment"
@@ -50,7 +50,7 @@ dcx up
 
 ### "Configuration has changed, rebuild required"
 
-**Symptoms:** `dcx start` fails with this error.
+**Symptoms:** `dcx up` reports configuration has changed.
 
 **Cause:** You've modified devcontainer.json since the container was created.
 
@@ -177,5 +177,5 @@ docker rm $(docker ps -aq --filter "label=io.github.dcx.managed=true")
 
 If you're still having issues:
 1. Run with `--verbose` flag to get detailed output
-2. Check the GitHub issues: https://github.com/anthropics/claude-code/issues
+2. Check the GitHub issues: https://github.com/griffithind/dcx/issues
 3. Include your devcontainer.json (with sensitive data removed) when reporting issues
