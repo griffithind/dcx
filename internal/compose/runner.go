@@ -187,6 +187,12 @@ func (r *Runner) buildDerivedImageWithFeatures(ctx context.Context, opts runner.
 
 	fmt.Printf("Base image: %s\n", baseImage)
 
+	// Merge image metadata if present
+	if err := r.mergeImageMetadata(ctx, baseImage); err != nil {
+		// Log warning but don't fail - metadata is optional
+		fmt.Printf("Warning: failed to read image metadata: %v\n", err)
+	}
+
 	// Create feature manager
 	mgr, err := features.NewManager(r.configDir)
 	if err != nil {
@@ -246,6 +252,39 @@ func (r *Runner) imageExists(ctx context.Context, imageTag string) bool {
 	// Fallback to subprocess (for cases where dockerClient is nil)
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageTag)
 	return cmd.Run() == nil
+}
+
+// mergeImageMetadata reads the devcontainer.metadata label from the image
+// and merges it with the local configuration.
+func (r *Runner) mergeImageMetadata(ctx context.Context, imageRef string) error {
+	if r.dockerClient == nil {
+		return nil // Can't read labels without docker client
+	}
+
+	labels, err := r.dockerClient.GetImageLabels(ctx, imageRef)
+	if err != nil {
+		return err
+	}
+
+	metadataLabel, ok := labels[config.DevcontainerMetadataLabel]
+	if !ok || metadataLabel == "" {
+		return nil // No metadata to merge
+	}
+
+	imageConfigs, err := config.ParseImageMetadata(metadataLabel)
+	if err != nil {
+		return fmt.Errorf("failed to parse image metadata: %w", err)
+	}
+
+	if len(imageConfigs) == 0 {
+		return nil
+	}
+
+	// Merge image metadata with local config
+	merged := config.MergeMetadata(r.cfg, imageConfigs)
+	*r.cfg = *merged
+
+	return nil
 }
 
 // getBaseImage determines the base image for the primary service.

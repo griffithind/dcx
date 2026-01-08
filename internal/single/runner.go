@@ -95,6 +95,12 @@ func (r *Runner) resolveImage(ctx context.Context, opts runner.UpOptions) (strin
 		}
 
 		baseImage = r.cfg.Image
+
+		// Merge image metadata if present
+		if err := r.mergeImageMetadata(ctx, baseImage); err != nil {
+			// Log warning but don't fail - metadata is optional
+			fmt.Printf("Warning: failed to read image metadata: %v\n", err)
+		}
 	} else if r.cfg.Build != nil {
 		// Dockerfile-based configuration
 		imageTag := fmt.Sprintf("dcx/%s:%s", r.envKey, r.configHash[:12])
@@ -121,6 +127,35 @@ func (r *Runner) resolveImage(ctx context.Context, opts runner.UpOptions) (strin
 	}
 
 	return derivedImage, nil
+}
+
+// mergeImageMetadata reads the devcontainer.metadata label from the image
+// and merges it with the local configuration.
+func (r *Runner) mergeImageMetadata(ctx context.Context, imageRef string) error {
+	labels, err := r.dockerClient.GetImageLabels(ctx, imageRef)
+	if err != nil {
+		return err
+	}
+
+	metadataLabel, ok := labels[config.DevcontainerMetadataLabel]
+	if !ok || metadataLabel == "" {
+		return nil // No metadata to merge
+	}
+
+	imageConfigs, err := config.ParseImageMetadata(metadataLabel)
+	if err != nil {
+		return fmt.Errorf("failed to parse image metadata: %w", err)
+	}
+
+	if len(imageConfigs) == 0 {
+		return nil
+	}
+
+	// Merge image metadata with local config
+	merged := config.MergeMetadata(r.cfg, imageConfigs)
+	*r.cfg = *merged
+
+	return nil
 }
 
 // buildDerivedImage builds an image with features installed on top of the base image.
