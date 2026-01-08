@@ -382,6 +382,52 @@ func FilterByComposeProject(project string) string {
 	return fmt.Sprintf("label=%s=%s", LabelComposeProject, project)
 }
 
+// LegacyFilterSelector returns a filter for finding containers with legacy labels.
+func LegacyFilterSelector() string {
+	return fmt.Sprintf("label=%smanaged=true", LegacyPrefix)
+}
+
+// LegacyFilterByEnvKey returns a filter for finding containers by legacy env_key.
+func LegacyFilterByEnvKey(envKey string) string {
+	return fmt.Sprintf("label=%senv_key=%s", LegacyPrefix, envKey)
+}
+
+// IsDCXManaged checks if a container has dcx labels (either new or legacy).
+func IsDCXManaged(labelMap map[string]string) bool {
+	if labelMap[LabelManaged] == "true" {
+		return true
+	}
+	if labelMap[LegacyPrefix+"managed"] == "true" {
+		return true
+	}
+	return false
+}
+
+// GetWorkspaceID extracts the workspace ID from labels (handles both formats).
+func GetWorkspaceID(labelMap map[string]string) string {
+	if id := labelMap[LabelWorkspaceID]; id != "" {
+		return id
+	}
+	// Fall back to legacy env_key
+	return labelMap[LegacyPrefix+"env_key"]
+}
+
+// GetWorkspacePath extracts the workspace path from labels (handles both formats).
+func GetWorkspacePath(labelMap map[string]string) string {
+	if path := labelMap[LabelWorkspacePath]; path != "" {
+		return path
+	}
+	return labelMap[LegacyPrefix+"workspace_path"]
+}
+
+// IsPrimaryContainer checks if container is primary (handles both formats).
+func IsPrimaryContainer(labelMap map[string]string) bool {
+	if labelMap[LabelIsPrimary] == "true" {
+		return true
+	}
+	return labelMap[LegacyPrefix+"primary"] == "true"
+}
+
 // Helper functions
 
 func boolToString(b bool) string {

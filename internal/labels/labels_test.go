@@ -305,3 +305,167 @@ func TestLabelConstants(t *testing.T) {
 		}
 	}
 }
+
+func TestIsDCXManaged(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected bool
+	}{
+		{
+			name:     "new labels managed",
+			labels:   map[string]string{LabelManaged: "true"},
+			expected: true,
+		},
+		{
+			name:     "legacy labels managed",
+			labels:   map[string]string{"io.github.dcx.managed": "true"},
+			expected: true,
+		},
+		{
+			name:     "not managed",
+			labels:   map[string]string{"other.label": "value"},
+			expected: false,
+		},
+		{
+			name:     "empty labels",
+			labels:   map[string]string{},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := IsDCXManaged(tc.labels)
+			if result != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestGetWorkspaceID(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected string
+	}{
+		{
+			name:     "new label",
+			labels:   map[string]string{LabelWorkspaceID: "ws-new"},
+			expected: "ws-new",
+		},
+		{
+			name:     "legacy label",
+			labels:   map[string]string{"io.github.dcx.env_key": "ws-legacy"},
+			expected: "ws-legacy",
+		},
+		{
+			name: "both labels (new takes precedence)",
+			labels: map[string]string{
+				LabelWorkspaceID:          "ws-new",
+				"io.github.dcx.env_key": "ws-legacy",
+			},
+			expected: "ws-new",
+		},
+		{
+			name:     "no label",
+			labels:   map[string]string{},
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetWorkspaceID(tc.labels)
+			if result != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestGetWorkspacePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected string
+	}{
+		{
+			name:     "new label",
+			labels:   map[string]string{LabelWorkspacePath: "/new/path"},
+			expected: "/new/path",
+		},
+		{
+			name:     "legacy label",
+			labels:   map[string]string{"io.github.dcx.workspace_path": "/legacy/path"},
+			expected: "/legacy/path",
+		},
+		{
+			name:     "no label",
+			labels:   map[string]string{},
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetWorkspacePath(tc.labels)
+			if result != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestIsPrimaryContainer(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected bool
+	}{
+		{
+			name:     "new label primary",
+			labels:   map[string]string{LabelIsPrimary: "true"},
+			expected: true,
+		},
+		{
+			name:     "legacy label primary",
+			labels:   map[string]string{"io.github.dcx.primary": "true"},
+			expected: true,
+		},
+		{
+			name:     "not primary",
+			labels:   map[string]string{LabelIsPrimary: "false"},
+			expected: false,
+		},
+		{
+			name:     "no primary label",
+			labels:   map[string]string{},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := IsPrimaryContainer(tc.labels)
+			if result != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestLegacyFilterFunctions(t *testing.T) {
+	// Verify legacy filter selector
+	legacySelector := LegacyFilterSelector()
+	if legacySelector != "label=io.github.dcx.managed=true" {
+		t.Errorf("unexpected legacy selector: %s", legacySelector)
+	}
+
+	// Verify legacy env_key filter
+	legacyEnvKey := LegacyFilterByEnvKey("abc123")
+	if legacyEnvKey != "label=io.github.dcx.env_key=abc123" {
+		t.Errorf("unexpected legacy env_key filter: %s", legacyEnvKey)
+	}
+}
