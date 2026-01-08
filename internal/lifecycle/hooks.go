@@ -173,7 +173,13 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 }
 
 // RunPostAttach runs postAttachCommand in the container.
+// Per spec: feature hooks run BEFORE devcontainer hooks.
 func (r *HookRunner) RunPostAttach(ctx context.Context) error {
+	// Feature postAttachCommands run before devcontainer postAttachCommand
+	if err := r.runFeatureHooks(ctx, r.featurePostAttachHooks, "postAttachCommand"); err != nil {
+		return err
+	}
+
 	if r.cfg.PostAttachCommand != nil {
 		fmt.Println("Running postAttachCommand...")
 		if err := r.runContainerCommand(ctx, r.cfg.PostAttachCommand); err != nil {
@@ -181,8 +187,7 @@ func (r *HookRunner) RunPostAttach(ctx context.Context) error {
 		}
 	}
 
-	// Feature postAttachCommands run after devcontainer postAttachCommand
-	return r.runFeatureHooks(ctx, r.featurePostAttachHooks, "postAttachCommand")
+	return nil
 }
 
 // RunAllCreateHooks runs all hooks needed when a container is first created.
@@ -226,45 +231,45 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 	}
 
 	// onCreateCommand runs after container creation
+	// Per spec: feature hooks run BEFORE devcontainer hooks
 	if err := runHook(WaitForOnCreateCommand, "onCreateCommand", func() error {
-		if err := r.RunOnCreate(ctx); err != nil {
+		if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
 			return err
 		}
-		// Feature onCreateCommands run after devcontainer onCreateCommand
-		return r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand")
+		return r.RunOnCreate(ctx)
 	}); err != nil {
 		return fmt.Errorf("onCreateCommand failed: %w", err)
 	}
 
 	// updateContentCommand runs after onCreateCommand
+	// Per spec: feature hooks run BEFORE devcontainer hooks
 	if err := runHook(WaitForUpdateContentCommand, "updateContentCommand", func() error {
-		if err := r.RunUpdateContent(ctx); err != nil {
+		if err := r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand"); err != nil {
 			return err
 		}
-		// Feature updateContentCommands run after devcontainer updateContentCommand
-		return r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand")
+		return r.RunUpdateContent(ctx)
 	}); err != nil {
 		return fmt.Errorf("updateContentCommand failed: %w", err)
 	}
 
 	// postCreateCommand runs after updateContentCommand
+	// Per spec: feature hooks run BEFORE devcontainer hooks
 	if err := runHook(WaitForPostCreateCommand, "postCreateCommand", func() error {
-		if err := r.RunPostCreate(ctx); err != nil {
+		if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
 			return err
 		}
-		// Feature postCreateCommands run after devcontainer postCreateCommand
-		return r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand")
+		return r.RunPostCreate(ctx)
 	}); err != nil {
 		return fmt.Errorf("postCreateCommand failed: %w", err)
 	}
 
 	// postStartCommand runs after postCreateCommand (on first start)
+	// Per spec: feature hooks run BEFORE devcontainer hooks
 	if err := runHook(WaitForPostStartCommand, "postStartCommand", func() error {
-		if err := r.RunPostStart(ctx); err != nil {
+		if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
 			return err
 		}
-		// Feature postStartCommands run after devcontainer postStartCommand
-		return r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand")
+		return r.RunPostStart(ctx)
 	}); err != nil {
 		return fmt.Errorf("postStartCommand failed: %w", err)
 	}
@@ -285,13 +290,14 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 }
 
 // RunStartHooks runs hooks needed when a container is started (not first time).
+// Per spec: feature hooks run BEFORE devcontainer hooks.
 func (r *HookRunner) RunStartHooks(ctx context.Context) error {
-	if err := r.RunPostStart(ctx); err != nil {
+	// Feature postStartCommands run before devcontainer postStartCommand
+	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
 		return err
 	}
 
-	// Feature postStartCommands run after devcontainer postStartCommand
-	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
+	if err := r.RunPostStart(ctx); err != nil {
 		return err
 	}
 
