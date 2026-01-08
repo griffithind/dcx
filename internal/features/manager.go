@@ -33,14 +33,16 @@ func (m *Manager) SetForcePull(forcePull bool) {
 }
 
 // ResolveAll resolves all features from a devcontainer.json features map.
+// It recursively resolves dependencies specified in dependsOn and installsAfter.
 func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]interface{}, overrideOrder []string) ([]*Feature, error) {
 	if len(featuresConfig) == 0 {
 		return nil, nil
 	}
 
-	// Resolve each feature
-	features := make([]*Feature, 0, len(featuresConfig))
+	// Track resolved features by their metadata ID
+	resolved := make(map[string]*Feature)
 
+	// Resolve each feature from config
 	for id, optionsRaw := range featuresConfig {
 		// Parse options
 		var options map[string]interface{}
@@ -63,21 +65,97 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 			return nil, fmt.Errorf("failed to resolve feature %q: %w", id, err)
 		}
 
-		features = append(features, feature)
+		// Use metadata ID as key if available
+		key := id
+		if feature.Metadata != nil && feature.Metadata.ID != "" {
+			key = feature.Metadata.ID
+		}
+		resolved[key] = feature
 	}
 
-	// Validate dependencies
-	if err := ValidateDependencies(features); err != nil {
+	// Recursively resolve dependencies
+	if err := m.resolveDependencies(ctx, resolved); err != nil {
 		return nil, err
 	}
 
-	// Order features
+	// Convert map to slice
+	features := make([]*Feature, 0, len(resolved))
+	for _, f := range resolved {
+		features = append(features, f)
+	}
+
+	// Order features (ValidateDependencies is no longer needed since we auto-resolved deps)
 	ordered, err := OrderFeatures(features, overrideOrder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to order features: %w", err)
 	}
 
 	return ordered, nil
+}
+
+// resolveDependencies recursively resolves all dependencies for the given features.
+func (m *Manager) resolveDependencies(ctx context.Context, resolved map[string]*Feature) error {
+	// Collect all unresolved dependencies
+	for {
+		unresolved := m.collectUnresolvedDependencies(resolved)
+		if len(unresolved) == 0 {
+			break
+		}
+
+		// Resolve each unresolved dependency
+		for depID, depOptions := range unresolved {
+			feature, err := m.resolver.Resolve(ctx, depID, depOptions)
+			if err != nil {
+				return fmt.Errorf("failed to resolve dependency %q: %w", depID, err)
+			}
+
+			// Use metadata ID as key if available
+			key := depID
+			if feature.Metadata != nil && feature.Metadata.ID != "" {
+				key = feature.Metadata.ID
+			}
+			resolved[key] = feature
+		}
+	}
+
+	return nil
+}
+
+// collectUnresolvedDependencies finds all dependencies that haven't been resolved yet.
+func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) map[string]map[string]interface{} {
+	unresolved := make(map[string]map[string]interface{})
+
+	for _, feature := range resolved {
+		if feature.Metadata == nil {
+			continue
+		}
+
+		// Check hard dependencies (dependsOn)
+		for depID, depOptionsRaw := range feature.Metadata.DependsOn {
+			if _, exists := resolved[depID]; !exists {
+				// Parse options from dependency config
+				var depOptions map[string]interface{}
+				if opts, ok := depOptionsRaw.(map[string]interface{}); ok {
+					depOptions = opts
+				} else {
+					depOptions = make(map[string]interface{})
+				}
+				unresolved[depID] = depOptions
+			}
+		}
+
+		// Check soft dependencies (installsAfter) - these are also resolved if specified
+		for _, depID := range feature.Metadata.InstallsAfter {
+			if _, exists := resolved[depID]; !exists {
+				// Soft dependencies don't have options specified
+				if _, alreadyQueued := unresolved[depID]; !alreadyQueued {
+					unresolved[depID] = make(map[string]interface{})
+				}
+			}
+		}
+	}
+
+	return unresolved
 }
 
 // BuildDerivedImage builds a derived image with features installed.
