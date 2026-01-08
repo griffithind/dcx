@@ -472,7 +472,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		fmt.Printf("  [hooks] Container: %s\n", containerInfo.Name)
 	}
 
-	// Create hook runner (agent binary is pre-deployed, so skip deployment in hooks)
+	// Create hook runner
 	hookRunner := lifecycle.NewHookRunner(
 		s.dockerClient,
 		containerInfo.ID,
@@ -480,7 +480,6 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		info.Config,
 		info.EnvKey,
 		sshAgentEnabled,
-		sshAgentEnabled, // skip deploy if already deployed
 	)
 
 	// Resolve features to get their lifecycle hooks

@@ -18,13 +18,6 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// AgentProxyOptions configures AgentProxy behavior.
-type AgentProxyOptions struct {
-	// SkipDeploy skips deploying the dcx binary, assuming it's already present.
-	// Set this to true when the binary has been pre-deployed during 'up'.
-	SkipDeploy bool
-}
-
 // AgentProxy manages SSH agent forwarding between host and container.
 // It runs a TCP server on the host that proxies to the SSH agent,
 // and deploys a client inside the container that creates a Unix socket.
@@ -43,18 +36,11 @@ type AgentProxy struct {
 
 	// Container-side
 	socketPath string
-
-	// Options
-	skipDeploy bool
 }
 
 // NewAgentProxy creates a new SSH agent proxy for the given container.
+// The dcx binary must be pre-deployed to the container during 'up'.
 func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy, error) {
-	return NewAgentProxyWithOptions(containerID, containerName, uid, gid, AgentProxyOptions{})
-}
-
-// NewAgentProxyWithOptions creates a new SSH agent proxy with options.
-func NewAgentProxyWithOptions(containerID, containerName string, uid, gid int, opts AgentProxyOptions) (*AgentProxy, error) {
 	agentSock := os.Getenv("SSH_AUTH_SOCK")
 	if agentSock == "" {
 		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
@@ -77,7 +63,6 @@ func NewAgentProxyWithOptions(containerID, containerName string, uid, gid int, o
 		agentSock:     agentSock,
 		done:          make(chan struct{}),
 		socketPath:    fmt.Sprintf("/tmp/ssh-agent-%d-%s.sock", uid, uniqueID),
-		skipDeploy:    opts.SkipDeploy,
 	}, nil
 }
 
@@ -103,8 +88,8 @@ func (p *AgentProxy) Start() (string, error) {
 	p.wg.Add(1)
 	go p.acceptLoop()
 
-	// Deploy dcx to container and start client
-	if err := p.deployAndStartClient(); err != nil {
+	// Start client in container (binary must be pre-deployed during 'up')
+	if err := p.startClient(); err != nil {
 		p.Stop()
 		return "", fmt.Errorf("failed to start client in container: %w", err)
 	}
@@ -204,17 +189,11 @@ func (p *AgentProxy) handleConnection(tcpConn net.Conn) {
 	<-done
 }
 
-// deployAndStartClient deploys dcx to the container and starts the agent proxy client.
-func (p *AgentProxy) deployAndStartClient() error {
+// startClient starts the agent proxy client in the container.
+// The dcx binary must already be deployed to the container.
+func (p *AgentProxy) startClient() error {
 	ctx := context.Background()
 	binaryPath := GetContainerBinaryPath()
-
-	// Deploy dcx binary to container unless pre-deployed
-	if !p.skipDeploy {
-		if err := DeployToContainer(ctx, p.containerName, binaryPath); err != nil {
-			return err
-		}
-	}
 
 	// Start client in background
 	// On Docker Desktop, use host.docker.internal (built-in).
