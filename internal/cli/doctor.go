@@ -5,26 +5,47 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 
+	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
+)
+
+var (
+	doctorConfig bool
+	doctorSystem bool
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check system requirements",
+	Short: "Check system requirements and configuration",
 	Long: `Check that all system requirements are met for running dcx.
 
-This command checks:
+By default checks both system and configuration. Use flags to check only one:
+
+System checks:
 - Docker daemon connectivity
 - Docker Compose availability
 - SSH agent availability
-- SELinux status (Linux only)`,
+- SELinux status (Linux only)
+
+Configuration checks (with --config or by default if devcontainer.json exists):
+- JSON syntax and schema validity
+- Required fields and values
+- File references (Dockerfile, compose files)
+- Feature references syntax`,
 	RunE: runDoctor,
+}
+
+func init() {
+	doctorCmd.Flags().BoolVar(&doctorConfig, "config", false, "only check configuration (skip system checks)")
+	doctorCmd.Flags().BoolVar(&doctorSystem, "system", false, "only check system requirements (skip config checks)")
 }
 
 // CheckResult represents a single check result.
@@ -32,12 +53,14 @@ type CheckResult struct {
 	Name    string `json:"name"`
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
 }
 
 // DoctorOutput represents the doctor output for JSON.
 type DoctorOutput struct {
-	Checks  []CheckResult `json:"checks"`
-	AllOK   bool          `json:"allOk"`
+	SystemChecks []CheckResult `json:"systemChecks,omitempty"`
+	ConfigChecks []CheckResult `json:"configChecks,omitempty"`
+	AllOK        bool          `json:"allOk"`
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -45,61 +68,327 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	out := output.Global()
 	c := out.Color()
 
-	var results []CheckResult
+	// Determine what to check
+	checkSystemReqs := !doctorConfig
+	checkConfig := !doctorSystem
 
-	// Check Docker daemon
-	results = append(results, checkDocker(ctx))
-
-	// Check Docker Compose
-	results = append(results, checkCompose())
-
-	// Check SSH agent
-	results = append(results, checkSSHAgent())
-
-	// Check SELinux (Linux only)
-	if runtime.GOOS == "linux" {
-		results = append(results, checkSELinux())
+	// If config-only was requested but no config exists, error out
+	if doctorConfig {
+		cfgPath := findConfigPath(workspacePath)
+		if cfgPath == "" {
+			return fmt.Errorf("no devcontainer.json found in %s", workspacePath)
+		}
 	}
 
-	// Calculate overall status
+	var systemResults []CheckResult
+	var configResults []CheckResult
 	allOK := true
-	for _, r := range results {
-		if !r.OK {
-			allOK = false
-			break
+
+	// System checks
+	if checkSystemReqs {
+		systemResults = append(systemResults, checkDocker(ctx))
+		systemResults = append(systemResults, checkCompose())
+		systemResults = append(systemResults, checkSSHAgent())
+		if runtime.GOOS == "linux" {
+			systemResults = append(systemResults, checkSELinux())
+		}
+
+		for _, r := range systemResults {
+			if !r.OK {
+				allOK = false
+			}
+		}
+	}
+
+	// Configuration checks (if config exists or --config flag)
+	if checkConfig {
+		cfgPath := findConfigPath(workspacePath)
+		if cfgPath != "" || doctorConfig {
+			configResults = runConfigChecks(ctx, cfgPath)
+			for _, r := range configResults {
+				if !r.OK {
+					allOK = false
+				}
+			}
 		}
 	}
 
 	// JSON output mode
 	if out.IsJSON() {
 		return out.JSON(DoctorOutput{
-			Checks: results,
-			AllOK:  allOK,
+			SystemChecks: systemResults,
+			ConfigChecks: configResults,
+			AllOK:        allOK,
 		})
 	}
 
 	// Text output mode
-	out.Println(c.Header("dcx doctor"))
-	out.Println(c.Dim("=========="))
-	out.Println()
+	if len(systemResults) > 0 {
+		out.Println(c.Header("System Requirements"))
+		out.Println(c.Dim("=================="))
+		out.Println()
 
-	for _, r := range results {
-		var status string
-		if r.OK {
-			status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
-		} else {
-			status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+		for _, r := range systemResults {
+			var status string
+			if r.OK {
+				status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
+			} else {
+				status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+			}
+			out.Println(status)
+			if !r.OK && r.Hint != "" {
+				out.Printf("    %s", c.Hint(r.Hint))
+			}
 		}
-		out.Println(status)
+		out.Println()
 	}
 
-	out.Println()
+	if len(configResults) > 0 {
+		out.Println(c.Header("Configuration"))
+		out.Println(c.Dim("============="))
+		out.Println()
+
+		for _, r := range configResults {
+			var status string
+			if r.OK {
+				status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
+			} else {
+				status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+			}
+			out.Println(status)
+			if !r.OK && r.Hint != "" {
+				out.Printf("    %s", c.Hint(r.Hint))
+			}
+		}
+		out.Println()
+	}
+
 	if allOK {
 		out.Println(output.FormatSuccess("All checks passed!"))
 		return nil
 	}
 
 	return fmt.Errorf("some checks failed")
+}
+
+func findConfigPath(wsPath string) string {
+	paths := []string{
+		filepath.Join(wsPath, ".devcontainer", "devcontainer.json"),
+		filepath.Join(wsPath, ".devcontainer.json"),
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
+	var results []CheckResult
+
+	// Check config exists
+	if cfgPath == "" {
+		results = append(results, CheckResult{
+			Name:    "Config File",
+			OK:      false,
+			Message: "devcontainer.json not found",
+			Hint:    "Create a devcontainer.json file in .devcontainer/ directory",
+		})
+		return results
+	}
+
+	results = append(results, CheckResult{
+		Name:    "Config File",
+		OK:      true,
+		Message: cfgPath,
+	})
+
+	// Parse configuration
+	cfg, err := config.ParseFile(cfgPath)
+	if err != nil {
+		results = append(results, CheckResult{
+			Name:    "Config Syntax",
+			OK:      false,
+			Message: fmt.Sprintf("parse error: %v", err),
+		})
+		return results
+	}
+
+	results = append(results, CheckResult{
+		Name:    "Config Syntax",
+		OK:      true,
+		Message: "valid JSON",
+	})
+
+	// Build workspace model to validate structure
+	builder := workspace.NewBuilder(nil)
+	ws, err := builder.Build(ctx, workspace.BuildOptions{
+		ConfigPath:    cfgPath,
+		WorkspaceRoot: workspacePath,
+		Config:        cfg,
+	})
+	if err != nil {
+		results = append(results, CheckResult{
+			Name:    "Config Structure",
+			OK:      false,
+			Message: fmt.Sprintf("structure error: %v", err),
+		})
+		return results
+	}
+
+	results = append(results, CheckResult{
+		Name:    "Config Structure",
+		OK:      true,
+		Message: fmt.Sprintf("plan type: %s", ws.Resolved.PlanType),
+	})
+
+	// Validate plan-specific requirements
+	results = append(results, validatePlanRequirements(ws)...)
+
+	// Validate file references
+	results = append(results, validateFileReferences(ws)...)
+
+	// Validate features
+	results = append(results, validateFeatures(cfg)...)
+
+	return results
+}
+
+func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
+	var results []CheckResult
+
+	switch ws.Resolved.PlanType {
+	case workspace.PlanTypeImage:
+		if ws.Resolved.Image == "" {
+			results = append(results, CheckResult{
+				Name:    "Image",
+				OK:      false,
+				Message: "missing 'image' field",
+				Hint:    "Add an 'image' field with a valid Docker image reference",
+			})
+		} else {
+			results = append(results, CheckResult{
+				Name:    "Image",
+				OK:      true,
+				Message: ws.Resolved.Image,
+			})
+		}
+
+	case workspace.PlanTypeDockerfile:
+		if ws.Resolved.Dockerfile == nil || ws.Resolved.Dockerfile.Path == "" {
+			results = append(results, CheckResult{
+				Name:    "Dockerfile",
+				OK:      false,
+				Message: "missing 'build.dockerfile' field",
+			})
+		} else {
+			results = append(results, CheckResult{
+				Name:    "Dockerfile",
+				OK:      true,
+				Message: ws.Resolved.Dockerfile.Path,
+			})
+		}
+
+	case workspace.PlanTypeCompose:
+		if ws.Resolved.Compose == nil || len(ws.Resolved.Compose.Files) == 0 {
+			results = append(results, CheckResult{
+				Name:    "Compose Files",
+				OK:      false,
+				Message: "missing 'dockerComposeFile' field",
+			})
+		} else {
+			results = append(results, CheckResult{
+				Name:    "Compose Files",
+				OK:      true,
+				Message: fmt.Sprintf("%d file(s)", len(ws.Resolved.Compose.Files)),
+			})
+		}
+
+		if ws.Resolved.Compose != nil && ws.Resolved.Compose.Service == "" {
+			results = append(results, CheckResult{
+				Name:    "Service",
+				OK:      false,
+				Message: "missing 'service' field",
+				Hint:    "Specify which service is the devcontainer",
+			})
+		} else if ws.Resolved.Compose != nil {
+			results = append(results, CheckResult{
+				Name:    "Service",
+				OK:      true,
+				Message: ws.Resolved.Compose.Service,
+			})
+		}
+	}
+
+	return results
+}
+
+func validateFileReferences(ws *workspace.Workspace) []CheckResult {
+	var results []CheckResult
+
+	// Check Dockerfile exists
+	if ws.Resolved.Dockerfile != nil && ws.Resolved.Dockerfile.Path != "" {
+		if _, err := os.Stat(ws.Resolved.Dockerfile.Path); os.IsNotExist(err) {
+			results = append(results, CheckResult{
+				Name:    "Dockerfile Exists",
+				OK:      false,
+				Message: fmt.Sprintf("not found: %s", ws.Resolved.Dockerfile.Path),
+			})
+		} else {
+			results = append(results, CheckResult{
+				Name:    "Dockerfile Exists",
+				OK:      true,
+				Message: "found",
+			})
+		}
+	}
+
+	// Check compose files exist
+	if ws.Resolved.Compose != nil {
+		for _, f := range ws.Resolved.Compose.Files {
+			if _, err := os.Stat(f); os.IsNotExist(err) {
+				results = append(results, CheckResult{
+					Name:    "Compose File",
+					OK:      false,
+					Message: fmt.Sprintf("not found: %s", f),
+				})
+			}
+		}
+	}
+
+	return results
+}
+
+func validateFeatures(cfg *config.DevcontainerConfig) []CheckResult {
+	var results []CheckResult
+
+	if len(cfg.Features) == 0 {
+		return results
+	}
+
+	validFeatures := 0
+	for featureRef := range cfg.Features {
+		if featureRef == "" {
+			results = append(results, CheckResult{
+				Name:    "Feature",
+				OK:      false,
+				Message: "empty feature reference",
+			})
+			continue
+		}
+		validFeatures++
+	}
+
+	if validFeatures > 0 {
+		results = append(results, CheckResult{
+			Name:    "Features",
+			OK:      true,
+			Message: fmt.Sprintf("%d feature(s) configured", validFeatures),
+		})
+	}
+
+	return results
 }
 
 func checkDocker(ctx context.Context) CheckResult {
@@ -109,6 +398,7 @@ func checkDocker(ctx context.Context) CheckResult {
 			Name:    "Docker",
 			OK:      false,
 			Message: fmt.Sprintf("failed to connect: %v", err),
+			Hint:    "Start Docker Desktop or the Docker daemon",
 		}
 	}
 	defer client.Close()
@@ -118,6 +408,7 @@ func checkDocker(ctx context.Context) CheckResult {
 			Name:    "Docker",
 			OK:      false,
 			Message: fmt.Sprintf("daemon not responding: %v", err),
+			Hint:    "Ensure Docker daemon is running",
 		}
 	}
 
@@ -163,7 +454,8 @@ func checkCompose() CheckResult {
 	return CheckResult{
 		Name:    "Docker Compose",
 		OK:      false,
-		Message: "not found (install docker compose plugin or docker-compose)",
+		Message: "not found",
+		Hint:    "Install docker compose plugin or docker-compose",
 	}
 }
 
@@ -174,6 +466,7 @@ func checkSSHAgent() CheckResult {
 			Name:    "SSH Agent",
 			OK:      false,
 			Message: "SSH_AUTH_SOCK not set",
+			Hint:    "Start an SSH agent or set SSH_AUTH_SOCK",
 		}
 	}
 
