@@ -153,46 +153,39 @@ type FeatureCopyPath struct {
 	Dest   string // Destination directory name in build context
 }
 
-// CollectCapabilities collects all capabilities needed by features.
-func CollectCapabilities(features []*Feature) []string {
-	capMap := make(map[string]bool)
+// collectUniqueStrings is a generic helper to collect unique strings from features.
+func collectUniqueStrings(features []*Feature, getStrings func(*FeatureMetadata) []string) []string {
+	seen := make(map[string]bool)
 
 	for _, feature := range features {
 		if feature.Metadata == nil {
 			continue
 		}
-		for _, cap := range feature.Metadata.CapAdd {
-			capMap[cap] = true
+		for _, s := range getStrings(feature.Metadata) {
+			seen[s] = true
 		}
 	}
 
-	caps := make([]string, 0, len(capMap))
-	for cap := range capMap {
-		caps = append(caps, cap)
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
 	}
 
-	return caps
+	return result
+}
+
+// CollectCapabilities collects all capabilities needed by features.
+func CollectCapabilities(features []*Feature) []string {
+	return collectUniqueStrings(features, func(m *FeatureMetadata) []string {
+		return m.CapAdd
+	})
 }
 
 // CollectSecurityOpts collects all security options needed by features.
 func CollectSecurityOpts(features []*Feature) []string {
-	optMap := make(map[string]bool)
-
-	for _, feature := range features {
-		if feature.Metadata == nil {
-			continue
-		}
-		for _, opt := range feature.Metadata.SecurityOpt {
-			optMap[opt] = true
-		}
-	}
-
-	opts := make([]string, 0, len(optMap))
-	for opt := range optMap {
-		opts = append(opts, opt)
-	}
-
-	return opts
+	return collectUniqueStrings(features, func(m *FeatureMetadata) []string {
+		return m.SecurityOpt
+	})
 }
 
 // NeedsPrivileged returns true if any feature requires privileged mode.
@@ -328,12 +321,15 @@ type FeatureHook struct {
 	Command interface{}
 }
 
-// CollectOnCreateCommands collects all onCreateCommand hooks from features.
-// These run after feature installation, in feature order.
-func CollectOnCreateCommands(features []*Feature) []FeatureHook {
+// collectHooks is a generic helper to collect lifecycle hooks from features.
+func collectHooks(features []*Feature, getCommand func(*FeatureMetadata) interface{}) []FeatureHook {
 	var hooks []FeatureHook
 	for _, feature := range features {
-		if feature.Metadata == nil || feature.Metadata.OnCreateCommand == nil {
+		if feature.Metadata == nil {
+			continue
+		}
+		cmd := getCommand(feature.Metadata)
+		if cmd == nil {
 			continue
 		}
 		name := feature.Metadata.Name
@@ -343,94 +339,50 @@ func CollectOnCreateCommands(features []*Feature) []FeatureHook {
 		hooks = append(hooks, FeatureHook{
 			FeatureID:   feature.Metadata.ID,
 			FeatureName: name,
-			Command:     feature.Metadata.OnCreateCommand,
+			Command:     cmd,
 		})
 	}
 	return hooks
+}
+
+// CollectOnCreateCommands collects all onCreateCommand hooks from features.
+// These run after feature installation, in feature order.
+func CollectOnCreateCommands(features []*Feature) []FeatureHook {
+	return collectHooks(features, func(m *FeatureMetadata) interface{} {
+		return m.OnCreateCommand
+	})
 }
 
 // CollectPostCreateCommands collects all postCreateCommand hooks from features.
 // These run after all features are installed and container is ready.
 func CollectPostCreateCommands(features []*Feature) []FeatureHook {
-	var hooks []FeatureHook
-	for _, feature := range features {
-		if feature.Metadata == nil || feature.Metadata.PostCreateCommand == nil {
-			continue
-		}
-		name := feature.Metadata.Name
-		if name == "" {
-			name = feature.Metadata.ID
-		}
-		hooks = append(hooks, FeatureHook{
-			FeatureID:   feature.Metadata.ID,
-			FeatureName: name,
-			Command:     feature.Metadata.PostCreateCommand,
-		})
-	}
-	return hooks
+	return collectHooks(features, func(m *FeatureMetadata) interface{} {
+		return m.PostCreateCommand
+	})
 }
 
 // CollectPostStartCommands collects all postStartCommand hooks from features.
 // These run on each container start.
 func CollectPostStartCommands(features []*Feature) []FeatureHook {
-	var hooks []FeatureHook
-	for _, feature := range features {
-		if feature.Metadata == nil || feature.Metadata.PostStartCommand == nil {
-			continue
-		}
-		name := feature.Metadata.Name
-		if name == "" {
-			name = feature.Metadata.ID
-		}
-		hooks = append(hooks, FeatureHook{
-			FeatureID:   feature.Metadata.ID,
-			FeatureName: name,
-			Command:     feature.Metadata.PostStartCommand,
-		})
-	}
-	return hooks
+	return collectHooks(features, func(m *FeatureMetadata) interface{} {
+		return m.PostStartCommand
+	})
 }
 
 // CollectUpdateContentCommands collects all updateContentCommand hooks from features.
 // These run after onCreateCommand and before postCreateCommand.
 func CollectUpdateContentCommands(features []*Feature) []FeatureHook {
-	var hooks []FeatureHook
-	for _, feature := range features {
-		if feature.Metadata == nil || feature.Metadata.UpdateContentCommand == nil {
-			continue
-		}
-		name := feature.Metadata.Name
-		if name == "" {
-			name = feature.Metadata.ID
-		}
-		hooks = append(hooks, FeatureHook{
-			FeatureID:   feature.Metadata.ID,
-			FeatureName: name,
-			Command:     feature.Metadata.UpdateContentCommand,
-		})
-	}
-	return hooks
+	return collectHooks(features, func(m *FeatureMetadata) interface{} {
+		return m.UpdateContentCommand
+	})
 }
 
 // CollectPostAttachCommands collects all postAttachCommand hooks from features.
 // These run when attaching to the container.
 func CollectPostAttachCommands(features []*Feature) []FeatureHook {
-	var hooks []FeatureHook
-	for _, feature := range features {
-		if feature.Metadata == nil || feature.Metadata.PostAttachCommand == nil {
-			continue
-		}
-		name := feature.Metadata.Name
-		if name == "" {
-			name = feature.Metadata.ID
-		}
-		hooks = append(hooks, FeatureHook{
-			FeatureID:   feature.Metadata.ID,
-			FeatureName: name,
-			Command:     feature.Metadata.PostAttachCommand,
-		})
-	}
-	return hooks
+	return collectHooks(features, func(m *FeatureMetadata) interface{} {
+		return m.PostAttachCommand
+	})
 }
 
 // shellQuote quotes a string for use in shell.
