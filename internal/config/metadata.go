@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+
+	"github.com/griffithind/dcx/internal/util"
 )
 
 // DevcontainerMetadataLabel is the image label containing devcontainer metadata.
@@ -95,12 +97,12 @@ func mergeConfig(target, source *DevcontainerConfig) {
 	}
 
 	// Array properties: union without duplicates
-	target.RunArgs = unionStrings(target.RunArgs, source.RunArgs)
-	target.CapAdd = unionStrings(target.CapAdd, source.CapAdd)
-	target.SecurityOpt = unionStrings(target.SecurityOpt, source.SecurityOpt)
+	target.RunArgs = util.UnionStrings(target.RunArgs, source.RunArgs)
+	target.CapAdd = util.UnionStrings(target.CapAdd, source.CapAdd)
+	target.SecurityOpt = util.UnionStrings(target.SecurityOpt, source.SecurityOpt)
 
 	// ForwardPorts: union without duplicates (handles interface{} types)
-	target.ForwardPorts = unionInterfaces(target.ForwardPorts, source.ForwardPorts)
+	target.ForwardPorts = util.UnionInterfaces(target.ForwardPorts, source.ForwardPorts)
 
 	// Mounts: union
 	target.Mounts = unionMounts(target.Mounts, source.Mounts)
@@ -205,68 +207,6 @@ func applyLocalOverrides(merged, local *DevcontainerConfig) {
 	if local.UpdateRemoteUserUID != nil {
 		merged.UpdateRemoteUserUID = local.UpdateRemoteUserUID
 	}
-}
-
-// unionStrings returns a union of two string slices without duplicates.
-func unionStrings(a, b []string) []string {
-	if len(a) == 0 && len(b) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]bool)
-	var result []string
-
-	for _, s := range a {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	for _, s := range b {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-
-	return result
-}
-
-// unionInterfaces returns a union of two interface slices.
-// Used for ForwardPorts which can contain int or string.
-func unionInterfaces(a, b []interface{}) []interface{} {
-	if len(a) == 0 && len(b) == 0 {
-		return nil
-	}
-
-	seen := make(map[interface{}]bool)
-	var result []interface{}
-
-	for _, v := range a {
-		key := normalizePortKey(v)
-		if !seen[key] {
-			seen[key] = true
-			result = append(result, v)
-		}
-	}
-	for _, v := range b {
-		key := normalizePortKey(v)
-		if !seen[key] {
-			seen[key] = true
-			result = append(result, v)
-		}
-	}
-
-	return result
-}
-
-// normalizePortKey normalizes port values for deduplication.
-func normalizePortKey(v interface{}) interface{} {
-	// Convert float64 (from JSON) to int for comparison
-	if f, ok := v.(float64); ok {
-		return int(f)
-	}
-	return v
 }
 
 // unionMounts returns a union of mounts, deduplicating by target path.

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/griffithind/dcx/internal/util"
 )
 
 // Label prefix and schema version.
@@ -202,7 +204,7 @@ func NewLabels() *Labels {
 func (l *Labels) ToMap() map[string]string {
 	m := map[string]string{
 		LabelSchemaVersion: l.SchemaVersion,
-		LabelManaged:       boolToString(l.Managed),
+		LabelManaged:       util.BoolToString(l.Managed),
 	}
 
 	// Identity
@@ -429,13 +431,6 @@ func IsPrimaryContainer(labelMap map[string]string) bool {
 }
 
 // Helper functions
-
-func boolToString(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
 
 func setIfNotEmpty(m map[string]string, key, value string) {
 	if value != "" {

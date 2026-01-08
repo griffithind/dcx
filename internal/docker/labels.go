@@ -1,5 +1,7 @@
 package docker
 
+import "github.com/griffithind/dcx/internal/util"
+
 // Label constants for dcx-managed containers.
 // All labels use the io.github.dcx namespace.
 const (
@@ -71,7 +73,7 @@ type Labels struct {
 // ToMap converts Labels to a map of string key-value pairs.
 func (l Labels) ToMap() map[string]string {
 	m := map[string]string{
-		LabelManaged: boolToString(l.Managed),
+		LabelManaged: util.BoolToString(l.Managed),
 		LabelEnvKey:  l.EnvKey,
 		LabelVersion: l.Version,
 	}
@@ -125,9 +127,3 @@ func LabelsFromMap(m map[string]string) Labels {
 	}
 }
 
-func boolToString(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
