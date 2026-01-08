@@ -179,6 +179,11 @@ func TestSubstitute(t *testing.T) {
 			expected: "project",
 		},
 		{
+			name:     "containerWorkspaceFolderBasename",
+			input:    "${containerWorkspaceFolderBasename}",
+			expected: "workspace",
+		},
+		{
 			name:     "devcontainerId",
 			input:    "${devcontainerId}",
 			expected: "test123",
