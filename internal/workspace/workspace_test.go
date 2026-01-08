@@ -543,3 +543,45 @@ func TestDeepMergeCustomizations(t *testing.T) {
 		t.Error("key2 should be added")
 	}
 }
+
+func TestRemoteUserSubstitution_LocalEnvVariable(t *testing.T) {
+	// Test that remoteUser and containerUser support variable substitution
+	cfg := &config.DevcontainerConfig{
+		Name:          "test-remoteuser-substitution",
+		Image:         "alpine",
+		RemoteUser:    "${localEnv:USER}",
+		ContainerUser: "${localEnv:CONTAINER_USER}",
+	}
+
+	builder := &Builder{}
+	ws, err := builder.Build(context.Background(), BuildOptions{
+		Config:        cfg,
+		ConfigPath:    "/tmp/test/.devcontainer/devcontainer.json",
+		WorkspaceRoot: "/tmp/test",
+		SubstitutionContext: &SubstitutionContext{
+			LocalWorkspaceFolder:     "/tmp/test",
+			ContainerWorkspaceFolder: "/workspace",
+			LocalWorkspaceFolderBasename: "test",
+			LocalEnv: func(key string) string {
+				switch key {
+				case "USER":
+					return "testuser"
+				case "CONTAINER_USER":
+					return "containeruser"
+				}
+				return ""
+			},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to build workspace: %v", err)
+	}
+
+	if ws.Resolved.RemoteUser != "testuser" {
+		t.Errorf("expected remoteUser to be 'testuser', got %q", ws.Resolved.RemoteUser)
+	}
+	if ws.Resolved.ContainerUser != "containeruser" {
+		t.Errorf("expected containerUser to be 'containeruser', got %q", ws.Resolved.ContainerUser)
+	}
+}
