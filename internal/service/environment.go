@@ -239,14 +239,8 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}
 
-	// Update remote user UID/GID to match host user (Linux only)
-	// This must happen before lifecycle hooks so files created by hooks have correct ownership
-	if isNewEnvironment && containerInfo != nil {
-		if err := s.updateRemoteUserUID(ctx, containerInfo.ID, info.Config); err != nil {
-			// Non-fatal warning - some containers may not support this
-			fmt.Printf("Warning: Could not update remote user UID: %v\n", err)
-		}
-	}
+	// Note: UID/GID update is now done at build time (in runner.go) per devcontainer spec.
+	// This ensures the UID is baked into the image layer for better caching and compatibility.
 
 	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
 	if opts.SSHAgentEnabled && containerInfo != nil {
