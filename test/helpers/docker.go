@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/stretchr/testify/require"
 )
 
@@ -161,7 +162,7 @@ func CleanupTestContainers(t *testing.T, envKey string) {
 
 	// Find containers with our label
 	containers, err := client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey: envKey,
+		labels.LabelWorkspaceID: envKey,
 	})
 	if err != nil {
 		t.Logf("Warning: failed to list containers for cleanup: %v", err)
@@ -210,8 +211,8 @@ func ContainerIsRunning(t *testing.T, envKey string) bool {
 	client := DockerClient(t)
 
 	containers, err := client.ListContainers(ctx, map[string]string{
-		docker.LabelEnvKey:  envKey,
-		docker.LabelPrimary: "true",
+		labels.LabelWorkspaceID: envKey,
+		labels.LabelIsPrimary:   "true",
 	})
 	require.NoError(t, err)
 

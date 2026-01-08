@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
@@ -65,7 +66,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 
 	// List all dcx-managed containers
 	containers, err := dockerClient.ListContainers(ctx, map[string]string{
-		docker.LabelManaged: "true",
+		labels.LabelManaged: "true",
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
@@ -74,14 +75,14 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	// Group containers by environment
 	envMap := make(map[string]*EnvironmentInfo)
 	for _, cont := range containers {
-		labels := docker.LabelsFromMap(cont.Labels)
+		lbls := labels.FromMap(cont.Labels)
 
 		// Skip non-running containers unless --all is specified
 		if !listShowAll && !cont.Running {
 			continue
 		}
 
-		envKey := labels.EnvKey
+		envKey := lbls.WorkspaceID
 		if envKey == "" {
 			continue
 		}
@@ -90,9 +91,9 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		if !exists {
 			env = &EnvironmentInfo{
 				EnvKey:        envKey,
-				ProjectName:   labels.ProjectName,
-				WorkspacePath: labels.WorkspacePath,
-				Plan:          labels.Plan,
+				ProjectName:   lbls.WorkspaceName,
+				WorkspacePath: lbls.WorkspacePath,
+				Plan:          lbls.BuildMethod,
 				Containers:    []ContainerItem{},
 				CreatedAt:     cont.Created,
 			}
@@ -104,7 +105,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 			ID:        cont.ID[:12],
 			Name:      cont.Name,
 			Status:    cont.Status,
-			IsPrimary: labels.Primary,
+			IsPrimary: lbls.IsPrimary,
 			CreatedAt: cont.Created,
 		})
 
