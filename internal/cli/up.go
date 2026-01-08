@@ -7,10 +7,12 @@ import (
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +67,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	// Apply dcx.json up options (CLI flags take precedence)
@@ -87,13 +89,17 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Skip smart detection if --rebuild or --recreate or --pull are specified
 	if !rebuild && !recreate && !pull {
 		stateMgr := state.NewManager(dockerClient)
-		envKey := state.ComputeEnvKey(workspacePath)
+		envKey := workspace.ComputeID(workspacePath)
 
 		// Try to load config and compute hash for staleness detection
 		cfg, _, cfgErr := config.Load(workspacePath, configPath)
 		if cfgErr == nil {
-			configHash, hashErr := config.ComputeHash(cfg)
-			if hashErr == nil {
+			// Use simple hash of raw JSON to match workspace builder
+			var configHash string
+			if raw := cfg.GetRawJSON(); len(raw) > 0 {
+				configHash = config.ComputeSimpleHash(raw)
+			}
+			if configHash != "" {
 				currentState, containerInfo, stateErr := stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
 				if stateErr == nil {
 					switch currentState {
@@ -159,7 +165,11 @@ func runUp(cmd *cobra.Command, args []string) error {
 // quickStart starts existing containers without going through the full up sequence.
 // This is an offline-safe operation.
 func quickStart(ctx context.Context, dockerClient *docker.Client, containerInfo *state.ContainerInfo, projectName, envKey string) error {
-	if containerInfo != nil && containerInfo.Plan == docker.PlanSingle {
+	// Check for both legacy ("single") and new ("image"/"dockerfile") label values
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == docker.PlanSingle ||
+		containerInfo.Plan == labels.BuildMethodImage ||
+		containerInfo.Plan == labels.BuildMethodDockerfile)
+	if isSingleContainer {
 		// Single container - use Docker API directly
 		if err := dockerClient.StartContainer(ctx, containerInfo.ID); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)

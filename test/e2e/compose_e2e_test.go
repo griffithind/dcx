@@ -75,9 +75,9 @@ services:
 		assert.Equal(t, "CREATED", state)
 	})
 
-	// Test dcx start
-	t.Run("start_starts_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "start")
+	// Test dcx up (starts stopped container)
+	t.Run("up_starts_stopped_container", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 		assert.Contains(t, stdout, "started")
 
 		state := helpers.GetContainerState(t, workspace)

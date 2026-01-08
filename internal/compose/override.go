@@ -10,7 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/parse"
 	"github.com/griffithind/dcx/internal/selinux"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -226,7 +226,7 @@ func (g *overrideGenerator) generateRunServiceOverride(serviceName string) Servi
 func (g *overrideGenerator) addLabels(labels map[string]string, isPrimary bool) {
 	labels[docker.LabelManaged] = "true"
 	labels[docker.LabelEnvKey] = g.envKey
-	labels[docker.LabelWorkspaceRootHash] = state.ComputeWorkspaceHash(g.workspacePath)
+	labels[docker.LabelWorkspaceRootHash] = workspace.ComputeFullHash(g.workspacePath)
 	labels[docker.LabelWorkspacePath] = g.workspacePath
 	labels[docker.LabelConfigHash] = g.configHash
 	labels[docker.LabelPlan] = docker.PlanCompose

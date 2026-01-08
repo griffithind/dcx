@@ -291,9 +291,9 @@ services:
 		assert.Equal(t, "CREATED", state)
 	})
 
-	// Start should work with migration support
-	t.Run("start_works_with_migration", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "start")
+	// Up should work with migration support (start stopped container)
+	t.Run("up_works_with_migration", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 		assert.Contains(t, stdout, "started")
 
 		state := helpers.GetContainerState(t, workspace)

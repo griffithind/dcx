@@ -4,7 +4,7 @@ package state
 import (
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/labels"
 )
 
 // State represents the current state of a devcontainer environment.
@@ -66,11 +66,11 @@ type ContainerInfo struct {
 	Status         string
 	Running        bool
 	ConfigHash     string
-	EnvKey         string
+	WorkspaceID    string // Stable identifier (replaces EnvKey)
 	Plan           string
 	ComposeProject string
 	PrimaryService string
-	Labels         docker.Labels
+	Labels         *labels.Labels
 }
 
 // StateError represents an error related to environment state.

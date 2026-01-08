@@ -10,6 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -46,7 +47,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
-	envKey := state.ComputeEnvKey(workspacePath)
+	envKey := workspace.ComputeID(workspacePath)
 
 	// Check current state
 	currentState, containerInfo, err := stateMgr.GetState(ctx, envKey)

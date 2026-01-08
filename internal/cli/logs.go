@@ -10,6 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -51,12 +52,12 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	// Get project name from dcx.json
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = state.SanitizeProjectName(dcxCfg.Name)
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	// Initialize state manager
 	stateMgr := state.NewManager(dockerClient)
-	envKey := state.ComputeEnvKey(workspacePath)
+	envKey := workspace.ComputeID(workspacePath)
 
 	// Get current state
 	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)

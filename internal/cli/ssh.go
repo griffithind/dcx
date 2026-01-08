@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/version"
+	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -48,14 +49,14 @@ func runSSH(cmd *cobra.Command, args []string) error {
 			containerName = args[0]
 		} else {
 			// Try to find container from current directory
-			envKey := state.ComputeEnvKey(workspacePath)
+			envKey := workspace.ComputeID(workspacePath)
 			containerName = envKey
 		}
 		return runSSHStdio(ctx, containerName)
 	}
 
 	// Normal mode: Show connection info or connect
-	envKey := state.ComputeEnvKey(workspacePath)
+	envKey := workspace.ComputeID(workspacePath)
 	hostName := envKey + ".dcx"
 
 	if sshConnect {
