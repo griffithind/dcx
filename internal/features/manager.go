@@ -187,28 +187,31 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 // BuildDerivedImage builds a derived image with features installed.
 // remoteUser is the configured remoteUser from devcontainer.json (can be empty to default to containerUser).
 // containerUser is the container's user account (can be empty to default to "root").
-func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, buildDir, remoteUser, containerUser string) error {
+// Note: buildDir parameter is kept for API compatibility but no longer used.
+func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, _, remoteUser, containerUser string) error {
 	if len(features) == 0 {
 		return nil
 	}
 
-	// Create build directory
-	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return fmt.Errorf("failed to create build directory: %w", err)
+	// Create temporary build directory to avoid polluting .devcontainer
+	tempBuildDir, err := os.MkdirTemp("", "dcx-build-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp build directory: %w", err)
 	}
+	defer os.RemoveAll(tempBuildDir) // Cleanup after build completes
 
 	// Generate Dockerfile
-	generator := NewDockerfileGenerator(baseImage, features, buildDir, remoteUser, containerUser)
+	generator := NewDockerfileGenerator(baseImage, features, tempBuildDir, remoteUser, containerUser)
 	dockerfile := generator.Generate()
 
 	// Prepare build context
-	if err := PrepareBuildContext(buildDir, features, dockerfile); err != nil {
+	if err := PrepareBuildContext(tempBuildDir, features, dockerfile); err != nil {
 		return fmt.Errorf("failed to prepare build context: %w", err)
 	}
 
 	// Build the image using docker CLI
-	dockerfilePath := filepath.Join(buildDir, "Dockerfile.dcx-features")
-	if err := buildImage(ctx, buildDir, dockerfilePath, imageTag); err != nil {
+	dockerfilePath := filepath.Join(tempBuildDir, "Dockerfile.dcx-features")
+	if err := buildImage(ctx, tempBuildDir, dockerfilePath, imageTag); err != nil {
 		return fmt.Errorf("failed to build derived image: %w", err)
 	}
 
