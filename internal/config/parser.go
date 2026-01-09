@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/tidwall/jsonc"
@@ -37,132 +36,20 @@ func ParseFile(path string) (*DevcontainerConfig, error) {
 	return Parse(data)
 }
 
-// Variable substitution patterns
-var (
-	// ${localEnv:VAR} or ${localEnv:VAR:default}
-	localEnvPattern = regexp.MustCompile(`\$\{localEnv:([^}:]+)(?::([^}]*))?\}`)
-
-	// ${env:VAR} or ${env:VAR:default} (alias for localEnv)
-	envPattern = regexp.MustCompile(`\$\{env:([^}:]+)(?::([^}]*))?\}`)
-
-	// ${containerEnv:VAR} or ${containerEnv:VAR:default}
-	containerEnvPattern = regexp.MustCompile(`\$\{containerEnv:([^}:]+)(?::([^}]*))?\}`)
-
-	// ${localWorkspaceFolder}
-	localWorkspaceFolderPattern = regexp.MustCompile(`\$\{localWorkspaceFolder\}`)
-
-	// ${containerWorkspaceFolder}
-	containerWorkspaceFolderPattern = regexp.MustCompile(`\$\{containerWorkspaceFolder\}`)
-
-	// ${localWorkspaceFolderBasename}
-	localWorkspaceFolderBasenamePattern = regexp.MustCompile(`\$\{localWorkspaceFolderBasename\}`)
-
-	// ${containerWorkspaceFolderBasename}
-	containerWorkspaceFolderBasenamePattern = regexp.MustCompile(`\$\{containerWorkspaceFolderBasename\}`)
-
-	// ${devcontainerId}
-	devcontainerIdPattern = regexp.MustCompile(`\$\{devcontainerId\}`)
-
-	// ${pathSeparator}
-	pathSeparatorPattern = regexp.MustCompile(`\$\{pathSeparator\}`)
-
-	// ${userHome}
-	userHomePattern = regexp.MustCompile(`\$\{userHome\}`)
-)
-
 // SubstitutionContext provides values for variable substitution.
 type SubstitutionContext struct {
 	LocalWorkspaceFolder     string
 	ContainerWorkspaceFolder string
 	DevcontainerID           string
-	UserHome                 string            // User's home directory for ${userHome}
-	ContainerEnv             map[string]string // Container environment variables for ${containerEnv:VAR}
+	UserHome                 string                 // User's home directory for ${userHome}
+	ContainerEnv             map[string]string      // Container environment variables for ${containerEnv:VAR}
+	LocalEnv                 func(string) string    // Optional function to get local env vars; falls back to os.Getenv
 }
 
 // Substitute performs variable substitution on a string.
+// It delegates to the registry-based implementation in substitute.go.
 func Substitute(s string, ctx *SubstitutionContext) string {
-	// ${localEnv:VAR} or ${localEnv:VAR:default}
-	s = localEnvPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := localEnvPattern.FindStringSubmatch(match)
-		if len(parts) >= 2 {
-			value := os.Getenv(parts[1])
-			if value == "" && len(parts) >= 3 {
-				value = parts[2] // default value
-			}
-			return value
-		}
-		return match
-	})
-
-	// ${env:VAR} (alias for localEnv)
-	s = envPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := envPattern.FindStringSubmatch(match)
-		if len(parts) >= 2 {
-			value := os.Getenv(parts[1])
-			if value == "" && len(parts) >= 3 {
-				value = parts[2]
-			}
-			return value
-		}
-		return match
-	})
-
-	// ${containerEnv:VAR} or ${containerEnv:VAR:default}
-	if ctx != nil && ctx.ContainerEnv != nil {
-		s = containerEnvPattern.ReplaceAllStringFunc(s, func(match string) string {
-			parts := containerEnvPattern.FindStringSubmatch(match)
-			if len(parts) >= 2 {
-				value := ctx.ContainerEnv[parts[1]]
-				if value == "" && len(parts) >= 3 {
-					value = parts[2] // default value
-				}
-				return value
-			}
-			return match
-		})
-	}
-
-	// ${localWorkspaceFolder}
-	if ctx != nil && ctx.LocalWorkspaceFolder != "" {
-		s = localWorkspaceFolderPattern.ReplaceAllString(s, ctx.LocalWorkspaceFolder)
-	}
-
-	// ${containerWorkspaceFolder}
-	if ctx != nil && ctx.ContainerWorkspaceFolder != "" {
-		s = containerWorkspaceFolderPattern.ReplaceAllString(s, ctx.ContainerWorkspaceFolder)
-	}
-
-	// ${localWorkspaceFolderBasename}
-	if ctx != nil && ctx.LocalWorkspaceFolder != "" {
-		basename := filepath.Base(ctx.LocalWorkspaceFolder)
-		s = localWorkspaceFolderBasenamePattern.ReplaceAllString(s, basename)
-	}
-
-	// ${containerWorkspaceFolderBasename}
-	if ctx != nil && ctx.ContainerWorkspaceFolder != "" {
-		basename := filepath.Base(ctx.ContainerWorkspaceFolder)
-		s = containerWorkspaceFolderBasenamePattern.ReplaceAllString(s, basename)
-	}
-
-	// ${devcontainerId}
-	if ctx != nil && ctx.DevcontainerID != "" {
-		s = devcontainerIdPattern.ReplaceAllString(s, ctx.DevcontainerID)
-	}
-
-	// ${pathSeparator}
-	s = pathSeparatorPattern.ReplaceAllString(s, string(filepath.Separator))
-
-	// ${userHome}
-	if ctx != nil && ctx.UserHome != "" {
-		s = userHomePattern.ReplaceAllString(s, ctx.UserHome)
-	} else {
-		// Fallback to os.UserHomeDir if not provided in context
-		if home, err := os.UserHomeDir(); err == nil {
-			s = userHomePattern.ReplaceAllString(s, home)
-		}
-	}
-
-	return s
+	return substituteWithRegistry(s, ctx)
 }
 
 // SubstituteConfig performs variable substitution on the entire config.

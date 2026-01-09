@@ -68,7 +68,12 @@ func handleLocalEnv(match []string, ctx *SubstitutionContext) string {
 	if len(match) < 2 {
 		return match[0]
 	}
-	value := os.Getenv(match[1])
+	var value string
+	if ctx != nil && ctx.LocalEnv != nil {
+		value = ctx.LocalEnv(match[1])
+	} else {
+		value = os.Getenv(match[1])
+	}
 	if value == "" && len(match) >= 3 {
 		value = match[2] // default value
 	}
@@ -135,17 +140,15 @@ func handleUserHome(match []string, ctx *SubstitutionContext) string {
 	return match[0]
 }
 
-// SubstituteWithRegistry performs variable substitution using the registry.
-// This is the new implementation that uses the consolidated registry.
-func SubstituteWithRegistry(s string, ctx *SubstitutionContext) string {
+// substituteWithRegistry performs variable substitution using the registry.
+func substituteWithRegistry(s string, ctx *SubstitutionContext) string {
 	for _, sub := range substitutions {
 		s = sub.pattern.ReplaceAllStringFunc(s, func(match string) string {
 			parts := sub.pattern.FindStringSubmatch(match)
-			result := sub.handler(parts, ctx)
-			if result == "" {
-				return match // Keep original if no substitution
-			}
-			return result
+			// Handlers return match[0] when they can't perform substitution
+			// (e.g., when ctx is nil), otherwise they return the substituted value
+			// which may be empty (e.g., env var not found)
+			return sub.handler(parts, ctx)
 		})
 	}
 	return s
