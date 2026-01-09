@@ -1,13 +1,10 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
@@ -35,24 +32,17 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	// Initialize CLI context
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer cliCtx.Close()
 
-	// Create service and get identifiers
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
-	}
+	ids := cliCtx.Identifiers
 
 	// Load dcx.json for shortcuts display (optional)
-	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
+	dcxCfg, _ := config.LoadDcxConfig(cliCtx.WorkspacePath())
 
 	// Try to load config and compute hash for staleness detection
 	var currentState state.State
@@ -60,20 +50,20 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	var cfg *config.DevcontainerConfig
 	var configHash string
 
-	cfg, _, err = config.Load(workspacePath, configPath)
+	cfg, _, err = config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 	if err == nil {
 		// Config exists, check for staleness
 		if raw := cfg.GetRawJSON(); len(raw) > 0 {
 			configHash = config.ComputeSimpleHash(raw)
 		}
 		if configHash != "" {
-			currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProjectAndHash(ctx, ids.ProjectName, ids.EnvKey, configHash)
+			currentState, containerInfo, err = cliCtx.Service.GetStateMgr().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.EnvKey, configHash)
 		} else {
-			currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
+			currentState, containerInfo, err = cliCtx.GetState()
 		}
 	} else {
 		// No config or error loading it, just get basic state
-		currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
+		currentState, containerInfo, err = cliCtx.GetState()
 	}
 
 	if err != nil {
@@ -81,7 +71,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Text output mode
-	ui.Printf("%s", ui.FormatLabel("Workspace", ui.Code(workspacePath)))
+	ui.Printf("%s", ui.FormatLabel("Workspace", ui.Code(cliCtx.WorkspacePath())))
 	if ids.ProjectName != "" {
 		ui.Printf("%s", ui.FormatLabel("Project", ids.ProjectName))
 	}
@@ -114,7 +104,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 		// Detailed mode: show more container info
 		if statusDetailed {
-			fullContainer, inspectErr := dockerClient.InspectContainer(ctx, containerInfo.ID)
+			fullContainer, inspectErr := cliCtx.DockerClient.InspectContainer(cliCtx.Ctx, containerInfo.ID)
 			if inspectErr == nil {
 				ui.Println("")
 				ui.Println(ui.Bold("Container Details"))

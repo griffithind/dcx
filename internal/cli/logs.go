@@ -1,15 +1,12 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -36,34 +33,17 @@ Examples:
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	// Initialize CLI context
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer cliCtx.Close()
 
-	// Create service and get identifiers
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-	ids, err := svc.GetIdentifiers()
+	// Validate container exists (doesn't need to be running)
+	containerInfo, err := RequireExistingContainer(cliCtx)
 	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
-	}
-
-	// Get current state
-	currentState, containerInfo, err := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
-
-	if currentState == state.StateAbsent {
-		return fmt.Errorf("no devcontainer found; run 'dcx up' first")
-	}
-
-	if containerInfo == nil {
-		return fmt.Errorf("no primary container found")
+		return err
 	}
 
 	// Get logs from container
@@ -73,7 +53,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		Tail:       logsTail,
 	}
 
-	reader, err := dockerClient.GetLogs(ctx, containerInfo.ID, opts)
+	reader, err := cliCtx.DockerClient.GetLogs(cliCtx.Ctx, containerInfo.ID, opts)
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %w", err)
 	}
