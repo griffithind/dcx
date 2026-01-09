@@ -64,7 +64,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 	case state.StateBroken:
 		return fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
 	case state.StateStale:
-		fmt.Fprintln(os.Stderr, "Warning: devcontainer is stale (config changed)")
+		ui.Warning("devcontainer is stale (config changed)")
 	}
 
 	if containerInfo == nil {
