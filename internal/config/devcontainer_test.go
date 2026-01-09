@@ -42,6 +42,7 @@ func TestMountUnmarshalJSON(t *testing.T) {
 			expected: Mount{
 				Source: "/src",
 				Target: "/dest",
+				Type:   "bind",
 				Raw:    "source=/src,destination=/dest",
 			},
 		},
@@ -51,6 +52,7 @@ func TestMountUnmarshalJSON(t *testing.T) {
 			expected: Mount{
 				Source:   "/src",
 				Target:   "/dest",
+				Type:     "bind",
 				ReadOnly: true,
 				Raw:      "source=/src,target=/dest,ro",
 			},
@@ -61,6 +63,7 @@ func TestMountUnmarshalJSON(t *testing.T) {
 			expected: Mount{
 				Source:   "/src",
 				Target:   "/dest",
+				Type:     "bind",
 				ReadOnly: true,
 				Raw:      "source=/src,target=/dest,readonly=true",
 			},
@@ -185,6 +188,7 @@ func TestDevcontainerConfigMountsArray(t *testing.T) {
 				{
 					Source:   "/host2",
 					Target:   "/container2",
+					Type:     "bind",
 					ReadOnly: true,
 					Raw:      "source=/host2,target=/container2,readonly",
 				},

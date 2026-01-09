@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/parse"
 	"github.com/griffithind/dcx/internal/util"
 )
 
@@ -175,40 +175,11 @@ func ValidateHostRequirements(reqs *HostRequirements) *HostRequirementsResult {
 
 // parseMemoryString parses a memory string like "4gb", "4096mb", "4g" into bytes.
 func parseMemoryString(s string) (uint64, error) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" {
-		return 0, fmt.Errorf("empty memory string")
-	}
-
-	// Pattern to match number and unit
-	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([kmgt]?b?)?$`)
-	matches := re.FindStringSubmatch(s)
-	if matches == nil {
-		return 0, fmt.Errorf("invalid memory format: %s", s)
-	}
-
-	value, err := strconv.ParseFloat(matches[1], 64)
+	result, err := parse.ParseMemorySizeWithError(s)
 	if err != nil {
-		return 0, fmt.Errorf("invalid number: %s", matches[1])
+		return 0, err
 	}
-
-	unit := matches[2]
-	var multiplier uint64 = 1
-
-	switch {
-	case strings.HasPrefix(unit, "k"):
-		multiplier = 1024
-	case strings.HasPrefix(unit, "m"):
-		multiplier = 1024 * 1024
-	case strings.HasPrefix(unit, "g"):
-		multiplier = 1024 * 1024 * 1024
-	case strings.HasPrefix(unit, "t"):
-		multiplier = 1024 * 1024 * 1024 * 1024
-	case unit == "b" || unit == "":
-		multiplier = 1
-	}
-
-	return uint64(value * float64(multiplier)), nil
+	return uint64(result), nil
 }
 
 // formatBytes formats bytes as a human-readable string.
