@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -55,8 +55,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 
 	// If validate-only, we're done
 	if configValidateOnly {
-		out := output.Global()
-		out.Println(output.FormatSuccess("Configuration is valid."))
+		ui.Success("Configuration is valid.")
 		return nil
 	}
 

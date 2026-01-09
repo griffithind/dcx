@@ -10,6 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -57,13 +58,13 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 	switch currentState {
 	case state.StateAbsent:
-		return fmt.Errorf("no environment found; run 'dcx up' first")
+		return fmt.Errorf("no devcontainer found; run 'dcx up' first")
 	case state.StateCreated:
-		return fmt.Errorf("environment is not running; run 'dcx start' first")
+		return fmt.Errorf("devcontainer is not running; run 'dcx start' first")
 	case state.StateBroken:
-		return fmt.Errorf("environment is in broken state; run 'dcx up --recreate'")
+		return fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
 	case state.StateStale:
-		fmt.Fprintln(os.Stderr, "Warning: environment is stale (config changed)")
+		fmt.Fprintln(os.Stderr, "Warning: devcontainer is stale (config changed)")
 	}
 
 	if containerInfo == nil {
@@ -113,11 +114,11 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 		agentProxy, err = ssh.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy setup failed: %v\n", err)
+			ui.Warning("SSH agent proxy setup failed: %v", err)
 		} else {
 			socketPath, startErr := agentProxy.Start()
 			if startErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy start failed: %v\n", startErr)
+				ui.Warning("SSH agent proxy start failed: %v", startErr)
 			} else {
 				dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("SSH_AUTH_SOCK=%s", socketPath))
 			}

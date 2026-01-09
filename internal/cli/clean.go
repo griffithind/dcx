@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +40,6 @@ func init() {
 
 func runClean(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -58,20 +57,16 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// Clean derived images (unless only dangling is requested)
 	if !cleanDangling {
-		if !out.IsQuiet() {
-			out.Println("Cleaning derived images...")
-		}
+		ui.Println("Cleaning derived images...")
 		result, err := dockerClient.CleanupAllDerivedImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean derived images: %w", err)
 		}
 
-		if !out.IsQuiet() {
-			if result.ImagesRemoved > 0 {
-				out.Printf("  Removed %d derived image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
-			} else {
-				out.Println("  No derived images to clean")
-			}
+		if result.ImagesRemoved > 0 {
+			ui.Printf("  Removed %d derived image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
+		} else {
+			ui.Println("  No derived images to clean")
 		}
 
 		totalImages += result.ImagesRemoved
@@ -80,45 +75,35 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// Clean dangling images if requested
 	if cleanAll || cleanDangling {
-		if !out.IsQuiet() {
-			out.Println("Cleaning dangling images...")
-		}
+		ui.Println("Cleaning dangling images...")
 		result, err := dockerClient.CleanupDanglingImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean dangling images: %w", err)
 		}
 
-		if !out.IsQuiet() {
-			if result.ImagesRemoved > 0 {
-				out.Printf("  Removed %d dangling image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
-			} else {
-				out.Println("  No dangling images to clean")
-			}
+		if result.ImagesRemoved > 0 {
+			ui.Printf("  Removed %d dangling image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
+		} else {
+			ui.Println("  No dangling images to clean")
 		}
 
 		totalImages += result.ImagesRemoved
 		totalSpace += result.SpaceReclaimed
 	}
 
-	if !out.IsQuiet() {
-		out.Println()
-		if totalImages > 0 {
-			out.Println(output.FormatSuccess(fmt.Sprintf("Total: %d image(s) removed, %s reclaimed",
-				totalImages, formatBytes(totalSpace))))
-		} else {
-			out.Println("Nothing to clean")
-		}
+	ui.Println("")
+	if totalImages > 0 {
+		ui.Success("Total: %d image(s) removed, %s reclaimed", totalImages, formatBytes(totalSpace))
+	} else {
+		ui.Println("Nothing to clean")
 	}
 
 	return nil
 }
 
 func showCleanStats(ctx context.Context, dockerClient *docker.Client) error {
-	out := output.Global()
-	c := out.Color()
-
-	out.Println(c.Header("Dry run - showing what would be cleaned:"))
-	out.Println()
+	ui.Println(ui.Bold("Dry run - showing what would be cleaned:"))
+	ui.Println("")
 
 	// Show derived images
 	count, size, err := dockerClient.GetDerivedImageStats(ctx)
@@ -127,9 +112,9 @@ func showCleanStats(ctx context.Context, dockerClient *docker.Client) error {
 	}
 
 	if count > 0 {
-		out.Printf("Derived images: %d (%s)", count, formatBytes(size))
+		ui.Printf("Derived images: %d (%s)", count, formatBytes(size))
 	} else {
-		out.Println("Derived images: none")
+		ui.Println("Derived images: none")
 	}
 
 	return nil

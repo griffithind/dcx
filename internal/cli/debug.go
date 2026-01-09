@@ -7,12 +7,12 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -292,92 +292,91 @@ func outputDebugJSON(debug *DebugInfo) error {
 }
 
 func outputDebugTable(debug *DebugInfo) error {
-	fmt.Println("DCX Debug Information")
-	fmt.Println("=====================")
-	fmt.Println()
+	ui.Println("DCX Debug Information")
+	ui.Println("=====================")
+	ui.Println("")
 
 	// Platform
-	fmt.Println("Platform:")
-	fmt.Printf("  OS:         %s/%s\n", debug.Platform.OS, debug.Platform.Arch)
-	fmt.Printf("  Go Version: %s\n", debug.Platform.GoVer)
-	fmt.Printf("  DCX Version: %s\n", debug.Version)
-	fmt.Println()
+	ui.Println("Platform:")
+	ui.Printf("  OS:         %s/%s", debug.Platform.OS, debug.Platform.Arch)
+	ui.Printf("  Go Version: %s", debug.Platform.GoVer)
+	ui.Printf("  DCX Version: %s", debug.Version)
+	ui.Println("")
 
 	// Docker
-	fmt.Println("Docker:")
+	ui.Println("Docker:")
 	if debug.Docker.Available {
-		fmt.Printf("  Status:      Available\n")
-		fmt.Printf("  Version:     %s\n", debug.Docker.Version)
-		fmt.Printf("  API Version: %s\n", debug.Docker.APIVersion)
+		ui.Printf("  Status:      Available")
+		ui.Printf("  Version:     %s", debug.Docker.Version)
+		ui.Printf("  API Version: %s", debug.Docker.APIVersion)
 	} else {
-		fmt.Printf("  Status:  Not Available\n")
-		fmt.Printf("  Error:   %s\n", debug.Docker.Error)
+		ui.Printf("  Status:  Not Available")
+		ui.Printf("  Error:   %s", debug.Docker.Error)
 	}
-	fmt.Println()
+	ui.Println("")
 
 	// Workspace
 	if debug.Workspace.ID != "" {
-		fmt.Println("Workspace:")
-		fmt.Printf("  ID:           %s\n", debug.Workspace.ID)
-		fmt.Printf("  Name:         %s\n", debug.Workspace.Name)
-		fmt.Printf("  Path:         %s\n", debug.Workspace.Path)
-		fmt.Printf("  Config:       %s\n", debug.Workspace.ConfigPath)
-		fmt.Printf("  Plan Type:    %s\n", debug.Workspace.PlanType)
+		ui.Println("Workspace:")
+		ui.Printf("  ID:           %s", debug.Workspace.ID)
+		ui.Printf("  Name:         %s", debug.Workspace.Name)
+		ui.Printf("  Path:         %s", debug.Workspace.Path)
+		ui.Printf("  Config:       %s", debug.Workspace.ConfigPath)
+		ui.Printf("  Plan Type:    %s", debug.Workspace.PlanType)
 		if debug.Workspace.Image != "" {
-			fmt.Printf("  Image:        %s\n", debug.Workspace.Image)
+			ui.Printf("  Image:        %s", debug.Workspace.Image)
 		}
-		fmt.Printf("  Service Name: %s\n", debug.Workspace.ServiceName)
-		fmt.Printf("  Features:     %d\n", debug.Workspace.FeatureCount)
-		fmt.Println()
+		ui.Printf("  Service Name: %s", debug.Workspace.ServiceName)
+		ui.Printf("  Features:     %d", debug.Workspace.FeatureCount)
+		ui.Println("")
 	}
 
 	// Configuration
 	if debug.Config.Hashes.Config != "" {
-		fmt.Println("Configuration:")
-		fmt.Printf("  Has Image:      %v\n", debug.Config.HasImage)
-		fmt.Printf("  Has Dockerfile: %v\n", debug.Config.HasDockerfile)
-		fmt.Printf("  Has Compose:    %v\n", debug.Config.HasCompose)
+		ui.Println("Configuration:")
+		ui.Printf("  Has Image:      %v", debug.Config.HasImage)
+		ui.Printf("  Has Dockerfile: %v", debug.Config.HasDockerfile)
+		ui.Printf("  Has Compose:    %v", debug.Config.HasCompose)
 		if len(debug.Config.Features) > 0 {
-			fmt.Printf("  Features:\n")
+			ui.Printf("  Features:")
 			for _, f := range debug.Config.Features {
-				fmt.Printf("    - %s\n", f)
+				ui.Printf("    - %s", f)
 			}
 		}
-		fmt.Println()
+		ui.Println("")
 
-		fmt.Println("Hashes:")
-		fmt.Printf("  Config:     %s\n", debug.Config.Hashes.Config)
+		ui.Println("Hashes:")
+		ui.Printf("  Config:     %s", debug.Config.Hashes.Config)
 		if debug.Config.Hashes.Dockerfile != "" {
-			fmt.Printf("  Dockerfile: %s\n", debug.Config.Hashes.Dockerfile)
+			ui.Printf("  Dockerfile: %s", debug.Config.Hashes.Dockerfile)
 		}
 		if debug.Config.Hashes.Compose != "" {
-			fmt.Printf("  Compose:    %s\n", debug.Config.Hashes.Compose)
+			ui.Printf("  Compose:    %s", debug.Config.Hashes.Compose)
 		}
 		if debug.Config.Hashes.Features != "" {
-			fmt.Printf("  Features:   %s\n", debug.Config.Hashes.Features)
+			ui.Printf("  Features:   %s", debug.Config.Hashes.Features)
 		}
-		fmt.Printf("  Overall:    %s\n", debug.Config.Hashes.Overall)
-		fmt.Println()
+		ui.Printf("  Overall:    %s", debug.Config.Hashes.Overall)
+		ui.Println("")
 	}
 
 	// Container
-	fmt.Println("Container:")
+	ui.Println("Container:")
 	if debug.Container.Found {
-		fmt.Printf("  ID:      %s\n", debug.Container.ID[:12])
-		fmt.Printf("  Name:    %s\n", debug.Container.Name)
-		fmt.Printf("  State:   %s\n", debug.Container.State)
-		fmt.Printf("  Running: %v\n", debug.Container.Running)
+		ui.Printf("  ID:      %s", debug.Container.ID[:12])
+		ui.Printf("  Name:    %s", debug.Container.Name)
+		ui.Printf("  State:   %s", debug.Container.State)
+		ui.Printf("  Running: %v", debug.Container.Running)
 		if debug.Container.LegacyLabels {
-			fmt.Printf("  Labels:  Using legacy format (io.github.dcx)\n")
+			ui.Printf("  Labels:  Using legacy format (io.github.dcx)")
 		} else {
-			fmt.Printf("  Labels:  Using new format (com.griffithind.dcx)\n")
+			ui.Printf("  Labels:  Using new format (com.griffithind.dcx)")
 		}
-		fmt.Println()
+		ui.Println("")
 
 		// Show key labels
 		if len(debug.Container.Labels) > 0 {
-			fmt.Println("Key Labels:")
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			ui.Println("Key Labels:")
 			for k, v := range debug.Container.Labels {
 				// Only show dcx labels
 				if strings.Contains(k, "dcx") {
@@ -385,49 +384,48 @@ func outputDebugTable(debug *DebugInfo) error {
 					if len(v) > 50 {
 						v = v[:47] + "..."
 					}
-					fmt.Fprintf(w, "  %s\t%s\n", k, v)
+					ui.Printf("  %s: %s", k, v)
 				}
 			}
-			w.Flush()
-			fmt.Println()
+			ui.Println("")
 		}
 	} else {
-		fmt.Printf("  Status: Not found\n")
-		fmt.Println()
+		ui.Printf("  Status: Not found")
+		ui.Println("")
 	}
 
 	// Staleness
-	fmt.Println("Staleness:")
+	ui.Println("Staleness:")
 	if debug.Staleness.IsStale {
-		fmt.Printf("  Status: Stale\n")
-		fmt.Printf("  Reason: %s\n", debug.Staleness.Reason)
+		ui.Printf("  Status: Stale")
+		ui.Printf("  Reason: %s", debug.Staleness.Reason)
 		if len(debug.Staleness.Changes) > 0 {
-			fmt.Println("  Changes:")
+			ui.Println("  Changes:")
 			for _, c := range debug.Staleness.Changes {
-				fmt.Printf("    - %s\n", c)
+				ui.Printf("    - %s", c)
 			}
 		}
 	} else {
-		fmt.Printf("  Status: Up to date\n")
+		ui.Printf("  Status: Up to date")
 	}
-	fmt.Println()
+	ui.Println("")
 
 	// Suggestions
 	if debug.Staleness.IsStale {
-		fmt.Println("Suggestions:")
+		ui.Println("Suggestions:")
 		if !debug.Container.Found {
-			fmt.Println("  Run 'dcx up' to create the container")
+			ui.Println("  Run 'dcx up' to create the container")
 		} else {
-			fmt.Println("  Run 'dcx up --recreate' to update the container")
+			ui.Println("  Run 'dcx up --recreate' to update the container")
 		}
-		fmt.Println()
+		ui.Println("")
 	}
 
 	// Label migration notice
 	if debug.Container.Found && debug.Container.LegacyLabels {
-		fmt.Println("Note: Container uses legacy labels.")
-		fmt.Println("Run 'dcx up --recreate' to migrate to new label format.")
-		fmt.Println()
+		ui.Println("Note: Container uses legacy labels.")
+		ui.Println("Run 'dcx up --recreate' to migrate to new label format.")
+		ui.Println("")
 	}
 
 	return nil

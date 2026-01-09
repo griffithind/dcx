@@ -7,9 +7,9 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,6 @@ will not be stopped unless --force is used.`,
 
 func runStop(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -62,15 +61,11 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 	switch currentState {
 	case state.StateAbsent:
-		if !out.IsQuiet() {
-			out.Println("No environment found")
-		}
+		ui.Println("No devcontainer found")
 		return nil
 
 	case state.StateCreated:
-		if !out.IsQuiet() {
-			out.Println("Environment is already stopped")
-		}
+		ui.Println("Devcontainer is already stopped")
 		return nil
 
 	case state.StateRunning, state.StateStale, state.StateBroken:
@@ -78,10 +73,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 		if !stopForce {
 			cfg, _, loadErr := config.Load(workspacePath, configPath)
 			if loadErr == nil && cfg.ShutdownAction == "none" {
-				if !out.IsQuiet() {
-					out.Println("Skipping stop: shutdownAction is set to 'none'")
-					out.Println("Use --force to stop anyway")
-				}
+				ui.Println("Skipping stop: shutdownAction is set to 'none'")
+				ui.Println("Use --force to stop anyway")
 				return nil
 			}
 		}
@@ -106,9 +99,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}
 		}
-		if !out.IsQuiet() {
-			out.Println(output.FormatSuccess("Environment stopped"))
-		}
+		ui.Success("Devcontainer stopped")
 		return nil
 
 	default:

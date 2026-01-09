@@ -7,9 +7,9 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +43,6 @@ func init() {
 
 func runRestart(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -72,17 +71,15 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	if currentState == state.StateAbsent {
-		return fmt.Errorf("no environment found, use 'dcx up' to create one")
+		return fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
 	}
 
 	// Check shutdownAction setting if not forcing
 	if !restartForce {
 		cfg, _, loadErr := config.Load(workspacePath, configPath)
 		if loadErr == nil && cfg.ShutdownAction == "none" {
-			if !out.IsQuiet() {
-				out.Println("Skipping restart: shutdownAction is set to 'none'")
-				out.Println("Use --force to restart anyway")
-			}
+			ui.Println("Skipping restart: shutdownAction is set to 'none'")
+			ui.Println("Use --force to restart anyway")
 			return nil
 		}
 	}
@@ -96,10 +93,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start spinner
-	spinner := output.NewSpinner("Restarting devcontainer...")
-	if !out.IsQuiet() && !out.IsJSON() {
-		spinner.Start()
-	}
+	spinner := ui.StartSpinner("Restarting devcontainer...")
 
 	var restartErr error
 
@@ -134,12 +128,10 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Stop spinner with appropriate message
-	if !out.IsQuiet() && !out.IsJSON() {
-		if restartErr != nil {
-			spinner.StopWithError("Failed to restart devcontainer")
-		} else {
-			spinner.StopWithSuccess("Devcontainer restarted")
-		}
+	if restartErr != nil {
+		spinner.Fail("Failed to restart devcontainer")
+	} else {
+		spinner.Success("Devcontainer restarted")
 	}
 
 	return restartErr

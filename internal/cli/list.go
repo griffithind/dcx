@@ -9,8 +9,8 @@ import (
 
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -27,8 +27,7 @@ Use --all to include stopped environments.
 
 Examples:
   dcx list              # List running environments
-  dcx list --all        # List all environments (including stopped)
-  dcx list --json       # Output as JSON for scripting`,
+  dcx list --all        # List all environments (including stopped)`,
 	RunE: runListEnvironments,
 }
 
@@ -54,8 +53,6 @@ type ContainerItem struct {
 
 func runListEnvironments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
-	c := out.Color()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -131,21 +128,17 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		return environments[i].WorkspacePath < environments[j].WorkspacePath
 	})
 
-	// JSON output mode
-	if out.IsJSON() {
-		return out.JSON(environments)
-	}
-
 	// Text output mode
 	if len(environments) == 0 {
-		out.Println("No dcx-managed environments found.")
+		ui.Println("No dcx-managed environments found.")
 		if !listShowAll {
-			out.Println(c.Dim("Use --all to include stopped environments."))
+			ui.Println(ui.Dim("Use --all to include stopped environments."))
 		}
 		return nil
 	}
 
-	table := output.NewTable(out.Writer(), []string{"Name", "State", "Containers", "Workspace"})
+	headers := []string{"Name", "State", "Containers", "Workspace"}
+	var rows [][]string
 	for _, env := range environments {
 		// Build container summary
 		containerNames := make([]string, 0, len(env.Containers))
@@ -169,34 +162,20 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 			identifier = env.ProjectName
 		}
 
-		table.AddRow(
+		rows = append(rows, []string{
 			identifier,
 			formatListState(env.State),
 			strings.Join(containerNames, ", "),
-			c.Code(workspace),
-		)
+			ui.Code(workspace),
+		})
 	}
 
-	return table.RenderWithDivider()
+	return ui.RenderTable(headers, rows)
 }
 
 // formatListState returns a colored state string.
 func formatListState(s string) string {
-	c := output.Color()
-	switch state.State(s) {
-	case state.StateRunning:
-		return c.StateRunning(s)
-	case state.StateCreated:
-		return c.StateStopped(s)
-	case state.StateStale:
-		return c.Warning(s)
-	case state.StateBroken:
-		return c.StateError(s)
-	case state.StateAbsent:
-		return c.StateUnknown(s)
-	default:
-		return s
-	}
+	return ui.StateColor(s)
 }
 
 func init() {

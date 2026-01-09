@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +38,6 @@ func init() {
 
 func runBuild(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -51,10 +50,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
 	// Start spinner for progress feedback
-	spinner := output.NewSpinner("Building devcontainer images...")
-	if !out.IsQuiet() && !out.IsJSON() {
-		spinner.Start()
-	}
+	spinner := ui.StartSpinner("Building devcontainer images...")
 
 	// Execute build
 	buildErr := svc.Build(ctx, service.BuildOptions{
@@ -63,12 +59,10 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	})
 
 	// Stop spinner with appropriate message
-	if !out.IsQuiet() && !out.IsJSON() {
-		if buildErr != nil {
-			spinner.StopWithError("Failed to build devcontainer images")
-		} else {
-			spinner.StopWithSuccess("Build completed successfully")
-		}
+	if buildErr != nil {
+		spinner.Fail("Failed to build devcontainer images")
+	} else {
+		spinner.Success("Build completed successfully")
 	}
 
 	return buildErr

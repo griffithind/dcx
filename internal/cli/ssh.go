@@ -11,6 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
@@ -69,7 +70,7 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print connection info
-	fmt.Printf("ssh %s\n", hostName)
+	ui.Printf("ssh %s", hostName)
 	return nil
 }
 

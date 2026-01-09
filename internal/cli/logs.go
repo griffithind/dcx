@@ -66,7 +66,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	if currentState == state.StateAbsent {
-		return fmt.Errorf("no environment found; run 'dcx up' first")
+		return fmt.Errorf("no devcontainer found; run 'dcx up' first")
 	}
 
 	if containerInfo == nil {
