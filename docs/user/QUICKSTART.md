@@ -92,7 +92,7 @@ dcx status
 Output:
 ```
 Workspace:  /home/user/myproject
-Env Key:    abcd1234efgh
+Workspace ID: abcd1234efgh
 State:      RUNNING
 
 Primary Container:

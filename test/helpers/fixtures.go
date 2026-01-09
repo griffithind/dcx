@@ -213,7 +213,7 @@ func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAM
 	return tmpDir
 }
 
-// UniqueWorkspaceID generates a unique env key for a test.
+// UniqueWorkspaceID generates a unique workspace ID for a test.
 func UniqueWorkspaceID(t *testing.T) string {
 	t.Helper()
 	// Use test name to generate a semi-unique key

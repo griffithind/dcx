@@ -135,7 +135,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	if s.verbose {
-		ui.Printf("Env key: %s", workspaceID)
+		ui.Printf("Workspace ID: %s", workspaceID)
 		ui.Printf("Config hash: %s", configHash[:12])
 	}
 
@@ -479,7 +479,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 	return nil
 }
 
-// DownWithWorkspaceID removes the environment using just project name and env key.
+// DownWithWorkspaceID removes the environment using just project name and workspace ID.
 func (s *EnvironmentService) DownWithWorkspaceID(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
 	currentState, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, projectName, workspaceID)
 	if err != nil {
@@ -665,7 +665,7 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 		})
 	}
 
-	// Use project name as SSH host if available, otherwise env key
+	// Use project name as SSH host if available, otherwise workspace ID
 	hostName := info.WorkspaceID
 	if info.ProjectName != "" {
 		hostName = info.ProjectName

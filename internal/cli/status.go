@@ -75,7 +75,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if ids.ProjectName != "" {
 		ui.Printf("%s", ui.FormatLabel("Project", ids.ProjectName))
 	}
-	ui.Printf("%s", ui.FormatLabel("Env Key", ids.WorkspaceID))
+	ui.Printf("%s", ui.FormatLabel("Workspace ID", ids.WorkspaceID))
 	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
 
 	// Show SSH status
