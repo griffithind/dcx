@@ -51,12 +51,13 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 			},
 		},
 		{
-			name:  "with extra options",
+			name:  "with consistency option",
 			input: "source=/host,target=/container,type=bind,consistency=cached",
 			expected: &Mount{
-				Source: "/host",
-				Target: "/container",
-				Type:   "bind",
+				Source:      "/host",
+				Target:      "/container",
+				Type:        "bind",
+				Consistency: "cached",
 			},
 		},
 		{
@@ -65,6 +66,26 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 			expected: &Mount{
 				Target: "/tmp/cache",
 				Type:   "tmpfs",
+			},
+		},
+		{
+			name:  "with standalone readonly",
+			input: "source=/host,target=/container,readonly",
+			expected: &Mount{
+				Source:   "/host",
+				Target:   "/container",
+				Type:     "bind",
+				ReadOnly: true,
+			},
+		},
+		{
+			name:  "with standalone ro",
+			input: "source=/host,target=/container,ro",
+			expected: &Mount{
+				Source:   "/host",
+				Target:   "/container",
+				Type:     "bind",
+				ReadOnly: true,
 			},
 		},
 	}
@@ -77,6 +98,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 			assert.Equal(t, tt.expected.Target, result.Target)
 			assert.Equal(t, tt.expected.Type, result.Type)
 			assert.Equal(t, tt.expected.ReadOnly, result.ReadOnly)
+			assert.Equal(t, tt.expected.Consistency, result.Consistency)
 		})
 	}
 }
@@ -113,6 +135,27 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 				Source: "myvolume",
 				Target: "/data",
 				Type:   "bind",
+			},
+		},
+		{
+			name:  "with consistency",
+			input: "/host/path:/container/path:cached",
+			expected: &Mount{
+				Source:      "/host/path",
+				Target:      "/container/path",
+				Type:        "bind",
+				Consistency: "cached",
+			},
+		},
+		{
+			name:  "with readonly and consistency",
+			input: "/host/path:/container/path:ro,delegated",
+			expected: &Mount{
+				Source:      "/host/path",
+				Target:      "/container/path",
+				Type:        "bind",
+				ReadOnly:    true,
+				Consistency: "delegated",
 			},
 		},
 	}
@@ -153,6 +196,27 @@ func TestMount_ToDockerFormat(t *testing.T) {
 			},
 			expected: "/host:/container:ro",
 		},
+		{
+			name: "with consistency",
+			mount: &Mount{
+				Source:      "/host",
+				Target:      "/container",
+				Type:        "bind",
+				Consistency: "cached",
+			},
+			expected: "/host:/container:cached",
+		},
+		{
+			name: "readonly with consistency",
+			mount: &Mount{
+				Source:      "/host",
+				Target:      "/container",
+				Type:        "bind",
+				ReadOnly:    true,
+				Consistency: "delegated",
+			},
+			expected: "/host:/container:ro,delegated",
+		},
 	}
 
 	for _, tt := range tests {
@@ -173,7 +237,13 @@ func TestMount_ToDockerFormatWithSuffix(t *testing.T) {
 	assert.Equal(t, "/host:/container:Z", m.ToDockerFormatWithSuffix(":Z"))
 
 	m.ReadOnly = true
-	assert.Equal(t, "/host:/container:ro:Z", m.ToDockerFormatWithSuffix(":Z"))
+	assert.Equal(t, "/host:/container:ro,Z", m.ToDockerFormatWithSuffix(":Z"))
+
+	m.Consistency = "cached"
+	assert.Equal(t, "/host:/container:ro,cached,Z", m.ToDockerFormatWithSuffix(":Z"))
+
+	m.ReadOnly = false
+	assert.Equal(t, "/host:/container:cached,Z", m.ToDockerFormatWithSuffix(":Z"))
 }
 
 func TestMount_ToComposeFormat(t *testing.T) {

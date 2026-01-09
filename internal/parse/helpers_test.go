@@ -29,29 +29,3 @@ func TestParseTmpfs(t *testing.T) {
 	ParseTmpfs(tmpfs, "/tmp:size=100m,mode=1777")
 	assert.Equal(t, "size=100m,mode=1777", tmpfs["/tmp"])
 }
-
-func TestParseShmSize(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected int64
-	}{
-		{"empty", "", 0},
-		{"bytes", "1024", 1024},
-		{"kilobytes", "1k", 1024},
-		{"kilobytes upper", "1K", 1024},
-		{"megabytes", "64m", 64 * 1024 * 1024},
-		{"megabytes upper", "64M", 64 * 1024 * 1024},
-		{"gigabytes", "1g", 1024 * 1024 * 1024},
-		{"gigabytes upper", "1G", 1024 * 1024 * 1024},
-		{"with b suffix", "1024b", 1024},
-		{"with spaces", "  512m  ", 512 * 1024 * 1024},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseShmSize(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}

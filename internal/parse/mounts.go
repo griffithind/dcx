@@ -5,10 +5,11 @@ import "strings"
 
 // Mount represents a parsed mount specification.
 type Mount struct {
-	Source   string
-	Target   string
-	Type     string // bind, volume, tmpfs
-	ReadOnly bool
+	Source      string
+	Target      string
+	Type        string // bind, volume, tmpfs
+	ReadOnly    bool
+	Consistency string // cached, delegated, consistent (macOS)
 }
 
 // ParseMount parses a devcontainer mount string into a Mount struct.
@@ -37,11 +38,14 @@ func parseDockerShortMount(mount string) *Mount {
 	}
 
 	if len(parts) >= 3 {
-		// Check for readonly flag
+		// Check for options (readonly, consistency)
 		opts := strings.Split(parts[2], ",")
 		for _, opt := range opts {
-			if opt == "ro" || opt == "readonly" {
+			switch opt {
+			case "ro", "readonly":
 				m.ReadOnly = true
+			case "cached", "delegated", "consistent":
+				m.Consistency = opt
 			}
 		}
 	}
@@ -58,6 +62,14 @@ func parseDevcontainerMount(mount string) *Mount {
 	}
 
 	for _, part := range parts {
+		part = strings.TrimSpace(part)
+
+		// Handle standalone options without a value
+		if part == "readonly" || part == "ro" {
+			m.ReadOnly = true
+			continue
+		}
+
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
 			continue
@@ -74,6 +86,8 @@ func parseDevcontainerMount(mount string) *Mount {
 			m.Type = value
 		case "readonly", "ro":
 			m.ReadOnly = value == "true" || value == "1"
+		case "consistency":
+			m.Consistency = value
 		}
 	}
 
@@ -88,15 +102,22 @@ func parseDevcontainerMount(mount string) *Mount {
 	return m
 }
 
-// ToDockerFormat returns the mount in Docker CLI format: "source:target[:ro]"
+// ToDockerFormat returns the mount in Docker CLI format: "source:target[:options]"
 func (m *Mount) ToDockerFormat() string {
 	if m == nil {
 		return ""
 	}
 
 	result := m.Source + ":" + m.Target
+	var opts []string
 	if m.ReadOnly {
-		result += ":ro"
+		opts = append(opts, "ro")
+	}
+	if m.Consistency != "" {
+		opts = append(opts, m.Consistency)
+	}
+	if len(opts) > 0 {
+		result += ":" + strings.Join(opts, ",")
 	}
 	return result
 }
@@ -108,12 +129,19 @@ func (m *Mount) ToDockerFormatWithSuffix(suffix string) string {
 	}
 
 	result := m.Source + ":" + m.Target
-	if m.ReadOnly && suffix != "" {
-		result += ":ro" + suffix
-	} else if m.ReadOnly {
-		result += ":ro"
-	} else if suffix != "" {
-		result += suffix
+	var opts []string
+	if m.ReadOnly {
+		opts = append(opts, "ro")
+	}
+	if m.Consistency != "" {
+		opts = append(opts, m.Consistency)
+	}
+	if suffix != "" {
+		// Suffix like ":Z" should have the colon stripped if present
+		opts = append(opts, strings.TrimPrefix(suffix, ":"))
+	}
+	if len(opts) > 0 {
+		result += ":" + strings.Join(opts, ",")
 	}
 	return result
 }
@@ -132,8 +160,15 @@ func (m *Mount) ToComposeFormat(suffix string) string {
 		return m.ToDockerFormatWithSuffix(suffix)
 	case "volume":
 		result := m.Source + ":" + m.Target
+		var opts []string
 		if m.ReadOnly {
-			result += ":ro"
+			opts = append(opts, "ro")
+		}
+		if m.Consistency != "" {
+			opts = append(opts, m.Consistency)
+		}
+		if len(opts) > 0 {
+			result += ":" + strings.Join(opts, ",")
 		}
 		return result
 	case "tmpfs":

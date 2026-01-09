@@ -4,7 +4,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+
+	"github.com/griffithind/dcx/internal/parse"
 )
 
 // DevcontainerConfig represents the parsed devcontainer.json configuration.
@@ -240,29 +241,13 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		m.Raw = s
-		// Parse the mount string: "source=...,target=...,type=...,readonly"
-		parts := strings.Split(s, ",")
-		for _, part := range parts {
-			if part == "readonly" || part == "ro" {
-				m.ReadOnly = true
-				continue
-			}
-			kv := strings.SplitN(part, "=", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			value := strings.TrimSpace(kv[1])
-			switch key {
-			case "source", "src":
-				m.Source = value
-			case "target", "dst", "destination":
-				m.Target = value
-			case "type":
-				m.Type = value
-			case "readonly", "ro":
-				m.ReadOnly = value == "true" || value == "1"
-			}
+		// Use parse package to parse the mount string
+		parsed := parse.ParseMount(s)
+		if parsed != nil {
+			m.Source = parsed.Source
+			m.Target = parsed.Target
+			m.Type = parsed.Type
+			m.ReadOnly = parsed.ReadOnly
 		}
 		return nil
 	}
