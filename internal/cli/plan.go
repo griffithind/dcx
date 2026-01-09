@@ -7,10 +7,11 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/pipeline"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +30,6 @@ No changes are made to your environment.
 
 Examples:
   dcx plan              # Show execution plan for current directory
-  dcx plan --json       # Output plan as JSON for scripting
   dcx plan -w /path     # Show plan for specific workspace`,
 	RunE: runPlan,
 }
@@ -39,28 +39,8 @@ func init() {
 	rootCmd.AddCommand(planCmd)
 }
 
-// PlanOutput represents the plan output for JSON.
-type PlanOutput struct {
-	Action      string                    `json:"action"`
-	Reason      string                    `json:"reason"`
-	Changes     []string                  `json:"changes,omitempty"`
-	Workspace   WorkspacePlanOutput       `json:"workspace"`
-	ImagesBuild []pipeline.ImageBuildPlan `json:"imagesToBuild,omitempty"`
-	Containers  []pipeline.ContainerPlan  `json:"containersToCreate,omitempty"`
-	Services    []string                  `json:"servicesToStart,omitempty"`
-}
-
-// WorkspacePlanOutput represents workspace info for plan output.
-type WorkspacePlanOutput struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
-
 func runPlan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
-	c := out.Color()
 
 	// Find config path
 	cfgPath := configPath
@@ -142,39 +122,20 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// JSON output mode
-	if out.IsJSON() {
-		return out.JSON(PlanOutput{
-			Action:  string(plan.Action),
-			Reason:  plan.Reason,
-			Changes: plan.Changes,
-			Workspace: WorkspacePlanOutput{
-				ID:   plan.Workspace.ID,
-				Name: plan.Workspace.Name,
-				Path: plan.Workspace.LocalRoot,
-			},
-			ImagesBuild: plan.ImagesToBuild,
-			Containers:  plan.ContainersToCreate,
-			Services:    plan.ServicesToStart,
-		})
-	}
-
 	// Text output mode
-	out.Println(c.Header("Devcontainer Execution Plan"))
-	out.Println(c.Dim("==========================="))
-	out.Println()
+	ui.Println(ui.Bold("Devcontainer Execution Plan"))
+	ui.Println(ui.Dim("==========================="))
+	ui.Println("")
 
 	// Workspace info
-	kv := output.NewKeyValueTable(out.Writer())
-	kv.Add("Workspace", ws.Name)
-	kv.Add("Path", c.Code(ws.LocalRoot))
-	kv.Add("ID", c.Dim(ws.ID))
-	kv.Render()
-	out.Println()
+	ui.Printf("%s %s", ui.FormatLabel("Workspace", ws.Name), "")
+	ui.Printf("%s %s", ui.FormatLabel("Path", ui.Code(ws.LocalRoot)), "")
+	ui.Printf("%s %s", ui.FormatLabel("ID", ui.Dim(ws.ID)), "")
+	ui.Println("")
 
 	// Action
 	if plan.Action == pipeline.ActionNone {
-		out.Println(output.FormatSuccess("Up to date - no changes needed"))
+		ui.Success("Up to date - no changes needed")
 		return nil
 	}
 
@@ -182,96 +143,93 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	var actionStr string
 	switch plan.Action {
 	case pipeline.ActionCreate:
-		actionStr = c.StateRunning(string(plan.Action))
+		actionStr = pterm.FgGreen.Sprint(string(plan.Action))
 	case pipeline.ActionRecreate:
-		actionStr = c.Warning(string(plan.Action))
+		actionStr = pterm.FgYellow.Sprint(string(plan.Action))
 	case pipeline.ActionRebuild:
-		actionStr = c.StateError(string(plan.Action))
+		actionStr = pterm.FgRed.Sprint(string(plan.Action))
 	case pipeline.ActionStart:
-		actionStr = c.Info(string(plan.Action))
+		actionStr = pterm.FgCyan.Sprint(string(plan.Action))
 	default:
 		actionStr = string(plan.Action)
 	}
 
-	actionKV := output.NewKeyValueTable(out.Writer())
-	actionKV.Add("Action", actionStr)
-	actionKV.Add("Reason", plan.Reason)
-	actionKV.Render()
-	out.Println()
+	ui.Printf("%s %s", ui.FormatLabel("Action", actionStr), "")
+	ui.Printf("%s %s", ui.FormatLabel("Reason", plan.Reason), "")
+	ui.Println("")
 
 	// Changes detected
 	if len(plan.Changes) > 0 {
-		out.Println(c.Header("Changes Detected"))
+		ui.Println(ui.Bold("Changes Detected"))
 		for _, change := range plan.Changes {
-			out.Printf("  %s %s", output.Symbols.Bullet, change)
+			ui.Printf("  %s %s", ui.Symbols.Bullet, change)
 		}
-		out.Println()
+		ui.Println("")
 	}
 
 	// Images to build
 	if len(plan.ImagesToBuild) > 0 {
-		out.Println(c.Header("Images to Build"))
-		table := output.NewTable(out.Writer(), []string{"Tag", "Base", "Reason"})
+		ui.Println(ui.Bold("Images to Build"))
+		headers := []string{"Tag", "Base", "Reason"}
+		var rows [][]string
 		for _, img := range plan.ImagesToBuild {
 			base := img.BaseImage
 			if base == "" && img.Dockerfile != "" {
 				base = "(Dockerfile)"
 			}
-			table.AddRow(img.Tag, base, img.Reason)
+			rows = append(rows, []string{img.Tag, base, img.Reason})
 		}
-		table.RenderWithDivider()
-		out.Println()
+		ui.RenderTable(headers, rows)
+		ui.Println("")
 	}
 
 	// Features
 	if len(ws.Resolved.Features) > 0 {
-		out.Println(c.Header("Features to Install"))
+		ui.Println(ui.Bold("Features to Install"))
 		for i, f := range ws.Resolved.Features {
-			out.Printf("  %d. %s", i+1, c.Code(f.ID))
+			ui.Printf("  %d. %s", i+1, ui.Code(f.ID))
 		}
-		out.Println()
+		ui.Println("")
 	}
 
 	// Containers
 	if len(plan.ContainersToCreate) > 0 {
-		out.Println(c.Header("Containers to Create"))
+		ui.Println(ui.Bold("Containers to Create"))
 		for _, cont := range plan.ContainersToCreate {
 			primary := ""
 			if cont.IsPrimary {
-				primary = c.Dim(" (primary)")
+				primary = ui.Dim(" (primary)")
 			}
-			out.Printf("  %s %s%s", output.Symbols.Bullet, cont.Name, primary)
+			ui.Printf("  %s %s%s", ui.Symbols.Bullet, cont.Name, primary)
 		}
-		out.Println()
+		ui.Println("")
 	}
 
 	// Services (compose)
 	if len(plan.ServicesToStart) > 0 {
-		out.Println(c.Header("Services to Start"))
-		out.Printf("  %s", strings.Join(plan.ServicesToStart, ", "))
-		out.Println()
+		ui.Println(ui.Bold("Services to Start"))
+		ui.Printf("  %s", strings.Join(plan.ServicesToStart, ", "))
+		ui.Println("")
 	}
 
 	// Hashes (verbose only)
-	if out.IsVerbose() {
-		out.Println(c.Header("Configuration Hashes"))
-		hashKV := output.NewKeyValueTable(out.Writer())
-		hashKV.Add("  Config", ws.Hashes.Config)
+	if ui.IsVerbose() {
+		ui.Println(ui.Bold("Configuration Hashes"))
+		ui.Printf("  %s", ui.FormatLabel("Config", ws.Hashes.Config))
 		if ws.Hashes.Dockerfile != "" {
-			hashKV.Add("  Dockerfile", ws.Hashes.Dockerfile)
+			ui.Printf("  %s", ui.FormatLabel("Dockerfile", ws.Hashes.Dockerfile))
 		}
 		if ws.Hashes.Compose != "" {
-			hashKV.Add("  Compose", ws.Hashes.Compose)
+			ui.Printf("  %s", ui.FormatLabel("Compose", ws.Hashes.Compose))
 		}
 		if ws.Hashes.Features != "" {
-			hashKV.Add("  Features", ws.Hashes.Features)
+			ui.Printf("  %s", ui.FormatLabel("Features", ws.Hashes.Features))
 		}
-		hashKV.Add("  Overall", ws.Hashes.Overall)
-		hashKV.Render()
-		out.Println()
+		ui.Printf("  %s", ui.FormatLabel("Overall", ws.Hashes.Overall))
+		ui.Println("")
 	}
 
-	out.Println(c.Dim("Run 'dcx up' to execute this plan."))
+	ui.Println(ui.Dim("Run 'dcx up' to execute this plan."))
 
 	return nil
 }

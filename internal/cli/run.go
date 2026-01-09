@@ -9,10 +9,10 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/shortcuts"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -91,13 +91,10 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 }
 
 func listShortcuts(dcxCfg *config.DcxConfig) error {
-	out := output.Global()
-	c := out.Color()
-
 	if dcxCfg == nil || len(dcxCfg.Shortcuts) == 0 {
-		out.Println("No shortcuts defined.")
-		out.Println()
-		out.Println("To define shortcuts, create .devcontainer/dcx.json with a \"shortcuts\" key.")
+		ui.Println("No shortcuts defined.")
+		ui.Println("")
+		ui.Println("To define shortcuts, create .devcontainer/dcx.json with a \"shortcuts\" key.")
 		return nil
 	}
 
@@ -108,8 +105,8 @@ func listShortcuts(dcxCfg *config.DcxConfig) error {
 		return infos[i].Name < infos[j].Name
 	})
 
-	out.Println(c.Header("Available shortcuts:"))
-	out.Println()
+	ui.Println(ui.Bold("Available shortcuts:"))
+	ui.Println("")
 
 	// Calculate column widths
 	maxName := 0
@@ -121,10 +118,10 @@ func listShortcuts(dcxCfg *config.DcxConfig) error {
 
 	for _, info := range infos {
 		if info.Description != "" {
-			out.Printf("  %s  %s", c.Code(fmt.Sprintf("%-*s", maxName, info.Name)), info.Description)
-			out.Printf("  %-*s  %s", maxName, "", c.Dim("-> "+info.Expansion))
+			ui.Printf("  %s  %s", ui.Code(fmt.Sprintf("%-*s", maxName, info.Name)), info.Description)
+			ui.Printf("  %-*s  %s", maxName, "", ui.Dim("-> "+info.Expansion))
 		} else {
-			out.Printf("  %s  %s", c.Code(fmt.Sprintf("%-*s", maxName, info.Name)), c.Dim("-> "+info.Expansion))
+			ui.Printf("  %s  %s", ui.Code(fmt.Sprintf("%-*s", maxName, info.Name)), ui.Dim("-> "+info.Expansion))
 		}
 	}
 
@@ -162,13 +159,13 @@ func executeInContainer(execArgs []string) error {
 
 	switch currentState {
 	case state.StateAbsent:
-		return fmt.Errorf("no environment found; run 'dcx up' first")
+		return fmt.Errorf("no devcontainer found; run 'dcx up' first")
 	case state.StateCreated:
-		return fmt.Errorf("environment is not running; run 'dcx start' first")
+		return fmt.Errorf("devcontainer is not running; run 'dcx start' first")
 	case state.StateBroken:
-		return fmt.Errorf("environment is in broken state; run 'dcx up --recreate'")
+		return fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
 	case state.StateStale:
-		fmt.Fprintln(os.Stderr, "Warning: environment is stale (config changed)")
+		fmt.Fprintln(os.Stderr, "Warning: devcontainer is stale (config changed)")
 	}
 
 	if containerInfo == nil {
@@ -219,11 +216,11 @@ func executeInContainer(execArgs []string) error {
 
 		agentProxy, err = ssh.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy setup failed: %v\n", err)
+			ui.Warning("SSH agent proxy setup failed: %v", err)
 		} else {
 			socketPath, startErr := agentProxy.Start()
 			if startErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: SSH agent proxy start failed: %v\n", startErr)
+				ui.Warning("SSH agent proxy start failed: %v", startErr)
 			} else {
 				dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("SSH_AUTH_SOCK=%s", socketPath))
 			}

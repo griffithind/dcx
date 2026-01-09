@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
 )
 
@@ -15,7 +15,6 @@ import (
 var (
 	workspacePath string
 	configPath    string
-	jsonOutput    bool
 	noColor       bool
 	quiet         bool
 	verbose       bool
@@ -33,21 +32,15 @@ requiring the @devcontainers/cli. Container state is tracked using labels,
 enabling offline-safe operations for start/stop/exec commands.`,
 	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Configure output system
-		format := output.FormatText
-		if jsonOutput {
-			format = output.FormatJSON
-		}
-
-		verbosity := output.VerbosityNormal
+		// Configure UI system
+		verbosity := ui.VerbosityNormal
 		if quiet {
-			verbosity = output.VerbosityQuiet
+			verbosity = ui.VerbosityQuiet
 		} else if verbose {
-			verbosity = output.VerbosityVerbose
+			verbosity = ui.VerbosityVerbose
 		}
 
-		output.Configure(output.Config{
-			Format:    format,
+		ui.Configure(ui.Config{
 			Verbosity: verbosity,
 			NoColor:   noColor,
 			Writer:    os.Stdout,
@@ -78,7 +71,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to devcontainer.json (default: auto-detect)")
 
 	// Output flags
-	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output as JSON")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "minimal output (errors only)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")

@@ -10,7 +10,7 @@ import (
 	"github.com/minio/selfupdate"
 	"github.com/spf13/cobra"
 
-	"github.com/griffithind/dcx/internal/output"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
 )
 
@@ -44,10 +44,7 @@ type githubRelease struct {
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
-	out := output.Global()
-	c := out.Color()
-
-	out.Printf("Current version: %s", c.Code(version.Version))
+	ui.Printf("Current version: %s", ui.Code(version.Version))
 
 	// Get latest release info
 	release, err := getLatestRelease()
@@ -56,19 +53,19 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	latestVersion := release.TagName
-	out.Printf("Latest version:  %s", c.Code(latestVersion))
+	ui.Printf("Latest version:  %s", ui.Code(latestVersion))
 
 	// Compare versions (strip 'v' prefix for comparison)
 	currentClean := strings.TrimPrefix(version.Version, "v")
 	latestClean := strings.TrimPrefix(latestVersion, "v")
 
 	if currentClean == latestClean {
-		out.Println(output.FormatSuccess("Already up to date!"))
+		ui.Success("Already up to date!")
 		return nil
 	}
 
 	if version.Version == "dev" {
-		out.Println(c.Warning("Running development version, upgrading to latest release..."))
+		ui.Warning("Running development version, upgrading to latest release...")
 	}
 
 	// Determine binary name for this platform
@@ -88,35 +85,30 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start spinner for download
-	spinner := output.NewSpinner(fmt.Sprintf("Downloading %s...", binaryName))
-	if !out.IsQuiet() && !out.IsJSON() {
-		spinner.Start()
-	}
+	spinner := ui.StartSpinner(fmt.Sprintf("Downloading %s...", binaryName))
 
 	resp, err := http.Get(downloadURL)
 	if err != nil {
-		spinner.StopWithError("Download failed")
+		spinner.Fail("Download failed")
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		spinner.StopWithError("Download failed")
+		spinner.Fail("Download failed")
 		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
 
 	// Apply the update using selfupdate library
 	// This handles "text file busy" and other OS-specific issues
 	if err := selfupdate.Apply(resp.Body, selfupdate.Options{}); err != nil {
-		spinner.StopWithError("Update failed")
+		spinner.Fail("Update failed")
 		return fmt.Errorf("failed to apply update: %w", err)
 	}
 
-	if !out.IsQuiet() && !out.IsJSON() {
-		spinner.StopWithSuccess(fmt.Sprintf("Successfully upgraded to %s!", latestVersion))
-	}
+	spinner.Success(fmt.Sprintf("Successfully upgraded to %s!", latestVersion))
 
-	out.Printf("Release notes: %s", c.Code(release.HTMLURL))
+	ui.Printf("Release notes: %s", ui.Code(release.HTMLURL))
 
 	return nil
 }

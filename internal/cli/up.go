@@ -7,11 +7,11 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -49,7 +49,6 @@ func init() {
 
 func runUp(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
 
 	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
@@ -105,24 +104,18 @@ func runUp(cmd *cobra.Command, args []string) error {
 					switch currentState {
 					case state.StateRunning:
 						// Already running, nothing to do
-						if !out.IsQuiet() {
-							out.Println(output.FormatSuccess("Environment is already running"))
-						}
+						ui.Success("Devcontainer is already running")
 						return nil
 
 					case state.StateCreated:
 						// Containers exist but stopped, just start them (offline-safe)
-						if !out.IsQuiet() && !out.IsJSON() {
-							out.Printf("Environment exists and is up to date, starting...")
-						}
+						ui.Printf("Devcontainer exists and is up to date, starting...")
 
 						if err := quickStart(ctx, dockerClient, containerInfo, projectName, envKey); err != nil {
 							return err
 						}
 
-						if !out.IsQuiet() {
-							out.Println(output.FormatSuccess("Environment started"))
-						}
+						ui.Success("Devcontainer started")
 						return nil
 
 					// For ABSENT, STALE, BROKEN - continue to full up
@@ -135,31 +128,19 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Full up sequence required
 	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
-	// Start spinner for progress feedback
-	spinner := output.NewSpinner("Starting devcontainer...")
-	if !out.IsQuiet() && !out.IsJSON() {
-		spinner.Start()
-	}
-
-	// Execute up
-	upErr := svc.Up(ctx, service.UpOptions{
+	// Execute up (service provides its own progress output)
+	if err := svc.Up(ctx, service.UpOptions{
 		Recreate:        recreate,
 		Rebuild:         rebuild,
 		Pull:            pull,
 		SSHAgentEnabled: sshAgentEnabled,
 		EnableSSH:       effectiveSSH,
-	})
-
-	// Stop spinner with appropriate message
-	if !out.IsQuiet() && !out.IsJSON() {
-		if upErr != nil {
-			spinner.StopWithError("Failed to start devcontainer")
-		} else {
-			spinner.StopWithSuccess("Devcontainer started successfully")
-		}
+	}); err != nil {
+		return err
 	}
 
-	return upErr
+	ui.Success("Devcontainer started successfully")
+	return nil
 }
 
 // quickStart starts existing containers without going through the full up sequence.

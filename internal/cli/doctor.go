@@ -10,9 +10,9 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/output"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -50,23 +50,14 @@ func init() {
 
 // CheckResult represents a single check result.
 type CheckResult struct {
-	Name    string `json:"name"`
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
-	Hint    string `json:"hint,omitempty"`
-}
-
-// DoctorOutput represents the doctor output for JSON.
-type DoctorOutput struct {
-	SystemChecks []CheckResult `json:"systemChecks,omitempty"`
-	ConfigChecks []CheckResult `json:"configChecks,omitempty"`
-	AllOK        bool          `json:"allOk"`
+	Name    string
+	OK      bool
+	Message string
+	Hint    string
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	out := output.Global()
-	c := out.Color()
 
 	// Determine what to check
 	checkSystemReqs := !doctorConfig
@@ -113,58 +104,49 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// JSON output mode
-	if out.IsJSON() {
-		return out.JSON(DoctorOutput{
-			SystemChecks: systemResults,
-			ConfigChecks: configResults,
-			AllOK:        allOK,
-		})
-	}
-
 	// Text output mode
 	if len(systemResults) > 0 {
-		out.Println(c.Header("System Requirements"))
-		out.Println(c.Dim("=================="))
-		out.Println()
+		ui.Println(ui.Bold("System Requirements"))
+		ui.Println(ui.Dim("=================="))
+		ui.Println("")
 
 		for _, r := range systemResults {
-			var status string
+			var checkResult ui.CheckResult
 			if r.OK {
-				status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
+				checkResult = ui.CheckResultPass
 			} else {
-				status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+				checkResult = ui.CheckResultFail
 			}
-			out.Println(status)
+			ui.Println(ui.FormatCheck(checkResult, fmt.Sprintf("%s: %s", r.Name, r.Message)))
 			if !r.OK && r.Hint != "" {
-				out.Printf("    %s", c.Hint(r.Hint))
+				ui.Printf("    %s", ui.Dim(r.Hint))
 			}
 		}
-		out.Println()
+		ui.Println("")
 	}
 
 	if len(configResults) > 0 {
-		out.Println(c.Header("Configuration"))
-		out.Println(c.Dim("============="))
-		out.Println()
+		ui.Println(ui.Bold("Configuration"))
+		ui.Println(ui.Dim("============="))
+		ui.Println("")
 
 		for _, r := range configResults {
-			var status string
+			var checkResult ui.CheckResult
 			if r.OK {
-				status = output.FormatCheck(output.CheckResultPass, fmt.Sprintf("%s: %s", r.Name, r.Message))
+				checkResult = ui.CheckResultPass
 			} else {
-				status = output.FormatCheck(output.CheckResultFail, fmt.Sprintf("%s: %s", r.Name, r.Message))
+				checkResult = ui.CheckResultFail
 			}
-			out.Println(status)
+			ui.Println(ui.FormatCheck(checkResult, fmt.Sprintf("%s: %s", r.Name, r.Message)))
 			if !r.OK && r.Hint != "" {
-				out.Printf("    %s", c.Hint(r.Hint))
+				ui.Printf("    %s", ui.Dim(r.Hint))
 			}
 		}
-		out.Println()
+		ui.Println("")
 	}
 
 	if allOK {
-		out.Println(output.FormatSuccess("All checks passed!"))
+		ui.Success("All checks passed!")
 		return nil
 	}
 
