@@ -11,7 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/selinux"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
@@ -461,7 +461,7 @@ func checkSSHAgent() CheckResult {
 	}
 
 	// Validate it's actually a socket
-	if err := ssh.ValidateSocket(sock); err != nil {
+	if err := agent.ValidateSocket(sock); err != nil {
 		return CheckResult{
 			Name:    "SSH Agent",
 			OK:      false,

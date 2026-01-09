@@ -7,7 +7,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +72,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine if SSH agent should be enabled
-	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
+	sshAgentEnabled := !effectiveNoAgent && agent.IsAvailable()
 
 	// Create service
 	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)

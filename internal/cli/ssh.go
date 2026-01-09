@@ -10,7 +10,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
@@ -147,7 +147,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 
 	// Deploy dcx binary to container if needed
 	binaryPath := fmt.Sprintf("/tmp/dcx-%s", version.Version)
-	if err := ssh.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
+	if err := container.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
 

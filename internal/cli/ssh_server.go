@@ -3,7 +3,7 @@ package cli
 import (
 	"os"
 
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +35,7 @@ func runSSHServer(cmd *cobra.Command, args []string) error {
 	}
 
 	hostKeyPath := "/tmp/dcx-ssh-hostkey"
-	server, err := ssh.NewServer(sshServerUser, shell, sshServerWorkDir, hostKeyPath)
+	server, err := container.NewServer(sshServerUser, shell, sshServerWorkDir, hostKeyPath)
 	if err != nil {
 		return err
 	}

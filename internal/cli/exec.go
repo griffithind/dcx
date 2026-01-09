@@ -9,7 +9,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -117,12 +117,12 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup SSH agent forwarding if enabled
-	var agentProxy *ssh.AgentProxy
-	if !execNoAgent && ssh.IsAgentAvailable() {
+	var agentProxy *agent.AgentProxy
+	if !execNoAgent && agent.IsAvailable() {
 		// Get UID/GID for the container user
-		uid, gid := ssh.GetContainerUserIDs(containerInfo.Name, user)
+		uid, gid := agent.GetContainerUserIDs(containerInfo.Name, user)
 
-		agentProxy, err = ssh.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
+		agentProxy, err = agent.NewAgentProxy(containerInfo.ID, containerInfo.Name, uid, gid)
 		if err != nil {
 			ui.Warning("SSH agent proxy setup failed: %v", err)
 		} else {

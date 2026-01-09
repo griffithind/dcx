@@ -1,5 +1,5 @@
-// Package ssh provides SSH agent proxy functionality.
-package ssh
+// Package agent provides SSH agent detection and validation.
+package agent
 
 import (
 	"fmt"
@@ -64,8 +64,8 @@ func ValidateSocket(path string) error {
 	return nil
 }
 
-// IsAgentAvailable checks if an SSH agent is available.
-func IsAgentAvailable() bool {
+// IsAvailable checks if an SSH agent is available.
+func IsAvailable() bool {
 	sock, err := GetUpstreamSocket()
 	if err != nil {
 		return false

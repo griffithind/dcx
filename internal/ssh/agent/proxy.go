@@ -1,4 +1,4 @@
-package ssh
+package agent
 
 import (
 	"crypto/rand"

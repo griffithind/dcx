@@ -1,4 +1,4 @@
-package ssh
+package host
 
 import (
 	"fmt"
@@ -26,8 +26,13 @@ const DefaultContainerPath = "/ssh-agent"
 // DefaultSocketName is the default socket filename.
 const DefaultSocketName = "agent.sock"
 
+// ProxyDirGetter is an interface for types that provide a proxy directory.
+type ProxyDirGetter interface {
+	ProxyDir() string
+}
+
 // NewMountConfig creates a new SSH mount configuration from a proxy.
-func NewMountConfig(proxy *Proxy) *MountConfig {
+func NewMountConfig(proxy ProxyDirGetter) *MountConfig {
 	if proxy == nil {
 		return nil
 	}

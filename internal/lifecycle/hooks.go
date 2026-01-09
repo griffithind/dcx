@@ -11,7 +11,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 )
 
@@ -530,13 +530,13 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 	}
 
 	// Setup SSH agent forwarding if enabled
-	var agentProxy *ssh.AgentProxy
-	if r.sshAgentEnabled && ssh.IsAgentAvailable() {
+	var agentProxy *agent.AgentProxy
+	if r.sshAgentEnabled && agent.IsAvailable() {
 		// Get UID/GID for the container user (use containerID for both ID and name, docker accepts either)
-		uid, gid := ssh.GetContainerUserIDs(r.containerID, user)
+		uid, gid := agent.GetContainerUserIDs(r.containerID, user)
 
 		var proxyErr error
-		agentProxy, proxyErr = ssh.NewAgentProxy(r.containerID, r.containerID, uid, gid)
+		agentProxy, proxyErr = agent.NewAgentProxy(r.containerID, r.containerID, uid, gid)
 		if proxyErr == nil {
 			socketPath, startErr := agentProxy.Start()
 			if startErr == nil {

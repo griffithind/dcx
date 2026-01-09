@@ -8,7 +8,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -89,7 +89,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
 
 	// Show SSH status
-	if containerInfo != nil && ssh.HasSSHConfig(containerInfo.Name) {
+	if containerInfo != nil && host.HasSSHConfig(containerInfo.Name) {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
 	} else if currentState != state.StateAbsent {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (use 'dcx up --ssh' to enable)")))
