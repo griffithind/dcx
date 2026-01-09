@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/util"
 )
@@ -30,6 +31,10 @@ type Workspace struct {
 
 	// Resolved configuration (after all processing)
 	Resolved *ResolvedConfig
+
+	// ResolvedFeatures contains fully resolved features (ordered for installation).
+	// This is populated during workspace building by the Builder.
+	ResolvedFeatures []*features.Feature
 
 	// Build artifacts
 	Build *BuildPlan
@@ -60,9 +65,6 @@ type ResolvedConfig struct {
 
 	// Compose configuration (if applicable)
 	Compose *ComposePlan
-
-	// Features (ordered by installation order)
-	Features []*ResolvedFeature
 
 	// Workspace paths
 	WorkspaceFolder          string // Inside container
@@ -126,35 +128,6 @@ type ComposePlan struct {
 	RunServices    []string // Additional services to start
 	ProjectName    string   // Compose project name
 	WorkDir        string   // Working directory for compose commands
-}
-
-// ResolvedFeature represents a resolved and validated feature.
-type ResolvedFeature struct {
-	ID            string                            // Feature identifier (e.g., "ghcr.io/devcontainers/features/go:1")
-	LocalPath     string                            // Path to extracted feature
-	Options       map[string]interface{}            // Feature options
-	Metadata      *FeatureMetadata                  // Parsed devcontainer-feature.json
-	Digest        string                            // OCI digest (for registry features)
-	InstallOrder  int                               // Order in installation sequence
-}
-
-// FeatureMetadata contains feature metadata from devcontainer-feature.json.
-type FeatureMetadata struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Version      string                 `json:"version"`
-	Description  string                 `json:"description"`
-	Options      map[string]interface{} `json:"options"`
-	DependsOn    map[string]interface{} `json:"dependsOn"`
-	InstallsAfter []string              `json:"installsAfter"`
-	Entrypoint   string                 `json:"entrypoint"`
-	CapAdd       []string               `json:"capAdd"`
-	SecurityOpt  []string               `json:"securityOpt"`
-	Privileged   bool                   `json:"privileged"`
-	Init         bool                   `json:"init"`
-	ContainerEnv map[string]string      `json:"containerEnv"`
-	Mounts       []config.Mount         `json:"mounts"`
-	Customizations map[string]interface{} `json:"customizations"`
 }
 
 // PortForward represents a port forwarding configuration.
@@ -380,25 +353,25 @@ func (w *Workspace) GetBuildLabels(dcxVersion string) *labels.Labels {
 		l.BaseImage = w.Resolved.Image
 		l.DerivedImage = w.Resolved.FinalImage
 
-		// Features
-		if len(w.Resolved.Features) > 0 {
-			featureIDs := make([]string, len(w.Resolved.Features))
-			featureConfig := make(map[string]map[string]interface{})
-			for i, f := range w.Resolved.Features {
-				featureIDs[i] = f.ID
-				if len(f.Options) > 0 {
-					featureConfig[f.ID] = f.Options
-				}
-			}
-			l.FeaturesInstalled = featureIDs
-			l.FeaturesConfig = featureConfig
-		}
-
 		// Compose
 		if w.Resolved.Compose != nil {
 			l.ComposeProject = w.Resolved.Compose.ProjectName
 			l.ComposeService = w.Resolved.Compose.Service
 		}
+	}
+
+	// Features - use ResolvedFeatures from workspace
+	if len(w.ResolvedFeatures) > 0 {
+		featureIDs := make([]string, len(w.ResolvedFeatures))
+		featureConfig := make(map[string]map[string]interface{})
+		for i, f := range w.ResolvedFeatures {
+			featureIDs[i] = f.ID
+			if len(f.Options) > 0 {
+				featureConfig[f.ID] = f.Options
+			}
+		}
+		l.FeaturesInstalled = featureIDs
+		l.FeaturesConfig = featureConfig
 	}
 
 	// Cache
