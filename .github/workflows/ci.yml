@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    tags-ignore: ['v*']
+    tags-ignore: ["v*"]
   pull_request:
     branches: [main]
 
@@ -16,13 +16,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
 
       - name: Create placeholder embeds
         run: |
           mkdir -p internal/ssh/bin
-          echo "placeholder" | gzip > internal/ssh/bin/dcx-linux-amd64.gz
-          echo "placeholder" | gzip > internal/ssh/bin/dcx-linux-arm64.gz
+          echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-amd64.gz
+          echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-arm64.gz
 
       - name: Build
         run: go build -v ./...
