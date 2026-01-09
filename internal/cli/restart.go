@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +52,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if result.State == state.StateAbsent {
+	if result.State == container.StateAbsent {
 		return fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
 	}
 

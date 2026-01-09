@@ -113,52 +113,6 @@ func TestState_CanExec(t *testing.T) {
 	}
 }
 
-func TestFromLegacyState(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected State
-	}{
-		{"ABSENT", StateAbsent},
-		{"CREATED", StateCreated},
-		{"RUNNING", StateRunning},
-		{"STALE", StateStale},
-		{"BROKEN", StateBroken},
-		{"absent", StateAbsent},
-		{"running", StateRunning},
-		{"unknown", State("unknown")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := FromLegacyState(tt.input); got != tt.expected {
-				t.Errorf("FromLegacyState(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestState_ToLegacyState(t *testing.T) {
-	tests := []struct {
-		state    State
-		expected string
-	}{
-		{StateAbsent, "ABSENT"},
-		{StateCreated, "CREATED"},
-		{StateRunning, "RUNNING"},
-		{StateStale, "STALE"},
-		{StateBroken, "BROKEN"},
-		{StateStopped, "CREATED"}, // Stopped maps to CREATED
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.state), func(t *testing.T) {
-			if got := tt.state.ToLegacyState(); got != tt.expected {
-				t.Errorf("State.ToLegacyState() = %q, want %q", got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestState_GetRecovery(t *testing.T) {
 	tests := []struct {
 		state          State

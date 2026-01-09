@@ -261,7 +261,7 @@ services:
 
 	// Get status before adding dcx.json
 	statusBefore := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	assert.True(t, helpers.ContainsLabel(statusBefore, "State", "RUNNING"), "should be running")
+	assert.True(t, helpers.ContainsLabel(statusBefore, "State", "running"), "should be running")
 	// Container uses compose-style naming (project-service-instance)
 	assert.Contains(t, statusBefore, "-app-")
 
@@ -277,7 +277,7 @@ services:
 	// Status should still find the container (labels are used for lookup, not name)
 	t.Run("status_finds_old_container_after_adding_dcx_json", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.True(t, helpers.ContainsLabel(stdout, "State", "RUNNING"), "should be running")
+		assert.True(t, helpers.ContainsLabel(stdout, "State", "running"), "should be running")
 		assert.True(t, helpers.ContainsLabel(stdout, "Project", "migrationtest"), "should show project name")
 		// Container name still has compose naming
 		assert.Contains(t, stdout, "-app-")
@@ -289,7 +289,7 @@ services:
 		assert.Contains(t, stdout, "stopped")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 
 	// Up should work with migration support (start stopped container)
@@ -298,7 +298,7 @@ services:
 		assert.Contains(t, stdout, "started")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Down should work with migration support
@@ -307,7 +307,7 @@ services:
 		assert.Contains(t, stdout, "removed")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 }
 
@@ -382,7 +382,7 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 	t.Run("status_shows_project_and_shortcuts_when_absent", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.True(t, helpers.ContainsLabel(stdout, "Project", "noenvtest"), "should show project name")
-		assert.True(t, helpers.ContainsLabel(stdout, "State", "ABSENT"), "should show ABSENT state")
+		assert.True(t, helpers.ContainsLabel(stdout, "State", "absent"), "should show absent state")
 		assert.True(t, helpers.ContainsLabel(stdout, "Shortcuts", "1 defined"), "should show shortcuts count")
 		// SSH should NOT be shown when environment is absent
 		assert.NotContains(t, helpers.StripANSI(stdout), "SSH:")

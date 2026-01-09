@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -256,17 +256,17 @@ func colorAction(action service.PlanAction) string {
 	}
 }
 
-func colorState(s state.State) string {
+func colorState(s container.State) string {
 	switch s {
-	case state.StateRunning:
+	case container.StateRunning:
 		return pterm.FgGreen.Sprint(string(s))
-	case state.StateCreated:
+	case container.StateCreated:
 		return pterm.FgYellow.Sprint(string(s))
-	case state.StateStale:
+	case container.StateStale:
 		return pterm.FgYellow.Sprint(string(s))
-	case state.StateBroken:
+	case container.StateBroken:
 		return pterm.FgRed.Sprint(string(s))
-	case state.StateAbsent:
+	case container.StateAbsent:
 		return pterm.FgWhite.Sprint(string(s))
 	default:
 		return string(s)

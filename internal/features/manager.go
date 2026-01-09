@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+
+	"github.com/griffithind/dcx/internal/docker"
 )
 
 // Manager handles feature resolution, ordering, and installation.
@@ -222,18 +223,13 @@ func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag str
 func buildImage(ctx context.Context, contextDir, dockerfilePath, tag string) error {
 	// Build derived image with features. Docker layer cache is used for performance.
 	// Cache is invalidated when config changes because the image tag includes configHash.
-	args := []string{"build", "-t", tag, "-f", dockerfilePath, contextDir}
-
-	cmd := execCommand(ctx, "docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
-}
-
-// execCommand creates an exec.Cmd.
-func execCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
+	return docker.BuildImageCLI(ctx, docker.BuildOptions{
+		Tag:        tag,
+		Dockerfile: dockerfilePath,
+		Context:    contextDir,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+	})
 }
 
 // HasFeatures returns true if the config has any features.

@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -45,15 +45,15 @@ func runStop(cmd *cobra.Command, args []string) error {
 	containerInfo := result.ContainerInfo
 
 	switch currentState {
-	case state.StateAbsent:
+	case container.StateAbsent:
 		ui.Println("No devcontainer found")
 		return nil
 
-	case state.StateCreated:
+	case container.StateCreated:
 		ui.Println("Devcontainer is already stopped")
 		return nil
 
-	case state.StateRunning, state.StateStale, state.StateBroken:
+	case container.StateRunning, container.StateStale, container.StateBroken:
 		// Check shutdownAction setting if not forcing
 		if !stopForce {
 			cfg, _, loadErr := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())

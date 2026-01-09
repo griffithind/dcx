@@ -1,4 +1,4 @@
-package state
+package container
 
 import (
 	"context"
@@ -301,17 +301,6 @@ func (m *Manager) ValidateState(ctx context.Context, envKey string, operation Op
 	return nil
 }
 
-// Operation represents a dcx operation.
-type Operation string
-
-const (
-	OpStart Operation = "start"
-	OpStop  Operation = "stop"
-	OpExec  Operation = "exec"
-	OpDown  Operation = "down"
-	OpUp    Operation = "up"
-)
-
 // GetDiagnostics returns diagnostic information for troubleshooting.
 func (m *Manager) GetDiagnostics(ctx context.Context, envKey string) (*Diagnostics, error) {
 	state, info, err := m.GetState(ctx, envKey)
@@ -335,12 +324,4 @@ func (m *Manager) GetDiagnostics(ctx context.Context, envKey string) (*Diagnosti
 	}
 
 	return diag, nil
-}
-
-// Diagnostics contains diagnostic information about an environment.
-type Diagnostics struct {
-	State            State
-	Recovery         Recovery
-	PrimaryContainer *ContainerInfo
-	Containers       []ContainerInfo
 }

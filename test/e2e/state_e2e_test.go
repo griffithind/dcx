@@ -24,64 +24,64 @@ func TestStateTransitionsE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// ABSENT -> RUNNING (via up)
+	// absent -> running (via up)
 	t.Run("absent_to_running", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 		state = helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
-	// RUNNING -> CREATED (via stop)
+	// running -> created (via stop)
 	t.Run("running_to_created", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "stop")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 
-	// CREATED -> RUNNING (via up - smart start)
+	// created -> running (via up - smart start)
 	t.Run("created_to_running", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
-	// RUNNING -> ABSENT (via down)
+	// running -> absent (via down)
 	t.Run("running_to_absent", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "down")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 
-	// ABSENT -> RUNNING again
+	// absent -> running again
 	t.Run("absent_to_running_again", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
-	// CREATED -> ABSENT (via down from stopped state)
+	// created -> absent (via down from stopped state)
 	t.Run("created_to_absent", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "stop")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 
 		helpers.RunDCXInDirSuccess(t, workspace, "down")
 
 		state = helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 }
 
-// TestStaleDetectionE2E tests that config changes result in STALE state.
+// TestStaleDetectionE2E tests that config changes result in stale state.
 func TestStaleDetectionE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -102,7 +102,7 @@ func TestStaleDetectionE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "RUNNING", state)
+	assert.Equal(t, "running", state)
 
 	// Modify devcontainer.json
 	modifiedConfig := `{
@@ -118,10 +118,10 @@ func TestStaleDetectionE2E(t *testing.T) {
 	err := os.WriteFile(configPath, []byte(modifiedConfig), 0644)
 	require.NoError(t, err)
 
-	// Check state - should be STALE
+	// Check state - should be stale
 	t.Run("detects_stale_config", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "STALE", state)
+		assert.Equal(t, "stale", state)
 	})
 
 	// Running 'up' should recreate
@@ -129,7 +129,7 @@ func TestStaleDetectionE2E(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Verify new env var exists
@@ -159,7 +159,7 @@ func TestUpFromAbsentE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "RUNNING", state)
+	assert.Equal(t, "running", state)
 }
 
 // TestExecOnStoppedFailsE2E tests that exec fails on stopped container.
@@ -252,7 +252,7 @@ func TestStatusCommandE2E(t *testing.T) {
 	t.Run("status_absent", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "ABSENT")
+		assert.Contains(t, stdout, "absent")
 		assert.Contains(t, stdout, "Workspace:")
 		assert.Contains(t, stdout, "Env Key:")
 	})
@@ -263,7 +263,7 @@ func TestStatusCommandE2E(t *testing.T) {
 
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "RUNNING")
+		assert.Contains(t, stdout, "running")
 		assert.Contains(t, stdout, "Primary Container")
 		assert.Contains(t, stdout, "ID:")
 		assert.Contains(t, stdout, "Name:")
@@ -275,7 +275,7 @@ func TestStatusCommandE2E(t *testing.T) {
 
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "CREATED")
+		assert.Contains(t, stdout, "created")
 	})
 }
 

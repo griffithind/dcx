@@ -32,7 +32,7 @@ func TestLocalFeatureE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Verify feature was installed by checking for marker file

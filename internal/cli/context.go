@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 )
 
 // CLIContext holds initialized resources for CLI commands.
@@ -89,7 +89,7 @@ func (c *CLIContext) Close() {
 }
 
 // GetState retrieves the current container state.
-func (c *CLIContext) GetState() (state.State, *state.ContainerInfo, error) {
+func (c *CLIContext) GetState() (container.State, *container.ContainerInfo, error) {
 	return c.Service.GetStateMgr().GetStateWithProject(
 		c.Ctx,
 		c.Identifiers.ProjectName,
@@ -98,7 +98,7 @@ func (c *CLIContext) GetState() (state.State, *state.ContainerInfo, error) {
 }
 
 // GetStateWithHashCheck retrieves the state with config hash verification.
-func (c *CLIContext) GetStateWithHashCheck(expectedHash string) (state.State, *state.ContainerInfo, error) {
+func (c *CLIContext) GetStateWithHashCheck(expectedHash string) (container.State, *container.ContainerInfo, error) {
 	return c.Service.GetStateMgr().GetStateWithHashCheck(
 		c.Ctx,
 		c.Identifiers.EnvKey,
