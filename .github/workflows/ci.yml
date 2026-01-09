@@ -20,7 +20,7 @@ jobs:
 
       - name: Create placeholder embeds
         run: |
-          mkdir -p internal/ssh/bin
+          mkdir -p internal/ssh/container/bin
           echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-amd64.gz
           echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-arm64.gz
 
