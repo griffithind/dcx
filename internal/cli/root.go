@@ -32,21 +32,6 @@ requiring the @devcontainers/cli. Container state is tracked using labels,
 enabling offline-safe operations for start/stop/exec commands.`,
 	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Configure UI system
-		verbosity := ui.VerbosityNormal
-		if quiet {
-			verbosity = ui.VerbosityQuiet
-		} else if verbose {
-			verbosity = ui.VerbosityVerbose
-		}
-
-		ui.Configure(ui.Config{
-			Verbosity: verbosity,
-			NoColor:   noColor,
-			Writer:    os.Stdout,
-			ErrWriter: os.Stderr,
-		})
-
 		// Initialize workspace path if not provided
 		if workspacePath == "" {
 			var err error
@@ -62,7 +47,33 @@ enabling offline-safe operations for start/stop/exec commands.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	return rootCmd.Execute()
+	// Parse flags early to configure UI before command execution.
+	// This ensures --no-color and --quiet affect output even for invalid commands.
+	rootCmd.ParseFlags(os.Args[1:])
+	initUI()
+
+	err := rootCmd.Execute()
+	if err != nil {
+		ui.PrintError(err)
+	}
+	return err
+}
+
+// initUI configures the UI system based on parsed flags.
+func initUI() {
+	verbosity := ui.VerbosityNormal
+	if quiet {
+		verbosity = ui.VerbosityQuiet
+	} else if verbose {
+		verbosity = ui.VerbosityVerbose
+	}
+
+	ui.Configure(ui.Config{
+		Verbosity: verbosity,
+		NoColor:   noColor,
+		Writer:    os.Stdout,
+		ErrWriter: os.Stderr,
+	})
 }
 
 func init() {
@@ -74,6 +85,11 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "minimal output (errors only)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+
+	// Configure Cobra to use UI-aware writers
+	rootCmd.SetOut(ui.NewCobraOutWriter())
+	rootCmd.SetErr(ui.NewCobraErrWriter())
+	rootCmd.SilenceErrors = true // We handle errors ourselves in Execute()
 
 	// Define command groups
 	rootCmd.AddGroup(&cobra.Group{ID: "lifecycle", Title: "Lifecycle Commands:"})
