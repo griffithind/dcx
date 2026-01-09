@@ -1,4 +1,5 @@
-package ssh
+// Package container provides SSH server functionality for containers.
+package container
 
 import (
 	"crypto/ed25519"

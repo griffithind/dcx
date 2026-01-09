@@ -1,4 +1,5 @@
-package ssh
+// Package host provides SSH configuration management for the host system.
+package host
 
 import (
 	"fmt"

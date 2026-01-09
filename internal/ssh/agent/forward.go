@@ -1,4 +1,4 @@
-package ssh
+package agent
 
 import (
 	"bufio"
@@ -307,6 +307,11 @@ func StartServerProcess() (int, func(), error) {
 	}
 
 	return port, stop, nil
+}
+
+// GetContainerBinaryPath returns the path for dcx binary in the container.
+func GetContainerBinaryPath() string {
+	return "/tmp/dcx"
 }
 
 // getDockerBridgeIP returns the gateway IP of the default Docker bridge network.

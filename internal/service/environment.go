@@ -14,7 +14,8 @@ import (
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	runnerPkg "github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/container"
+	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
@@ -364,7 +365,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
 	if opts.SSHAgentEnabled && containerInfo != nil {
 		ui.Println("Installing dcx agent...")
-		if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
+		if err := container.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
 		}
 	}
@@ -491,7 +492,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 
 	// Clean up SSH config entry
 	if containerInfo != nil {
-		ssh.RemoveSSHConfig(containerInfo.Name)
+		host.RemoveSSHConfig(containerInfo.Name)
 	}
 
 	return nil
@@ -540,7 +541,7 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 
 	// Clean up SSH config entry
 	if containerInfo != nil {
-		ssh.RemoveSSHConfig(containerInfo.Name)
+		host.RemoveSSHConfig(containerInfo.Name)
 	}
 
 	ui.Println("Devcontainer removed")
@@ -713,8 +714,8 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 	}
 
 	// Deploy dcx binary to container
-	binaryPath := ssh.GetContainerBinaryPath()
-	if err := ssh.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
+	binaryPath := container.GetContainerBinaryPath()
+	if err := container.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
 
@@ -737,7 +738,7 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 		hostName = info.ProjectName
 	}
 	hostName = hostName + ".dcx"
-	if err := ssh.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
+	if err := host.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 

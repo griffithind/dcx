@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,12 +37,12 @@ func getContainerName(statusOutput string) string {
 func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !ssh.HasEmbeddedBinaries() {
+	if !container.HasEmbeddedBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
 	// Check if embeds are valid (not placeholders)
-	binary, err := ssh.GetEmbeddedBinary("amd64")
+	binary, err := container.GetEmbeddedBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -67,8 +67,8 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	defer cancel()
 
 	// Deploy the agent binary
-	binaryPath := ssh.GetContainerBinaryPath()
-	err = ssh.DeployToContainer(ctx, containerName, binaryPath)
+	binaryPath := container.GetContainerBinaryPath()
+	err = container.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "DeployToContainer should succeed")
 
 	// Verify binary exists in container
@@ -92,11 +92,11 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 func TestInstallAgentIdempotentE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !ssh.HasEmbeddedBinaries() {
+	if !container.HasEmbeddedBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := ssh.GetEmbeddedBinary("amd64")
+	binary, err := container.GetEmbeddedBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -117,15 +117,15 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	binaryPath := ssh.GetContainerBinaryPath()
+	binaryPath := container.GetContainerBinaryPath()
 
 	// First deploy
-	err = ssh.DeployToContainer(ctx, containerName, binaryPath)
+	err = container.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "first deploy should succeed")
 
 	// Second deploy should also succeed (and be fast since binary exists)
 	start := time.Now()
-	err = ssh.DeployToContainer(ctx, containerName, binaryPath)
+	err = container.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "second deploy should succeed")
 	elapsed := time.Since(start)
 
@@ -137,11 +137,11 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 func TestInstallAgentPreDeployE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !ssh.HasEmbeddedBinaries() {
+	if !container.HasEmbeddedBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := ssh.GetEmbeddedBinary("amd64")
+	binary, err := container.GetEmbeddedBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -163,11 +163,11 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 	defer cancel()
 
 	// Use PreDeployAgent which is the main entry point
-	err = ssh.PreDeployAgent(ctx, containerName)
+	err = container.PreDeployAgent(ctx, containerName)
 	require.NoError(t, err, "PreDeployAgent should succeed")
 
 	// Verify binary exists and runs
-	binaryPath := ssh.GetContainerBinaryPath()
+	binaryPath := container.GetContainerBinaryPath()
 	versionCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--version")
 	output, err := versionCmd.CombinedOutput()
 	require.NoError(t, err, "deployed binary should run: %s", string(output))
@@ -178,11 +178,11 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 func TestInstallAgentArchitectureE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !ssh.HasEmbeddedBinaries() {
+	if !container.HasEmbeddedBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := ssh.GetEmbeddedBinary("amd64")
+	binary, err := container.GetEmbeddedBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -211,8 +211,8 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 	t.Logf("Container architecture: %s", containerArch)
 
 	// Deploy
-	binaryPath := ssh.GetContainerBinaryPath()
-	err = ssh.DeployToContainer(ctx, containerName, binaryPath)
+	binaryPath := container.GetContainerBinaryPath()
+	err = container.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err)
 
 	// Verify binary can run (which confirms correct architecture)
