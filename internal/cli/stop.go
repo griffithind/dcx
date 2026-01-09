@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -31,27 +28,21 @@ will not be stopped unless --force is used.`,
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	// Initialize CLI context
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer cliCtx.Close()
 
-	// Create service and get identifiers
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-	ids, err := svc.GetIdentifiers()
+	// Get current state (allow any state)
+	result, err := CheckState(cliCtx)
 	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
+		return err
 	}
 
-	// Check current state
-	currentState, containerInfo, err := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
+	currentState := result.State
+	containerInfo := result.ContainerInfo
 
 	switch currentState {
 	case state.StateAbsent:
@@ -65,7 +56,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 	case state.StateRunning, state.StateStale, state.StateBroken:
 		// Check shutdownAction setting if not forcing
 		if !stopForce {
-			cfg, _, loadErr := config.Load(workspacePath, configPath)
+			cfg, _, loadErr := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 			if loadErr == nil && cfg.ShutdownAction == "none" {
 				ui.Println("Skipping stop: shutdownAction is set to 'none'")
 				ui.Println("Use --force to stop anyway")
@@ -78,17 +69,17 @@ func runStop(cmd *cobra.Command, args []string) error {
 			containerInfo.Plan == labels.BuildMethodDockerfile)
 		if isSingleContainer {
 			// Single container - use Docker API directly
-			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
+			if err := cliCtx.DockerClient.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		} else {
 			// Compose plan - use docker compose
 			actualProject := containerInfo.ComposeProject
 			if actualProject == "" {
-				actualProject = ids.ProjectName
+				actualProject = cliCtx.Identifiers.ProjectName
 			}
-			r := runner.NewUnifiedRunnerForExisting(workspacePath, actualProject, ids.EnvKey)
-			if err := r.Stop(ctx); err != nil {
+			r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.EnvKey)
+			if err := r.Stop(cliCtx.Ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}
 		}

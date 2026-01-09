@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/runner"
-	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -42,35 +39,28 @@ func init() {
 }
 
 func runRestart(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	// Initialize CLI context
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer dockerClient.Close()
+	defer cliCtx.Close()
 
-	// Create service and get identifiers
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-	ids, err := svc.GetIdentifiers()
+	// Get current state
+	result, err := CheckState(cliCtx)
 	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
+		return err
 	}
 
-	// Check current state
-	currentState, containerInfo, err := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
-
-	if currentState == state.StateAbsent {
+	if result.State == state.StateAbsent {
 		return fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
 	}
 
+	containerInfo := result.ContainerInfo
+
 	// Check shutdownAction setting if not forcing
 	if !restartForce {
-		cfg, _, loadErr := config.Load(workspacePath, configPath)
+		cfg, _, loadErr := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 		if loadErr == nil && cfg.ShutdownAction == "none" {
 			ui.Println("Skipping restart: shutdownAction is set to 'none'")
 			ui.Println("Use --force to restart anyway")
@@ -97,12 +87,12 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	if isSingleContainer {
 		// Single container - use Docker API directly
 		if containerInfo.Running {
-			if err := dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
+			if err := cliCtx.DockerClient.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
 				restartErr = fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
 		if restartErr == nil {
-			if err := dockerClient.StartContainer(ctx, containerInfo.ID); err != nil {
+			if err := cliCtx.DockerClient.StartContainer(cliCtx.Ctx, containerInfo.ID); err != nil {
 				restartErr = fmt.Errorf("failed to start container: %w", err)
 			}
 		}
@@ -113,10 +103,10 @@ func runRestart(cmd *cobra.Command, args []string) error {
 			actualProject = containerInfo.ComposeProject
 		}
 		if actualProject == "" {
-			actualProject = ids.ProjectName
+			actualProject = cliCtx.Identifiers.ProjectName
 		}
-		r := runner.NewUnifiedRunnerForExisting(workspacePath, actualProject, ids.EnvKey)
-		if err := r.Restart(ctx); err != nil {
+		r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.EnvKey)
+		if err := r.Restart(cliCtx.Ctx); err != nil {
 			restartErr = fmt.Errorf("failed to restart containers: %w", err)
 		}
 	}
