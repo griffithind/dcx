@@ -47,7 +47,7 @@ func TestUIDUpdateE2E(t *testing.T) {
 
 	// Bring up the container
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Contains(t, stdout, "Environment is ready")
+	assert.Contains(t, stdout, "Devcontainer started successfully")
 
 	// Check the user's UID inside the container
 	t.Run("uid_matches_host", func(t *testing.T) {

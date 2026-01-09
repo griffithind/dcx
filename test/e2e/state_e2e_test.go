@@ -233,7 +233,7 @@ func TestDownIdempotentE2E(t *testing.T) {
 
 	// Down on absent should succeed
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
-	assert.Contains(t, stdout, "No environment found")
+	assert.Contains(t, stdout, "No devcontainer found")
 }
 
 // TestStatusCommandE2E tests the status command output.

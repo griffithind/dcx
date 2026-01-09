@@ -54,7 +54,7 @@ services:
 	// Test dcx up
 	t.Run("up_creates_running_container", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
 		assert.Equal(t, "RUNNING", state)
@@ -131,7 +131,7 @@ services:
 
 	// Bring up the environment
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Contains(t, stdout, "Environment is ready")
+	assert.Contains(t, stdout, "Devcontainer started successfully")
 
 	// Verify state
 	state := helpers.GetContainerState(t, workspace)
@@ -353,7 +353,7 @@ func TestComposeLocalFeatureCachingE2E(t *testing.T) {
 	// First up - features should be installed
 	t.Run("first_up_installs_features", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		assert.Contains(t, stdout, "Building derived image")
 	})
 
@@ -380,7 +380,7 @@ func TestComposeLocalFeatureCachingE2E(t *testing.T) {
 	// Up again - should use cached features image
 	t.Run("up_after_down_uses_cached_image", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		assert.Contains(t, stdout, "Using cached derived image")
 		assert.NotContains(t, stdout, "Building derived image")
 	})
@@ -408,7 +408,7 @@ func TestComposeRemoteFeatureCachingE2E(t *testing.T) {
 	// First up - features should be installed
 	t.Run("first_up_installs_features", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		assert.Contains(t, stdout, "Building derived image")
 	})
 
