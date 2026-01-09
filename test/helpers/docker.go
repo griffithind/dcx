@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,9 @@ import (
 	"github.com/griffithind/dcx/internal/labels"
 	"github.com/stretchr/testify/require"
 )
+
+// ansiRegex matches ANSI escape sequences.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // TestPrefix is used to identify test containers for cleanup.
 const TestPrefix = "dcx-e2e-test-"
@@ -229,10 +233,11 @@ func GetContainerState(t *testing.T, dir string) string {
 
 	stdout := RunDCXInDirSuccess(t, dir, "status")
 
-	// Parse state from output
+	// Parse state from output (strip ANSI color codes first)
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix(line, "State:") {
-			parts := strings.Fields(line)
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		if strings.HasPrefix(cleanLine, "State:") {
+			parts := strings.Fields(cleanLine)
 			if len(parts) >= 2 {
 				return parts[1]
 			}
@@ -260,4 +265,22 @@ func RequireComposeAvailable(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Skip("docker compose is not available, skipping E2E test")
 	}
+}
+
+// StripANSI removes ANSI escape sequences from a string.
+func StripANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
+// ContainsLabel checks if the output contains a label:value pair.
+// It strips ANSI codes and checks for the pattern "Label: value" with flexible spacing.
+func ContainsLabel(output, label, value string) bool {
+	cleaned := StripANSI(output)
+	// Check for label followed by value on same line (with any spacing)
+	for _, line := range strings.Split(cleaned, "\n") {
+		if strings.Contains(line, label+":") && strings.Contains(line, value) {
+			return true
+		}
+	}
+	return false
 }

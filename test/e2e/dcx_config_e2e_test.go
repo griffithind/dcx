@@ -50,7 +50,7 @@ services:
 	// Test dcx up with project name
 	t.Run("up_uses_project_name", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		// SSH should be configured with project name
 		assert.Contains(t, stdout, "SSH configured: ssh testproject.dcx")
 	})
@@ -58,8 +58,8 @@ services:
 	// Test status shows project name
 	t.Run("status_shows_project_name", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "Project:    testproject")
-		assert.Contains(t, stdout, "SSH:        ssh testproject.dcx")
+		assert.True(t, helpers.ContainsLabel(stdout, "Project", "testproject"), "should show project name")
+		assert.True(t, helpers.ContainsLabel(stdout, "SSH", "ssh testproject.dcx"), "should show SSH command")
 	})
 
 	// Test container name uses project name
@@ -137,7 +137,7 @@ services:
 	// Test status shows shortcuts count
 	t.Run("status_shows_shortcuts_count", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "Shortcuts:  3 defined")
+		assert.True(t, helpers.ContainsLabel(stdout, "Shortcuts", "3 defined"), "should show shortcuts count")
 	})
 
 	// Test running simple command shortcut
@@ -261,7 +261,7 @@ services:
 
 	// Get status before adding dcx.json
 	statusBefore := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	assert.Contains(t, statusBefore, "State:      RUNNING")
+	assert.True(t, helpers.ContainsLabel(statusBefore, "State", "RUNNING"), "should be running")
 	// Container uses compose-style naming (project-service-instance)
 	assert.Contains(t, statusBefore, "-app-")
 
@@ -277,8 +277,8 @@ services:
 	// Status should still find the container (labels are used for lookup, not name)
 	t.Run("status_finds_old_container_after_adding_dcx_json", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "State:      RUNNING")
-		assert.Contains(t, stdout, "Project:    migrationtest")
+		assert.True(t, helpers.ContainsLabel(stdout, "State", "RUNNING"), "should be running")
+		assert.True(t, helpers.ContainsLabel(stdout, "Project", "migrationtest"), "should show project name")
 		// Container name still has compose naming
 		assert.Contains(t, stdout, "-app-")
 	})
@@ -381,11 +381,11 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 	// Don't bring up, just check status
 	t.Run("status_shows_project_and_shortcuts_when_absent", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "Project:    noenvtest")
-		assert.Contains(t, stdout, "State:      ABSENT")
-		assert.Contains(t, stdout, "Shortcuts:  1 defined")
+		assert.True(t, helpers.ContainsLabel(stdout, "Project", "noenvtest"), "should show project name")
+		assert.True(t, helpers.ContainsLabel(stdout, "State", "ABSENT"), "should show ABSENT state")
+		assert.True(t, helpers.ContainsLabel(stdout, "Shortcuts", "1 defined"), "should show shortcuts count")
 		// SSH should NOT be shown when environment is absent
-		assert.NotContains(t, stdout, "SSH:")
+		assert.NotContains(t, helpers.StripANSI(stdout), "SSH:")
 	})
 }
 

@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -134,6 +135,20 @@ func SimpleImageConfigWithName(image, name string) string {
 	}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	return string(data)
+}
+
+// SimpleImageConfigWithHostReqs returns a devcontainer.json with hostRequirements.
+// The hostReqs parameter should be raw JSON fields, e.g., `"cpus": 10000`
+func SimpleImageConfigWithHostReqs(t *testing.T, image, hostReqs string) string {
+	t.Helper()
+	return fmt.Sprintf(`{
+	"name": %q,
+	"image": %q,
+	"workspaceFolder": "/workspace",
+	"hostRequirements": {
+		%s
+	}
+}`, UniqueTestName(t), image, hostReqs)
 }
 
 // SimpleComposeConfig returns a devcontainer.json for a compose-based config.

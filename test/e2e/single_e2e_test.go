@@ -37,7 +37,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 	// Test dcx up
 	t.Run("up_creates_running_container", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
 		assert.Equal(t, "RUNNING", state)
@@ -117,7 +117,7 @@ RUN echo "built from dockerfile" > /built-marker
 	// Test dcx up with Dockerfile
 	t.Run("up_builds_and_runs", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, tmpDir)
 		assert.Equal(t, "RUNNING", state)

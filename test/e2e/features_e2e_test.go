@@ -20,7 +20,7 @@ func TestLocalFeatureE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create workspace with local feature
-	workspace := createWorkspaceWithLocalFeature(t)
+	workspace := createWorkspaceWithLocalFeature(t, "Local Feature Test")
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
@@ -29,7 +29,7 @@ func TestLocalFeatureE2E(t *testing.T) {
 	// Build and run
 	t.Run("up_installs_feature", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
 		assert.Equal(t, "RUNNING", state)
@@ -126,7 +126,7 @@ func TestMultipleFeaturesE2E(t *testing.T) {
 }
 
 // createWorkspaceWithLocalFeature creates a workspace with a simple local feature.
-func createWorkspaceWithLocalFeature(t *testing.T) string {
+func createWorkspaceWithLocalFeature(t *testing.T, name string) string {
 	t.Helper()
 
 	workspace := t.TempDir()
@@ -160,14 +160,14 @@ echo "feature installed" > /tmp/feature-marker
 	require.NoError(t, err)
 
 	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Local Feature Test",
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": "%s",
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/simple-marker": {}
 		}
-	}`
+	}`, name)
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
@@ -369,7 +369,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 	// First up - features should be installed
 	t.Run("first_up_installs_features", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		// Should see feature building output
 		assert.Contains(t, stdout, "Building derived image")
 	})
@@ -406,7 +406,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 
 		// Now up should rebuild since config changed
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 		// Should see building output since config changed
 		assert.Contains(t, stdout, "Building derived image")
 
@@ -432,7 +432,7 @@ func TestFeatureWithMountsE2E(t *testing.T) {
 	// Build and run
 	t.Run("up_installs_feature", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 	})
 
 	// Verify the docker socket is mounted
@@ -556,7 +556,7 @@ func TestNoGeneratedFilesInDevcontainerE2E(t *testing.T) {
 	t.Run("single_container", func(t *testing.T) {
 		t.Parallel()
 
-		workspace := createWorkspaceWithLocalFeature(t)
+		workspace := createWorkspaceWithLocalFeature(t, "No Generated Files Test")
 
 		t.Cleanup(func() {
 			helpers.RunDCXInDir(t, workspace, "down")

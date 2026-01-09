@@ -33,7 +33,7 @@ func TestOverrideCommandE2E(t *testing.T) {
 	// Bring up - should not exit immediately even though alpine has no default command
 	t.Run("container_stays_running_with_override", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
 		assert.Equal(t, "RUNNING", state)
@@ -177,60 +177,37 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 
 	// Test with impossible CPU requirement (should fail)
 	t.Run("fails_with_impossible_cpu", func(t *testing.T) {
-		devcontainerJSON := `{
-			"name": "CPU Test",
-			"image": "alpine:latest",
-			"workspaceFolder": "/workspace",
-			"hostRequirements": {
-				"cpus": 10000
-			}
-		}`
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 10000`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 		t.Cleanup(func() {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "up")
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		assert.Error(t, err, "should fail with impossible CPU requirement")
-		// Error messages go to stdout in dcx
-		assert.Contains(t, stdout, "CPU requirement not met")
+		// Error messages go to stderr via ui.Error
+		assert.Contains(t, stderr, "CPU requirement not met")
 	})
 
 	// Test with impossible memory requirement (should fail)
 	t.Run("fails_with_impossible_memory", func(t *testing.T) {
-		devcontainerJSON := `{
-			"name": "Memory Test",
-			"image": "alpine:latest",
-			"workspaceFolder": "/workspace",
-			"hostRequirements": {
-				"memory": "10000gb"
-			}
-		}`
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"memory": "10000gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 		t.Cleanup(func() {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "up")
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		assert.Error(t, err, "should fail with impossible memory requirement")
-		// Error messages go to stdout in dcx
-		assert.Contains(t, stdout, "Memory requirement not met")
+		// Error messages go to stderr via ui.Error
+		assert.Contains(t, stderr, "Memory requirement not met")
 	})
 
 	// Test with achievable requirements (should succeed)
 	t.Run("succeeds_with_achievable_requirements", func(t *testing.T) {
-		devcontainerJSON := `{
-			"name": "Achievable Test",
-			"image": "alpine:latest",
-			"workspaceFolder": "/workspace",
-			"overrideCommand": true,
-			"hostRequirements": {
-				"cpus": 1,
-				"memory": "512mb"
-			}
-		}`
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 1, "memory": "512mb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 		t.Cleanup(func() {
@@ -238,28 +215,24 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 		})
 
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Environment is ready")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
 	})
 
 	// Test with storage requirement (should warn but succeed)
 	t.Run("warns_for_storage_requirement", func(t *testing.T) {
-		devcontainerJSON := `{
-			"name": "Storage Test",
-			"image": "alpine:latest",
-			"workspaceFolder": "/workspace",
-			"overrideCommand": true,
-			"hostRequirements": {
-				"storage": "10gb"
-			}
-		}`
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"storage": "10gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 		t.Cleanup(func() {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "cannot be validated")
+		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		require.NoError(t, err, "should succeed with storage requirement")
+		// Success message goes to stdout
+		assert.Contains(t, stdout, "Devcontainer started successfully")
+		// Warning goes to stderr via ui.Warning
+		assert.Contains(t, stderr, "cannot be validated")
 	})
 }
 
