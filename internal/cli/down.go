@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -40,13 +40,13 @@ func runDown(cmd *cobra.Command, args []string) error {
 	defer dockerClient.Close()
 
 	// Create service and get identifiers
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	return svc.DownWithWorkspaceID(ctx, ids.ProjectName, ids.WorkspaceID, service.DownOptions{
+	return svc.DownWithWorkspaceID(ctx, ids.ProjectName, ids.WorkspaceID, orchestrator.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	})

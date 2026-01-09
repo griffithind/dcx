@@ -7,7 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 	"golang.org/x/term"
@@ -37,13 +37,13 @@ type ExecFlags struct {
 // ExecBuilder builds and executes docker exec commands.
 // It consolidates the common exec pattern used in exec, shell, and run commands.
 type ExecBuilder struct {
-	containerInfo *container.ContainerInfo
+	containerInfo *containerstate.ContainerInfo
 	cfg           *config.DevContainerConfig
 	workspacePath string
 }
 
 // NewExecBuilder creates a new exec builder.
-func NewExecBuilder(containerInfo *container.ContainerInfo, cfg *config.DevContainerConfig, workspacePath string) *ExecBuilder {
+func NewExecBuilder(containerInfo *containerstate.ContainerInfo, cfg *config.DevContainerConfig, workspacePath string) *ExecBuilder {
 	return &ExecBuilder{
 		containerInfo: containerInfo,
 		cfg:           cfg,

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 )
 
 // CLIContext holds initialized resources for CLI commands.
@@ -19,10 +19,10 @@ type CLIContext struct {
 	DockerClient *docker.Client
 
 	// Service is the environment service for devcontainer operations.
-	Service *service.EnvironmentService
+	Service *orchestrator.EnvironmentService
 
 	// Identifiers contains the workspace identifiers (project name, env key, etc.).
-	Identifiers *service.Identifiers
+	Identifiers *orchestrator.Identifiers
 }
 
 // NewCLIContext creates and initializes a CLIContext with Docker client,
@@ -37,7 +37,7 @@ func NewCLIContext() (*CLIContext, error) {
 	}
 
 	// Create service
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
 	// Get identifiers
 	ids, err := svc.GetIdentifiers()
@@ -63,7 +63,7 @@ func (c *CLIContext) Close() {
 }
 
 // GetState retrieves the current container state.
-func (c *CLIContext) GetState() (container.State, *container.ContainerInfo, error) {
+func (c *CLIContext) GetState() (containerstate.State, *containerstate.ContainerInfo, error) {
 	return c.Service.GetStateMgr().GetStateWithProject(
 		c.Ctx,
 		c.Identifiers.ProjectName,

@@ -1,5 +1,5 @@
 // Package container provides unified container state management types.
-package container
+package containerstate
 
 import (
 	"fmt"

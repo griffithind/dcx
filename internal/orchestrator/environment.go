@@ -1,14 +1,14 @@
-// Package service provides high-level orchestration for devcontainer environments.
+// Package orchestrator provides high-level orchestration for devcontainer environments.
 // It abstracts the differences between compose and single-container runners,
 // and coordinates config loading, state management, and lifecycle hooks.
-package service
+package orchestrator
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/labels"
@@ -23,7 +23,7 @@ import (
 // EnvironmentService orchestrates devcontainer environment operations.
 type EnvironmentService struct {
 	dockerClient  *docker.Client
-	stateMgr      *container.Manager
+	stateMgr      *containerstate.Manager
 	workspacePath string
 	configPath    string // optional override
 	verbose       bool
@@ -37,7 +37,7 @@ type EnvironmentService struct {
 func NewEnvironmentService(dockerClient *docker.Client, workspacePath, configPath string, verbose bool) *EnvironmentService {
 	return &EnvironmentService{
 		dockerClient:  dockerClient,
-		stateMgr:      container.NewManager(dockerClient),
+		stateMgr:      containerstate.NewManager(dockerClient),
 		workspacePath: workspacePath,
 		configPath:    configPath,
 		verbose:       verbose,
@@ -150,12 +150,12 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 }
 
 // GetState returns the current state of the environment.
-func (s *EnvironmentService) GetState(ctx context.Context, info *EnvironmentInfo) (container.State, *container.ContainerInfo, error) {
+func (s *EnvironmentService) GetState(ctx context.Context, info *EnvironmentInfo) (containerstate.State, *containerstate.ContainerInfo, error) {
 	return s.stateMgr.GetStateWithProjectAndHash(ctx, info.ProjectName, info.WorkspaceID, info.ConfigHash)
 }
 
 // GetStateBasic returns the current state without hash checking.
-func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, workspaceID string) (container.State, *container.ContainerInfo, error) {
+func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, workspaceID string) (containerstate.State, *containerstate.ContainerInfo, error) {
 	return s.stateMgr.GetStateWithProject(ctx, projectName, workspaceID)
 }
 
@@ -210,8 +210,8 @@ type PlanOptions struct {
 // PlanResult contains the result of planning what action to take.
 type PlanResult struct {
 	Info          *EnvironmentInfo
-	State         container.State
-	ContainerInfo *container.ContainerInfo
+	State         containerstate.State
+	ContainerInfo *containerstate.ContainerInfo
 	Action        PlanAction
 	Reason        string
 	Changes       []string
@@ -239,7 +239,7 @@ func (s *EnvironmentService) Plan(ctx context.Context, opts PlanOptions) (*PlanR
 
 	// Determine action based on current state
 	switch currentState {
-	case container.StateRunning:
+	case containerstate.StateRunning:
 		if opts.Rebuild {
 			result.Action = PlanActionRebuild
 			result.Reason = "force rebuild requested"
@@ -250,17 +250,17 @@ func (s *EnvironmentService) Plan(ctx context.Context, opts PlanOptions) (*PlanR
 			result.Action = PlanActionNone
 			result.Reason = "container is running and up to date"
 		}
-	case container.StateStale:
+	case containerstate.StateStale:
 		result.Action = PlanActionRecreate
 		result.Reason = "configuration changed"
 		result.Changes = []string{"devcontainer.json modified"}
-	case container.StateBroken:
+	case containerstate.StateBroken:
 		result.Action = PlanActionRecreate
 		result.Reason = "container state is broken"
-	case container.StateAbsent:
+	case containerstate.StateAbsent:
 		result.Action = PlanActionCreate
 		result.Reason = "no container found"
-	case container.StateCreated:
+	case containerstate.StateCreated:
 		result.Action = PlanActionStart
 		result.Reason = "container exists but stopped"
 	}
@@ -334,13 +334,13 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	var needsRebuild bool
 
 	switch currentState {
-	case container.StateRunning:
+	case containerstate.StateRunning:
 		if !opts.Recreate && !opts.Rebuild {
 			ui.Println("Devcontainer is already running")
 			return nil
 		}
 		fallthrough
-	case container.StateStale, container.StateBroken:
+	case containerstate.StateStale, containerstate.StateBroken:
 		if s.verbose {
 			ui.Println("Removing existing devcontainer...")
 		}
@@ -349,12 +349,12 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		}
 		needsRebuild = true
 		fallthrough
-	case container.StateAbsent:
+	case containerstate.StateAbsent:
 		if err := s.create(ctx, info, opts.Rebuild || needsRebuild, opts.Pull); err != nil {
 			return err
 		}
 		isNewEnvironment = true
-	case container.StateCreated:
+	case containerstate.StateCreated:
 		if err := s.start(ctx, info); err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 // QuickStart attempts to start an existing container without full up sequence.
 // Returns (true, nil) if quick start succeeded, (false, nil) if full up is needed,
 // or (false, error) if an error occurred.
-func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *container.ContainerInfo, projectName, workspaceID string) error {
+func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *containerstate.ContainerInfo, projectName, workspaceID string) error {
 	// Determine plan type (single-container vs compose)
 	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 		containerInfo.Plan == labels.BuildMethodDockerfile)
@@ -463,7 +463,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 		return fmt.Errorf("failed to get state: %w", err)
 	}
 
-	if currentState == container.StateAbsent {
+	if currentState == containerstate.StateAbsent {
 		ui.Println("No devcontainer found")
 		return nil
 	}
@@ -509,7 +509,7 @@ func (s *EnvironmentService) DownWithWorkspaceID(ctx context.Context, projectNam
 		return fmt.Errorf("failed to get state: %w", err)
 	}
 
-	if currentState == container.StateAbsent {
+	if currentState == containerstate.StateAbsent {
 		ui.Println("No devcontainer found")
 		return nil
 	}
@@ -661,7 +661,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 }
 
 // setupSSHAccess configures SSH access to the container.
-func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *EnvironmentInfo, containerInfo *container.ContainerInfo) error {
+func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *EnvironmentInfo, containerInfo *containerstate.ContainerInfo) error {
 	if containerInfo == nil {
 		_, containerInfo, _ = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.WorkspaceID)
 	}
@@ -703,7 +703,7 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 }
 
 // GetStateMgr returns the state manager for direct access when needed.
-func (s *EnvironmentService) GetStateMgr() *container.Manager {
+func (s *EnvironmentService) GetStateMgr() *containerstate.Manager {
 	return s.stateMgr
 }
 

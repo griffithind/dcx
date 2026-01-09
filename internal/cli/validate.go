@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/ui"
 )
 
@@ -36,10 +36,10 @@ type StateValidationOptions struct {
 // StateValidationResult contains the validation outcome.
 type StateValidationResult struct {
 	// State is the current container state.
-	State container.State
+	State containerstate.State
 
 	// ContainerInfo is the container metadata, may be nil if absent.
-	ContainerInfo *container.ContainerInfo
+	ContainerInfo *containerstate.ContainerInfo
 
 	// Warnings collected during validation.
 	Warnings []string
@@ -61,20 +61,20 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 	switch opts.Requirement {
 	case RequireRunning:
 		switch currentState {
-		case container.StateAbsent:
+		case containerstate.StateAbsent:
 			return nil, fmt.Errorf("no devcontainer found; run 'dcx up' first")
-		case container.StateCreated:
+		case containerstate.StateCreated:
 			return nil, fmt.Errorf("devcontainer is not running; run 'dcx start' first")
-		case container.StateBroken:
+		case containerstate.StateBroken:
 			return nil, fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
-		case container.StateStale:
+		case containerstate.StateStale:
 			if opts.WarnOnStale {
 				result.Warnings = append(result.Warnings, "devcontainer is stale (config changed)")
 			}
 			if !opts.AllowStale {
 				return nil, fmt.Errorf("devcontainer is stale; run 'dcx up' to update")
 			}
-		case container.StateRunning:
+		case containerstate.StateRunning:
 			// Good - container is running
 		}
 
@@ -84,7 +84,7 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 		}
 
 	case RequireExists:
-		if currentState == container.StateAbsent {
+		if currentState == containerstate.StateAbsent {
 			return nil, fmt.Errorf("no devcontainer found; run 'dcx up' first")
 		}
 		if containerInfo == nil {
@@ -105,7 +105,7 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 
 // RequireRunningContainer is a convenience function for exec-like commands.
 // It validates the container is running and returns the container info.
-func RequireRunningContainer(cliCtx *CLIContext) (*container.ContainerInfo, error) {
+func RequireRunningContainer(cliCtx *CLIContext) (*containerstate.ContainerInfo, error) {
 	result, err := ValidateState(cliCtx, StateValidationOptions{
 		Requirement: RequireRunning,
 		WarnOnStale: true,
@@ -119,7 +119,7 @@ func RequireRunningContainer(cliCtx *CLIContext) (*container.ContainerInfo, erro
 
 // RequireExistingContainer is a convenience function for commands that need
 // a container to exist but don't require it to be running.
-func RequireExistingContainer(cliCtx *CLIContext) (*container.ContainerInfo, error) {
+func RequireExistingContainer(cliCtx *CLIContext) (*containerstate.ContainerInfo, error) {
 	result, err := ValidateState(cliCtx, StateValidationOptions{
 		Requirement: RequireExists,
 		WarnOnStale: true,

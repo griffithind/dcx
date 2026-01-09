@@ -8,9 +8,9 @@ import (
 	"syscall"
 
 	"github.com/griffithind/dcx/internal/config"
-	ctr "github.com/griffithind/dcx/internal/container"
+	ctr "github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
@@ -50,7 +50,7 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return fmt.Errorf("failed to get identifiers: %w", err)
