@@ -11,12 +11,12 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected *Mount
+		expected *ParsedMount
 	}{
 		{
 			name:  "basic bind mount",
 			input: "source=/host/path,target=/container/path,type=bind",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source: "/host/path",
 				Target: "/container/path",
 				Type:   "bind",
@@ -25,7 +25,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "bind mount with readonly",
 			input: "source=/host/path,target=/container/path,type=bind,readonly=true",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:   "/host/path",
 				Target:   "/container/path",
 				Type:     "bind",
@@ -35,7 +35,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "volume mount",
 			input: "source=myvolume,target=/data,type=volume",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source: "myvolume",
 				Target: "/data",
 				Type:   "volume",
@@ -44,7 +44,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "using src/dst aliases",
 			input: "src=/host,dst=/container",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source: "/host",
 				Target: "/container",
 				Type:   "bind",
@@ -53,7 +53,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "with consistency option",
 			input: "source=/host,target=/container,type=bind,consistency=cached",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:      "/host",
 				Target:      "/container",
 				Type:        "bind",
@@ -63,7 +63,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "tmpfs mount",
 			input: "target=/tmp/cache,type=tmpfs",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Target: "/tmp/cache",
 				Type:   "tmpfs",
 			},
@@ -71,7 +71,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "with standalone readonly",
 			input: "source=/host,target=/container,readonly",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:   "/host",
 				Target:   "/container",
 				Type:     "bind",
@@ -81,7 +81,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 		{
 			name:  "with standalone ro",
 			input: "source=/host,target=/container,ro",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:   "/host",
 				Target:   "/container",
 				Type:     "bind",
@@ -107,12 +107,12 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected *Mount
+		expected *ParsedMount
 	}{
 		{
 			name:  "basic short format",
 			input: "/host/path:/container/path",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source: "/host/path",
 				Target: "/container/path",
 				Type:   "bind",
@@ -121,7 +121,7 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 		{
 			name:  "with readonly",
 			input: "/host/path:/container/path:ro",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:   "/host/path",
 				Target:   "/container/path",
 				Type:     "bind",
@@ -131,7 +131,7 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 		{
 			name:  "named volume",
 			input: "myvolume:/data",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source: "myvolume",
 				Target: "/data",
 				Type:   "bind",
@@ -140,7 +140,7 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 		{
 			name:  "with consistency",
 			input: "/host/path:/container/path:cached",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:      "/host/path",
 				Target:      "/container/path",
 				Type:        "bind",
@@ -150,7 +150,7 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 		{
 			name:  "with readonly and consistency",
 			input: "/host/path:/container/path:ro,delegated",
-			expected: &Mount{
+			expected: &ParsedMount{
 				Source:      "/host/path",
 				Target:      "/container/path",
 				Type:        "bind",
@@ -174,12 +174,12 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 func TestMount_ToDockerFormat(t *testing.T) {
 	tests := []struct {
 		name     string
-		mount    *Mount
+		mount    *ParsedMount
 		expected string
 	}{
 		{
 			name: "basic mount",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source: "/host",
 				Target: "/container",
 				Type:   "bind",
@@ -188,7 +188,7 @@ func TestMount_ToDockerFormat(t *testing.T) {
 		},
 		{
 			name: "readonly mount",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source:   "/host",
 				Target:   "/container",
 				Type:     "bind",
@@ -198,7 +198,7 @@ func TestMount_ToDockerFormat(t *testing.T) {
 		},
 		{
 			name: "with consistency",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source:      "/host",
 				Target:      "/container",
 				Type:        "bind",
@@ -208,7 +208,7 @@ func TestMount_ToDockerFormat(t *testing.T) {
 		},
 		{
 			name: "readonly with consistency",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source:      "/host",
 				Target:      "/container",
 				Type:        "bind",
@@ -228,7 +228,7 @@ func TestMount_ToDockerFormat(t *testing.T) {
 }
 
 func TestMount_ToDockerFormatWithSuffix(t *testing.T) {
-	m := &Mount{
+	m := &ParsedMount{
 		Source: "/host",
 		Target: "/container",
 		Type:   "bind",
@@ -249,13 +249,13 @@ func TestMount_ToDockerFormatWithSuffix(t *testing.T) {
 func TestMount_ToComposeFormat(t *testing.T) {
 	tests := []struct {
 		name     string
-		mount    *Mount
+		mount    *ParsedMount
 		suffix   string
 		expected string
 	}{
 		{
 			name: "bind mount",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source: "/host",
 				Target: "/container",
 				Type:   "bind",
@@ -265,7 +265,7 @@ func TestMount_ToComposeFormat(t *testing.T) {
 		},
 		{
 			name: "volume mount",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source: "myvolume",
 				Target: "/data",
 				Type:   "volume",
@@ -275,7 +275,7 @@ func TestMount_ToComposeFormat(t *testing.T) {
 		},
 		{
 			name: "tmpfs mount",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Target: "/tmp/cache",
 				Type:   "tmpfs",
 			},
@@ -284,7 +284,7 @@ func TestMount_ToComposeFormat(t *testing.T) {
 		},
 		{
 			name: "bind with SELinux",
-			mount: &Mount{
+			mount: &ParsedMount{
 				Source: "/host",
 				Target: "/container",
 				Type:   "bind",

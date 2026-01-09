@@ -236,7 +236,7 @@ func (r *UnifiedRunner) buildDockerfile(ctx context.Context, imageTag string) er
 		buildArgs[k] = v
 	}
 
-	return r.docker.BuildImage(ctx, docker.BuildOptions{
+	return r.docker.BuildImage(ctx, docker.ImageBuildOptions{
 		Tag:        imageTag,
 		Dockerfile: df.Path,
 		Context:    buildCtx,

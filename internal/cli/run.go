@@ -122,7 +122,7 @@ func executeInContainer(execArgs []string) error {
 
 	// Execute command using ExecBuilder
 	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
-	return builder.Execute(cliCtx.Ctx, ExecOptions{
+	return builder.Execute(cliCtx.Ctx, ExecFlags{
 		Command:        execArgs,
 		EnableSSHAgent: !runNoAgent,
 	})

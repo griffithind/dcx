@@ -30,8 +30,8 @@ func NewBuilder(logger *slog.Logger) *Builder {
 	return &Builder{logger: logger}
 }
 
-// BuildOptions contains options for building a workspace.
-type BuildOptions struct {
+// BuilderOptions contains options for building a workspace.
+type BuilderOptions struct {
 	// ConfigPath is the path to devcontainer.json
 	ConfigPath string
 
@@ -49,7 +49,7 @@ type BuildOptions struct {
 }
 
 // Build creates a Workspace from the given options.
-func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, error) {
+func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*Workspace, error) {
 	if opts.Config == nil {
 		return nil, dcxerrors.New(dcxerrors.CategoryConfig, dcxerrors.CodeConfigMissing, "configuration is required")
 	}

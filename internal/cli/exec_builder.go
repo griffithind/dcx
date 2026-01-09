@@ -13,8 +13,8 @@ import (
 	"golang.org/x/term"
 )
 
-// ExecOptions configures container execution.
-type ExecOptions struct {
+// ExecFlags holds parsed command-line flags for exec operations.
+type ExecFlags struct {
 	// Command is the command and arguments to run.
 	Command []string
 
@@ -53,7 +53,7 @@ func NewExecBuilder(containerInfo *container.ContainerInfo, cfg *config.DevConta
 
 // BuildArgs constructs docker exec arguments based on options.
 // Returns the args slice and the resolved user.
-func (b *ExecBuilder) BuildArgs(opts ExecOptions) ([]string, string) {
+func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 	args := []string{"exec"}
 
 	// TTY detection
@@ -109,7 +109,7 @@ func (b *ExecBuilder) BuildArgs(opts ExecOptions) ([]string, string) {
 
 // Execute runs a command in the container with optional SSH agent support.
 // This handles the full execution lifecycle including SSH proxy setup and cleanup.
-func (b *ExecBuilder) Execute(ctx context.Context, opts ExecOptions) error {
+func (b *ExecBuilder) Execute(ctx context.Context, opts ExecFlags) error {
 	dockerArgs, user := b.BuildArgs(opts)
 
 	// Setup SSH agent forwarding if enabled
@@ -158,7 +158,7 @@ func (b *ExecBuilder) Execute(ctx context.Context, opts ExecOptions) error {
 }
 
 // ExecuteWithOutput runs a command and returns its output instead of streaming.
-func (b *ExecBuilder) ExecuteWithOutput(ctx context.Context, opts ExecOptions) ([]byte, error) {
+func (b *ExecBuilder) ExecuteWithOutput(ctx context.Context, opts ExecFlags) ([]byte, error) {
 	dockerArgs, user := b.BuildArgs(opts)
 
 	// Setup SSH agent forwarding if enabled
@@ -202,7 +202,7 @@ func (b *ExecBuilder) Shell(ctx context.Context, shell string, enableSSHAgent bo
 	}
 
 	// Use login shell for proper environment setup
-	return b.Execute(ctx, ExecOptions{
+	return b.Execute(ctx, ExecFlags{
 		Command:        []string{shell, "-l"},
 		EnableSSHAgent: enableSSHAgent,
 		TTY:            boolPtr(true),

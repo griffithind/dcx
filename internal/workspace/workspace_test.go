@@ -112,7 +112,7 @@ func TestBuilderBasicBuild(t *testing.T) {
 		RemoteUser:      "vscode",
 	}
 
-	ws, err := builder.Build(context.Background(), BuildOptions{
+	ws, err := builder.Build(context.Background(), BuilderOptions{
 		ConfigPath:    "/home/user/project/.devcontainer/devcontainer.json",
 		WorkspaceRoot: "/home/user/project",
 		Config:        cfg,
@@ -162,7 +162,7 @@ func TestBuilderDockerfileBuild(t *testing.T) {
 		},
 	}
 
-	ws, err := builder.Build(context.Background(), BuildOptions{
+	ws, err := builder.Build(context.Background(), BuilderOptions{
 		ConfigPath:    "/home/user/project/.devcontainer/devcontainer.json",
 		WorkspaceRoot: "/home/user/project",
 		Config:        cfg,
@@ -192,7 +192,7 @@ func TestBuilderComposeBuild(t *testing.T) {
 		RunServices:       []string{"db", "redis"},
 	}
 
-	ws, err := builder.Build(context.Background(), BuildOptions{
+	ws, err := builder.Build(context.Background(), BuilderOptions{
 		ConfigPath:    "/home/user/project/.devcontainer/devcontainer.json",
 		WorkspaceRoot: "/home/user/project",
 		Config:        cfg,
@@ -423,7 +423,7 @@ func TestRemoteUserSubstitution_LocalEnvVariable(t *testing.T) {
 	}
 
 	builder := &Builder{}
-	ws, err := builder.Build(context.Background(), BuildOptions{
+	ws, err := builder.Build(context.Background(), BuilderOptions{
 		Config:        cfg,
 		ConfigPath:    "/tmp/test/.devcontainer/devcontainer.json",
 		WorkspaceRoot: "/tmp/test",

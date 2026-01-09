@@ -223,7 +223,7 @@ func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag str
 func buildImage(ctx context.Context, contextDir, dockerfilePath, tag string) error {
 	// Build derived image with features. Docker layer cache is used for performance.
 	// Cache is invalidated when config changes because the image tag includes configHash.
-	return docker.BuildImageCLI(ctx, docker.BuildOptions{
+	return docker.BuildImageCLI(ctx, docker.ImageBuildOptions{
 		Tag:        tag,
 		Dockerfile: dockerfilePath,
 		Context:    contextDir,

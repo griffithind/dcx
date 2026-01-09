@@ -205,7 +205,7 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 
 	// Build workspace model to validate structure
 	builder := workspace.NewBuilder(nil)
-	ws, err := builder.Build(ctx, workspace.BuildOptions{
+	ws, err := builder.Build(ctx, workspace.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
 		Config:        cfg,

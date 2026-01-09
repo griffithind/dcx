@@ -182,7 +182,7 @@ func (s *EnvironmentService) CreateRunner(info *EnvironmentInfo) (runnerPkg.Envi
 // buildWorkspace constructs a workspace from environment info.
 func (s *EnvironmentService) buildWorkspace(info *EnvironmentInfo) (*workspace.Workspace, error) {
 	builder := workspace.NewBuilder(nil)
-	return builder.Build(context.Background(), workspace.BuildOptions{
+	return builder.Build(context.Background(), workspace.BuilderOptions{
 		ConfigPath:    info.ConfigPath,
 		WorkspaceRoot: s.workspacePath,
 		Config:        info.Config,
@@ -453,11 +453,8 @@ func (s *EnvironmentService) start(ctx context.Context, info *EnvironmentInfo) e
 	return envRunner.Start(ctx)
 }
 
-// DownOptions configures the Down operation.
-type DownOptions struct {
-	RemoveVolumes bool
-	RemoveOrphans bool
-}
+// DownOptions is an alias for runner.DownOptions.
+type DownOptions = runnerPkg.DownOptions
 
 // Down removes the environment.
 func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, opts DownOptions) error {
@@ -555,11 +552,8 @@ func (s *EnvironmentService) DownWithWorkspaceID(ctx context.Context, projectNam
 	return nil
 }
 
-// BuildOptions configures the Build operation.
-type BuildOptions struct {
-	NoCache bool
-	Pull    bool
-}
+// BuildOptions is an alias for runner.BuildOptions.
+type BuildOptions = runnerPkg.BuildOptions
 
 // Build builds the environment images without starting containers.
 func (s *EnvironmentService) Build(ctx context.Context, opts BuildOptions) error {
