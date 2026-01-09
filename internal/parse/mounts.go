@@ -3,8 +3,8 @@ package parse
 
 import "strings"
 
-// Mount represents a parsed mount specification.
-type Mount struct {
+// ParsedMount represents a parsed mount specification.
+type ParsedMount struct {
 	Source      string
 	Target      string
 	Type        string // bind, volume, tmpfs
@@ -12,10 +12,10 @@ type Mount struct {
 	Consistency string // cached, delegated, consistent (macOS)
 }
 
-// ParseMount parses a devcontainer mount string into a Mount struct.
+// ParseMount parses a devcontainer mount string into a ParsedMount.
 // Devcontainer format: "source=/path,target=/path,type=bind,consistency=cached,readonly=true"
 // Also accepts Docker short format: "source:target" or "source:target:ro"
-func ParseMount(mount string) *Mount {
+func ParseMount(mount string) *ParsedMount {
 	// Check for Docker short format (contains colon but no source= pattern)
 	if strings.Contains(mount, ":") && !strings.Contains(mount, "source=") {
 		return parseDockerShortMount(mount)
@@ -25,13 +25,13 @@ func ParseMount(mount string) *Mount {
 }
 
 // parseDockerShortMount parses Docker short format: "source:target" or "source:target:ro"
-func parseDockerShortMount(mount string) *Mount {
+func parseDockerShortMount(mount string) *ParsedMount {
 	parts := strings.SplitN(mount, ":", 3)
 	if len(parts) < 2 {
 		return nil
 	}
 
-	m := &Mount{
+	m := &ParsedMount{
 		Source: parts[0],
 		Target: parts[1],
 		Type:   "bind",
@@ -54,10 +54,10 @@ func parseDockerShortMount(mount string) *Mount {
 }
 
 // parseDevcontainerMount parses devcontainer key=value format.
-func parseDevcontainerMount(mount string) *Mount {
+func parseDevcontainerMount(mount string) *ParsedMount {
 	parts := strings.Split(mount, ",")
 
-	m := &Mount{
+	m := &ParsedMount{
 		Type: "bind", // Default type
 	}
 
@@ -103,7 +103,7 @@ func parseDevcontainerMount(mount string) *Mount {
 }
 
 // ToDockerFormat returns the mount in Docker CLI format: "source:target[:options]"
-func (m *Mount) ToDockerFormat() string {
+func (m *ParsedMount) ToDockerFormat() string {
 	if m == nil {
 		return ""
 	}
@@ -123,7 +123,7 @@ func (m *Mount) ToDockerFormat() string {
 }
 
 // ToDockerFormatWithSuffix returns the mount with an optional suffix (e.g., ":Z" for SELinux).
-func (m *Mount) ToDockerFormatWithSuffix(suffix string) string {
+func (m *ParsedMount) ToDockerFormatWithSuffix(suffix string) string {
 	if m == nil {
 		return ""
 	}
@@ -150,7 +150,7 @@ func (m *Mount) ToDockerFormatWithSuffix(suffix string) string {
 // For bind mounts: "source:target[:suffix]"
 // For volume mounts: "volumeName:target"
 // For tmpfs mounts: not supported, returns empty
-func (m *Mount) ToComposeFormat(suffix string) string {
+func (m *ParsedMount) ToComposeFormat(suffix string) string {
 	if m == nil {
 		return ""
 	}

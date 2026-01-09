@@ -193,7 +193,7 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 
 	// Build workspace
 	builder := workspace.NewBuilder(nil)
-	ws, err := builder.Build(ctx, workspace.BuildOptions{
+	ws, err := builder.Build(ctx, workspace.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
 		Config:        cfg,

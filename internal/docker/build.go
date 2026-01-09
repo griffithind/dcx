@@ -158,8 +158,8 @@ func (c *Client) CreateContainer(ctx context.Context, opts CreateContainerOption
 	return resp.ID, nil
 }
 
-// BuildOptions contains options for building an image.
-type BuildOptions struct {
+// ImageBuildOptions contains options for building a Docker image.
+type ImageBuildOptions struct {
 	Tag        string
 	Dockerfile string
 	Context    string
@@ -172,7 +172,7 @@ type BuildOptions struct {
 }
 
 // BuildImage builds a Docker image from a Dockerfile.
-func (c *Client) BuildImage(ctx context.Context, opts BuildOptions) error {
+func (c *Client) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
 	// For single-container builds, we shell out to docker build
 	// This is simpler and more compatible than using the API directly
 	return buildImageWithCLI(ctx, opts)
@@ -181,12 +181,12 @@ func (c *Client) BuildImage(ctx context.Context, opts BuildOptions) error {
 // BuildImageCLI builds a Docker image using the CLI.
 // This is the canonical function for all docker build operations.
 // It can be called without a Client instance.
-func BuildImageCLI(ctx context.Context, opts BuildOptions) error {
+func BuildImageCLI(ctx context.Context, opts ImageBuildOptions) error {
 	return buildImageWithCLI(ctx, opts)
 }
 
 // buildImageWithCLI builds an image using the docker CLI.
-func buildImageWithCLI(ctx context.Context, opts BuildOptions) error {
+func buildImageWithCLI(ctx context.Context, opts ImageBuildOptions) error {
 	// Determine the config directory (for resolving relative paths)
 	configDir := opts.ConfigDir
 	if configDir == "" {

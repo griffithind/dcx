@@ -91,7 +91,7 @@ func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, ima
 	}
 
 	// Build the image with build args
-	err = docker.BuildImageCLI(ctx, docker.BuildOptions{
+	err = docker.BuildImageCLI(ctx, docker.ImageBuildOptions{
 		Tag:        newTag,
 		Dockerfile: dockerfilePath,
 		Context:    tempBuildDir,

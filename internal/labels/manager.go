@@ -28,7 +28,7 @@ func NewManager(dockerClient client.APIClient, logger *slog.Logger) *Manager {
 }
 
 // Build creates labels for a new container.
-func (m *Manager) Build(opts BuildOptions) *Labels {
+func (m *Manager) Build(opts LabelBuildOptions) *Labels {
 	l := NewLabels()
 
 	// Identity
@@ -76,8 +76,8 @@ func (m *Manager) Build(opts BuildOptions) *Labels {
 	return l
 }
 
-// BuildOptions contains options for building container labels.
-type BuildOptions struct {
+// LabelBuildOptions contains options for building container labels.
+type LabelBuildOptions struct {
 	// Identity
 	WorkspaceID   string
 	WorkspaceName string
@@ -231,7 +231,7 @@ func MergeLabels(base map[string]string, additional map[string]string) map[strin
 }
 
 // ListContainers returns all dcx-managed containers.
-func (m *Manager) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+func (m *Manager) ListContainers(ctx context.Context) ([]LabeledContainer, error) {
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("label", fmt.Sprintf("%s=true", LabelManaged))
 
@@ -243,10 +243,10 @@ func (m *Manager) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 
-	result := make([]ContainerInfo, 0, len(containers))
+	result := make([]LabeledContainer, 0, len(containers))
 	for _, c := range containers {
 		labels := m.ReadFromMap(c.Labels)
-		result = append(result, ContainerInfo{
+		result = append(result, LabeledContainer{
 			ID:     c.ID,
 			Names:  c.Names,
 			State:  c.State,
@@ -257,8 +257,8 @@ func (m *Manager) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	return result, nil
 }
 
-// ContainerInfo holds basic container info with parsed labels.
-type ContainerInfo struct {
+// LabeledContainer holds basic container info with parsed labels.
+type LabeledContainer struct {
 	ID     string
 	Names  []string
 	State  string
@@ -266,7 +266,7 @@ type ContainerInfo struct {
 }
 
 // ListByWorkspace returns containers for a specific workspace.
-func (m *Manager) ListByWorkspace(ctx context.Context, workspaceID string) ([]ContainerInfo, error) {
+func (m *Manager) ListByWorkspace(ctx context.Context, workspaceID string) ([]LabeledContainer, error) {
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("label", fmt.Sprintf("%s=%s", LabelWorkspaceID, workspaceID))
 
@@ -278,10 +278,10 @@ func (m *Manager) ListByWorkspace(ctx context.Context, workspaceID string) ([]Co
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 
-	result := make([]ContainerInfo, 0, len(containers))
+	result := make([]LabeledContainer, 0, len(containers))
 	for _, c := range containers {
 		labels := m.ReadFromMap(c.Labels)
-		result = append(result, ContainerInfo{
+		result = append(result, LabeledContainer{
 			ID:     c.ID,
 			Names:  c.Names,
 			State:  c.State,
@@ -293,7 +293,7 @@ func (m *Manager) ListByWorkspace(ctx context.Context, workspaceID string) ([]Co
 }
 
 // FindPrimaryContainer finds the primary container for a workspace.
-func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) (*ContainerInfo, error) {
+func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) (*LabeledContainer, error) {
 	containers, err := m.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) 
 
 // FindPrimaryContainerWithFallback finds the primary container, trying primary ID first then fallback.
 // This is useful when containers may be labeled with either a project name or workspace hash.
-func (m *Manager) FindPrimaryContainerWithFallback(ctx context.Context, primaryID, fallbackID string) (*ContainerInfo, error) {
+func (m *Manager) FindPrimaryContainerWithFallback(ctx context.Context, primaryID, fallbackID string) (*LabeledContainer, error) {
 	// Try primary ID first (usually project name)
 	if primaryID != "" {
 		container, err := m.FindPrimaryContainer(ctx, primaryID)

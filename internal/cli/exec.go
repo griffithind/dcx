@@ -50,7 +50,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	// Execute command using ExecBuilder
 	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
-	return builder.Execute(cliCtx.Ctx, ExecOptions{
+	return builder.Execute(cliCtx.Ctx, ExecFlags{
 		Command:        args,
 		EnableSSHAgent: !execNoAgent,
 	})
