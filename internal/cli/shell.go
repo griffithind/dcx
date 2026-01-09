@@ -8,10 +8,10 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -46,12 +46,15 @@ func runShell(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
-	envKey := workspace.ComputeID(workspacePath)
+	// Create service and get identifiers
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
+	}
 
 	// Check current state
-	currentState, containerInfo, err := stateMgr.GetState(ctx, envKey)
+	currentState, containerInfo, err := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}

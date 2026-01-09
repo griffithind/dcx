@@ -6,8 +6,9 @@ import (
 	"os"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -67,8 +68,19 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Compute workspace ID and config hash
-	envKey := workspace.ComputeID(workspacePath)
+	// Get identifiers from service
+	dockerClient, err := docker.NewClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer dockerClient.Close()
+
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
+	}
+
 	// Use simple hash of raw JSON to match workspace builder
 	var configHash string
 	if raw := cfg.GetRawJSON(); len(raw) > 0 {
@@ -89,7 +101,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	// Build output
 	output := ConfigOutput{
 		ConfigPath:      cfgPath,
-		EnvKey:          envKey,
+		EnvKey:          ids.EnvKey,
 		ConfigHash:      configHash,
 		WorkspaceFolder: wsFolder,
 		PlanType:        planType,

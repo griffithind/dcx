@@ -135,26 +135,6 @@ func (m *Manager) ReadFromMap(labelMap map[string]string) *Labels {
 	return FromMap(labelMap)
 }
 
-// UpdateLifecycleState updates the lifecycle state label on a container.
-// Note: Docker doesn't support label updates directly, so this creates
-// a pending update that should be applied on container recreation.
-func (m *Manager) UpdateLifecycleState(ctx context.Context, containerID string, state string) error {
-	// Docker doesn't support updating labels on a running container.
-	// We track the desired state and apply it when the container is recreated.
-	m.logger.Debug("lifecycle state update queued",
-		"container", containerID,
-		"state", state)
-	return nil
-}
-
-// UpdateCache updates the cache data on container labels.
-// Since Docker doesn't support label updates, this is stored for next recreation.
-func (m *Manager) UpdateCache(containerID string, cache *CacheData) error {
-	// This would be persisted and applied on container recreation
-	m.logger.Debug("cache update queued",
-		"container", containerID)
-	return nil
-}
 
 // GetCache retrieves cached data from container labels.
 func (m *Manager) GetCache(ctx context.Context, containerID string) (*CacheData, error) {
@@ -323,6 +303,28 @@ func (m *Manager) FindPrimaryContainer(ctx context.Context, workspaceID string) 
 		if c.Labels.IsPrimary {
 			return &c, nil
 		}
+	}
+
+	return nil, nil
+}
+
+// FindPrimaryContainerWithFallback finds the primary container, trying primary ID first then fallback.
+// This is useful when containers may be labeled with either a project name or workspace hash.
+func (m *Manager) FindPrimaryContainerWithFallback(ctx context.Context, primaryID, fallbackID string) (*ContainerInfo, error) {
+	// Try primary ID first (usually project name)
+	if primaryID != "" {
+		container, err := m.FindPrimaryContainer(ctx, primaryID)
+		if err != nil {
+			return nil, err
+		}
+		if container != nil {
+			return container, nil
+		}
+	}
+
+	// Try fallback ID (usually workspace hash)
+	if fallbackID != "" && fallbackID != primaryID {
+		return m.FindPrimaryContainer(ctx, fallbackID)
 	}
 
 	return nil, nil

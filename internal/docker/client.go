@@ -56,6 +56,11 @@ func (c *Client) Close() error {
 	return c.cli.Close()
 }
 
+// APIClient returns the underlying Docker API client.
+func (c *Client) APIClient() *client.Client {
+	return c.cli
+}
+
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
 // Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
 func SanitizeProjectName(name string) string {

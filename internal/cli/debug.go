@@ -11,7 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
@@ -244,15 +244,19 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	}
 	defer client.Close()
 
-	stateMgr := state.NewManager(client)
+	svc := service.NewEnvironmentService(client, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return
+	}
 
 	// Try to find container by workspace ID
 	envKey := debug.Workspace.ID
 	if envKey == "" {
-		envKey = workspace.ComputeID(workspacePath)
+		envKey = ids.EnvKey
 	}
 
-	s, info, _ := stateMgr.GetState(ctx, envKey)
+	s, info, _ := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, envKey)
 
 	debug.Container = ContainerDebug{
 		Found: info != nil,

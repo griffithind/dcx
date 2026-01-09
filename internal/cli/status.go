@@ -7,10 +7,10 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -44,20 +44,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Load dcx.json configuration (optional)
-	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
-
-	// Get project name from dcx.json
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = docker.SanitizeProjectName(dcxCfg.Name)
+	// Create service and get identifiers
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
-
-	// Compute workspace ID
-	envKey := workspace.ComputeID(workspacePath)
+	// Load dcx.json for shortcuts display (optional)
+	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
 
 	// Try to load config and compute hash for staleness detection
 	var currentState state.State
@@ -68,18 +63,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	cfg, _, err = config.Load(workspacePath, configPath)
 	if err == nil {
 		// Config exists, check for staleness
-		// Use simple hash of raw JSON to match workspace builder
 		if raw := cfg.GetRawJSON(); len(raw) > 0 {
 			configHash = config.ComputeSimpleHash(raw)
 		}
 		if configHash != "" {
-			currentState, containerInfo, err = stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
+			currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProjectAndHash(ctx, ids.ProjectName, ids.EnvKey, configHash)
 		} else {
-			currentState, containerInfo, err = stateMgr.GetStateWithProject(ctx, projectName, envKey)
+			currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
 		}
 	} else {
 		// No config or error loading it, just get basic state
-		currentState, containerInfo, err = stateMgr.GetStateWithProject(ctx, projectName, envKey)
+		currentState, containerInfo, err = svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
 	}
 
 	if err != nil {
@@ -88,19 +82,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Text output mode
 	ui.Printf("%s", ui.FormatLabel("Workspace", ui.Code(workspacePath)))
-	if projectName != "" {
-		ui.Printf("%s", ui.FormatLabel("Project", projectName))
+	if ids.ProjectName != "" {
+		ui.Printf("%s", ui.FormatLabel("Project", ids.ProjectName))
 	}
-	ui.Printf("%s", ui.FormatLabel("Env Key", envKey))
+	ui.Printf("%s", ui.FormatLabel("Env Key", ids.EnvKey))
 	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
 
 	// Show SSH status
 	if containerInfo != nil && ssh.HasSSHConfig(containerInfo.Name) {
-		sshHost := envKey
-		if projectName != "" {
-			sshHost = projectName
-		}
-		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s.dcx", sshHost))))
+		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
 	} else if currentState != state.StateAbsent {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (use 'dcx up --ssh' to enable)")))
 	}

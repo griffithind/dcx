@@ -40,6 +40,46 @@ func NewEnvironmentService(dockerClient *docker.Client, workspacePath, configPat
 	}
 }
 
+// Identifiers contains the core identifiers for a workspace.
+// This is a lightweight struct that can be computed without loading the full config.
+type Identifiers struct {
+	// ProjectName is the sanitized project name from dcx.json (may be empty)
+	ProjectName string
+	// EnvKey is the stable workspace identifier (hash of workspace path)
+	EnvKey string
+	// SSHHost is the SSH hostname for this workspace (projectName.dcx or envKey.dcx)
+	SSHHost string
+}
+
+// GetIdentifiers computes the core identifiers for this workspace.
+// This is a lightweight operation that doesn't require loading devcontainer.json.
+func (s *EnvironmentService) GetIdentifiers() (*Identifiers, error) {
+	// Load dcx.json configuration (optional)
+	dcxCfg, _ := config.LoadDcxConfig(s.workspacePath)
+
+	// Get project name from dcx.json
+	var projectName string
+	if dcxCfg != nil && dcxCfg.Name != "" {
+		projectName = docker.SanitizeProjectName(dcxCfg.Name)
+	}
+
+	// Compute workspace ID
+	envKey := workspace.ComputeID(s.workspacePath)
+
+	// Compute SSH host
+	sshHost := envKey
+	if projectName != "" {
+		sshHost = projectName
+	}
+	sshHost = sshHost + ".dcx"
+
+	return &Identifiers{
+		ProjectName: projectName,
+		EnvKey:      envKey,
+		SSHHost:     sshHost,
+	}, nil
+}
+
 // EnvironmentInfo contains resolved environment configuration.
 type EnvironmentInfo struct {
 	Config      *config.DevcontainerConfig
@@ -140,6 +180,84 @@ func (s *EnvironmentService) buildWorkspace(info *EnvironmentInfo) (*workspace.W
 		Config:        info.Config,
 		ProjectName:   info.ProjectName,
 	})
+}
+
+// PlanAction represents the action to be taken.
+type PlanAction string
+
+const (
+	PlanActionNone     PlanAction = "none"
+	PlanActionStart    PlanAction = "start"
+	PlanActionCreate   PlanAction = "create"
+	PlanActionRecreate PlanAction = "recreate"
+	PlanActionRebuild  PlanAction = "rebuild"
+)
+
+// PlanOptions configures the Plan operation.
+type PlanOptions struct {
+	Recreate bool
+	Rebuild  bool
+}
+
+// PlanResult contains the result of planning what action to take.
+type PlanResult struct {
+	Info          *EnvironmentInfo
+	State         state.State
+	ContainerInfo *state.ContainerInfo
+	Action        PlanAction
+	Reason        string
+	Changes       []string
+}
+
+// Plan analyzes the current state and determines what action would be taken.
+// This is the single source of truth for "what action to take" decisions.
+func (s *EnvironmentService) Plan(ctx context.Context, opts PlanOptions) (*PlanResult, error) {
+	info, err := s.LoadEnvironmentInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	currentState, containerInfo, err := s.stateMgr.GetStateWithProjectAndHash(
+		ctx, info.ProjectName, info.EnvKey, info.ConfigHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get state: %w", err)
+	}
+
+	result := &PlanResult{
+		Info:          info,
+		State:         currentState,
+		ContainerInfo: containerInfo,
+	}
+
+	// Determine action based on current state
+	switch currentState {
+	case state.StateRunning:
+		if opts.Rebuild {
+			result.Action = PlanActionRebuild
+			result.Reason = "force rebuild requested"
+		} else if opts.Recreate {
+			result.Action = PlanActionRecreate
+			result.Reason = "force recreate requested"
+		} else {
+			result.Action = PlanActionNone
+			result.Reason = "container is running and up to date"
+		}
+	case state.StateStale:
+		result.Action = PlanActionRecreate
+		result.Reason = "configuration changed"
+		result.Changes = []string{"devcontainer.json modified"}
+	case state.StateBroken:
+		result.Action = PlanActionRecreate
+		result.Reason = "container state is broken"
+	case state.StateAbsent:
+		result.Action = PlanActionCreate
+		result.Reason = "no container found"
+	case state.StateCreated:
+		result.Action = PlanActionStart
+		result.Reason = "container exists but stopped"
+	}
+
+	return result, nil
 }
 
 // UpOptions configures the Up operation.
@@ -263,6 +381,35 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 
+	return nil
+}
+
+// QuickStart attempts to start an existing container without full up sequence.
+// Returns (true, nil) if quick start succeeded, (false, nil) if full up is needed,
+// or (false, error) if an error occurred.
+func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *state.ContainerInfo, projectName, envKey string) error {
+	// Determine plan type (single-container vs compose)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
+		containerInfo.Plan == labels.BuildMethodDockerfile)
+	if isSingleContainer {
+		// Single container - use Docker API directly
+		if err := s.dockerClient.StartContainer(ctx, containerInfo.ID); err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+	} else {
+		// Compose plan - use docker compose
+		actualProject := ""
+		if containerInfo != nil {
+			actualProject = containerInfo.ComposeProject
+		}
+		if actualProject == "" {
+			actualProject = projectName
+		}
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, envKey)
+		if err := r.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start containers: %w", err)
+		}
+	}
 	return nil
 }
 

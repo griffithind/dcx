@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -41,22 +39,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Load dcx.json configuration (optional)
-	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
-
-	// Get project name from dcx.json
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = docker.SanitizeProjectName(dcxCfg.Name)
+	// Create service and get identifiers
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	// Compute workspace ID
-	envKey := workspace.ComputeID(workspacePath)
-
-	// Create environment service and delegate to it
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-
-	return svc.DownWithEnvKey(ctx, projectName, envKey, service.DownOptions{
+	return svc.DownWithEnvKey(ctx, ids.ProjectName, ids.EnvKey, service.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	})
