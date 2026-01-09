@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/ssh"
+	"github.com/griffithind/dcx/internal/ui"
 )
 
 // WaitFor represents the lifecycle command to wait for before considering
@@ -133,7 +134,7 @@ func (r *HookRunner) RunInitialize(ctx context.Context) error {
 	if r.cfg.InitializeCommand == nil {
 		return nil
 	}
-	fmt.Println("Running initializeCommand...")
+	ui.Println("Running initializeCommand...")
 	return r.runHostCommand(ctx, r.cfg.InitializeCommand)
 }
 
@@ -142,7 +143,7 @@ func (r *HookRunner) RunOnCreate(ctx context.Context) error {
 	if r.cfg.OnCreateCommand == nil {
 		return nil
 	}
-	fmt.Println("Running onCreateCommand...")
+	ui.Println("Running onCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.OnCreateCommand)
 }
 
@@ -151,7 +152,7 @@ func (r *HookRunner) RunUpdateContent(ctx context.Context) error {
 	if r.cfg.UpdateContentCommand == nil {
 		return nil
 	}
-	fmt.Println("Running updateContentCommand...")
+	ui.Println("Running updateContentCommand...")
 	return r.runContainerCommand(ctx, r.cfg.UpdateContentCommand)
 }
 
@@ -160,7 +161,7 @@ func (r *HookRunner) RunPostCreate(ctx context.Context) error {
 	if r.cfg.PostCreateCommand == nil {
 		return nil
 	}
-	fmt.Println("Running postCreateCommand...")
+	ui.Println("Running postCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostCreateCommand)
 }
 
@@ -169,7 +170,7 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 	if r.cfg.PostStartCommand == nil {
 		return nil
 	}
-	fmt.Println("Running postStartCommand...")
+	ui.Println("Running postStartCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostStartCommand)
 }
 
@@ -182,7 +183,7 @@ func (r *HookRunner) RunPostAttach(ctx context.Context) error {
 	}
 
 	if r.cfg.PostAttachCommand != nil {
-		fmt.Println("Running postAttachCommand...")
+		ui.Println("Running postAttachCommand...")
 		if err := r.runContainerCommand(ctx, r.cfg.PostAttachCommand); err != nil {
 			return err
 		}
@@ -213,7 +214,7 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 				backgroundMu.Lock()
 				backgroundErrs = append(backgroundErrs, fmt.Errorf("%s: %w", name, err))
 				backgroundMu.Unlock()
-				fmt.Printf("Background %s failed: %v\n", name, err)
+				ui.Warning("Background %s failed: %v", name, err)
 			}
 		}()
 		return nil
@@ -221,7 +222,7 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 
 	// Log waitFor setting if not default
 	if waitFor != WaitForPostStartCommand {
-		fmt.Printf("Container will be ready after %s (remaining hooks run in background)\n", waitFor)
+		ui.Printf("Container will be ready after %s (remaining hooks run in background)", waitFor)
 	}
 
 	// initializeCommand runs on host before anything else
@@ -280,9 +281,9 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 		go func() {
 			backgroundWg.Wait()
 			if len(backgroundErrs) > 0 {
-				fmt.Printf("Warning: %d background lifecycle hook(s) failed\n", len(backgroundErrs))
+				ui.Warning("%d background lifecycle hook(s) failed", len(backgroundErrs))
 			} else {
-				fmt.Println("Background lifecycle hooks completed successfully")
+				ui.Println("Background lifecycle hooks completed successfully")
 			}
 		}()
 	}
@@ -308,7 +309,7 @@ func (r *HookRunner) RunStartHooks(ctx context.Context) error {
 // runFeatureHooks executes a list of feature hooks.
 func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []FeatureHook, hookType string) error {
 	for _, hook := range hooks {
-		fmt.Printf("Running %s from feature '%s'...\n", hookType, hook.FeatureName)
+		ui.Printf("Running %s from feature '%s'...", hookType, hook.FeatureName)
 		if err := r.runContainerCommand(ctx, hook.Command); err != nil {
 			return fmt.Errorf("feature '%s' %s failed: %w", hook.FeatureName, hookType, err)
 		}
@@ -345,7 +346,7 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 
 	// Parallel execution for map commands with context cancellation
 	// Per spec, if one parallel command fails, cancel the others
-	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	ui.Printf("  Running %d parallel commands...", len(cmds))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -381,7 +382,7 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 	if len(errs) > 0 {
 		// Return first error, but log all
 		for _, err := range errs {
-			fmt.Printf("  Error: %v\n", err)
+			ui.Error("  %v", err)
 		}
 		return errs[0]
 	}
@@ -418,7 +419,7 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 
 	// Parallel execution for map commands with context cancellation
 	// Per spec, if one parallel command fails, cancel the others
-	fmt.Printf("  Running %d parallel commands...\n", len(cmds))
+	ui.Printf("  Running %d parallel commands...", len(cmds))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -454,7 +455,7 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 	if len(errs) > 0 {
 		// Return first error, but log all
 		for _, err := range errs {
-			fmt.Printf("  Error: %v\n", err)
+			ui.Error("  %v", err)
 		}
 		return errs[0]
 	}
@@ -472,7 +473,7 @@ func formatCommandForDisplay(cmd CommandSpec) string {
 
 // executeHostCommand runs a single command on the host.
 func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec) error {
-	fmt.Printf("  > %s\n", formatCommandForDisplay(cmdSpec))
+	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
 
 	var cmd *exec.Cmd
 	if cmdSpec.UseShell {
@@ -492,7 +493,7 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 
 // executeContainerCommand runs a single command in the container.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
-	fmt.Printf("  > %s\n", formatCommandForDisplay(cmdSpec))
+	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
 
 	workspaceFolder := config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 
