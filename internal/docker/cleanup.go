@@ -16,9 +16,9 @@ type CleanupResult struct {
 }
 
 // CleanupDerivedImages removes derived images created by dcx.
-// If envKey is provided, only images for that environment are removed.
+// If workspaceID is provided, only images for that environment are removed.
 // If keepCurrent is true, the current derived image (matching configHash) is preserved.
-func (c *Client) CleanupDerivedImages(ctx context.Context, envKey, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
+func (c *Client) CleanupDerivedImages(ctx context.Context, workspaceID, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
 	result := &CleanupResult{}
 
 	// List all images
@@ -30,7 +30,7 @@ func (c *Client) CleanupDerivedImages(ctx context.Context, envKey, currentConfig
 	for _, img := range images {
 		// Check each tag
 		for _, tag := range img.RepoTags {
-			// Derived images follow the pattern: dcx-derived/<envKey>:<hash>
+			// Derived images follow the pattern: dcx-derived/<workspaceID>:<hash>
 			if !strings.HasPrefix(tag, "dcx-derived/") {
 				continue
 			}
@@ -41,11 +41,11 @@ func (c *Client) CleanupDerivedImages(ctx context.Context, envKey, currentConfig
 				continue
 			}
 
-			imageEnvKey := parts[0]
+			imageWorkspaceID := parts[0]
 			imageHash := parts[1]
 
-			// If envKey filter is provided, only match that environment
-			if envKey != "" && imageEnvKey != envKey {
+			// If workspaceID filter is provided, only match that environment
+			if workspaceID != "" && imageWorkspaceID != workspaceID {
 				continue
 			}
 

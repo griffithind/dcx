@@ -105,7 +105,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		if actualProject == "" {
 			actualProject = cliCtx.Identifiers.ProjectName
 		}
-		r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.EnvKey)
+		r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.WorkspaceID)
 		if err := r.Restart(cliCtx.Ctx); err != nil {
 			restartErr = fmt.Errorf("failed to restart containers: %w", err)
 		}

@@ -140,7 +140,7 @@ type ContainerInfo struct {
 	Status         string
 	Running        bool
 	ConfigHash     string
-	WorkspaceID    string // Stable identifier (replaces EnvKey)
+	WorkspaceID    string // Stable identifier (replaces WorkspaceID)
 	Plan           string
 	ComposeProject string
 	PrimaryService string

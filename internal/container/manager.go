@@ -75,8 +75,8 @@ func (m *Manager) GetState(ctx context.Context, workspaceID string) (State, *Con
 }
 
 // GetStateWithHashCheck determines state and checks for staleness.
-func (m *Manager) GetStateWithHashCheck(ctx context.Context, envKey, currentConfigHash string) (State, *ContainerInfo, error) {
-	state, info, err := m.GetState(ctx, envKey)
+func (m *Manager) GetStateWithHashCheck(ctx context.Context, workspaceID, currentConfigHash string) (State, *ContainerInfo, error) {
+	state, info, err := m.GetState(ctx, workspaceID)
 	if err != nil || info == nil {
 		return state, info, err
 	}
@@ -108,8 +108,8 @@ func (m *Manager) GetStateWithProject(ctx context.Context, projectName, workspac
 }
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
-func (m *Manager) GetStateWithProjectAndHash(ctx context.Context, projectName, envKey, currentConfigHash string) (State, *ContainerInfo, error) {
-	state, info, err := m.GetStateWithProject(ctx, projectName, envKey)
+func (m *Manager) GetStateWithProjectAndHash(ctx context.Context, projectName, workspaceID, currentConfigHash string) (State, *ContainerInfo, error) {
+	state, info, err := m.GetStateWithProject(ctx, projectName, workspaceID)
 	if err != nil || info == nil {
 		return state, info, err
 	}
@@ -262,8 +262,8 @@ func (m *Manager) Cleanup(ctx context.Context, workspaceID string, removeVolumes
 }
 
 // ValidateState checks if the current state allows the requested operation.
-func (m *Manager) ValidateState(ctx context.Context, envKey string, operation Operation) error {
-	state, _, err := m.GetState(ctx, envKey)
+func (m *Manager) ValidateState(ctx context.Context, workspaceID string, operation Operation) error {
+	state, _, err := m.GetState(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -302,13 +302,13 @@ func (m *Manager) ValidateState(ctx context.Context, envKey string, operation Op
 }
 
 // GetDiagnostics returns diagnostic information for troubleshooting.
-func (m *Manager) GetDiagnostics(ctx context.Context, envKey string) (*Diagnostics, error) {
-	state, info, err := m.GetState(ctx, envKey)
+func (m *Manager) GetDiagnostics(ctx context.Context, workspaceID string) (*Diagnostics, error) {
+	state, info, err := m.GetState(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	containers, err := m.FindContainers(ctx, envKey)
+	containers, err := m.FindContainers(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}

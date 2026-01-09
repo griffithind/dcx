@@ -46,7 +46,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	return svc.DownWithEnvKey(ctx, ids.ProjectName, ids.EnvKey, service.DownOptions{
+	return svc.DownWithWorkspaceID(ctx, ids.ProjectName, ids.WorkspaceID, service.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	})

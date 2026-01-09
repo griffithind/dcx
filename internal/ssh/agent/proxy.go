@@ -23,7 +23,7 @@ func GenerateSocketName() string {
 
 // Proxy manages an SSH agent proxy socket.
 type Proxy struct {
-	envKey         string
+	workspaceID         string
 	upstreamSocket string
 	proxyDir       string
 	socketPath     string
@@ -35,13 +35,13 @@ type Proxy struct {
 }
 
 // NewProxy creates a new SSH agent proxy with default socket name.
-func NewProxy(envKey string) (*Proxy, error) {
-	return NewProxyWithSocket(envKey, "agent.sock")
+func NewProxy(workspaceID string) (*Proxy, error) {
+	return NewProxyWithSocket(workspaceID, "agent.sock")
 }
 
 // NewProxyWithSocket creates a new SSH agent proxy with a custom socket name.
 // This allows multiple concurrent proxies in the same directory.
-func NewProxyWithSocket(envKey, socketName string) (*Proxy, error) {
+func NewProxyWithSocket(workspaceID, socketName string) (*Proxy, error) {
 	// Get upstream socket
 	upstreamSocket, err := GetUpstreamSocket()
 	if err != nil {
@@ -54,7 +54,7 @@ func NewProxyWithSocket(envKey, socketName string) (*Proxy, error) {
 	}
 
 	// Determine proxy directory
-	proxyDir, err := GetProxyDir(envKey)
+	proxyDir, err := GetProxyDir(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine proxy directory: %w", err)
 	}
@@ -62,7 +62,7 @@ func NewProxyWithSocket(envKey, socketName string) (*Proxy, error) {
 	socketPath := filepath.Join(proxyDir, socketName)
 
 	return &Proxy{
-		envKey:         envKey,
+		workspaceID:         workspaceID,
 		upstreamSocket: upstreamSocket,
 		proxyDir:       proxyDir,
 		socketPath:     socketPath,
@@ -71,7 +71,7 @@ func NewProxyWithSocket(envKey, socketName string) (*Proxy, error) {
 }
 
 // GetProxyDir returns the platform-specific proxy directory for SSH agent sockets.
-func GetProxyDir(envKey string) (string, error) {
+func GetProxyDir(workspaceID string) (string, error) {
 	var baseDir string
 
 	switch runtime.GOOS {
@@ -80,14 +80,14 @@ func GetProxyDir(envKey string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		baseDir = filepath.Join(home, "Library", "Caches", "dcx", envKey, "ssh-agent")
+		baseDir = filepath.Join(home, "Library", "Caches", "dcx", workspaceID, "ssh-agent")
 
 	default: // linux
 		if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-			baseDir = filepath.Join(runtimeDir, "dcx", envKey, "ssh-agent")
+			baseDir = filepath.Join(runtimeDir, "dcx", workspaceID, "ssh-agent")
 		} else {
 			// Fallback to /run/user/$UID
-			baseDir = filepath.Join("/run", "user", fmt.Sprintf("%d", os.Getuid()), "dcx", envKey, "ssh-agent")
+			baseDir = filepath.Join("/run", "user", fmt.Sprintf("%d", os.Getuid()), "dcx", workspaceID, "ssh-agent")
 		}
 	}
 

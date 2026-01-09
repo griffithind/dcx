@@ -12,7 +12,7 @@ func TestParseImageMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected []DevcontainerConfig
+		expected []DevContainerConfig
 		wantErr  bool
 	}{
 		{
@@ -23,14 +23,14 @@ func TestParseImageMetadata(t *testing.T) {
 		{
 			name:  "single config",
 			input: `[{"remoteUser": "vscode", "workspaceFolder": "/workspace"}]`,
-			expected: []DevcontainerConfig{
+			expected: []DevContainerConfig{
 				{RemoteUser: "vscode", WorkspaceFolder: "/workspace"},
 			},
 		},
 		{
 			name:  "multiple configs",
 			input: `[{"remoteUser": "node"}, {"remoteUser": "vscode", "capAdd": ["SYS_PTRACE"]}]`,
-			expected: []DevcontainerConfig{
+			expected: []DevContainerConfig{
 				{RemoteUser: "node"},
 				{RemoteUser: "vscode", CapAdd: []string{"SYS_PTRACE"}},
 			},
@@ -57,22 +57,22 @@ func TestParseImageMetadata(t *testing.T) {
 
 func TestMergeMetadata(t *testing.T) {
 	t.Run("empty image configs returns local", func(t *testing.T) {
-		local := &DevcontainerConfig{RemoteUser: "local"}
+		local := &DevContainerConfig{RemoteUser: "local"}
 		result := MergeMetadata(local, nil)
 		assert.Equal(t, "local", result.RemoteUser)
 	})
 
 	t.Run("local single values take precedence", func(t *testing.T) {
-		local := &DevcontainerConfig{RemoteUser: "local", WorkspaceFolder: "/local"}
-		image := []DevcontainerConfig{{RemoteUser: "image", WorkspaceFolder: "/image"}}
+		local := &DevContainerConfig{RemoteUser: "local", WorkspaceFolder: "/local"}
+		image := []DevContainerConfig{{RemoteUser: "image", WorkspaceFolder: "/image"}}
 		result := MergeMetadata(local, image)
 		assert.Equal(t, "local", result.RemoteUser)
 		assert.Equal(t, "/local", result.WorkspaceFolder)
 	})
 
 	t.Run("image fills empty local values", func(t *testing.T) {
-		local := &DevcontainerConfig{RemoteUser: "local"}
-		image := []DevcontainerConfig{{WorkspaceFolder: "/image", UserEnvProbe: "loginShell"}}
+		local := &DevContainerConfig{RemoteUser: "local"}
+		image := []DevContainerConfig{{WorkspaceFolder: "/image", UserEnvProbe: "loginShell"}}
 		result := MergeMetadata(local, image)
 		assert.Equal(t, "local", result.RemoteUser)
 		assert.Equal(t, "/image", result.WorkspaceFolder)
@@ -81,8 +81,8 @@ func TestMergeMetadata(t *testing.T) {
 
 	t.Run("boolean true wins", func(t *testing.T) {
 		val := true
-		local := &DevcontainerConfig{}
-		image := []DevcontainerConfig{{Init: &val, Privileged: &val}}
+		local := &DevContainerConfig{}
+		image := []DevContainerConfig{{Init: &val, Privileged: &val}}
 		result := MergeMetadata(local, image)
 		require.NotNil(t, result.Init)
 		assert.True(t, *result.Init)
@@ -93,19 +93,19 @@ func TestMergeMetadata(t *testing.T) {
 	t.Run("local boolean false overrides image true", func(t *testing.T) {
 		localVal := false
 		imageVal := true
-		local := &DevcontainerConfig{Init: &localVal}
-		image := []DevcontainerConfig{{Init: &imageVal}}
+		local := &DevContainerConfig{Init: &localVal}
+		image := []DevContainerConfig{{Init: &imageVal}}
 		result := MergeMetadata(local, image)
 		require.NotNil(t, result.Init)
 		assert.False(t, *result.Init)
 	})
 
 	t.Run("arrays are unioned", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			CapAdd:      []string{"SYS_PTRACE"},
 			SecurityOpt: []string{"seccomp=unconfined"},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			CapAdd:      []string{"NET_ADMIN", "SYS_PTRACE"}, // SYS_PTRACE is duplicate
 			SecurityOpt: []string{"apparmor=unconfined"},
 		}}
@@ -115,10 +115,10 @@ func TestMergeMetadata(t *testing.T) {
 	})
 
 	t.Run("environment maps are merged", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			ContainerEnv: map[string]string{"LOCAL": "value", "SHARED": "local"},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			ContainerEnv: map[string]string{"IMAGE": "value", "SHARED": "image"},
 		}}
 		result := MergeMetadata(local, image)
@@ -128,12 +128,12 @@ func TestMergeMetadata(t *testing.T) {
 	})
 
 	t.Run("features are merged", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Features: map[string]interface{}{
 				"ghcr.io/devcontainers/features/git:1": map[string]interface{}{},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Features: map[string]interface{}{
 				"ghcr.io/devcontainers/features/node:1":   map[string]interface{}{},
 				"ghcr.io/devcontainers/features/python:1": map[string]interface{}{},
@@ -147,8 +147,8 @@ func TestMergeMetadata(t *testing.T) {
 	})
 
 	t.Run("multiple image configs merge in order", func(t *testing.T) {
-		local := &DevcontainerConfig{RemoteUser: "local"}
-		image := []DevcontainerConfig{
+		local := &DevContainerConfig{RemoteUser: "local"}
+		image := []DevContainerConfig{
 			{WorkspaceFolder: "/first", UserEnvProbe: "none"},
 			{WorkspaceFolder: "/second"}, // overwrites /first since local is empty
 		}
@@ -160,10 +160,10 @@ func TestMergeMetadata(t *testing.T) {
 	})
 
 	t.Run("forward ports are unioned", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			ForwardPorts: []interface{}{3000, "8080:80"},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			ForwardPorts: []interface{}{float64(3000), 5000}, // float64 from JSON, 3000 is duplicate
 		}}
 		result := MergeMetadata(local, image)
@@ -172,12 +172,12 @@ func TestMergeMetadata(t *testing.T) {
 	})
 
 	t.Run("mounts are unioned by target", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Mounts: []Mount{
 				{Source: "/local", Target: "/mount1", Type: "bind"},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Mounts: []Mount{
 				{Source: "/image", Target: "/mount1", Type: "bind"}, // duplicate target
 				{Source: "/image2", Target: "/mount2", Type: "bind"},
@@ -240,14 +240,14 @@ func TestUnionStrings(t *testing.T) {
 
 func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 	t.Run("extensions are unioned", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"extensions": []interface{}{"local.ext1", "shared.ext"},
 				},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"extensions": []interface{}{"image.ext1", "shared.ext"},
@@ -265,7 +265,7 @@ func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 	})
 
 	t.Run("settings are merged with local taking precedence", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"settings": map[string]interface{}{
@@ -276,7 +276,7 @@ func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 				},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"settings": map[string]interface{}{
@@ -296,7 +296,7 @@ func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 	})
 
 	t.Run("both extensions and settings are merged together", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"extensions": []interface{}{"local.ext"},
@@ -306,7 +306,7 @@ func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 				},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Customizations: map[string]interface{}{
 				"vscode": map[string]interface{}{
 					"extensions": []interface{}{"image.ext"},
@@ -327,14 +327,14 @@ func TestDeepMergeVSCodeCustomizations(t *testing.T) {
 	})
 
 	t.Run("non-vscode customizations use simple merge", func(t *testing.T) {
-		local := &DevcontainerConfig{
+		local := &DevContainerConfig{
 			Customizations: map[string]interface{}{
 				"jetbrains": map[string]interface{}{
 					"localSetting": "value",
 				},
 			},
 		}
-		image := []DevcontainerConfig{{
+		image := []DevContainerConfig{{
 			Customizations: map[string]interface{}{
 				"jetbrains": map[string]interface{}{
 					"imageSetting": "value",

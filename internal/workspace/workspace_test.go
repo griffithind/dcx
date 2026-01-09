@@ -6,7 +6,6 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/labels"
 	"github.com/griffithind/dcx/internal/util"
 )
 
@@ -31,19 +30,19 @@ func TestComputeName(t *testing.T) {
 	tests := []struct {
 		name     string
 		path     string
-		config   *config.DevcontainerConfig
+		config   *config.DevContainerConfig
 		expected string
 	}{
 		{
 			name:     "from config name",
 			path:     "/home/user/project",
-			config:   &config.DevcontainerConfig{Name: "My Project"},
+			config:   &config.DevContainerConfig{Name: "My Project"},
 			expected: "My Project",
 		},
 		{
 			name:     "from path",
 			path:     "/home/user/my-project",
-			config:   &config.DevcontainerConfig{},
+			config:   &config.DevContainerConfig{},
 			expected: "my-project",
 		},
 		{
@@ -67,24 +66,24 @@ func TestComputeName(t *testing.T) {
 func TestGetPlanType(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   *config.DevcontainerConfig
+		config   *config.DevContainerConfig
 		expected PlanType
 	}{
 		{
 			name:     "image plan",
-			config:   &config.DevcontainerConfig{Image: "ubuntu:latest"},
+			config:   &config.DevContainerConfig{Image: "ubuntu:latest"},
 			expected: PlanTypeImage,
 		},
 		{
 			name: "dockerfile plan",
-			config: &config.DevcontainerConfig{
+			config: &config.DevContainerConfig{
 				Build: &config.BuildConfig{Dockerfile: "Dockerfile"},
 			},
 			expected: PlanTypeDockerfile,
 		},
 		{
 			name: "compose plan",
-			config: &config.DevcontainerConfig{
+			config: &config.DevContainerConfig{
 				DockerComposeFile: "docker-compose.yml",
 				Service:           "app",
 			},
@@ -102,138 +101,10 @@ func TestGetPlanType(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIsStale(t *testing.T) {
-	t.Run("no state", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "abc123"},
-		}
-		if !ws.IsStale() {
-			t.Error("should be stale with no state")
-		}
-	})
-
-	t.Run("no labels", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "abc123"},
-			State:  &RuntimeState{},
-		}
-		if !ws.IsStale() {
-			t.Error("should be stale with no labels")
-		}
-	})
-
-	t.Run("matching hash", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "abc123"},
-			State: &RuntimeState{
-				Labels: &labels.Labels{HashOverall: "abc123"},
-			},
-		}
-		if ws.IsStale() {
-			t.Error("should not be stale with matching hash")
-		}
-	})
-
-	t.Run("different hash", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "abc123"},
-			State: &RuntimeState{
-				Labels: &labels.Labels{HashOverall: "def456"},
-			},
-		}
-		if !ws.IsStale() {
-			t.Error("should be stale with different hash")
-		}
-	})
-}
-
-func TestWorkspaceGetStalenessChanges(t *testing.T) {
-	t.Run("no state", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "abc123"},
-		}
-		changes := ws.GetStalenessChanges()
-		if len(changes) != 1 || changes[0] != "container not found" {
-			t.Errorf("unexpected changes: %v", changes)
-		}
-	})
-
-	t.Run("config changed", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Config: "new", Overall: "overall"},
-			State: &RuntimeState{
-				Labels: &labels.Labels{HashConfig: "old", HashOverall: "different"},
-			},
-		}
-		changes := ws.GetStalenessChanges()
-		if len(changes) != 1 || changes[0] != "devcontainer.json changed" {
-			t.Errorf("unexpected changes: %v", changes)
-		}
-	})
-
-	t.Run("multiple changes", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{
-				Config:     "new-config",
-				Dockerfile: "new-dockerfile",
-				Overall:    "overall",
-			},
-			State: &RuntimeState{
-				Labels: &labels.Labels{
-					HashConfig:     "old-config",
-					HashDockerfile: "old-dockerfile",
-					HashOverall:    "different",
-				},
-			},
-		}
-		changes := ws.GetStalenessChanges()
-		if len(changes) != 2 {
-			t.Errorf("expected 2 changes, got %d: %v", len(changes), changes)
-		}
-	})
-}
-
-func TestWorkspaceNeedsRebuild(t *testing.T) {
-	t.Run("absent", func(t *testing.T) {
-		ws := &Workspace{
-			State: &RuntimeState{Status: StatusAbsent},
-		}
-		if !ws.NeedsRebuild() {
-			t.Error("should need rebuild when absent")
-		}
-	})
-
-	t.Run("stale", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "new"},
-			State: &RuntimeState{
-				Status: StatusRunning,
-				Labels: &labels.Labels{HashOverall: "old"},
-			},
-		}
-		if !ws.NeedsRebuild() {
-			t.Error("should need rebuild when stale")
-		}
-	})
-
-	t.Run("up to date", func(t *testing.T) {
-		ws := &Workspace{
-			Hashes: &HashSet{Overall: "same"},
-			State: &RuntimeState{
-				Status: StatusRunning,
-				Labels: &labels.Labels{HashOverall: "same"},
-			},
-		}
-		if ws.NeedsRebuild() {
-			t.Error("should not need rebuild when up to date")
-		}
-	})
-}
-
 func TestBuilderBasicBuild(t *testing.T) {
 	builder := NewBuilder(nil)
 
-	cfg := &config.DevcontainerConfig{
+	cfg := &config.DevContainerConfig{
 		Name:            "test-project",
 		Image:           "ubuntu:latest",
 		WorkspaceFolder: "/workspace",
@@ -283,7 +154,7 @@ func TestBuilderBasicBuild(t *testing.T) {
 func TestBuilderDockerfileBuild(t *testing.T) {
 	builder := NewBuilder(nil)
 
-	cfg := &config.DevcontainerConfig{
+	cfg := &config.DevContainerConfig{
 		Build: &config.BuildConfig{
 			Dockerfile: "Dockerfile",
 			Context:    ".",
@@ -315,7 +186,7 @@ func TestBuilderDockerfileBuild(t *testing.T) {
 func TestBuilderComposeBuild(t *testing.T) {
 	builder := NewBuilder(nil)
 
-	cfg := &config.DevcontainerConfig{
+	cfg := &config.DevContainerConfig{
 		DockerComposeFile: []string{"docker-compose.yml"},
 		Service:           "app",
 		RunServices:       []string{"db", "redis"},
@@ -388,7 +259,7 @@ func TestVariableSubstitution(t *testing.T) {
 
 func TestParseLifecycleHooks(t *testing.T) {
 	t.Run("string command", func(t *testing.T) {
-		cfg := &config.DevcontainerConfig{
+		cfg := &config.DevContainerConfig{
 			OnCreateCommand: "npm install",
 		}
 		hooks := parseLifecycleHooks(cfg)
@@ -401,7 +272,7 @@ func TestParseLifecycleHooks(t *testing.T) {
 	})
 
 	t.Run("array command", func(t *testing.T) {
-		cfg := &config.DevcontainerConfig{
+		cfg := &config.DevContainerConfig{
 			OnCreateCommand: []interface{}{"npm", "install"},
 		}
 		hooks := parseLifecycleHooks(cfg)
@@ -414,7 +285,7 @@ func TestParseLifecycleHooks(t *testing.T) {
 	})
 
 	t.Run("map command", func(t *testing.T) {
-		cfg := &config.DevcontainerConfig{
+		cfg := &config.DevContainerConfig{
 			OnCreateCommand: map[string]interface{}{
 				"install": "npm install",
 				"build":   "npm run build",
@@ -544,7 +415,7 @@ func TestDeepMergeCustomizations(t *testing.T) {
 
 func TestRemoteUserSubstitution_LocalEnvVariable(t *testing.T) {
 	// Test that remoteUser and containerUser support variable substitution
-	cfg := &config.DevcontainerConfig{
+	cfg := &config.DevContainerConfig{
 		Name:          "test-remoteuser-substitution",
 		Image:         "alpine",
 		RemoteUser:    "${localEnv:USER}",

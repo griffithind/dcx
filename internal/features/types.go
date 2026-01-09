@@ -15,8 +15,8 @@ type Feature struct {
 	// ID is the original feature identifier from devcontainer.json
 	ID string
 
-	// Ref is the parsed reference (OCI, local, or HTTP)
-	Ref FeatureRef
+	// Source is the parsed feature source (OCI, local path, or tarball)
+	Source FeatureSource
 
 	// Options are the user-specified options for this feature
 	Options map[string]interface{}
@@ -28,10 +28,10 @@ type Feature struct {
 	CachePath string
 }
 
-// FeatureRef represents a parsed feature reference.
-type FeatureRef struct {
-	// Type is the reference type (oci, local, http)
-	Type RefType
+// FeatureSource represents a parsed feature source/reference.
+type FeatureSource struct {
+	// Type is the source type (oci, local-path, tarball)
+	Type SourceType
 
 	// Registry is the OCI registry (for OCI refs)
 	Registry string
@@ -52,13 +52,13 @@ type FeatureRef struct {
 	URL string
 }
 
-// RefType indicates the type of feature reference.
-type RefType string
+// SourceType indicates the type of feature reference.
+type SourceType string
 
 const (
-	RefTypeOCI   RefType = "oci"
-	RefTypeLocal RefType = "local"
-	RefTypeHTTP  RefType = "http"
+	SourceTypeOCI   SourceType = "oci"
+	SourceTypeLocalPath SourceType = "local"
+	SourceTypeTarball  SourceType = "http"
 )
 
 // FeatureMetadata represents the devcontainer-feature.json contents.
@@ -221,40 +221,40 @@ func (f *Feature) String() string {
 }
 
 // CanonicalID returns a canonical identifier for caching.
-func (r *FeatureRef) CanonicalID() string {
+func (r *FeatureSource) CanonicalID() string {
 	switch r.Type {
-	case RefTypeOCI:
+	case SourceTypeOCI:
 		return fmt.Sprintf("%s/%s/%s:%s", r.Registry, r.Repository, r.Resource, r.Version)
-	case RefTypeLocal:
+	case SourceTypeLocalPath:
 		return fmt.Sprintf("local:%s", r.Path)
-	case RefTypeHTTP:
+	case SourceTypeTarball:
 		return r.URL
 	default:
 		return ""
 	}
 }
 
-// ParseFeatureRef parses a feature ID string into a FeatureRef.
-func ParseFeatureRef(id string) (FeatureRef, error) {
-	ref := FeatureRef{}
+// ParseFeatureSource parses a feature ID string into a FeatureSource.
+func ParseFeatureSource(id string) (FeatureSource, error) {
+	ref := FeatureSource{}
 
 	// Check for local path
 	if strings.HasPrefix(id, "./") || strings.HasPrefix(id, "../") || strings.HasPrefix(id, "/") {
-		ref.Type = RefTypeLocal
+		ref.Type = SourceTypeLocalPath
 		ref.Path = id
 		return ref, nil
 	}
 
 	// Check for HTTP(S) URL
 	if strings.HasPrefix(id, "http://") || strings.HasPrefix(id, "https://") {
-		ref.Type = RefTypeHTTP
+		ref.Type = SourceTypeTarball
 		ref.URL = id
 		return ref, nil
 	}
 
 	// Parse as OCI reference
 	// Format: [registry/]repository/feature[:version]
-	ref.Type = RefTypeOCI
+	ref.Type = SourceTypeOCI
 
 	// Split off version
 	versionIdx := strings.LastIndex(id, ":")

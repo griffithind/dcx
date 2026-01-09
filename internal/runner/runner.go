@@ -48,12 +48,12 @@ func NewUnifiedRunner(ws *workspace.Workspace, dockerClient *docker.Client) (*Un
 
 // NewUnifiedRunnerForExisting creates a lightweight runner for operating on existing environments.
 // This is used for simple operations (stop, start, restart, down) where we don't need a full workspace.
-// The projectName is the compose project name, envKey is the workspace ID.
-func NewUnifiedRunnerForExisting(workspacePath, projectName, envKey string) *UnifiedRunner {
+// The projectName is the compose project name, workspaceID is the workspace ID.
+func NewUnifiedRunnerForExisting(workspacePath, projectName, workspaceID string) *UnifiedRunner {
 	// Create a minimal workspace for compose operations
 	ws := &workspace.Workspace{
 		LocalRoot: workspacePath,
-		ID:        envKey,
+		ID:        workspaceID,
 		Resolved: &workspace.ResolvedConfig{
 			PlanType:    workspace.PlanTypeCompose,
 			ServiceName: projectName,

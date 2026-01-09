@@ -342,7 +342,7 @@ func validateFileReferences(ws *workspace.Workspace) []CheckResult {
 	return results
 }
 
-func validateFeatures(cfg *config.DevcontainerConfig) []CheckResult {
+func validateFeatures(cfg *config.DevContainerConfig) []CheckResult {
 	var results []CheckResult
 
 	if len(cfg.Features) == 0 {

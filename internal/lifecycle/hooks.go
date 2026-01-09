@@ -11,6 +11,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 )
@@ -62,47 +63,39 @@ type CommandSpec struct {
 	Parallel bool
 }
 
-// FeatureHook represents a lifecycle hook from a feature.
-// This mirrors features.FeatureHook to avoid import cycles.
-type FeatureHook struct {
-	FeatureID   string
-	FeatureName string
-	Command     interface{}
-}
-
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
 	dockerClient     *docker.Client
 	containerID     string
 	workspacePath   string
-	cfg             *config.DevcontainerConfig
-	envKey          string
+	cfg             *config.DevContainerConfig
+	workspaceID          string
 	sshAgentEnabled bool
 
 	// Feature hooks (optional, set via SetFeatureHooks)
-	featureOnCreateHooks      []FeatureHook
-	featureUpdateContentHooks []FeatureHook
-	featurePostCreateHooks    []FeatureHook
-	featurePostStartHooks     []FeatureHook
-	featurePostAttachHooks    []FeatureHook
+	featureOnCreateHooks      []features.FeatureHook
+	featureUpdateContentHooks []features.FeatureHook
+	featurePostCreateHooks    []features.FeatureHook
+	featurePostStartHooks     []features.FeatureHook
+	featurePostAttachHooks    []features.FeatureHook
 }
 
 // NewHookRunner creates a new hook runner.
-// envKey is the environment key for SSH proxy directory.
+// workspaceID is the environment key for SSH proxy directory.
 // sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevcontainerConfig, envKey string, sshAgentEnabled bool) *HookRunner {
+func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
 	return &HookRunner{
 		dockerClient:    dockerClient,
 		containerID:     containerID,
 		workspacePath:   workspacePath,
 		cfg:             cfg,
-		envKey:          envKey,
+		workspaceID:          workspaceID,
 		sshAgentEnabled: sshAgentEnabled,
 	}
 }
 
 // SetFeatureHooks sets the feature lifecycle hooks to be executed.
-func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postStart, postAttach []FeatureHook) {
+func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postStart, postAttach []features.FeatureHook) {
 	r.featureOnCreateHooks = onCreate
 	r.featureUpdateContentHooks = updateContent
 	r.featurePostCreateHooks = postCreate
@@ -307,7 +300,7 @@ func (r *HookRunner) RunStartHooks(ctx context.Context) error {
 }
 
 // runFeatureHooks executes a list of feature hooks.
-func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []FeatureHook, hookType string) error {
+func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []features.FeatureHook, hookType string) error {
 	for _, hook := range hooks {
 		ui.Printf("Running %s from feature '%s'...", hookType, hook.FeatureName)
 		if err := r.runContainerCommand(ctx, hook.Command); err != nil {

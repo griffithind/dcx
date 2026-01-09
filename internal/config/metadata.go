@@ -11,12 +11,12 @@ const DevcontainerMetadataLabel = "devcontainer.metadata"
 
 // ParseImageMetadata parses the devcontainer.metadata label value.
 // The label contains a JSON array of configuration objects.
-func ParseImageMetadata(labelValue string) ([]DevcontainerConfig, error) {
+func ParseImageMetadata(labelValue string) ([]DevContainerConfig, error) {
 	if labelValue == "" {
 		return nil, nil
 	}
 
-	var configs []DevcontainerConfig
+	var configs []DevContainerConfig
 	if err := json.Unmarshal([]byte(labelValue), &configs); err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func ParseImageMetadata(labelValue string) ([]DevcontainerConfig, error) {
 // - Booleans: true if any source is true
 // - Arrays: Union without duplicates
 // - Single values: Last value wins (local config takes precedence)
-func MergeMetadata(local *DevcontainerConfig, imageConfigs []DevcontainerConfig) *DevcontainerConfig {
+func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig) *DevContainerConfig {
 	if len(imageConfigs) == 0 {
 		return local
 	}
@@ -48,7 +48,7 @@ func MergeMetadata(local *DevcontainerConfig, imageConfigs []DevcontainerConfig)
 }
 
 // mergeConfig merges source config into target.
-func mergeConfig(target, source *DevcontainerConfig) {
+func mergeConfig(target, source *DevContainerConfig) {
 	// String properties: source wins if target is empty
 	if target.Name == "" && source.Name != "" {
 		target.Name = source.Name
@@ -164,7 +164,7 @@ func mergeConfig(target, source *DevcontainerConfig) {
 }
 
 // applyLocalOverrides ensures local config values take final precedence.
-func applyLocalOverrides(merged, local *DevcontainerConfig) {
+func applyLocalOverrides(merged, local *DevContainerConfig) {
 	// Single values: local wins if set
 	if local.Name != "" {
 		merged.Name = local.Name

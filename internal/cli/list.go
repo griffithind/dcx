@@ -33,7 +33,7 @@ Examples:
 
 // EnvironmentInfo represents a dcx-managed environment for listing.
 type EnvironmentInfo struct {
-	EnvKey        string          `json:"envKey"`
+	WorkspaceID        string          `json:"workspaceID"`
 	ProjectName   string          `json:"projectName,omitempty"`
 	WorkspacePath string          `json:"workspacePath"`
 	State         string          `json:"state"`
@@ -79,22 +79,22 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		envKey := lbls.WorkspaceID
-		if envKey == "" {
+		workspaceID := lbls.WorkspaceID
+		if workspaceID == "" {
 			continue
 		}
 
-		env, exists := envMap[envKey]
+		env, exists := envMap[workspaceID]
 		if !exists {
 			env = &EnvironmentInfo{
-				EnvKey:        envKey,
+				WorkspaceID:        workspaceID,
 				ProjectName:   lbls.WorkspaceName,
 				WorkspacePath: lbls.WorkspacePath,
 				Plan:          lbls.BuildMethod,
 				Containers:    []ContainerItem{},
 				CreatedAt:     cont.Created,
 			}
-			envMap[envKey] = env
+			envMap[workspaceID] = env
 		}
 
 		// Add container to environment
@@ -115,7 +115,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	// Determine state for each environment
 	stateMgr := container.NewManager(dockerClient)
 	for _, env := range envMap {
-		s, _, _ := stateMgr.GetState(ctx, env.EnvKey)
+		s, _, _ := stateMgr.GetState(ctx, env.WorkspaceID)
 		env.State = string(s)
 	}
 
@@ -157,7 +157,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		}
 
 		// Use project name as identifier if available
-		identifier := env.EnvKey
+		identifier := env.WorkspaceID
 		if env.ProjectName != "" {
 			identifier = env.ProjectName
 		}

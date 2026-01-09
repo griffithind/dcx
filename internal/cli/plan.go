@@ -70,7 +70,7 @@ func displayPlan(plan *service.PlanResult) {
 
 	// Workspace info
 	ui.Printf("%s", ui.FormatLabel("Workspace", info.ProjectName))
-	ui.Printf("%s", ui.FormatLabel("Path", ui.Code(info.EnvKey)))
+	ui.Printf("%s", ui.FormatLabel("Path", ui.Code(info.WorkspaceID)))
 	if info.ProjectName != "" {
 		ui.Printf("%s", ui.FormatLabel("Project", ui.Dim(info.ProjectName)))
 	}

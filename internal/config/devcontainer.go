@@ -8,8 +8,8 @@ import (
 	"github.com/griffithind/dcx/internal/parse"
 )
 
-// DevcontainerConfig represents the parsed devcontainer.json configuration.
-type DevcontainerConfig struct {
+// DevContainerConfig represents the parsed devcontainer.json configuration.
+type DevContainerConfig struct {
 	// Name is the display name for the dev container.
 	Name string `json:"name,omitempty"`
 
@@ -102,7 +102,7 @@ type HostRequirements struct {
 }
 
 // GetDockerComposeFiles returns the docker compose file paths as a slice.
-func (c *DevcontainerConfig) GetDockerComposeFiles() []string {
+func (c *DevContainerConfig) GetDockerComposeFiles() []string {
 	if c.DockerComposeFile == nil {
 		return nil
 	}
@@ -126,34 +126,34 @@ func (c *DevcontainerConfig) GetDockerComposeFiles() []string {
 }
 
 // IsComposePlan returns true if this config uses docker compose.
-func (c *DevcontainerConfig) IsComposePlan() bool {
+func (c *DevContainerConfig) IsComposePlan() bool {
 	return c.DockerComposeFile != nil
 }
 
 // IsSinglePlan returns true if this config uses image or build.
-func (c *DevcontainerConfig) IsSinglePlan() bool {
+func (c *DevContainerConfig) IsSinglePlan() bool {
 	return c.Image != "" || c.Build != nil
 }
 
 // GetRawJSON returns the raw JSON content for hash computation.
-func (c *DevcontainerConfig) GetRawJSON() []byte {
+func (c *DevContainerConfig) GetRawJSON() []byte {
 	return c.rawJSON
 }
 
 // SetRawJSON stores the raw JSON content.
-func (c *DevcontainerConfig) SetRawJSON(data []byte) {
+func (c *DevContainerConfig) SetRawJSON(data []byte) {
 	c.rawJSON = data
 }
 
 // MarshalJSON implements json.Marshaler.
-func (c *DevcontainerConfig) MarshalJSON() ([]byte, error) {
-	type Alias DevcontainerConfig
+func (c *DevContainerConfig) MarshalJSON() ([]byte, error) {
+	type Alias DevContainerConfig
 	return json.Marshal((*Alias)(c))
 }
 
 // GetForwardPorts returns the forward ports as a slice of strings.
 // Each element is in the format "hostPort:containerPort" or just "port".
-func (c *DevcontainerConfig) GetForwardPorts() []string {
+func (c *DevContainerConfig) GetForwardPorts() []string {
 	if len(c.ForwardPorts) == 0 {
 		return nil
 	}
@@ -183,7 +183,7 @@ func formatPort(port int) string {
 // GetAppPorts returns the app ports as a slice of strings.
 // AppPort can be an integer, string, or array of integers/strings.
 // Each element is in the format "hostPort:containerPort".
-func (c *DevcontainerConfig) GetAppPorts() []string {
+func (c *DevContainerConfig) GetAppPorts() []string {
 	if c.AppPort == nil {
 		return nil
 	}
@@ -278,7 +278,7 @@ func (m Mount) String() string {
 }
 
 // GetPortAttribute returns the attributes for a specific port.
-func (c *DevcontainerConfig) GetPortAttribute(port string) *PortAttribute {
+func (c *DevContainerConfig) GetPortAttribute(port string) *PortAttribute {
 	if c.PortsAttributes == nil {
 		return nil
 	}

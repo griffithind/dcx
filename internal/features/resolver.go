@@ -66,28 +66,28 @@ func getCacheDir() (string, error) {
 // Resolve resolves a feature from its ID and options.
 func (r *Resolver) Resolve(ctx context.Context, id string, options map[string]interface{}) (*Feature, error) {
 	// Parse the feature reference
-	ref, err := ParseFeatureRef(id)
+	ref, err := ParseFeatureSource(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feature ID %q: %w", id, err)
 	}
 
 	feature := &Feature{
 		ID:      id,
-		Ref:     ref,
+		Source:  ref,
 		Options: options,
 	}
 
 	// Resolve based on reference type
 	switch ref.Type {
-	case RefTypeLocal:
+	case SourceTypeLocalPath:
 		if err := r.resolveLocal(ctx, feature); err != nil {
 			return nil, fmt.Errorf("failed to resolve local feature: %w", err)
 		}
-	case RefTypeOCI:
+	case SourceTypeOCI:
 		if err := r.resolveOCI(ctx, feature); err != nil {
 			return nil, fmt.Errorf("failed to resolve OCI feature: %w", err)
 		}
-	case RefTypeHTTP:
+	case SourceTypeTarball:
 		if err := r.resolveHTTP(ctx, feature); err != nil {
 			return nil, fmt.Errorf("failed to resolve HTTP feature: %w", err)
 		}
@@ -101,7 +101,7 @@ func (r *Resolver) Resolve(ctx context.Context, id string, options map[string]in
 // resolveLocal resolves a local feature.
 func (r *Resolver) resolveLocal(ctx context.Context, feature *Feature) error {
 	// Resolve path relative to config directory
-	path := feature.Ref.Path
+	path := feature.Source.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(r.configDir, path)
 	}
@@ -129,7 +129,7 @@ func (r *Resolver) resolveLocal(ctx context.Context, feature *Feature) error {
 
 // resolveOCI resolves an OCI feature from a registry.
 func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
-	ref := feature.Ref
+	ref := feature.Source
 
 	// Compute cache key
 	cacheKey := computeCacheKey(ref.CanonicalID())
@@ -171,7 +171,7 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 
 // resolveHTTP resolves a feature from an HTTP URL.
 func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
-	ref := feature.Ref
+	ref := feature.Source
 
 	// Compute cache key
 	cacheKey := computeCacheKey(ref.URL)
@@ -211,7 +211,7 @@ func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
 }
 
 // fetchOCI fetches a feature from an OCI registry.
-func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureRef, destPath string) error {
+func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath string) error {
 	// Build the OCI manifest URL
 	// For ghcr.io, the format is: https://ghcr.io/v2/{repository}/{feature}/manifests/{tag}
 	manifestURL := fmt.Sprintf("https://%s/v2/%s/%s/manifests/%s",
@@ -465,7 +465,7 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 
 // getRegistryToken obtains an authentication token from an OCI registry.
 // It follows the Docker Registry v2 authentication spec.
-func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureRef) (string, error) {
+func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (string, error) {
 	// First, make an unauthenticated request to get the WWW-Authenticate header
 	pingURL := fmt.Sprintf("https://%s/v2/", ref.Registry)
 	req, err := http.NewRequestWithContext(ctx, "GET", pingURL, nil)

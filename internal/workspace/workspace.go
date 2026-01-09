@@ -27,7 +27,7 @@ type Workspace struct {
 	LocalRoot  string // Workspace root on host
 
 	// Source configuration (as-parsed)
-	RawConfig *config.DevcontainerConfig
+	RawConfig *config.DevContainerConfig
 
 	// Resolved configuration (after all processing)
 	Resolved *ResolvedConfig
@@ -39,11 +39,8 @@ type Workspace struct {
 	// Build artifacts
 	Build *BuildPlan
 
-	// Runtime state (from container labels if available)
-	State *RuntimeState
-
 	// Computed hashes for staleness detection
-	Hashes *HashSet
+	Hashes *ConfigHashes
 
 	// Labels for container operations
 	Labels *labels.Labels
@@ -189,31 +186,9 @@ type BuildPlan struct {
 	ShouldUpdateUID bool // Whether UID update layer is needed
 }
 
-// RuntimeState represents container runtime state.
-type RuntimeState struct {
-	ContainerID    string
-	ContainerName  string
-	Status         ContainerStatus
-	CreatedAt      time.Time
-	StartedAt      time.Time
-	LifecycleState string // created, ready, broken
-	Labels         *labels.Labels
-}
 
-// ContainerStatus represents container state.
-type ContainerStatus string
-
-const (
-	StatusAbsent   ContainerStatus = "absent"
-	StatusCreated  ContainerStatus = "created"
-	StatusRunning  ContainerStatus = "running"
-	StatusStopped  ContainerStatus = "stopped"
-	StatusStale    ContainerStatus = "stale"
-	StatusBroken   ContainerStatus = "broken"
-)
-
-// HashSet contains hashes for staleness detection.
-type HashSet struct {
+// ConfigHashes contains hashes for staleness detection.
+type ConfigHashes struct {
 	Config     string // devcontainer.json canonical hash
 	Dockerfile string // Dockerfile content hash
 	Compose    string // docker-compose.yml hash
@@ -229,8 +204,7 @@ func New() *Workspace {
 			RemoteEnv:      make(map[string]string),
 			Customizations: make(map[string]interface{}),
 		},
-		Hashes: &HashSet{},
-		State:  &RuntimeState{},
+		Hashes: &ConfigHashes{},
 		Labels: labels.NewLabels(),
 	}
 }
@@ -265,7 +239,7 @@ func ComputeID(workspacePath string) string {
 }
 
 // ComputeName derives a workspace name from the path or config.
-func ComputeName(workspacePath string, cfg *config.DevcontainerConfig) string {
+func ComputeName(workspacePath string, cfg *config.DevContainerConfig) string {
 	if cfg != nil && cfg.Name != "" {
 		return cfg.Name
 	}
@@ -273,7 +247,7 @@ func ComputeName(workspacePath string, cfg *config.DevcontainerConfig) string {
 }
 
 // GetPlanType determines the plan type from configuration.
-func GetPlanType(cfg *config.DevcontainerConfig) PlanType {
+func GetPlanType(cfg *config.DevContainerConfig) PlanType {
 	if cfg.IsComposePlan() {
 		return PlanTypeCompose
 	}
@@ -281,54 +255,6 @@ func GetPlanType(cfg *config.DevcontainerConfig) PlanType {
 		return PlanTypeDockerfile
 	}
 	return PlanTypeImage
-}
-
-// IsStale checks if the workspace configuration is stale compared to container state.
-func (w *Workspace) IsStale() bool {
-	if w.State == nil || w.State.Labels == nil {
-		return true
-	}
-	if w.State.Labels.HashOverall == "" {
-		return true
-	}
-	return w.State.Labels.HashOverall != w.Hashes.Overall
-}
-
-// GetStalenessChanges returns what changed if workspace is stale.
-func (w *Workspace) GetStalenessChanges() []string {
-	if w.State == nil || w.State.Labels == nil {
-		return []string{"container not found"}
-	}
-
-	var changes []string
-	l := w.State.Labels
-
-	if l.HashConfig != "" && l.HashConfig != w.Hashes.Config {
-		changes = append(changes, "devcontainer.json changed")
-	}
-	if l.HashDockerfile != "" && l.HashDockerfile != w.Hashes.Dockerfile {
-		changes = append(changes, "Dockerfile changed")
-	}
-	if l.HashCompose != "" && l.HashCompose != w.Hashes.Compose {
-		changes = append(changes, "docker-compose.yml changed")
-	}
-	if l.HashFeatures != "" && l.HashFeatures != w.Hashes.Features {
-		changes = append(changes, "features changed")
-	}
-
-	if len(changes) == 0 && w.IsStale() {
-		changes = append(changes, "configuration changed")
-	}
-
-	return changes
-}
-
-// NeedsRebuild determines if the workspace needs to be rebuilt.
-func (w *Workspace) NeedsRebuild() bool {
-	if w.State == nil || w.State.Status == StatusAbsent {
-		return true
-	}
-	return w.IsStale()
 }
 
 // GetBuildLabels returns labels to apply during container creation.

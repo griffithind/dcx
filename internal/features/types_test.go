@@ -7,17 +7,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseFeatureRef_OCI(t *testing.T) {
+func TestParseFeatureSource_OCI(t *testing.T) {
 	tests := []struct {
 		name     string
 		id       string
-		expected FeatureRef
+		expected FeatureSource
 	}{
 		{
 			name: "ghcr.io with version",
 			id:   "ghcr.io/devcontainers/features/go:1",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "go",
@@ -27,8 +27,8 @@ func TestParseFeatureRef_OCI(t *testing.T) {
 		{
 			name: "short form defaults to ghcr.io",
 			id:   "devcontainers/features/node:18",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "node",
@@ -38,8 +38,8 @@ func TestParseFeatureRef_OCI(t *testing.T) {
 		{
 			name: "no version defaults to latest",
 			id:   "ghcr.io/devcontainers/features/python",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "python",
@@ -50,7 +50,7 @@ func TestParseFeatureRef_OCI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref, err := ParseFeatureRef(tt.id)
+			ref, err := ParseFeatureSource(tt.id)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected.Type, ref.Type)
 			assert.Equal(t, tt.expected.Registry, ref.Registry)
@@ -61,7 +61,7 @@ func TestParseFeatureRef_OCI(t *testing.T) {
 	}
 }
 
-func TestParseFeatureRef_Local(t *testing.T) {
+func TestParseFeatureSource_Local(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
@@ -86,15 +86,15 @@ func TestParseFeatureRef_Local(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref, err := ParseFeatureRef(tt.id)
+			ref, err := ParseFeatureSource(tt.id)
 			require.NoError(t, err)
-			assert.Equal(t, RefTypeLocal, ref.Type)
+			assert.Equal(t, SourceTypeLocalPath, ref.Type)
 			assert.Equal(t, tt.path, ref.Path)
 		})
 	}
 }
 
-func TestParseFeatureRef_HTTP(t *testing.T) {
+func TestParseFeatureSource_HTTP(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
@@ -114,9 +114,9 @@ func TestParseFeatureRef_HTTP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref, err := ParseFeatureRef(tt.id)
+			ref, err := ParseFeatureSource(tt.id)
 			require.NoError(t, err)
-			assert.Equal(t, RefTypeHTTP, ref.Type)
+			assert.Equal(t, SourceTypeTarball, ref.Type)
 			assert.Equal(t, tt.url, ref.URL)
 		})
 	}
@@ -157,16 +157,16 @@ func TestFeature_GetEnvVars(t *testing.T) {
 	assert.Equal(t, "default-value", env["UNUSED"])
 }
 
-func TestFeatureRef_CanonicalID(t *testing.T) {
+func TestFeatureSource_CanonicalID(t *testing.T) {
 	tests := []struct {
 		name     string
-		ref      FeatureRef
+		ref      FeatureSource
 		expected string
 	}{
 		{
 			name: "OCI reference",
-			ref: FeatureRef{
-				Type:       RefTypeOCI,
+			ref: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "go",
@@ -176,16 +176,16 @@ func TestFeatureRef_CanonicalID(t *testing.T) {
 		},
 		{
 			name: "local reference",
-			ref: FeatureRef{
-				Type: RefTypeLocal,
+			ref: FeatureSource{
+				Type: SourceTypeLocalPath,
 				Path: "./features/custom",
 			},
 			expected: "local:./features/custom",
 		},
 		{
 			name: "HTTP reference",
-			ref: FeatureRef{
-				Type: RefTypeHTTP,
+			ref: FeatureSource{
+				Type: SourceTypeTarball,
 				URL:  "https://example.com/feature.tgz",
 			},
 			expected: "https://example.com/feature.tgz",
@@ -204,13 +204,13 @@ func TestOuzoERPStyleFeatures(t *testing.T) {
 	tests := []struct {
 		name     string
 		id       string
-		expected FeatureRef
+		expected FeatureSource
 	}{
 		{
 			name: "common-utils with major version",
 			id:   "ghcr.io/devcontainers/features/common-utils:2",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "common-utils",
@@ -220,8 +220,8 @@ func TestOuzoERPStyleFeatures(t *testing.T) {
 		{
 			name: "docker-outside-of-docker",
 			id:   "ghcr.io/devcontainers/features/docker-outside-of-docker:1",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "docker-outside-of-docker",
@@ -231,8 +231,8 @@ func TestOuzoERPStyleFeatures(t *testing.T) {
 		{
 			name: "feature with full semver",
 			id:   "ghcr.io/devcontainers/features/node:1.2.3",
-			expected: FeatureRef{
-				Type:       RefTypeOCI,
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "node",
@@ -243,7 +243,7 @@ func TestOuzoERPStyleFeatures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref, err := ParseFeatureRef(tt.id)
+			ref, err := ParseFeatureSource(tt.id)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected.Type, ref.Type)
 			assert.Equal(t, tt.expected.Registry, ref.Registry)
