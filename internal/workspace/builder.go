@@ -41,22 +41,10 @@ type BuildOptions struct {
 	Config *config.DevcontainerConfig
 
 	// SubstitutionContext provides variable substitution values
-	SubstitutionContext *SubstitutionContext
+	SubstitutionContext *config.SubstitutionContext
 
 	// ProjectName overrides the workspace name (from dcx.json)
 	ProjectName string
-}
-
-// SubstitutionContext provides values for variable substitution.
-type SubstitutionContext struct {
-	LocalWorkspaceFolder          string
-	ContainerWorkspaceFolder      string
-	LocalWorkspaceFolderBasename  string
-	ContainerWorkspaceFolderBasename string
-	DevcontainerID                string
-	UserHome                      string
-	LocalEnv                      func(string) string
-	ContainerEnv                  map[string]string
 }
 
 // Build creates a Workspace from the given options.
@@ -83,11 +71,10 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 	// Build substitution context if not provided
 	subCtx := opts.SubstitutionContext
 	if subCtx == nil {
-		subCtx = &SubstitutionContext{
-			LocalWorkspaceFolder:         opts.WorkspaceRoot,
-			LocalWorkspaceFolderBasename: filepath.Base(opts.WorkspaceRoot),
-			DevcontainerID:               ws.ID,
-			LocalEnv:                     os.Getenv,
+		subCtx = &config.SubstitutionContext{
+			LocalWorkspaceFolder: opts.WorkspaceRoot,
+			DevcontainerID:       ws.ID,
+			LocalEnv:             os.Getenv,
 		}
 		// Set container workspace folder (default or from config)
 		if opts.Config.WorkspaceFolder != "" {
@@ -95,7 +82,6 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 		} else {
 			subCtx.ContainerWorkspaceFolder = "/workspaces/" + filepath.Base(opts.WorkspaceRoot)
 		}
-		subCtx.ContainerWorkspaceFolderBasename = filepath.Base(subCtx.ContainerWorkspaceFolder)
 
 		// Set user home
 		if home, err := os.UserHomeDir(); err == nil {
@@ -126,7 +112,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 }
 
 // resolveConfig resolves the base configuration.
-func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig, subCtx *SubstitutionContext) error {
+func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig, subCtx *config.SubstitutionContext) error {
 	resolved := ws.Resolved
 
 	// Service name (sanitized for Docker container naming requirements)
@@ -135,22 +121,22 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 	// Workspace paths
 	resolved.WorkspaceFolder = subCtx.ContainerWorkspaceFolder
 	if cfg.WorkspaceMount != "" {
-		resolved.WorkspaceMount = substituteVars(cfg.WorkspaceMount, subCtx)
+		resolved.WorkspaceMount = config.Substitute(cfg.WorkspaceMount, subCtx)
 	}
 
 	// User configuration (with substitution for ${localEnv:USER} etc.)
-	resolved.RemoteUser = substituteVars(cfg.RemoteUser, subCtx)
-	resolved.ContainerUser = substituteVars(cfg.ContainerUser, subCtx)
+	resolved.RemoteUser = config.Substitute(cfg.RemoteUser, subCtx)
+	resolved.ContainerUser = config.Substitute(cfg.ContainerUser, subCtx)
 	if cfg.UpdateRemoteUserUID != nil {
 		resolved.UpdateRemoteUserUID = *cfg.UpdateRemoteUserUID
 	}
 
 	// Environment variables (with substitution)
 	for k, v := range cfg.ContainerEnv {
-		resolved.ContainerEnv[k] = substituteVars(v, subCtx)
+		resolved.ContainerEnv[k] = config.Substitute(v, subCtx)
 	}
 	for k, v := range cfg.RemoteEnv {
-		resolved.RemoteEnv[k] = substituteVars(v, subCtx)
+		resolved.RemoteEnv[k] = config.Substitute(v, subCtx)
 	}
 
 	// Runtime options
@@ -168,8 +154,8 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 	for _, m := range cfg.Mounts {
 		resolved.Mounts = append(resolved.Mounts, mount.Mount{
 			Type:     mount.Type(m.Type),
-			Source:   substituteVars(m.Source, subCtx),
-			Target:   substituteVars(m.Target, subCtx),
+			Source:   config.Substitute(m.Source, subCtx),
+			Target:   config.Substitute(m.Target, subCtx),
 			ReadOnly: m.ReadOnly,
 		})
 	}
@@ -288,80 +274,6 @@ func (b *Builder) computeHashes(ws *Workspace, cfg *config.DevcontainerConfig) e
 func hashBytes(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
-}
-
-func substituteVars(s string, ctx *SubstitutionContext) string {
-	if ctx == nil {
-		return s
-	}
-
-	// Simple variable substitution
-	replacements := map[string]string{
-		"${localWorkspaceFolder}":          ctx.LocalWorkspaceFolder,
-		"${containerWorkspaceFolder}":      ctx.ContainerWorkspaceFolder,
-		"${localWorkspaceFolderBasename}":  ctx.LocalWorkspaceFolderBasename,
-		"${containerWorkspaceFolderBasename}": ctx.ContainerWorkspaceFolderBasename,
-		"${devcontainerId}":                ctx.DevcontainerID,
-		"${userHome}":                      ctx.UserHome,
-	}
-
-	for old, new := range replacements {
-		s = strings.ReplaceAll(s, old, new)
-	}
-
-	// Handle ${localEnv:VAR} and ${localEnv:VAR:default}
-	s = substituteEnvVars(s, "localEnv", ctx.LocalEnv)
-	s = substituteEnvVars(s, "env", ctx.LocalEnv) // alias
-
-	// Handle ${containerEnv:VAR}
-	if ctx.ContainerEnv != nil {
-		s = substituteEnvVars(s, "containerEnv", func(key string) string {
-			return ctx.ContainerEnv[key]
-		})
-	}
-
-	return s
-}
-
-func substituteEnvVars(s string, prefix string, getEnv func(string) string) string {
-	// Pattern: ${prefix:VAR} or ${prefix:VAR:default}
-	pattern := "${" + prefix + ":"
-	result := s
-
-	for {
-		start := strings.Index(result, pattern)
-		if start == -1 {
-			break
-		}
-
-		end := strings.Index(result[start:], "}")
-		if end == -1 {
-			break
-		}
-		end += start
-
-		// Extract variable part: VAR or VAR:default
-		varPart := result[start+len(pattern) : end]
-		parts := strings.SplitN(varPart, ":", 2)
-		varName := parts[0]
-		defaultVal := ""
-		if len(parts) > 1 {
-			defaultVal = parts[1]
-		}
-
-		// Get value
-		value := ""
-		if getEnv != nil {
-			value = getEnv(varName)
-		}
-		if value == "" {
-			value = defaultVal
-		}
-
-		result = result[:start] + value + result[end+1:]
-	}
-
-	return result
 }
 
 func parsePortForwards(ports []string) []PortForward {

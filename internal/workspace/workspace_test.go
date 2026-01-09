@@ -346,11 +346,9 @@ func TestBuilderComposeBuild(t *testing.T) {
 }
 
 func TestVariableSubstitution(t *testing.T) {
-	ctx := &SubstitutionContext{
+	ctx := &config.SubstitutionContext{
 		LocalWorkspaceFolder:     "/home/user/project",
 		ContainerWorkspaceFolder: "/workspace",
-		LocalWorkspaceFolderBasename: "project",
-		ContainerWorkspaceFolderBasename: "workspace",
 		DevcontainerID:           "abc123",
 		UserHome:                 "/home/user",
 		LocalEnv: func(key string) string {
@@ -380,7 +378,7 @@ func TestVariableSubstitution(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			result := substituteVars(tc.input, ctx)
+			result := config.Substitute(tc.input, ctx)
 			if result != tc.expected {
 				t.Errorf("input %q: expected %q, got %q", tc.input, tc.expected, result)
 			}
@@ -558,10 +556,9 @@ func TestRemoteUserSubstitution_LocalEnvVariable(t *testing.T) {
 		Config:        cfg,
 		ConfigPath:    "/tmp/test/.devcontainer/devcontainer.json",
 		WorkspaceRoot: "/tmp/test",
-		SubstitutionContext: &SubstitutionContext{
+		SubstitutionContext: &config.SubstitutionContext{
 			LocalWorkspaceFolder:     "/tmp/test",
 			ContainerWorkspaceFolder: "/workspace",
-			LocalWorkspaceFolderBasename: "test",
 			LocalEnv: func(key string) string {
 				switch key {
 				case "USER":

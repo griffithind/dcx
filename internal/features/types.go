@@ -4,9 +4,10 @@ package features
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
+
+	"github.com/griffithind/dcx/internal/config"
 )
 
 // Feature represents a resolved devcontainer feature.
@@ -317,8 +318,8 @@ func (f *Feature) GetEnvVars() map[string]string {
 			// Normalize option name per devcontainer spec
 			envName := NormalizeOptionName(name)
 			strVal := fmt.Sprintf("%v", val)
-			// Apply variable substitution
-			env[envName] = substituteVariables(strVal)
+			// Apply variable substitution (nil context uses os.Getenv for localEnv/env)
+			env[envName] = config.Substitute(strVal, nil)
 		}
 	}
 
@@ -343,36 +344,3 @@ func NormalizeOptionName(name string) string {
 	return strings.ToUpper(name)
 }
 
-// substituteVariables performs devcontainer variable substitution.
-// Supports ${localEnv:VAR}, ${localEnv:VAR:default}, ${env:VAR}
-func substituteVariables(s string) string {
-	// Pattern: ${localEnv:VAR} or ${localEnv:VAR:default}
-	localEnvPattern := regexp.MustCompile(`\$\{localEnv:([^}:]+)(?::([^}]*))?\}`)
-	s = localEnvPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := localEnvPattern.FindStringSubmatch(match)
-		if len(parts) >= 2 {
-			value := os.Getenv(parts[1])
-			if value == "" && len(parts) >= 3 {
-				value = parts[2] // default value
-			}
-			return value
-		}
-		return match
-	})
-
-	// Pattern: ${env:VAR} (alias for localEnv)
-	envPattern := regexp.MustCompile(`\$\{env:([^}:]+)(?::([^}]*))?\}`)
-	s = envPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := envPattern.FindStringSubmatch(match)
-		if len(parts) >= 2 {
-			value := os.Getenv(parts[1])
-			if value == "" && len(parts) >= 3 {
-				value = parts[2]
-			}
-			return value
-		}
-		return match
-	})
-
-	return s
-}
