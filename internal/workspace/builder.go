@@ -40,19 +40,11 @@ type BuildOptions struct {
 	// Config is the parsed devcontainer configuration
 	Config *config.DevcontainerConfig
 
-	// FeatureResolver resolves features (optional, can be nil for basic workspace)
-	FeatureResolver FeatureResolver
-
 	// SubstitutionContext provides variable substitution values
 	SubstitutionContext *SubstitutionContext
 
 	// ProjectName overrides the workspace name (from dcx.json)
 	ProjectName string
-}
-
-// FeatureResolver resolves features to their local paths and metadata.
-type FeatureResolver interface {
-	Resolve(ctx context.Context, featureRef string, options map[string]interface{}) (*ResolvedFeature, error)
 }
 
 // SubstitutionContext provides values for variable substitution.
@@ -117,13 +109,6 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 	// Resolve configuration based on plan type
 	if err := b.resolveConfig(ctx, ws, opts.Config, subCtx); err != nil {
 		return nil, err
-	}
-
-	// Resolve features if resolver provided
-	if opts.FeatureResolver != nil && len(opts.Config.Features) > 0 {
-		if err := b.resolveFeatures(ctx, ws, opts.Config, opts.FeatureResolver); err != nil {
-			return nil, err
-		}
 	}
 
 	// Compute hashes
@@ -238,82 +223,6 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 	}
 
 	return nil
-}
-
-// resolveFeatures resolves all features in the configuration.
-func (b *Builder) resolveFeatures(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig, resolver FeatureResolver) error {
-	features := make([]*ResolvedFeature, 0, len(cfg.Features))
-
-	for featureRef, options := range cfg.Features {
-		opts, ok := options.(map[string]interface{})
-		if !ok {
-			opts = make(map[string]interface{})
-		}
-
-		resolved, err := resolver.Resolve(ctx, featureRef, opts)
-		if err != nil {
-			return dcxerrors.FeatureResolve(featureRef, err)
-		}
-
-		features = append(features, resolved)
-	}
-
-	// Sort by installation order
-	sort.Slice(features, func(i, j int) bool {
-		return features[i].InstallOrder < features[j].InstallOrder
-	})
-
-	ws.Resolved.Features = features
-
-	// Merge feature metadata into resolved config
-	b.mergeFeatureMetadata(ws)
-
-	return nil
-}
-
-// mergeFeatureMetadata merges feature metadata into the resolved config.
-func (b *Builder) mergeFeatureMetadata(ws *Workspace) {
-	for _, f := range ws.Resolved.Features {
-		if f.Metadata == nil {
-			continue
-		}
-
-		// CapAdd: union
-		ws.Resolved.CapAdd = util.UnionStrings(ws.Resolved.CapAdd, f.Metadata.CapAdd)
-
-		// SecurityOpt: union
-		ws.Resolved.SecurityOpt = util.UnionStrings(ws.Resolved.SecurityOpt, f.Metadata.SecurityOpt)
-
-		// Privileged: true wins
-		if f.Metadata.Privileged {
-			ws.Resolved.Privileged = true
-		}
-
-		// Init: true wins
-		if f.Metadata.Init {
-			ws.Resolved.Init = true
-		}
-
-		// ContainerEnv: feature doesn't override base
-		for k, v := range f.Metadata.ContainerEnv {
-			if _, exists := ws.Resolved.ContainerEnv[k]; !exists {
-				ws.Resolved.ContainerEnv[k] = v
-			}
-		}
-
-		// Mounts: append
-		for _, m := range f.Metadata.Mounts {
-			ws.Resolved.Mounts = append(ws.Resolved.Mounts, mount.Mount{
-				Type:     mount.Type(m.Type),
-				Source:   m.Source,
-				Target:   m.Target,
-				ReadOnly: m.ReadOnly,
-			})
-		}
-
-		// Customizations: deep merge
-		deepMergeCustomizations(ws.Resolved.Customizations, f.Metadata.Customizations)
-	}
 }
 
 // computeHashes computes all configuration hashes.

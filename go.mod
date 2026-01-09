@@ -8,15 +8,14 @@ require (
 	github.com/docker/docker v27.4.1+incompatible
 	github.com/docker/go-connections v0.6.0
 	github.com/gliderlabs/ssh v0.3.8
-	github.com/gowebpki/jcs v1.0.1
 	github.com/minio/selfupdate v0.6.0
 	github.com/pkg/sftp v1.13.10
+	github.com/pterm/pterm v0.12.82
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/jsonc v0.3.2
 	golang.org/x/crypto v0.41.0
 	golang.org/x/term v0.38.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -50,7 +49,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/pterm/pterm v0.12.82 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
@@ -68,5 +66,6 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 )

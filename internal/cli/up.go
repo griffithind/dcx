@@ -6,13 +6,9 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -63,12 +59,6 @@ func runUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load dcx.json: %w", err)
 	}
 
-	// Get project name from dcx.json
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = docker.SanitizeProjectName(dcxCfg.Name)
-	}
-
 	// Apply dcx.json up options (CLI flags take precedence)
 	effectiveSSH := enableSSH
 	effectiveNoAgent := noAgent
@@ -84,51 +74,35 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Determine if SSH agent should be enabled
 	sshAgentEnabled := !effectiveNoAgent && ssh.IsAgentAvailable()
 
+	// Create service
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+
 	// Check if we can do a quick start (smart detection)
 	// Skip smart detection if --rebuild or --recreate or --pull are specified
 	if !rebuild && !recreate && !pull {
-		stateMgr := state.NewManager(dockerClient)
-		envKey := workspace.ComputeID(workspacePath)
+		plan, err := svc.Plan(ctx, service.PlanOptions{})
+		if err == nil {
+			switch plan.Action {
+			case service.PlanActionNone:
+				// Already running, nothing to do
+				ui.Success("Devcontainer is already running")
+				return nil
 
-		// Try to load config and compute hash for staleness detection
-		cfg, _, cfgErr := config.Load(workspacePath, configPath)
-		if cfgErr == nil {
-			// Use simple hash of raw JSON to match workspace builder
-			var configHash string
-			if raw := cfg.GetRawJSON(); len(raw) > 0 {
-				configHash = config.ComputeSimpleHash(raw)
-			}
-			if configHash != "" {
-				currentState, containerInfo, stateErr := stateMgr.GetStateWithProjectAndHash(ctx, projectName, envKey, configHash)
-				if stateErr == nil {
-					switch currentState {
-					case state.StateRunning:
-						// Already running, nothing to do
-						ui.Success("Devcontainer is already running")
-						return nil
-
-					case state.StateCreated:
-						// Containers exist but stopped, just start them (offline-safe)
-						ui.Printf("Devcontainer exists and is up to date, starting...")
-
-						if err := quickStart(ctx, dockerClient, containerInfo, projectName, envKey); err != nil {
-							return err
-						}
-
-						ui.Success("Devcontainer started")
-						return nil
-
-					// For ABSENT, STALE, BROKEN - continue to full up
-					}
+			case service.PlanActionStart:
+				// Containers exist but stopped, just start them (offline-safe)
+				ui.Printf("Devcontainer exists and is up to date, starting...")
+				if err := svc.QuickStart(ctx, plan.ContainerInfo, plan.Info.ProjectName, plan.Info.EnvKey); err != nil {
+					return err
 				}
+				ui.Success("Devcontainer started")
+				return nil
+
+			// For CREATE, RECREATE, REBUILD - continue to full up
 			}
 		}
 	}
 
 	// Full up sequence required
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
-
-	// Execute up (service provides its own progress output)
 	if err := svc.Up(ctx, service.UpOptions{
 		Recreate:        recreate,
 		Rebuild:         rebuild,
@@ -140,33 +114,5 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	ui.Success("Devcontainer started successfully")
-	return nil
-}
-
-// quickStart starts existing containers without going through the full up sequence.
-// This is an offline-safe operation.
-func quickStart(ctx context.Context, dockerClient *docker.Client, containerInfo *state.ContainerInfo, projectName, envKey string) error {
-	// Determine plan type (single-container vs compose)
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
-		containerInfo.Plan == labels.BuildMethodDockerfile)
-	if isSingleContainer {
-		// Single container - use Docker API directly
-		if err := dockerClient.StartContainer(ctx, containerInfo.ID); err != nil {
-			return fmt.Errorf("failed to start container: %w", err)
-		}
-	} else {
-		// Compose plan - use docker compose
-		actualProject := ""
-		if containerInfo != nil {
-			actualProject = containerInfo.ComposeProject
-		}
-		if actualProject == "" {
-			actualProject = projectName
-		}
-		r := runner.NewUnifiedRunnerForExisting(workspacePath, actualProject, envKey)
-		if err := r.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start containers: %w", err)
-		}
-	}
 	return nil
 }

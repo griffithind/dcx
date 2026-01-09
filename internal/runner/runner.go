@@ -74,9 +74,8 @@ func NewUnifiedRunnerForExisting(workspacePath, projectName, envKey string) *Uni
 func (r *UnifiedRunner) Up(ctx context.Context, opts UpOptions) error {
 	ws := r.workspace
 
-	// Check if we need to handle features
-	// Check raw config if resolved features are empty (when no FeatureResolver was provided)
-	hasFeatures := len(ws.Resolved.Features) > 0 || (ws.RawConfig != nil && len(ws.RawConfig.Features) > 0)
+	// Check if we need to handle features (from raw config)
+	hasFeatures := ws.RawConfig != nil && len(ws.RawConfig.Features) > 0
 
 	// Determine the approach based on plan type
 	switch ws.Resolved.PlanType {
@@ -374,31 +373,21 @@ func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remo
 func (r *UnifiedRunner) resolveFeatures(ctx context.Context, pull bool) ([]*features.Feature, error) {
 	ws := r.workspace
 
-	// Check resolved features first, then fall back to raw config
-	var featureList []*features.Feature
-	if len(ws.Resolved.Features) > 0 {
-		for _, f := range ws.Resolved.Features {
-			featureList = append(featureList, &features.Feature{
-				ID:      f.ID,
-				Options: f.Options,
-			})
-		}
-	} else if ws.RawConfig != nil && len(ws.RawConfig.Features) > 0 {
-		// Use raw config features if resolved features are empty
-		for id, opts := range ws.RawConfig.Features {
-			options := make(map[string]interface{})
-			if optsMap, ok := opts.(map[string]interface{}); ok {
-				options = optsMap
-			}
-			featureList = append(featureList, &features.Feature{
-				ID:      id,
-				Options: options,
-			})
-		}
+	// Build feature list from raw config
+	if ws.RawConfig == nil || len(ws.RawConfig.Features) == 0 {
+		return nil, nil
 	}
 
-	if len(featureList) == 0 {
-		return nil, nil
+	var featureList []*features.Feature
+	for id, opts := range ws.RawConfig.Features {
+		options := make(map[string]interface{})
+		if optsMap, ok := opts.(map[string]interface{}); ok {
+			options = optsMap
+		}
+		featureList = append(featureList, &features.Feature{
+			ID:      id,
+			Options: options,
+		})
 	}
 
 	// Order features by dependencies
@@ -512,9 +501,9 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 	}
 
 	// Store installed features
-	if len(ws.Resolved.Features) > 0 {
-		featureIDs := make([]string, len(ws.Resolved.Features))
-		for i, f := range ws.Resolved.Features {
+	if len(r.resolvedFeatures) > 0 {
+		featureIDs := make([]string, len(r.resolvedFeatures))
+		for i, f := range r.resolvedFeatures {
 			featureIDs[i] = f.ID
 		}
 		l.FeaturesInstalled = featureIDs

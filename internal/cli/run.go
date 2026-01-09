@@ -8,11 +8,11 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/shortcuts"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -121,21 +121,15 @@ func executeInContainer(execArgs []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Load dcx.json for project name
-	dcxCfg, _ := config.LoadDcxConfig(workspacePath)
-
-	// Get project name from dcx.json
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = docker.SanitizeProjectName(dcxCfg.Name)
+	// Create service and get identifiers
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
-	envKey := workspace.ComputeID(workspacePath)
-
-	// Check current state (check both project name and env key for migration)
-	currentState, containerInfo, err := stateMgr.GetStateWithProject(ctx, projectName, envKey)
+	// Check current state
+	currentState, containerInfo, err := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, ids.EnvKey)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}

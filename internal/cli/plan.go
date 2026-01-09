@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/pipeline"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
@@ -21,10 +19,10 @@ var planCmd = &cobra.Command{
 	Long: `Preview the execution plan for starting the devcontainer environment.
 
 This command analyzes your devcontainer configuration and shows:
-- What images would be built or pulled
-- What containers would be created or recreated
-- Why the action is needed (new, stale, etc.)
-- What changes were detected
+- Current container state (if any)
+- What action would be taken (create, recreate, start, none)
+- Full configuration including features, mounts, environment, ports
+- Security options and lifecycle hooks
 
 No changes are made to your environment.
 
@@ -42,120 +40,64 @@ func init() {
 func runPlan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Find config path
-	cfgPath := configPath
-	if cfgPath == "" {
-		cfgPath = findConfigPath(workspacePath)
-		if cfgPath == "" {
-			return fmt.Errorf("devcontainer.json not found in %s", workspacePath)
-		}
-	}
-
-	// Parse configuration
-	cfg, err := config.ParseFile(cfgPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse configuration: %w", err)
-	}
-
-	// Build workspace
-	builder := workspace.NewBuilder(nil)
-	ws, err := builder.Build(ctx, workspace.BuildOptions{
-		ConfigPath:    cfgPath,
-		WorkspaceRoot: workspacePath,
-		Config:        cfg,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to build workspace: %w", err)
-	}
-
-	// Try to get container state if Docker is available
-	var containerState string
-	var existingContainer bool
+	// Initialize Docker client
 	dockerClient, err := docker.NewClient()
-	if err == nil {
-		defer dockerClient.Close()
-		stateMgr := state.NewManager(dockerClient)
-		s, info, _ := stateMgr.GetState(ctx, ws.ID)
-		containerState = string(s)
-		existingContainer = info != nil
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer dockerClient.Close()
 
-		if info != nil {
-			ws.State = &workspace.RuntimeState{
-				ContainerID:   info.ID,
-				ContainerName: info.Name,
-				Status:        workspace.ContainerStatus(s),
-			}
-		}
+	// Create service and get plan
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+
+	plan, err := svc.Plan(ctx, service.PlanOptions{})
+	if err != nil {
+		return err
 	}
 
-	// Build the plan result
-	plan := &pipeline.PlanResult{
-		Workspace: ws,
-	}
+	// Display the plan
+	displayPlan(plan)
 
-	// Determine action
-	if !existingContainer {
-		plan.Action = pipeline.ActionCreate
-		plan.Reason = "no existing container found"
-	} else if ws.IsStale() {
-		plan.Action = pipeline.ActionRecreate
-		plan.Changes = ws.GetStalenessChanges()
-		plan.Reason = fmt.Sprintf("configuration changed: %v", plan.Changes)
-	} else if containerState == string(state.StateCreated) {
-		plan.Action = pipeline.ActionStart
-		plan.Reason = "container exists but is stopped"
-	} else {
-		plan.Action = pipeline.ActionNone
-		plan.Reason = "container is up to date and running"
-	}
+	return nil
+}
 
-	// Build image plans
-	if plan.Action != pipeline.ActionNone && plan.Action != pipeline.ActionStart {
-		plan.ImagesToBuild = buildImagePlans(ws)
-		plan.ContainersToCreate = []pipeline.ContainerPlan{{
-			Name:      ws.Resolved.ServiceName,
-			Image:     ws.Resolved.FinalImage,
-			IsPrimary: true,
-		}}
-		if ws.Resolved.Compose != nil {
-			plan.ServicesToStart = append([]string{ws.Resolved.Compose.Service}, ws.Resolved.Compose.RunServices...)
-		}
-	}
+func displayPlan(plan *service.PlanResult) {
+	info := plan.Info
+	cfg := info.Config
 
-	// Text output mode
 	ui.Println(ui.Bold("Devcontainer Execution Plan"))
 	ui.Println(ui.Dim("==========================="))
 	ui.Println("")
 
 	// Workspace info
-	ui.Printf("%s %s", ui.FormatLabel("Workspace", ws.Name), "")
-	ui.Printf("%s %s", ui.FormatLabel("Path", ui.Code(ws.LocalRoot)), "")
-	ui.Printf("%s %s", ui.FormatLabel("ID", ui.Dim(ws.ID)), "")
+	ui.Printf("%s", ui.FormatLabel("Workspace", info.ProjectName))
+	ui.Printf("%s", ui.FormatLabel("Path", ui.Code(info.EnvKey)))
+	if info.ProjectName != "" {
+		ui.Printf("%s", ui.FormatLabel("Project", ui.Dim(info.ProjectName)))
+	}
 	ui.Println("")
 
+	// Current state (if container exists)
+	if plan.ContainerInfo != nil {
+		ui.Println(ui.Bold("Current State"))
+		statusStr := "stopped"
+		if plan.ContainerInfo.Running {
+			statusStr = "running"
+		}
+		ui.Printf("  %s", ui.FormatLabel("Status", ui.StateColor(statusStr)))
+		containerInfo := plan.ContainerInfo.Name
+		if len(plan.ContainerInfo.ID) >= 12 {
+			containerInfo += " (" + plan.ContainerInfo.ID[:12] + ")"
+		}
+		ui.Printf("  %s", ui.FormatLabel("Container", containerInfo))
+		ui.Println("")
+	}
+
 	// Action
-	if plan.Action == pipeline.ActionNone {
-		ui.Success("Up to date - no changes needed")
-		return nil
+	ui.Printf("%s", ui.FormatLabel("Action", colorAction(plan.Action)))
+	if plan.Reason != "" {
+		ui.Printf("%s", ui.FormatLabel("Reason", plan.Reason))
 	}
-
-	// Show action with color
-	var actionStr string
-	switch plan.Action {
-	case pipeline.ActionCreate:
-		actionStr = pterm.FgGreen.Sprint(string(plan.Action))
-	case pipeline.ActionRecreate:
-		actionStr = pterm.FgYellow.Sprint(string(plan.Action))
-	case pipeline.ActionRebuild:
-		actionStr = pterm.FgRed.Sprint(string(plan.Action))
-	case pipeline.ActionStart:
-		actionStr = pterm.FgCyan.Sprint(string(plan.Action))
-	default:
-		actionStr = string(plan.Action)
-	}
-
-	ui.Printf("%s %s", ui.FormatLabel("Action", actionStr), "")
-	ui.Printf("%s %s", ui.FormatLabel("Reason", plan.Reason), "")
 	ui.Println("")
 
 	// Changes detected
@@ -167,125 +109,205 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		ui.Println("")
 	}
 
-	// Images to build
-	if len(plan.ImagesToBuild) > 0 {
-		ui.Println(ui.Bold("Images to Build"))
-		headers := []string{"Tag", "Base", "Reason"}
-		var rows [][]string
-		for _, img := range plan.ImagesToBuild {
-			base := img.BaseImage
-			if base == "" && img.Dockerfile != "" {
-				base = "(Dockerfile)"
-			}
-			rows = append(rows, []string{img.Tag, base, img.Reason})
-		}
-		ui.RenderTable(headers, rows)
-		ui.Println("")
+	// Configuration section
+	ui.Println(ui.Bold("Configuration"))
+	planType := "image"
+	if cfg.Build != nil {
+		planType = "dockerfile"
+	} else if cfg.DockerComposeFile != nil {
+		planType = "compose"
+	}
+	ui.Printf("  %s", ui.FormatLabel("Type", planType))
+	if cfg.Image != "" {
+		ui.Printf("  %s", ui.FormatLabel("Image", cfg.Image))
+	}
+	if cfg.RemoteUser != "" {
+		ui.Printf("  %s", ui.FormatLabel("User", cfg.RemoteUser))
+	}
+	if cfg.WorkspaceFolder != "" {
+		ui.Printf("  %s", ui.FormatLabel("Workspace Folder", cfg.WorkspaceFolder))
 	}
 
 	// Features
-	if len(ws.Resolved.Features) > 0 {
-		ui.Println(ui.Bold("Features to Install"))
-		for i, f := range ws.Resolved.Features {
-			ui.Printf("  %d. %s", i+1, ui.Code(f.ID))
-		}
+	if len(cfg.Features) > 0 {
 		ui.Println("")
+		ui.Println(ui.Bold("Features"))
+		for featureID := range cfg.Features {
+			ui.Printf("  %s %s", ui.Symbols.Bullet, featureID)
+		}
 	}
 
-	// Containers
-	if len(plan.ContainersToCreate) > 0 {
-		ui.Println(ui.Bold("Containers to Create"))
-		for _, cont := range plan.ContainersToCreate {
-			primary := ""
-			if cont.IsPrimary {
-				primary = ui.Dim(" (primary)")
-			}
-			ui.Printf("  %s %s%s", ui.Symbols.Bullet, cont.Name, primary)
-		}
+	// Mounts
+	if len(cfg.Mounts) > 0 {
 		ui.Println("")
+		ui.Println(ui.Bold("Mounts"))
+		for _, m := range cfg.Mounts {
+			ui.Printf("  %s %s", ui.Symbols.Bullet, formatMount(m))
+		}
 	}
 
-	// Services (compose)
-	if len(plan.ServicesToStart) > 0 {
-		ui.Println(ui.Bold("Services to Start"))
-		ui.Printf("  %s", strings.Join(plan.ServicesToStart, ", "))
+	// Environment
+	if len(cfg.ContainerEnv) > 0 || len(cfg.RemoteEnv) > 0 {
 		ui.Println("")
+		ui.Println(ui.Bold("Environment"))
+		for k, v := range cfg.ContainerEnv {
+			ui.Printf("  %s %s=%s", ui.Symbols.Bullet, k, v)
+		}
+		for k, v := range cfg.RemoteEnv {
+			ui.Printf("  %s %s=%s %s", ui.Symbols.Bullet, k, v, ui.Dim("(remote)"))
+		}
+	}
+
+	// Ports
+	if len(cfg.ForwardPorts) > 0 {
+		ui.Println("")
+		ui.Println(ui.Bold("Ports"))
+		for _, p := range cfg.ForwardPorts {
+			ui.Printf("  %s %v", ui.Symbols.Bullet, p)
+		}
+	}
+
+	// Security options
+	privileged := cfg.Privileged != nil && *cfg.Privileged
+	if privileged || len(cfg.CapAdd) > 0 || len(cfg.SecurityOpt) > 0 {
+		ui.Println("")
+		ui.Println(ui.Bold("Security"))
+		if privileged {
+			ui.Printf("  %s", ui.FormatLabel("Privileged", "true"))
+		}
+		if len(cfg.CapAdd) > 0 {
+			ui.Printf("  %s", ui.FormatLabel("Cap Add", strings.Join(cfg.CapAdd, ", ")))
+		}
+		if len(cfg.SecurityOpt) > 0 {
+			ui.Printf("  %s", ui.FormatLabel("Security Opt", strings.Join(cfg.SecurityOpt, ", ")))
+		}
+	}
+
+	// Lifecycle hooks
+	hasHooks := cfg.OnCreateCommand != nil || cfg.PostCreateCommand != nil ||
+		cfg.PostStartCommand != nil || cfg.PostAttachCommand != nil ||
+		cfg.InitializeCommand != nil || cfg.UpdateContentCommand != nil
+	if hasHooks {
+		ui.Println("")
+		ui.Println(ui.Bold("Lifecycle Hooks"))
+		if cfg.InitializeCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("initializeCommand", formatCommand(cfg.InitializeCommand)))
+		}
+		if cfg.OnCreateCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("onCreateCommand", formatCommand(cfg.OnCreateCommand)))
+		}
+		if cfg.UpdateContentCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("updateContentCommand", formatCommand(cfg.UpdateContentCommand)))
+		}
+		if cfg.PostCreateCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("postCreateCommand", formatCommand(cfg.PostCreateCommand)))
+		}
+		if cfg.PostStartCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("postStartCommand", formatCommand(cfg.PostStartCommand)))
+		}
+		if cfg.PostAttachCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("postAttachCommand", formatCommand(cfg.PostAttachCommand)))
+		}
+	}
+
+	// Other settings
+	hasOtherSettings := cfg.Init != nil || cfg.OverrideCommand != nil || cfg.ShutdownAction != ""
+	if hasOtherSettings {
+		ui.Println("")
+		ui.Println(ui.Bold("Settings"))
+		if cfg.Init != nil {
+			ui.Printf("  %s", ui.FormatLabel("Init Process", fmt.Sprintf("%t", *cfg.Init)))
+		}
+		if cfg.OverrideCommand != nil {
+			ui.Printf("  %s", ui.FormatLabel("Override Command", fmt.Sprintf("%t", *cfg.OverrideCommand)))
+		}
+		if cfg.ShutdownAction != "" {
+			ui.Printf("  %s", ui.FormatLabel("Shutdown Action", cfg.ShutdownAction))
+		}
 	}
 
 	// Hashes (verbose only)
 	if ui.IsVerbose() {
-		ui.Println(ui.Bold("Configuration Hashes"))
-		ui.Printf("  %s", ui.FormatLabel("Config", ws.Hashes.Config))
-		if ws.Hashes.Dockerfile != "" {
-			ui.Printf("  %s", ui.FormatLabel("Dockerfile", ws.Hashes.Dockerfile))
-		}
-		if ws.Hashes.Compose != "" {
-			ui.Printf("  %s", ui.FormatLabel("Compose", ws.Hashes.Compose))
-		}
-		if ws.Hashes.Features != "" {
-			ui.Printf("  %s", ui.FormatLabel("Features", ws.Hashes.Features))
-		}
-		ui.Printf("  %s", ui.FormatLabel("Overall", ws.Hashes.Overall))
 		ui.Println("")
+		ui.Println(ui.Bold("Configuration Hash"))
+		ui.Printf("  %s", ui.FormatLabel("Config", info.ConfigHash))
 	}
 
-	ui.Println(ui.Dim("Run 'dcx up' to execute this plan."))
-
-	return nil
+	ui.Println("")
+	if plan.Action != service.PlanActionNone {
+		ui.Println(ui.Dim("Run 'dcx up' to execute this plan."))
+	}
 }
 
-func buildImagePlans(ws *workspace.Workspace) []pipeline.ImageBuildPlan {
-	var plans []pipeline.ImageBuildPlan
-
-	switch ws.Resolved.PlanType {
-	case workspace.PlanTypeImage:
-		if len(ws.Resolved.Features) > 0 {
-			featureIDs := make([]string, len(ws.Resolved.Features))
-			for i, f := range ws.Resolved.Features {
-				featureIDs[i] = f.ID
-			}
-			plans = append(plans, pipeline.ImageBuildPlan{
-				Tag:       fmt.Sprintf("dcx-derived-%s", ws.ID[:8]),
-				BaseImage: ws.Resolved.Image,
-				Features:  featureIDs,
-				Reason:    "feature installation",
-			})
-		}
-
-	case workspace.PlanTypeDockerfile:
-		plans = append(plans, pipeline.ImageBuildPlan{
-			Tag:        fmt.Sprintf("dcx-build-%s", ws.ID[:8]),
-			Dockerfile: ws.Resolved.Dockerfile.Path,
-			Context:    ws.Resolved.Dockerfile.Context,
-			BuildArgs:  ws.Resolved.Dockerfile.Args,
-			Reason:     "Dockerfile build",
-		})
-		if len(ws.Resolved.Features) > 0 {
-			featureIDs := make([]string, len(ws.Resolved.Features))
-			for i, f := range ws.Resolved.Features {
-				featureIDs[i] = f.ID
-			}
-			plans = append(plans, pipeline.ImageBuildPlan{
-				Tag:       fmt.Sprintf("dcx-derived-%s", ws.ID[:8]),
-				BaseImage: fmt.Sprintf("dcx-build-%s", ws.ID[:8]),
-				Features:  featureIDs,
-				Reason:    "feature installation",
-			})
-		}
-
-	case workspace.PlanTypeCompose:
-		if len(ws.Resolved.Features) > 0 {
-			featureIDs := make([]string, len(ws.Resolved.Features))
-			for i, f := range ws.Resolved.Features {
-				featureIDs[i] = f.ID
-			}
-			plans = append(plans, pipeline.ImageBuildPlan{
-				Tag:      fmt.Sprintf("dcx-derived-%s", ws.ID[:8]),
-				Features: featureIDs,
-				Reason:   "feature installation for compose service",
-			})
-		}
+func colorAction(action service.PlanAction) string {
+	switch action {
+	case service.PlanActionCreate:
+		return pterm.FgGreen.Sprint(string(action))
+	case service.PlanActionRecreate:
+		return pterm.FgYellow.Sprint(string(action))
+	case service.PlanActionRebuild:
+		return pterm.FgRed.Sprint(string(action))
+	case service.PlanActionStart:
+		return pterm.FgCyan.Sprint(string(action))
+	case service.PlanActionNone:
+		return pterm.FgGreen.Sprint("none (up to date)")
+	default:
+		return string(action)
 	}
+}
 
-	return plans
+func colorState(s state.State) string {
+	switch s {
+	case state.StateRunning:
+		return pterm.FgGreen.Sprint(string(s))
+	case state.StateCreated:
+		return pterm.FgYellow.Sprint(string(s))
+	case state.StateStale:
+		return pterm.FgYellow.Sprint(string(s))
+	case state.StateBroken:
+		return pterm.FgRed.Sprint(string(s))
+	case state.StateAbsent:
+		return pterm.FgWhite.Sprint(string(s))
+	default:
+		return string(s)
+	}
+}
+
+func formatCommand(cmd interface{}) string {
+	switch v := cmd.(type) {
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, len(v))
+		for i, p := range v {
+			parts[i] = fmt.Sprintf("%v", p)
+		}
+		return strings.Join(parts, " ")
+	case map[string]interface{}:
+		// Parallel commands
+		var cmds []string
+		for name := range v {
+			cmds = append(cmds, name)
+		}
+		return fmt.Sprintf("{%s}", strings.Join(cmds, ", "))
+	default:
+		return fmt.Sprintf("%v", cmd)
+	}
+}
+
+func formatMount(mount interface{}) string {
+	switch v := mount.(type) {
+	case string:
+		return v
+	case map[string]interface{}:
+		source := fmt.Sprintf("%v", v["source"])
+		target := fmt.Sprintf("%v", v["target"])
+		mountType := "bind"
+		if t, ok := v["type"]; ok {
+			mountType = fmt.Sprintf("%v", t)
+		}
+		return fmt.Sprintf("%s → %s (%s)", source, target, mountType)
+	default:
+		return fmt.Sprintf("%v", mount)
+	}
 }

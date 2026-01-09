@@ -9,11 +9,11 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +43,19 @@ func init() {
 func runSSH(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
+	// Get identifiers (needed for both modes)
+	dockerClient, err := docker.NewClient()
+	if err != nil {
+		return fmt.Errorf("failed to connect to Docker: %w", err)
+	}
+	defer dockerClient.Close()
+
+	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	ids, err := svc.GetIdentifiers()
+	if err != nil {
+		return fmt.Errorf("failed to get identifiers: %w", err)
+	}
+
 	// --stdio mode: Called by SSH client via ProxyCommand
 	if sshStdio {
 		containerName := ""
@@ -50,27 +63,23 @@ func runSSH(cmd *cobra.Command, args []string) error {
 			containerName = args[0]
 		} else {
 			// Try to find container from current directory
-			envKey := workspace.ComputeID(workspacePath)
-			containerName = envKey
+			containerName = ids.EnvKey
 		}
 		return runSSHStdio(ctx, containerName)
 	}
 
 	// Normal mode: Show connection info or connect
-	envKey := workspace.ComputeID(workspacePath)
-	hostName := envKey + ".dcx"
-
 	if sshConnect {
 		// Connect directly via ssh
 		sshPath, err := exec.LookPath("ssh")
 		if err != nil {
 			return fmt.Errorf("ssh not found in PATH")
 		}
-		return syscall.Exec(sshPath, []string{"ssh", hostName}, os.Environ())
+		return syscall.Exec(sshPath, []string{"ssh", ids.SSHHost}, os.Environ())
 	}
 
 	// Print connection info
-	ui.Printf("ssh %s", hostName)
+	ui.Printf("ssh %s", ids.SSHHost)
 	return nil
 }
 
