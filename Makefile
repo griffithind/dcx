@@ -62,7 +62,7 @@ test-integration:
 
 # Run end-to-end tests (requires Docker) with parallel execution
 test-e2e:
-	go test -v -tags=e2e -parallel=4 ./test/e2e/...
+	go test -v -tags=e2e -parallel=8 ./test/e2e/...
 
 # Run tests with coverage
 test-coverage:
