@@ -190,15 +190,16 @@ func (s *EnvironmentService) buildWorkspace(info *EnvironmentInfo) (*workspace.W
 	})
 }
 
-// PlanAction represents the action to be taken.
-type PlanAction string
+// PlanAction is an alias for containerstate.PlanAction.
+type PlanAction = containerstate.PlanAction
 
+// Re-export PlanAction constants for convenience.
 const (
-	PlanActionNone     PlanAction = "none"
-	PlanActionStart    PlanAction = "start"
-	PlanActionCreate   PlanAction = "create"
-	PlanActionRecreate PlanAction = "recreate"
-	PlanActionRebuild  PlanAction = "rebuild"
+	PlanActionNone     = containerstate.PlanActionNone
+	PlanActionStart    = containerstate.PlanActionStart
+	PlanActionCreate   = containerstate.PlanActionCreate
+	PlanActionRecreate = containerstate.PlanActionRecreate
+	PlanActionRebuild  = containerstate.PlanActionRebuild
 )
 
 // PlanOptions configures the Plan operation.
@@ -231,41 +232,17 @@ func (s *EnvironmentService) Plan(ctx context.Context, opts PlanOptions) (*PlanR
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
 
-	result := &PlanResult{
+	// Use centralized logic to determine action
+	actionResult := containerstate.DeterminePlanAction(currentState, opts.Rebuild, opts.Recreate)
+
+	return &PlanResult{
 		Info:          info,
 		State:         currentState,
 		ContainerInfo: containerInfo,
-	}
-
-	// Determine action based on current state
-	switch currentState {
-	case containerstate.StateRunning:
-		if opts.Rebuild {
-			result.Action = PlanActionRebuild
-			result.Reason = "force rebuild requested"
-		} else if opts.Recreate {
-			result.Action = PlanActionRecreate
-			result.Reason = "force recreate requested"
-		} else {
-			result.Action = PlanActionNone
-			result.Reason = "container is running and up to date"
-		}
-	case containerstate.StateStale:
-		result.Action = PlanActionRecreate
-		result.Reason = "configuration changed"
-		result.Changes = []string{"devcontainer.json modified"}
-	case containerstate.StateBroken:
-		result.Action = PlanActionRecreate
-		result.Reason = "container state is broken"
-	case containerstate.StateAbsent:
-		result.Action = PlanActionCreate
-		result.Reason = "no container found"
-	case containerstate.StateCreated:
-		result.Action = PlanActionStart
-		result.Reason = "container exists but stopped"
-	}
-
-	return result, nil
+		Action:        actionResult.Action,
+		Reason:        actionResult.Reason,
+		Changes:       actionResult.Changes,
+	}, nil
 }
 
 // UpOptions configures the Up operation.

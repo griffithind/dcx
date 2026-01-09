@@ -186,10 +186,10 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 }
 
 // BuildDerivedImage builds a derived image with features installed.
+// This standalone function doesn't require a Manager instance.
 // remoteUser is the configured remoteUser from devcontainer.json (can be empty to default to containerUser).
 // containerUser is the container's user account (can be empty to default to "root").
-// Note: buildDir parameter is kept for API compatibility but no longer used.
-func (m *Manager) BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, _, remoteUser, containerUser string) error {
+func BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, remoteUser, containerUser string) error {
 	if len(features) == 0 {
 		return nil
 	}

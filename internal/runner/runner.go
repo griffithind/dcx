@@ -11,7 +11,6 @@ import (
 	"time"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
-	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/labels"
@@ -283,15 +282,10 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 
 	fmt.Printf("Building derived image: %s\n", derivedTag)
 
-	// Build the derived image using features manager
-	featureMgr, err := features.NewManager(ws.ConfigDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to create feature manager: %w", err)
-	}
-
+	// Build the derived image using the resolved features from workspace
 	remoteUser := ws.Resolved.RemoteUser
 	containerUser := ws.Resolved.ContainerUser
-	if err := featureMgr.BuildDerivedImage(ctx, baseImage, derivedTag, r.resolvedFeatures, ws.ConfigDir, remoteUser, containerUser); err != nil {
+	if err := features.BuildDerivedImage(ctx, baseImage, derivedTag, r.resolvedFeatures, remoteUser, containerUser); err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
 	}
 
@@ -618,11 +612,6 @@ func (r *UnifiedRunner) GetPrimaryContainerName() string {
 	return r.workspace.Resolved.ServiceName
 }
 
-// GetResolvedFeatures returns the resolved features.
-func (r *UnifiedRunner) GetResolvedFeatures() []*features.Feature {
-	return r.resolvedFeatures
-}
-
 // Compose helper methods
 
 func (r *UnifiedRunner) composeBaseArgs() []string {
@@ -832,35 +821,6 @@ func (r *UnifiedRunner) writeToTempFile(content, pattern string) (string, error)
 
 	tmpFile.Close()
 	return tmpFile.Name(), nil
-}
-
-// MergeImageMetadata reads image metadata labels and merges with config.
-func (r *UnifiedRunner) MergeImageMetadata(ctx context.Context, imageRef string) error {
-	labels, err := r.docker.GetImageLabels(ctx, imageRef)
-	if err != nil {
-		return err
-	}
-
-	metadataLabel, ok := labels[config.DevcontainerMetadataLabel]
-	if !ok || metadataLabel == "" {
-		return nil // No metadata to merge
-	}
-
-	imageConfigs, err := config.ParseImageMetadata(metadataLabel)
-	if err != nil {
-		return fmt.Errorf("failed to parse image metadata: %w", err)
-	}
-
-	if len(imageConfigs) == 0 {
-		return nil
-	}
-
-	// Merge metadata with workspace config
-	if r.workspace.RawConfig != nil {
-		r.workspace.RawConfig = config.MergeMetadata(r.workspace.RawConfig, imageConfigs)
-	}
-
-	return nil
 }
 
 // Verify UnifiedRunner implements Environment interface
