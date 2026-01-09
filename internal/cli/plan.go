@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
@@ -253,23 +252,6 @@ func colorAction(action service.PlanAction) string {
 		return pterm.FgGreen.Sprint("none (up to date)")
 	default:
 		return string(action)
-	}
-}
-
-func colorState(s container.State) string {
-	switch s {
-	case container.StateRunning:
-		return pterm.FgGreen.Sprint(string(s))
-	case container.StateCreated:
-		return pterm.FgYellow.Sprint(string(s))
-	case container.StateStale:
-		return pterm.FgYellow.Sprint(string(s))
-	case container.StateBroken:
-		return pterm.FgRed.Sprint(string(s))
-	case container.StateAbsent:
-		return pterm.FgWhite.Sprint(string(s))
-	default:
-		return string(s)
 	}
 }
 

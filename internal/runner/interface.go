@@ -80,18 +80,6 @@ type ExecOptions struct {
 	SSHAgentEnabled bool
 }
 
-// Info contains information about the running environment.
-type Info struct {
-	// ContainerID is the primary container's ID.
-	ContainerID string
-	// ContainerName is the primary container's name.
-	ContainerName string
-	// State is the current state of the environment.
-	State State
-	// WorkspaceFolder is the workspace path in the container.
-	WorkspaceFolder string
-}
-
 // State represents the current state of an environment.
 type State string
 
