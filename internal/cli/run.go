@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
@@ -100,32 +99,16 @@ func listShortcuts(dcxCfg *config.DcxConfig) error {
 
 	infos := shortcuts.ListShortcuts(dcxCfg.Shortcuts)
 
-	// Sort alphabetically
-	sort.Slice(infos, func(i, j int) bool {
-		return infos[i].Name < infos[j].Name
-	})
-
 	ui.Println(ui.Bold("Available shortcuts:"))
 	ui.Println("")
 
-	// Calculate column widths
-	maxName := 0
+	headers := []string{"Shortcut", "Command", "Description"}
+	rows := make([][]string, 0, len(infos))
 	for _, info := range infos {
-		if len(info.Name) > maxName {
-			maxName = len(info.Name)
-		}
+		rows = append(rows, []string{info.Name, info.Expansion, info.Description})
 	}
 
-	for _, info := range infos {
-		if info.Description != "" {
-			ui.Printf("  %s  %s", ui.Code(fmt.Sprintf("%-*s", maxName, info.Name)), info.Description)
-			ui.Printf("  %-*s  %s", maxName, "", ui.Dim("-> "+info.Expansion))
-		} else {
-			ui.Printf("  %s  %s", ui.Code(fmt.Sprintf("%-*s", maxName, info.Name)), ui.Dim("-> "+info.Expansion))
-		}
-	}
-
-	return nil
+	return ui.RenderTable(headers, rows)
 }
 
 func executeInContainer(execArgs []string) error {
@@ -165,7 +148,7 @@ func executeInContainer(execArgs []string) error {
 	case state.StateBroken:
 		return fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
 	case state.StateStale:
-		fmt.Fprintln(os.Stderr, "Warning: devcontainer is stale (config changed)")
+		ui.Warning("devcontainer is stale (config changed)")
 	}
 
 	if containerInfo == nil {
