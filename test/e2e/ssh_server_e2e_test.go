@@ -27,7 +27,7 @@ func TestSSHServerE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Get the env key for this workspace (used in SSH hostname)
+	// Get the workspace ID for this workspace (used in SSH hostname)
 	var workspaceID string
 
 	// Test dcx up --ssh adds SSH config

@@ -230,12 +230,14 @@ services:
 
 // extractContainerID extracts the container ID from status output.
 func extractContainerID(status string) string {
-	for _, line := range strings.Split(status, "\n") {
-		if strings.Contains(line, "ID:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				return parts[1]
-			}
+	// Strip ANSI codes before parsing
+	clean := helpers.StripANSI(status)
+	for _, line := range strings.Split(clean, "\n") {
+		// Look for lines where "ID:" is the first field (container ID line)
+		// This avoids matching "Workspace ID:" line
+		parts := strings.Fields(line)
+		if len(parts) >= 2 && parts[0] == "ID:" {
+			return parts[1]
 		}
 	}
 	return ""

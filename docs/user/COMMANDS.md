@@ -245,7 +245,7 @@ dcx status [flags]
 **Output:**
 ```
 Workspace:  /home/user/project
-Env Key:    abcd1234efgh
+Workspace ID: abcd1234efgh
 State:      RUNNING
 
 Primary Container:

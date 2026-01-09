@@ -254,7 +254,7 @@ func TestStatusCommandE2E(t *testing.T) {
 		assert.Contains(t, stdout, "State:")
 		assert.Contains(t, stdout, "absent")
 		assert.Contains(t, stdout, "Workspace:")
-		assert.Contains(t, stdout, "Env Key:")
+		assert.Contains(t, stdout, "Workspace ID:")
 	})
 
 	// Status when running

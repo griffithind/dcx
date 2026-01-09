@@ -21,7 +21,7 @@ type CLIContext struct {
 	// Service is the environment service for devcontainer operations.
 	Service *orchestrator.EnvironmentService
 
-	// Identifiers contains the workspace identifiers (project name, env key, etc.).
+	// Identifiers contains the workspace identifiers (project name, workspace ID, etc.).
 	Identifiers *orchestrator.Identifiers
 }
 

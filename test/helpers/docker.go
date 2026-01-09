@@ -157,7 +157,7 @@ func DockerClient(t *testing.T) *docker.Client {
 	return client
 }
 
-// CleanupTestContainers removes all test containers with the given env key prefix.
+// CleanupTestContainers removes all test containers with the given workspace ID prefix.
 func CleanupTestContainers(t *testing.T, workspaceID string) {
 	t.Helper()
 
@@ -207,7 +207,7 @@ func WaitForState(t *testing.T, dir string, expectedState string, timeout time.D
 	t.Fatalf("timeout waiting for state %s", expectedState)
 }
 
-// ContainerIsRunning checks if a container with the given env key is running.
+// ContainerIsRunning checks if a container with the given workspace ID is running.
 func ContainerIsRunning(t *testing.T, workspaceID string) bool {
 	t.Helper()
 
