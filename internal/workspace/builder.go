@@ -16,6 +16,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	dcxerrors "github.com/griffithind/dcx/internal/errors"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/util"
 )
 
@@ -97,7 +98,14 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 		return nil, err
 	}
 
-	// Compute hashes
+	// Resolve features if any exist
+	if len(opts.Config.Features) > 0 {
+		if err := b.resolveFeatures(ctx, ws, opts.Config); err != nil {
+			return nil, err
+		}
+	}
+
+	// Compute hashes (AFTER feature resolution so hashes are accurate)
 	if err := b.computeHashes(ws, opts.Config); err != nil {
 		return nil, err
 	}
@@ -211,6 +219,24 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 	return nil
 }
 
+// resolveFeatures resolves all features from the configuration.
+// Features are resolved and ordered by their installation order.
+func (b *Builder) resolveFeatures(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig) error {
+	mgr, err := features.NewManager(ws.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to create feature manager: %w", err)
+	}
+
+	resolved, err := mgr.ResolveAll(ctx, cfg.Features, cfg.OverrideFeatureInstallOrder)
+	if err != nil {
+		return fmt.Errorf("failed to resolve features: %w", err)
+	}
+
+	// Store resolved features on workspace
+	ws.ResolvedFeatures = resolved
+	return nil
+}
+
 // computeHashes computes all configuration hashes.
 func (b *Builder) computeHashes(ws *Workspace, cfg *config.DevcontainerConfig) error {
 	hashes := ws.Hashes
@@ -246,13 +272,17 @@ func (b *Builder) computeHashes(ws *Workspace, cfg *config.DevcontainerConfig) e
 		}
 	}
 
-	// Features hash
-	if len(ws.Resolved.Features) > 0 {
+	// Features hash - uses ResolvedFeatures from workspace
+	if len(ws.ResolvedFeatures) > 0 {
 		var featureData []string
-		for _, f := range ws.Resolved.Features {
-			// Include ID, digest, and options in hash
+		for _, f := range ws.ResolvedFeatures {
+			// Include ID, version, and options in hash
 			optData, _ := json.Marshal(f.Options)
-			featureData = append(featureData, fmt.Sprintf("%s:%s:%s", f.ID, f.Digest, string(optData)))
+			version := ""
+			if f.Metadata != nil {
+				version = f.Metadata.Version
+			}
+			featureData = append(featureData, fmt.Sprintf("%s:%s:%s", f.ID, version, string(optData)))
 		}
 		sort.Strings(featureData)
 		hashes.Features = hashBytes([]byte(strings.Join(featureData, "|")))

@@ -254,7 +254,7 @@ func (r *UnifiedRunner) buildDockerfile(ctx context.Context, imageTag string) er
 }
 
 // buildDerivedImage builds an image with features installed.
-func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string, rebuild, pull bool) (string, error) {
+func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string, rebuild, _ bool) (string, error) {
 	ws := r.workspace
 
 	// Use pre-computed derived image tag from workspace
@@ -276,13 +276,8 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 	remoteUser := ws.Resolved.RemoteUser
 	containerUser := ws.Resolved.ContainerUser
 
-	// Always resolve features to get metadata (mounts, env, etc.)
-	// This is needed even when using cached images
-	resolvedFeatures, err := r.resolveFeatures(ctx, pull)
-	if err != nil {
-		return "", err
-	}
-	r.resolvedFeatures = resolvedFeatures
+	// Use pre-resolved features from workspace (populated by builder)
+	r.resolvedFeatures = ws.ResolvedFeatures
 
 	// Merge feature mounts into workspace resolved mounts
 	r.mergeFeatureMounts()
@@ -305,7 +300,7 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		return "", fmt.Errorf("failed to create feature manager: %w", err)
 	}
 
-	if err := featureMgr.BuildDerivedImage(ctx, baseImage, derivedTag, resolvedFeatures, ws.ConfigDir, remoteUser, containerUser); err != nil {
+	if err := featureMgr.BuildDerivedImage(ctx, baseImage, derivedTag, r.resolvedFeatures, ws.ConfigDir, remoteUser, containerUser); err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
 	}
 
@@ -367,34 +362,6 @@ func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remo
 	}
 
 	return uidTag, nil
-}
-
-// resolveFeatures resolves and orders features for installation.
-// It uses Manager.ResolveAll to recursively resolve feature dependencies.
-func (r *UnifiedRunner) resolveFeatures(ctx context.Context, pull bool) ([]*features.Feature, error) {
-	ws := r.workspace
-
-	if ws.RawConfig == nil || len(ws.RawConfig.Features) == 0 {
-		return nil, nil
-	}
-
-	// Create feature manager
-	featureMgr, err := features.NewManager(ws.ConfigDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create feature manager: %w", err)
-	}
-
-	if pull {
-		featureMgr.SetForcePull(true)
-	}
-
-	// Resolve all features with dependency resolution
-	resolvedFeatures, err := featureMgr.ResolveAll(ctx, ws.RawConfig.Features, ws.RawConfig.OverrideFeatureInstallOrder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve features: %w", err)
-	}
-
-	return resolvedFeatures, nil
 }
 
 // createContainer creates a single container.

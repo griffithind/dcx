@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/container"
@@ -28,6 +27,10 @@ type EnvironmentService struct {
 	workspacePath string
 	configPath    string // optional override
 	verbose       bool
+
+	// lastWorkspace holds the workspace from the most recent create/start operation.
+	// This provides access to resolved features for lifecycle hooks without re-resolution.
+	lastWorkspace *workspace.Workspace
 }
 
 // NewEnvironmentService creates a new environment service.
@@ -158,12 +161,16 @@ func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, env
 
 // CreateRunner creates the unified runner for all configuration types.
 // The unified runner handles both compose and single-container plans.
+// The workspace is stored on the service for access by lifecycle hooks.
 func (s *EnvironmentService) CreateRunner(info *EnvironmentInfo) (runnerPkg.Environment, error) {
 	// Build a workspace for the unified runner (works for both compose and single)
 	ws, err := s.buildWorkspace(info)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build workspace: %w", err)
 	}
+
+	// Store workspace for access by lifecycle hooks (features are pre-resolved)
+	s.lastWorkspace = ws
 
 	r, err := runnerPkg.NewUnifiedRunner(ws, s.dockerClient)
 	if err != nil {
@@ -629,66 +636,52 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		sshAgentEnabled,
 	)
 
-	// Resolve features to get their lifecycle hooks
-	if len(info.Config.Features) > 0 {
+	// Use pre-resolved features from workspace (resolved during CreateRunner/buildWorkspace)
+	if s.lastWorkspace != nil && len(s.lastWorkspace.ResolvedFeatures) > 0 {
+		resolvedFeatures := s.lastWorkspace.ResolvedFeatures
 		if s.verbose {
-			ui.Printf("  [hooks] Resolving %d features...", len(info.Config.Features))
-			for id := range info.Config.Features {
-				ui.Printf("  [hooks]   - %s", id)
-			}
+			ui.Printf("  [hooks] Using %d pre-resolved features", len(resolvedFeatures))
 		}
-		configDir := filepath.Dir(info.ConfigPath)
-		mgr, err := features.NewManager(configDir)
-		if err == nil {
-			if s.verbose {
-				ui.Println("  [hooks] Calling ResolveAll...")
-			}
-			resolvedFeatures, err := mgr.ResolveAll(ctx, info.Config.Features, info.Config.OverrideFeatureInstallOrder)
-			if s.verbose {
-				ui.Printf("  [hooks] ResolveAll returned %d features, err=%v", len(resolvedFeatures), err)
-			}
-			if err == nil && len(resolvedFeatures) > 0 {
-				var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
 
-				for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
-					onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectUpdateContentCommands(resolvedFeatures) {
-					updateContentHooks = append(updateContentHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectPostCreateCommands(resolvedFeatures) {
-					postCreateHooks = append(postCreateHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectPostStartCommands(resolvedFeatures) {
-					postStartHooks = append(postStartHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
-				for _, fh := range features.CollectPostAttachCommands(resolvedFeatures) {
-					postAttachHooks = append(postAttachHooks, lifecycle.FeatureHook{
-						FeatureID:   fh.FeatureID,
-						FeatureName: fh.FeatureName,
-						Command:     fh.Command,
-					})
-				}
+		var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
 
-				hookRunner.SetFeatureHooks(onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks)
-			}
+		for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
+			onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
+				FeatureID:   fh.FeatureID,
+				FeatureName: fh.FeatureName,
+				Command:     fh.Command,
+			})
 		}
+		for _, fh := range features.CollectUpdateContentCommands(resolvedFeatures) {
+			updateContentHooks = append(updateContentHooks, lifecycle.FeatureHook{
+				FeatureID:   fh.FeatureID,
+				FeatureName: fh.FeatureName,
+				Command:     fh.Command,
+			})
+		}
+		for _, fh := range features.CollectPostCreateCommands(resolvedFeatures) {
+			postCreateHooks = append(postCreateHooks, lifecycle.FeatureHook{
+				FeatureID:   fh.FeatureID,
+				FeatureName: fh.FeatureName,
+				Command:     fh.Command,
+			})
+		}
+		for _, fh := range features.CollectPostStartCommands(resolvedFeatures) {
+			postStartHooks = append(postStartHooks, lifecycle.FeatureHook{
+				FeatureID:   fh.FeatureID,
+				FeatureName: fh.FeatureName,
+				Command:     fh.Command,
+			})
+		}
+		for _, fh := range features.CollectPostAttachCommands(resolvedFeatures) {
+			postAttachHooks = append(postAttachHooks, lifecycle.FeatureHook{
+				FeatureID:   fh.FeatureID,
+				FeatureName: fh.FeatureName,
+				Command:     fh.Command,
+			})
+		}
+
+		hookRunner.SetFeatureHooks(onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks)
 	}
 
 	// Run appropriate hooks based on whether this is a new environment

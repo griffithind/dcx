@@ -212,7 +212,7 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 		Image:        ws.Resolved.Image,
 		FinalImage:   ws.Resolved.FinalImage,
 		ServiceName:  ws.Resolved.ServiceName,
-		FeatureCount: len(ws.Resolved.Features),
+		FeatureCount: len(ws.ResolvedFeatures),
 	}
 
 	// Populate config debug
