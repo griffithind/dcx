@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/labels"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,10 +144,10 @@ func GetProjectRoot(t *testing.T) string {
 }
 
 // DockerClient returns a Docker client for test operations.
-func DockerClient(t *testing.T) *docker.Client {
+func DockerClient(t *testing.T) *container.DockerClient {
 	t.Helper()
 
-	client, err := docker.NewClient()
+	client, err := container.NewDockerClient()
 	require.NoError(t, err, "failed to create Docker client")
 
 	t.Cleanup(func() {
@@ -165,8 +165,8 @@ func CleanupTestContainers(t *testing.T, workspaceID string) {
 	client := DockerClient(t)
 
 	// Find containers with our label
-	containers, err := client.ListContainers(ctx, map[string]string{
-		labels.LabelWorkspaceID: workspaceID,
+	containers, err := client.ListContainersWithLabels(ctx, map[string]string{
+		state.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		t.Logf("Warning: failed to list containers for cleanup: %v", err)
@@ -214,9 +214,9 @@ func ContainerIsRunning(t *testing.T, workspaceID string) bool {
 	ctx := context.Background()
 	client := DockerClient(t)
 
-	containers, err := client.ListContainers(ctx, map[string]string{
-		labels.LabelWorkspaceID: workspaceID,
-		labels.LabelIsPrimary:   "true",
+	containers, err := client.ListContainersWithLabels(ctx, map[string]string{
+		state.LabelWorkspaceID: workspaceID,
+		state.LabelIsPrimary:   "true",
 	})
 	require.NoError(t, err)
 

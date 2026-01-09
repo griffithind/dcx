@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/containerstate"
+	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -42,22 +42,22 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ids := cliCtx.Identifiers
 
 	// Load dcx.json for shortcuts display (optional)
-	dcxCfg, _ := config.LoadDcxConfig(cliCtx.WorkspacePath())
+	dcxCfg, _ := devcontainer.LoadDcxConfig(cliCtx.WorkspacePath())
 
 	// Try to load config and compute hash for staleness detection
-	var currentState containerstate.State
-	var containerInfo *containerstate.ContainerInfo
-	var cfg *config.DevContainerConfig
+	var currentState state.ContainerState
+	var containerInfo *state.ContainerInfo
+	var cfg *devcontainer.DevContainerConfig
 	var configHash string
 
-	cfg, _, err = config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
+	cfg, _, err = devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 	if err == nil {
 		// Config exists, check for staleness
 		if raw := cfg.GetRawJSON(); len(raw) > 0 {
-			configHash = config.ComputeSimpleHash(raw)
+			configHash = devcontainer.ComputeSimpleHash(raw)
 		}
 		if configHash != "" {
-			currentState, containerInfo, err = cliCtx.Service.GetStateMgr().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, configHash)
+			currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, configHash)
 		} else {
 			currentState, containerInfo, err = cliCtx.GetState()
 		}
@@ -81,7 +81,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Show SSH status
 	if containerInfo != nil && host.HasSSHConfig(containerInfo.Name) {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
-	} else if currentState != containerstate.StateAbsent {
+	} else if currentState != state.StateAbsent {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (use 'dcx up --ssh' to enable)")))
 	}
 
@@ -109,7 +109,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				ui.Println("")
 				ui.Println(ui.Bold("Container Details"))
 				ui.Printf("  %s", ui.FormatLabel("Image", fullContainer.Image))
-				ui.Printf("  %s", ui.FormatLabel("Created", fullContainer.Created.Format("2006-01-02 15:04:05")))
+				if fullContainer.StartedAt != "" {
+					ui.Printf("  %s", ui.FormatLabel("Started", fullContainer.StartedAt))
+				}
 				ui.Printf("  %s", ui.FormatLabel("Running", fmt.Sprintf("%t", containerInfo.Running)))
 			}
 		}

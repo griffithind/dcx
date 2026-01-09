@@ -1,11 +1,30 @@
-// Package config handles parsing and validation of devcontainer.json files.
-package config
+// Package devcontainer provides types and utilities for parsing, validating,
+// and working with devcontainer.json configurations.
+//
+// This package is the core domain package for DCX, establishing "Dev Container"
+// as the central concept. It replaces the previous internal/config package
+// with clearer naming and organization.
+package devcontainer
 
 import (
 	"encoding/json"
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/parse"
+)
+
+// PlanType identifies the execution plan type for a devcontainer.
+type PlanType string
+
+const (
+	// PlanTypeImage indicates the devcontainer uses a pre-built image.
+	PlanTypeImage PlanType = "image"
+
+	// PlanTypeDockerfile indicates the devcontainer builds from a Dockerfile.
+	PlanTypeDockerfile PlanType = "dockerfile"
+
+	// PlanTypeCompose indicates the devcontainer uses Docker Compose.
+	PlanTypeCompose PlanType = "compose"
 )
 
 // DevContainerConfig represents the parsed devcontainer.json configuration.
@@ -66,12 +85,12 @@ type DevContainerConfig struct {
 	UserEnvProbe string `json:"userEnvProbe,omitempty"` // How to probe user environment (none, loginShell, loginInteractiveShell, interactiveShell)
 
 	// Runtime options
-	OverrideCommand   *bool    `json:"overrideCommand,omitempty"`
-	ShutdownAction    string   `json:"shutdownAction,omitempty"`
-	Init              *bool    `json:"init,omitempty"`
-	Privileged        *bool    `json:"privileged,omitempty"`
-	CapAdd            []string `json:"capAdd,omitempty"`
-	SecurityOpt       []string `json:"securityOpt,omitempty"`
+	OverrideCommand *bool    `json:"overrideCommand,omitempty"`
+	ShutdownAction  string   `json:"shutdownAction,omitempty"`
+	Init            *bool    `json:"init,omitempty"`
+	Privileged      *bool    `json:"privileged,omitempty"`
+	CapAdd          []string `json:"capAdd,omitempty"`
+	SecurityOpt     []string `json:"securityOpt,omitempty"`
 
 	// GPU support
 	HostRequirements *HostRequirements `json:"hostRequirements,omitempty"`
@@ -81,6 +100,18 @@ type DevContainerConfig struct {
 
 	// Store the raw JSON for hash computation
 	rawJSON []byte
+}
+
+// PlanType returns the execution plan type for this configuration.
+// This is the canonical method for determining how to build/run the container.
+func (c *DevContainerConfig) PlanType() PlanType {
+	if c.DockerComposeFile != nil {
+		return PlanTypeCompose
+	}
+	if c.Build != nil {
+		return PlanTypeDockerfile
+	}
+	return PlanTypeImage
 }
 
 // BuildConfig represents the build configuration for a devcontainer.
@@ -95,10 +126,10 @@ type BuildConfig struct {
 
 // HostRequirements specifies host machine requirements.
 type HostRequirements struct {
-	CPUs   int    `json:"cpus,omitempty"`
-	Memory string `json:"memory,omitempty"`
-	Storage string `json:"storage,omitempty"`
-	GPU    interface{} `json:"gpu,omitempty"` // bool or GPURequirement
+	CPUs    int         `json:"cpus,omitempty"`
+	Memory  string      `json:"memory,omitempty"`
+	Storage string      `json:"storage,omitempty"`
+	GPU     interface{} `json:"gpu,omitempty"` // bool or GPURequirement
 }
 
 // GetDockerComposeFiles returns the docker compose file paths as a slice.

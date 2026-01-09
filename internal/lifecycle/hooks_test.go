@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"testing"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,7 +143,7 @@ func TestShouldBlock(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &HookRunner{
-				cfg: &config.DevContainerConfig{
+				cfg: &devcontainer.DevContainerConfig{
 					WaitFor: tt.waitFor,
 				},
 			}
@@ -169,7 +169,7 @@ func TestGetWaitFor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &HookRunner{
-				cfg: &config.DevContainerConfig{
+				cfg: &devcontainer.DevContainerConfig{
 					WaitFor: tt.waitFor,
 				},
 			}

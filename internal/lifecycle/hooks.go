@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/ssh/agent"
@@ -68,7 +68,7 @@ type HookRunner struct {
 	dockerClient     *docker.Client
 	containerID     string
 	workspacePath   string
-	cfg             *config.DevContainerConfig
+	cfg             *devcontainer.DevContainerConfig
 	workspaceID          string
 	sshAgentEnabled bool
 
@@ -83,7 +83,7 @@ type HookRunner struct {
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
 // sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *config.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
+func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
 	return &HookRunner{
 		dockerClient:    dockerClient,
 		containerID:     containerID,
@@ -488,12 +488,12 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
 	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
 
-	workspaceFolder := config.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
+	workspaceFolder := devcontainer.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
 
 	// Apply variable substitution to remoteUser
 	user := r.cfg.RemoteUser
 	if user != "" {
-		user = config.Substitute(user, &config.SubstitutionContext{
+		user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
 			LocalWorkspaceFolder: r.workspacePath,
 		})
 	}

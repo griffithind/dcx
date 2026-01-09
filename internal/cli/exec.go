@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +46,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load config
-	cfg, _, _ := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
+	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
 	// Execute command using ExecBuilder
 	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())

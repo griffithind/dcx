@@ -4,10 +4,9 @@ package features
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
-
-	"github.com/griffithind/dcx/internal/config"
 )
 
 // Feature represents a resolved devcontainer feature.
@@ -318,8 +317,8 @@ func (f *Feature) GetEnvVars() map[string]string {
 			// Normalize option name per devcontainer spec
 			envName := NormalizeOptionName(name)
 			strVal := fmt.Sprintf("%v", val)
-			// Apply variable substitution (nil context uses os.Getenv for localEnv/env)
-			env[envName] = config.Substitute(strVal, nil)
+			// Apply environment variable substitution
+			env[envName] = substituteEnvVars(strVal)
 		}
 	}
 
@@ -342,5 +341,25 @@ func NormalizeOptionName(name string) string {
 	name = optionNameLeadingInvalid.ReplaceAllString(name, "_")
 	// Convert to uppercase
 	return strings.ToUpper(name)
+}
+
+// envVarPattern matches ${localEnv:VAR} and ${env:VAR} patterns with optional defaults.
+var envVarPattern = regexp.MustCompile(`\$\{(?:localEnv|env):([^}:]+)(?::([^}]*))?\}`)
+
+// substituteEnvVars substitutes environment variable references in a string.
+// This is a simplified version that only handles ${localEnv:VAR} and ${env:VAR} patterns.
+func substituteEnvVars(s string) string {
+	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := envVarPattern.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return match
+		}
+		varName := parts[1]
+		value := os.Getenv(varName)
+		if value == "" && len(parts) >= 3 {
+			value = parts[2] // default value
+		}
+		return value
+	})
 }
 

@@ -4,7 +4,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/griffithind/dcx/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,90 +12,74 @@ func TestShouldUpdateRemoteUserUID(t *testing.T) {
 	falseVal := false
 
 	tests := []struct {
-		name       string
-		cfg        *config.DevContainerConfig
-		remoteUser string
-		hostUID    int
-		expected   bool
+		name               string
+		updateRemoteUserUID *bool
+		remoteUser         string
+		hostUID            int
+		expected           bool
 	}{
 		{
-			name:       "explicitly true on supported platform",
-			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: &trueVal},
-			remoteUser: "vscode",
-			hostUID:    1000,
-			expected:   runtime.GOOS != "windows",
+			name:               "explicitly true on supported platform",
+			updateRemoteUserUID: &trueVal,
+			remoteUser:         "vscode",
+			hostUID:            1000,
+			expected:           runtime.GOOS != "windows",
 		},
 		{
-			name:       "explicitly false",
-			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: &falseVal},
-			remoteUser: "vscode",
-			hostUID:    1000,
-			expected:   false,
+			name:               "explicitly false",
+			updateRemoteUserUID: &falseVal,
+			remoteUser:         "vscode",
+			hostUID:            1000,
+			expected:           false,
 		},
 		{
-			name:       "not set (nil) - defaults to true on Linux/macOS",
-			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: nil},
-			remoteUser: "vscode",
-			hostUID:    1000,
-			expected:   runtime.GOOS != "windows",
+			name:               "not set (nil) - defaults to true on Linux/macOS",
+			updateRemoteUserUID: nil,
+			remoteUser:         "vscode",
+			hostUID:            1000,
+			expected:           runtime.GOOS != "windows",
 		},
 		{
-			name:       "empty config with user",
-			cfg:        &config.DevContainerConfig{},
-			remoteUser: "vscode",
-			hostUID:    1000,
-			expected:   runtime.GOOS != "windows",
+			name:               "skip root user",
+			updateRemoteUserUID: nil,
+			remoteUser:         "root",
+			hostUID:            1000,
+			expected:           false,
 		},
 		{
-			name:       "skip root user",
-			cfg:        &config.DevContainerConfig{},
-			remoteUser: "root",
-			hostUID:    1000,
-			expected:   false,
+			name:               "skip root user (numeric)",
+			updateRemoteUserUID: nil,
+			remoteUser:         "0",
+			hostUID:            1000,
+			expected:           false,
 		},
 		{
-			name:       "skip root user (numeric)",
-			cfg:        &config.DevContainerConfig{},
-			remoteUser: "0",
-			hostUID:    1000,
-			expected:   false,
-		},
-		{
-			name:       "skip when host is root",
-			cfg:        &config.DevContainerConfig{},
-			remoteUser: "vscode",
-			hostUID:    0,
-			expected:   false,
-		},
-		{
-			name:       "nil config",
-			cfg:        nil,
-			remoteUser: "vscode",
-			hostUID:    1000,
-			expected:   runtime.GOOS != "windows",
+			name:               "skip when host is root",
+			updateRemoteUserUID: nil,
+			remoteUser:         "vscode",
+			hostUID:            0,
+			expected:           false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ShouldUpdateRemoteUserUID(tt.cfg, tt.remoteUser, tt.hostUID)
+			result := ShouldUpdateRemoteUserUID(tt.updateRemoteUserUID, tt.remoteUser, tt.hostUID)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestShouldUpdateRemoteUserUID_PlatformSpecific(t *testing.T) {
-	cfg := &config.DevContainerConfig{}
-
 	switch runtime.GOOS {
 	case "linux":
 		// Linux should update by default
-		assert.True(t, ShouldUpdateRemoteUserUID(cfg, "vscode", 1000))
+		assert.True(t, ShouldUpdateRemoteUserUID(nil, "vscode", 1000))
 	case "darwin":
 		// macOS should update by default (for virtiofs)
-		assert.True(t, ShouldUpdateRemoteUserUID(cfg, "vscode", 501))
+		assert.True(t, ShouldUpdateRemoteUserUID(nil, "vscode", 501))
 	case "windows":
 		// Windows should not update (different file sharing semantics)
-		assert.False(t, ShouldUpdateRemoteUserUID(cfg, "vscode", 1000))
+		assert.False(t, ShouldUpdateRemoteUserUID(nil, "vscode", 1000))
 	}
 }

@@ -3,12 +3,12 @@ package shortcuts
 import (
 	"testing"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestResolve(t *testing.T) {
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"rw": {Command: "bin/jobs --skip-recurring"},
 		"r":  {Prefix: "rails", PassArgs: true},
 		"rs": {Command: "rails server -b 0.0.0.0"},
@@ -117,13 +117,13 @@ func TestResolveEmptyShortcuts(t *testing.T) {
 	assert.False(t, result.Found)
 	assert.Equal(t, []string{"rw"}, result.Command)
 
-	result = Resolve(map[string]config.Shortcut{}, []string{"rw"})
+	result = Resolve(map[string]devcontainer.Shortcut{}, []string{"rw"})
 	assert.False(t, result.Found)
 	assert.Equal(t, []string{"rw"}, result.Command)
 }
 
 func TestListShortcuts(t *testing.T) {
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"rw":   {Command: "bin/jobs --skip-recurring", Description: "Run workers"},
 		"r":    {Prefix: "rails", PassArgs: true, Description: "Rails command"},
 		"rs":   {Command: "rails server -b 0.0.0.0"},
@@ -156,13 +156,13 @@ func TestListShortcutsEmpty(t *testing.T) {
 	result := ListShortcuts(nil)
 	assert.Nil(t, result)
 
-	result = ListShortcuts(map[string]config.Shortcut{})
+	result = ListShortcuts(map[string]devcontainer.Shortcut{})
 	assert.Nil(t, result)
 }
 
 func TestListShortcutsSorting(t *testing.T) {
 	// Test that shortcuts are sorted alphabetically regardless of insertion order
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"z": {Command: "cmd-z"},
 		"a": {Command: "cmd-a"},
 		"m": {Command: "cmd-m"},
@@ -177,7 +177,7 @@ func TestListShortcutsSorting(t *testing.T) {
 
 func TestResolveWithFlags(t *testing.T) {
 	// Test that flags are passed through correctly
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"r": {Prefix: "rails", PassArgs: true},
 	}
 
@@ -224,7 +224,7 @@ func TestResolveWithFlags(t *testing.T) {
 
 func TestResolveCommandWithFlags(t *testing.T) {
 	// Test simple command shortcuts with additional args
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"rw": {Command: "bin/jobs --skip-recurring"},
 	}
 
@@ -260,7 +260,7 @@ func TestResolveCommandWithFlags(t *testing.T) {
 }
 
 func TestResolveSpecialCharacters(t *testing.T) {
-	shortcuts := map[string]config.Shortcut{
+	shortcuts := map[string]devcontainer.Shortcut{
 		"echo": {Prefix: "echo", PassArgs: true},
 	}
 

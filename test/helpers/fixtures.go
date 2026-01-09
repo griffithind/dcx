@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,11 +58,11 @@ func FeatureFixture(t *testing.T, name string) string {
 }
 
 // LoadTestConfig loads a devcontainer configuration from a fixture.
-func LoadTestConfig(t *testing.T, fixtureName string) *config.DevContainerConfig {
+func LoadTestConfig(t *testing.T, fixtureName string) *devcontainer.DevContainerConfig {
 	t.Helper()
 
 	fixtureDir := ConfigFixture(t, fixtureName)
-	cfg, _, err := config.Load(fixtureDir, "")
+	cfg, _, err := devcontainer.Load(fixtureDir, "")
 	require.NoError(t, err, "failed to load fixture config: %s", fixtureName)
 
 	return cfg

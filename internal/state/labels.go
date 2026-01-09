@@ -1,6 +1,4 @@
-// Package labels provides container label management for dcx.
-// All labels use the com.griffithind.dcx namespace.
-package labels
+package state
 
 import (
 	"encoding/json"
@@ -134,8 +132,9 @@ const (
 	LabelCacheFeatureDigests = Prefix + ".cache.feature.digests"
 )
 
-// Labels represents all dcx labels for a container.
-type Labels struct {
+// ContainerLabels represents all dcx labels for a container.
+// Renamed from Labels for clarity.
+type ContainerLabels struct {
 	// Schema version
 	SchemaVersion string
 
@@ -174,7 +173,7 @@ type Labels struct {
 	IsPrimary      bool
 
 	// Cache
-	CacheData          *CacheData
+	CacheData           *CacheData
 	CacheFeatureDigests map[string]string
 }
 
@@ -189,9 +188,9 @@ type CacheData struct {
 	LastChecked    time.Time         `json:"last_checked,omitempty"`
 }
 
-// NewLabels creates a new Labels with default values.
-func NewLabels() *Labels {
-	return &Labels{
+// NewContainerLabels creates a new ContainerLabels with default values.
+func NewContainerLabels() *ContainerLabels {
+	return &ContainerLabels{
 		SchemaVersion:       SchemaVersion,
 		Managed:             true,
 		FeaturesInstalled:   []string{},
@@ -200,8 +199,8 @@ func NewLabels() *Labels {
 	}
 }
 
-// ToMap converts Labels to a map for container creation.
-func (l *Labels) ToMap() map[string]string {
+// ToMap converts ContainerLabels to a map for container creation.
+func (l *ContainerLabels) ToMap() map[string]string {
 	m := map[string]string{
 		LabelSchemaVersion: l.SchemaVersion,
 		LabelManaged:       util.BoolToString(l.Managed),
@@ -269,9 +268,9 @@ func (l *Labels) ToMap() map[string]string {
 	return m
 }
 
-// FromMap creates Labels from a container label map.
-func FromMap(m map[string]string) *Labels {
-	l := NewLabels()
+// ContainerLabelsFromMap creates ContainerLabels from a container label map.
+func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
+	l := NewContainerLabels()
 
 	// Schema version
 	l.SchemaVersion = m[LabelSchemaVersion]
@@ -338,8 +337,8 @@ func IsLegacy(m map[string]string) bool {
 }
 
 // MigrateFromLegacy converts legacy labels to the new format.
-func MigrateFromLegacy(m map[string]string) *Labels {
-	l := NewLabels()
+func MigrateFromLegacy(m map[string]string) *ContainerLabels {
+	l := NewContainerLabels()
 
 	// Map legacy labels to new format
 	l.Managed = m[LegacyPrefix+"managed"] == "true"

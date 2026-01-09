@@ -2,11 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/containerstate"
-	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/runner"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -45,18 +45,18 @@ func runStop(cmd *cobra.Command, args []string) error {
 	containerInfo := result.ContainerInfo
 
 	switch currentState {
-	case containerstate.StateAbsent:
+	case state.StateAbsent:
 		ui.Println("No devcontainer found")
 		return nil
 
-	case containerstate.StateCreated:
+	case state.StateCreated:
 		ui.Println("Devcontainer is already stopped")
 		return nil
 
-	case containerstate.StateRunning, containerstate.StateStale, containerstate.StateBroken:
+	case state.StateRunning, state.StateStale, state.StateBroken:
 		// Check shutdownAction setting if not forcing
 		if !stopForce {
-			cfg, _, loadErr := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
+			cfg, _, loadErr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 			if loadErr == nil && cfg.ShutdownAction == "none" {
 				ui.Println("Skipping stop: shutdownAction is set to 'none'")
 				ui.Println("Use --force to stop anyway")
@@ -65,8 +65,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Determine plan type from container labels (single-container vs compose)
-		isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
-			containerInfo.Plan == labels.BuildMethodDockerfile)
+		isSingleContainer := containerInfo != nil && (containerInfo.Plan == state.BuildMethodImage ||
+			containerInfo.Plan == state.BuildMethodDockerfile)
 		if isSingleContainer {
 			// Single container - use Docker API directly
 			if err := cliCtx.DockerClient.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
@@ -78,7 +78,12 @@ func runStop(cmd *cobra.Command, args []string) error {
 			if actualProject == "" {
 				actualProject = cliCtx.Identifiers.ProjectName
 			}
-			r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.WorkspaceID)
+			// Get config directory for compose commands
+			configDir := cliCtx.WorkspacePath()
+			if containerInfo.Labels != nil && containerInfo.Labels.ConfigPath != "" {
+				configDir = filepath.Dir(containerInfo.Labels.ConfigPath)
+			}
+			r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject, cliCtx.DockerClient)
 			if err := r.Stop(cliCtx.Ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}

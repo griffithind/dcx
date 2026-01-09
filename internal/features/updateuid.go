@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 )
 
@@ -115,12 +114,17 @@ func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, ima
 // ShouldUpdateRemoteUserUID determines if we should update the remote user's UID.
 // This is called during the build phase to decide whether to add the UID update layer.
 //
+// Parameters:
+//   - updateRemoteUserUID: the value from devcontainer.json (nil means use default)
+//   - remoteUser: the user whose UID/GID should be updated (e.g., "vscode")
+//   - hostUID: the host user's UID to match
+//
 // Returns true when:
 //   - Platform is Linux or macOS (Darwin)
 //   - Host user is not root (UID 0)
 //   - updateRemoteUserUID is not explicitly disabled
 //   - remoteUser is not "root"
-func ShouldUpdateRemoteUserUID(cfg *config.DevContainerConfig, remoteUser string, hostUID int) bool {
+func ShouldUpdateRemoteUserUID(updateRemoteUserUID *bool, remoteUser string, hostUID int) bool {
 	// Skip on Windows (different file sharing semantics)
 	if runtime.GOOS == "windows" {
 		return false
@@ -137,8 +141,8 @@ func ShouldUpdateRemoteUserUID(cfg *config.DevContainerConfig, remoteUser string
 	}
 
 	// If explicitly set in config, use that value
-	if cfg != nil && cfg.UpdateRemoteUserUID != nil {
-		return *cfg.UpdateRemoteUserUID
+	if updateRemoteUserUID != nil {
+		return *updateRemoteUserUID
 	}
 
 	// Default to true on Linux and macOS

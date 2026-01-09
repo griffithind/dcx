@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
 // ResolvedCommand represents a resolved shortcut command.
@@ -27,7 +27,7 @@ type ResolvedCommand struct {
 //   - shortcuts["r"] = {prefix: "rails", passArgs: true}
 //     Resolve(shortcuts, ["r", "console"]) -> ["rails", "console"]
 //     Resolve(shortcuts, ["r", "server", "-p", "3001"]) -> ["rails", "server", "-p", "3001"]
-func Resolve(shortcuts map[string]config.Shortcut, args []string) ResolvedCommand {
+func Resolve(shortcuts map[string]devcontainer.Shortcut, args []string) ResolvedCommand {
 	if len(args) == 0 || len(shortcuts) == 0 {
 		return ResolvedCommand{Command: args, Found: false}
 	}
@@ -82,7 +82,7 @@ type ShortcutInfo struct {
 }
 
 // ListShortcuts returns a sorted list of shortcut information for display.
-func ListShortcuts(shortcuts map[string]config.Shortcut) []ShortcutInfo {
+func ListShortcuts(shortcuts map[string]devcontainer.Shortcut) []ShortcutInfo {
 	if len(shortcuts) == 0 {
 		return nil
 	}

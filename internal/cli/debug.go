@@ -8,12 +8,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/orchestrator"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -154,7 +153,7 @@ func runDebug(cmd *cobra.Command, args []string) error {
 func getDockerInfo(ctx context.Context) DockerInfo {
 	info := DockerInfo{}
 
-	client, err := docker.NewClient()
+	client, err := container.NewDockerClient()
 	if err != nil {
 		info.Available = false
 		info.Error = err.Error()
@@ -186,14 +185,14 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	}
 
 	// Parse configuration
-	cfg, err := config.ParseFile(cfgPath)
+	cfg, err := devcontainer.ParseFile(cfgPath)
 	if err != nil {
 		return err
 	}
 
-	// Build workspace
-	builder := workspace.NewBuilder(nil)
-	ws, err := builder.Build(ctx, workspace.BuilderOptions{
+	// Build resolved devcontainer
+	builder := devcontainer.NewBuilder(nil)
+	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
 		Config:        cfg,
@@ -203,16 +202,20 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	}
 
 	// Populate workspace debug
+	planType := ""
+	if resolved.Plan != nil {
+		planType = string(resolved.Plan.Type())
+	}
 	debug.Workspace = WorkspaceDebug{
-		ID:           ws.ID,
-		Name:         ws.Name,
-		Path:         ws.LocalRoot,
-		ConfigPath:   ws.ConfigPath,
-		PlanType:     string(ws.Resolved.PlanType),
-		Image:        ws.Resolved.Image,
-		FinalImage:   ws.Resolved.FinalImage,
-		ServiceName:  ws.Resolved.ServiceName,
-		FeatureCount: len(ws.ResolvedFeatures),
+		ID:           resolved.ID,
+		Name:         resolved.Name,
+		Path:         resolved.LocalRoot,
+		ConfigPath:   resolved.ConfigPath,
+		PlanType:     planType,
+		Image:        resolved.BaseImage,
+		FinalImage:   resolved.Image,
+		ServiceName:  resolved.ServiceName,
+		FeatureCount: len(resolved.Features),
 	}
 
 	// Populate config debug
@@ -221,11 +224,11 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 		HasDockerfile: cfg.Build != nil,
 		HasCompose:    cfg.IsComposePlan(),
 		Hashes: HashesDebug{
-			Config:     ws.Hashes.Config,
-			Dockerfile: ws.Hashes.Dockerfile,
-			Compose:    ws.Hashes.Compose,
-			Features:   ws.Hashes.Features,
-			Overall:    ws.Hashes.Overall,
+			Config:     resolved.Hashes.Config,
+			Dockerfile: resolved.Hashes.Dockerfile,
+			Compose:    resolved.Hashes.Compose,
+			Features:   resolved.Hashes.Features,
+			Overall:    resolved.Hashes.Overall,
 		},
 	}
 
@@ -238,13 +241,15 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 }
 
 func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
-	client, err := docker.NewClient()
+	client, err := container.NewDockerClient()
 	if err != nil {
 		return
 	}
 	defer client.Close()
 
-	svc := orchestrator.NewEnvironmentService(client, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(client, workspacePath, configPath, verbose)
+	defer svc.Close()
+
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return
@@ -256,7 +261,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 		workspaceID = ids.WorkspaceID
 	}
 
-	s, info, _ := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, workspaceID)
+	s, info, _ := svc.GetStateManager().GetStateWithProject(ctx, ids.ProjectName, workspaceID)
 
 	debug.Container = ContainerDebug{
 		Found: info != nil,
@@ -435,5 +440,5 @@ func outputDebugTable(debug *DebugInfo) error {
 	return nil
 }
 
-// Ensure labels package is imported
-var _ = labels.Prefix
+// Ensure state package is imported for label prefix
+var _ = state.LabelManaged

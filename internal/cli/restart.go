@@ -2,11 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/containerstate"
-	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/runner"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +52,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if result.State == containerstate.StateAbsent {
+	if result.State == state.StateAbsent {
 		return fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
 	}
 
@@ -60,7 +60,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 	// Check shutdownAction setting if not forcing
 	if !restartForce {
-		cfg, _, loadErr := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
+		cfg, _, loadErr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 		if loadErr == nil && cfg.ShutdownAction == "none" {
 			ui.Println("Skipping restart: shutdownAction is set to 'none'")
 			ui.Println("Use --force to restart anyway")
@@ -82,8 +82,8 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	var restartErr error
 
 	// Determine plan type from container labels (single-container vs compose)
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
-		containerInfo.Plan == labels.BuildMethodDockerfile)
+	isSingleContainer := containerInfo != nil && (containerInfo.Plan == state.BuildMethodImage ||
+		containerInfo.Plan == state.BuildMethodDockerfile)
 	if isSingleContainer {
 		// Single container - use Docker API directly
 		if containerInfo.Running {
@@ -105,9 +105,17 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		if actualProject == "" {
 			actualProject = cliCtx.Identifiers.ProjectName
 		}
-		r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.WorkspaceID)
-		if err := r.Restart(cliCtx.Ctx); err != nil {
-			restartErr = fmt.Errorf("failed to restart containers: %w", err)
+		// Get config directory for compose commands
+		configDir := cliCtx.WorkspacePath()
+		if containerInfo != nil && containerInfo.Labels != nil && containerInfo.Labels.ConfigPath != "" {
+			configDir = filepath.Dir(containerInfo.Labels.ConfigPath)
+		}
+		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject, cliCtx.DockerClient)
+		// Stop then start (no Restart method available)
+		if err := r.Stop(cliCtx.Ctx); err != nil {
+			restartErr = fmt.Errorf("failed to stop containers: %w", err)
+		} else if err := r.Start(cliCtx.Ctx); err != nil {
+			restartErr = fmt.Errorf("failed to start containers: %w", err)
 		}
 	}
 

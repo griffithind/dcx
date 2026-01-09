@@ -1,14 +1,15 @@
-// Package runner defines the common interface for devcontainer environment runners.
-package runner
+package container
 
 import (
 	"context"
 	"io"
 )
 
-// Environment represents a devcontainer environment that can be started, stopped, and managed.
+// ContainerRuntime represents a devcontainer environment that can be started, stopped, and managed.
 // This interface abstracts the differences between compose and single-container runners.
-type Environment interface {
+//
+// This replaces the previous runner.Environment interface with a clearer name.
+type ContainerRuntime interface {
 	// Up starts the environment, building images if necessary.
 	Up(ctx context.Context, opts UpOptions) error
 
@@ -27,11 +28,11 @@ type Environment interface {
 	// Exec executes a command in the running environment.
 	Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error)
 
-	// GetContainerWorkspaceFolder returns the workspace folder path inside the container.
-	GetContainerWorkspaceFolder() string
+	// WorkspaceFolder returns the workspace folder path inside the container.
+	WorkspaceFolder() string
 
-	// GetPrimaryContainerName returns the name/ID of the primary container.
-	GetPrimaryContainerName() string
+	// ContainerName returns the name/ID of the primary container.
+	ContainerName() string
 }
 
 // UpOptions configures the Up operation.
@@ -78,4 +79,15 @@ type ExecOptions struct {
 	TTY bool
 	// SSHAgentEnabled enables SSH agent forwarding.
 	SSHAgentEnabled bool
+}
+
+// ContainerInfo contains information about a running container.
+type ContainerInfo struct {
+	ID        string            // Container ID
+	Name      string            // Container name
+	Image     string            // Image used
+	Status    string            // Container status
+	Running   bool              // Is container running
+	Labels    map[string]string // Container labels
+	CreatedAt int64             // Creation timestamp
 }
