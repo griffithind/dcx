@@ -133,6 +133,83 @@ func (s State) GetRecovery() Recovery {
 	}
 }
 
+// PlanAction represents the action to be taken for an environment.
+type PlanAction string
+
+const (
+	// PlanActionNone means no action is needed.
+	PlanActionNone PlanAction = "none"
+
+	// PlanActionStart means the container should be started.
+	PlanActionStart PlanAction = "start"
+
+	// PlanActionCreate means the environment should be created.
+	PlanActionCreate PlanAction = "create"
+
+	// PlanActionRecreate means the environment should be removed and recreated.
+	PlanActionRecreate PlanAction = "recreate"
+
+	// PlanActionRebuild means the environment should be rebuilt with new images.
+	PlanActionRebuild PlanAction = "rebuild"
+)
+
+// PlanActionResult contains the result of determining what action to take.
+type PlanActionResult struct {
+	Action  PlanAction
+	Reason  string
+	Changes []string
+}
+
+// DeterminePlanAction determines what action should be taken based on current state
+// and user options. This is the single source of truth for action decisions.
+func DeterminePlanAction(state State, rebuild, recreate bool) PlanActionResult {
+	switch state {
+	case StateRunning:
+		if rebuild {
+			return PlanActionResult{
+				Action: PlanActionRebuild,
+				Reason: "force rebuild requested",
+			}
+		}
+		if recreate {
+			return PlanActionResult{
+				Action: PlanActionRecreate,
+				Reason: "force recreate requested",
+			}
+		}
+		return PlanActionResult{
+			Action: PlanActionNone,
+			Reason: "container is running and up to date",
+		}
+	case StateStale:
+		return PlanActionResult{
+			Action:  PlanActionRecreate,
+			Reason:  "configuration changed",
+			Changes: []string{"devcontainer.json modified"},
+		}
+	case StateBroken:
+		return PlanActionResult{
+			Action: PlanActionRecreate,
+			Reason: "container state is broken",
+		}
+	case StateAbsent:
+		return PlanActionResult{
+			Action: PlanActionCreate,
+			Reason: "no container found",
+		}
+	case StateCreated, StateStopped:
+		return PlanActionResult{
+			Action: PlanActionStart,
+			Reason: "container exists but stopped",
+		}
+	default:
+		return PlanActionResult{
+			Action: PlanActionCreate,
+			Reason: "unknown state",
+		}
+	}
+}
+
 // ContainerInfo holds information about a container relevant to state management.
 type ContainerInfo struct {
 	ID             string
