@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +26,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 				"options": ["--build-arg", "FOO=bar"]
 			}
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -46,7 +46,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"service": "app",
 			"runServices": ["app", "db"]
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -61,7 +61,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"workspaceFolder": "/workspace",
 			"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"containerUser": "root",
 			"updateRemoteUserUID": true
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -90,7 +90,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"containerEnv": {"FOO": "bar", "BAZ": "qux"},
 			"remoteEnv": {"PATH": "/custom:${containerEnv:PATH}"}
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -113,7 +113,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			},
 			"otherPortsAttributes": {"onAutoForward": "silent"}
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -139,7 +139,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 				"source=/data,target=/mnt,readonly"
 			]
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -157,7 +157,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 				{"source": "/data", "target": "/mnt", "readonly": true}
 			]
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"capAdd": ["SYS_PTRACE", "NET_ADMIN"],
 			"securityOpt": ["seccomp=unconfined"]
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -204,7 +204,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			"postAttachCommand": "echo postAttach",
 			"waitFor": "postCreateCommand"
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -226,7 +226,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 				"gpu": true
 			}
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -239,7 +239,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 
 	t.Run("userEnvProbe property", func(t *testing.T) {
 		input := `{"userEnvProbe": "loginInteractiveShell"}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -254,7 +254,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 			},
 			"overrideFeatureInstallOrder": ["ghcr.io/devcontainers/features/git:1"]
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -273,7 +273,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 				}
 			}
 		}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -284,7 +284,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 
 // TestVariableSubstitution verifies all variable substitution patterns.
 func TestVariableSubstitution(t *testing.T) {
-	ctx := &config.SubstitutionContext{
+	ctx := &devcontainer.SubstitutionContext{
 		LocalWorkspaceFolder:     "/home/user/project",
 		ContainerWorkspaceFolder: "/workspace",
 		DevcontainerID:           "abc123",
@@ -343,7 +343,7 @@ func TestVariableSubstitution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := config.Substitute(tt.input, ctx)
+			result := devcontainer.Substitute(tt.input, ctx)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -412,7 +412,7 @@ func TestParseProbeType(t *testing.T) {
 func TestImageMetadataMerging(t *testing.T) {
 	t.Run("parse valid metadata", func(t *testing.T) {
 		label := `[{"remoteUser": "vscode"}, {"capAdd": ["SYS_PTRACE"]}]`
-		configs, err := config.ParseImageMetadata(label)
+		configs, err := devcontainer.ParseImageMetadata(label)
 		require.NoError(t, err)
 		require.Len(t, configs, 2)
 		assert.Equal(t, "vscode", configs[0].RemoteUser)
@@ -421,35 +421,35 @@ func TestImageMetadataMerging(t *testing.T) {
 
 	t.Run("boolean merging - true wins", func(t *testing.T) {
 		val := true
-		local := &config.DevContainerConfig{}
-		image := []config.DevContainerConfig{{Init: &val}}
-		merged := config.MergeMetadata(local, image)
+		local := &devcontainer.DevContainerConfig{}
+		image := []devcontainer.DevContainerConfig{{Init: &val}}
+		merged := devcontainer.MergeMetadata(local, image)
 		require.NotNil(t, merged.Init)
 		assert.True(t, *merged.Init)
 	})
 
 	t.Run("array merging - union", func(t *testing.T) {
-		local := &config.DevContainerConfig{
+		local := &devcontainer.DevContainerConfig{
 			CapAdd: []string{"SYS_PTRACE"},
 		}
-		image := []config.DevContainerConfig{{
+		image := []devcontainer.DevContainerConfig{{
 			CapAdd: []string{"NET_ADMIN"},
 		}}
-		merged := config.MergeMetadata(local, image)
+		merged := devcontainer.MergeMetadata(local, image)
 		assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_ADMIN"}, merged.CapAdd)
 	})
 
 	t.Run("single value - local wins", func(t *testing.T) {
-		local := &config.DevContainerConfig{RemoteUser: "local"}
-		image := []config.DevContainerConfig{{RemoteUser: "image"}}
-		merged := config.MergeMetadata(local, image)
+		local := &devcontainer.DevContainerConfig{RemoteUser: "local"}
+		image := []devcontainer.DevContainerConfig{{RemoteUser: "image"}}
+		merged := devcontainer.MergeMetadata(local, image)
 		assert.Equal(t, "local", merged.RemoteUser)
 	})
 
 	t.Run("image fills missing local values", func(t *testing.T) {
-		local := &config.DevContainerConfig{}
-		image := []config.DevContainerConfig{{RemoteUser: "image", WorkspaceFolder: "/workspace"}}
-		merged := config.MergeMetadata(local, image)
+		local := &devcontainer.DevContainerConfig{}
+		image := []devcontainer.DevContainerConfig{{RemoteUser: "image", WorkspaceFolder: "/workspace"}}
+		merged := devcontainer.MergeMetadata(local, image)
 		assert.Equal(t, "image", merged.RemoteUser)
 		assert.Equal(t, "/workspace", merged.WorkspaceFolder)
 	})
@@ -459,7 +459,7 @@ func TestImageMetadataMerging(t *testing.T) {
 func TestMountFormats(t *testing.T) {
 	t.Run("string format parsing", func(t *testing.T) {
 		input := `"type=bind,source=/src,target=/dst,readonly"`
-		var m config.Mount
+		var m devcontainer.Mount
 		err := json.Unmarshal([]byte(input), &m)
 		require.NoError(t, err)
 
@@ -471,7 +471,7 @@ func TestMountFormats(t *testing.T) {
 
 	t.Run("object format parsing", func(t *testing.T) {
 		input := `{"source": "/src", "target": "/dst", "type": "volume", "readonly": true}`
-		var m config.Mount
+		var m devcontainer.Mount
 		err := json.Unmarshal([]byte(input), &m)
 		require.NoError(t, err)
 
@@ -482,7 +482,7 @@ func TestMountFormats(t *testing.T) {
 	})
 
 	t.Run("mount string output", func(t *testing.T) {
-		m := config.Mount{
+		m := devcontainer.Mount{
 			Source: "/src",
 			Target: "/dst",
 			Type:   "bind",
@@ -498,7 +498,7 @@ func TestMountFormats(t *testing.T) {
 func TestComposeDetection(t *testing.T) {
 	t.Run("compose plan detected", func(t *testing.T) {
 		input := `{"dockerComposeFile": "docker-compose.yml", "service": "app"}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -508,7 +508,7 @@ func TestComposeDetection(t *testing.T) {
 
 	t.Run("image plan detected", func(t *testing.T) {
 		input := `{"image": "ubuntu:22.04"}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
@@ -518,7 +518,7 @@ func TestComposeDetection(t *testing.T) {
 
 	t.Run("build plan detected", func(t *testing.T) {
 		input := `{"build": {"dockerfile": "Dockerfile"}}`
-		var cfg config.DevContainerConfig
+		var cfg devcontainer.DevContainerConfig
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 

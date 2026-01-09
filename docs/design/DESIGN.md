@@ -4,6 +4,8 @@
 
 dcx is a CLI for running devcontainers using the Docker Engine API and docker compose CLI, without depending on @devcontainers/cli.
 
+> **Note:** A proposed architecture redesign is documented in [ADR-001](../adr/001-architecture-redesign.md). This redesign addresses terminology confusion and proposes a clearer domain model.
+
 ### Design Principles
 
 1. **Native Docker integration** - Uses Docker Engine API for container operations

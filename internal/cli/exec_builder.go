@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/containerstate"
+	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 	"golang.org/x/term"
@@ -37,13 +37,13 @@ type ExecFlags struct {
 // ExecBuilder builds and executes docker exec commands.
 // It consolidates the common exec pattern used in exec, shell, and run commands.
 type ExecBuilder struct {
-	containerInfo *containerstate.ContainerInfo
-	cfg           *config.DevContainerConfig
+	containerInfo *state.ContainerInfo
+	cfg           *devcontainer.DevContainerConfig
 	workspacePath string
 }
 
 // NewExecBuilder creates a new exec builder.
-func NewExecBuilder(containerInfo *containerstate.ContainerInfo, cfg *config.DevContainerConfig, workspacePath string) *ExecBuilder {
+func NewExecBuilder(containerInfo *state.ContainerInfo, cfg *devcontainer.DevContainerConfig, workspacePath string) *ExecBuilder {
 	return &ExecBuilder{
 		containerInfo: containerInfo,
 		cfg:           cfg,
@@ -78,7 +78,7 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 			user = b.cfg.ContainerUser
 		}
 		if user != "" {
-			user = config.Substitute(user, &config.SubstitutionContext{
+			user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
 				LocalWorkspaceFolder: b.workspacePath,
 			})
 		}
@@ -88,7 +88,7 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 	if opts.WorkDir != "" {
 		args = append(args, "-w", opts.WorkDir)
 	} else if b.cfg != nil {
-		workDir := config.DetermineContainerWorkspaceFolder(b.cfg, b.workspacePath)
+		workDir := devcontainer.DetermineContainerWorkspaceFolder(b.cfg, b.workspacePath)
 		args = append(args, "-w", workDir)
 	}
 

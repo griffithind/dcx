@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/orchestrator"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -40,16 +41,17 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := container.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
 	// Create service and get plan
-	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	defer svc.Close()
 
-	plan, err := svc.Plan(ctx, orchestrator.PlanOptions{})
+	plan, err := svc.Plan(ctx, service.PlanOptions{})
 	if err != nil {
 		return err
 	}
@@ -60,19 +62,19 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func displayPlan(plan *orchestrator.PlanResult) {
-	info := plan.Info
-	cfg := info.Config
+func displayPlan(plan *service.PlanResult) {
+	resolved := plan.Resolved
+	cfg := resolved.RawConfig
 
 	ui.Println(ui.Bold("Devcontainer Execution Plan"))
 	ui.Println(ui.Dim("==========================="))
 	ui.Println("")
 
 	// Workspace info
-	ui.Printf("%s", ui.FormatLabel("Workspace", info.ProjectName))
-	ui.Printf("%s", ui.FormatLabel("Path", ui.Code(info.WorkspaceID)))
-	if info.ProjectName != "" {
-		ui.Printf("%s", ui.FormatLabel("Project", ui.Dim(info.ProjectName)))
+	ui.Printf("%s", ui.FormatLabel("Workspace", resolved.Name))
+	ui.Printf("%s", ui.FormatLabel("Path", ui.Code(resolved.LocalRoot)))
+	if resolved.Name != "" {
+		ui.Printf("%s", ui.FormatLabel("Project", ui.Dim(resolved.Name)))
 	}
 	ui.Println("")
 
@@ -226,29 +228,29 @@ func displayPlan(plan *orchestrator.PlanResult) {
 	}
 
 	// Hashes (verbose only)
-	if ui.IsVerbose() {
+	if ui.IsVerbose() && resolved.Hashes != nil {
 		ui.Println("")
 		ui.Println(ui.Bold("Configuration Hash"))
-		ui.Printf("  %s", ui.FormatLabel("Config", info.ConfigHash))
+		ui.Printf("  %s", ui.FormatLabel("Config", resolved.Hashes.Config))
 	}
 
 	ui.Println("")
-	if plan.Action != orchestrator.PlanActionNone {
+	if plan.Action != state.PlanActionNone {
 		ui.Println(ui.Dim("Run 'dcx up' to execute this plan."))
 	}
 }
 
-func colorAction(action orchestrator.PlanAction) string {
+func colorAction(action state.PlanAction) string {
 	switch action {
-	case orchestrator.PlanActionCreate:
+	case state.PlanActionCreate:
 		return pterm.FgGreen.Sprint(string(action))
-	case orchestrator.PlanActionRecreate:
+	case state.PlanActionRecreate:
 		return pterm.FgYellow.Sprint(string(action))
-	case orchestrator.PlanActionRebuild:
+	case state.PlanActionRebuild:
 		return pterm.FgRed.Sprint(string(action))
-	case orchestrator.PlanActionStart:
+	case state.PlanActionStart:
 		return pterm.FgCyan.Sprint(string(action))
-	case orchestrator.PlanActionNone:
+	case state.PlanActionNone:
 		return pterm.FgGreen.Sprint("none (up to date)")
 	default:
 		return string(action)

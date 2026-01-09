@@ -1,4 +1,4 @@
-package config
+package devcontainer
 
 import (
 	"encoding/json"
@@ -20,14 +20,14 @@ type DcxConfig struct {
 	Name string `json:"name,omitempty"`
 
 	// Up contains default options for the 'up' command.
-	Up UpOptions `json:"up,omitempty"`
+	Up DcxUpOptions `json:"up,omitempty"`
 
 	// Shortcuts defines command aliases for the 'run' command.
 	Shortcuts map[string]Shortcut `json:"shortcuts,omitempty"`
 }
 
-// UpOptions contains default options for the 'up' command.
-type UpOptions struct {
+// DcxUpOptions contains default options for the 'up' command.
+type DcxUpOptions struct {
 	// SSH enables SSH server access when true.
 	SSH bool `json:"ssh,omitempty"`
 

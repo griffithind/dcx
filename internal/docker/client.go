@@ -1,4 +1,7 @@
 // Package docker provides a wrapper around the Docker Engine API client.
+//
+// Deprecated: Use github.com/griffithind/dcx/internal/container instead.
+// This package is maintained for backwards compatibility and will be removed in a future version.
 package docker
 
 import (
@@ -10,11 +13,15 @@ import (
 )
 
 // Client wraps the Docker client with dcx-specific functionality.
+//
+// Deprecated: Use container.DockerClient instead.
 type Client struct {
 	cli *client.Client
 }
 
 // NewClient creates a new Docker client.
+//
+// Deprecated: Use container.NewDockerClient instead.
 func NewClient() (*Client, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,

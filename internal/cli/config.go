@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/orchestrator"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,18 +39,18 @@ type ConfigOutput struct {
 	ConfigHash        string                    `json:"config_hash,omitempty"`
 	WorkspaceFolder   string                    `json:"workspace_folder"`
 	PlanType          string                    `json:"plan_type"`
-	Config            *config.DevContainerConfig `json:"config"`
+	Config            *devcontainer.DevContainerConfig `json:"config"`
 }
 
 func runConfig(cmd *cobra.Command, args []string) error {
 	// Load and parse configuration
-	cfg, cfgPath, err := config.Load(workspacePath, configPath)
+	cfg, cfgPath, err := devcontainer.Load(workspacePath, configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Validate configuration
-	if err := config.Validate(cfg); err != nil {
+	if err := devcontainer.Validate(cfg); err != nil {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
@@ -62,20 +62,22 @@ func runConfig(cmd *cobra.Command, args []string) error {
 
 	// If --raw, reload without substitution
 	if configShowRaw {
-		cfg, err = config.ParseFile(cfgPath)
+		cfg, err = devcontainer.ParseFile(cfgPath)
 		if err != nil {
 			return fmt.Errorf("failed to parse configuration: %w", err)
 		}
 	}
 
 	// Get identifiers from service
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := container.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
-	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	defer svc.Close()
+
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return fmt.Errorf("failed to get identifiers: %w", err)
@@ -84,7 +86,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	// Use simple hash of raw JSON to match workspace builder
 	var configHash string
 	if raw := cfg.GetRawJSON(); len(raw) > 0 {
-		configHash = config.ComputeSimpleHash(raw)
+		configHash = devcontainer.ComputeSimpleHash(raw)
 	}
 
 	// Determine plan type
@@ -96,7 +98,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine workspace folder
-	wsFolder := config.DetermineContainerWorkspaceFolder(cfg, workspacePath)
+	wsFolder := devcontainer.DetermineContainerWorkspaceFolder(cfg, workspacePath)
 
 	// Build output
 	output := ConfigOutput{

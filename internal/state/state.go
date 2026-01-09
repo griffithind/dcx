@@ -1,43 +1,44 @@
-// Package container provides unified container state management types.
-package containerstate
+// Package state provides unified container state management types.
+// This package replaces the previous internal/containerstate package
+// with clearer naming (ContainerState instead of State).
+package state
 
 import (
 	"fmt"
-
-	"github.com/griffithind/dcx/internal/labels"
 )
 
-// State represents the lifecycle state of a container or environment.
+// ContainerState represents the lifecycle state of a container or environment.
 // This is the canonical state type used throughout dcx.
-type State string
+// Renamed from State to ContainerState for clarity.
+type ContainerState string
 
 const (
 	// StateUnknown represents an indeterminate or initial state.
-	StateUnknown State = ""
+	StateUnknown ContainerState = ""
 
 	// StateAbsent means no managed containers exist for this environment.
-	StateAbsent State = "absent"
+	StateAbsent ContainerState = "absent"
 
 	// StateCreated means containers exist but the primary is stopped.
-	StateCreated State = "created"
+	StateCreated ContainerState = "created"
 
 	// StateRunning means the primary container is running.
-	StateRunning State = "running"
+	StateRunning ContainerState = "running"
 
 	// StateStopped means the container was explicitly stopped.
-	StateStopped State = "stopped"
+	StateStopped ContainerState = "stopped"
 
 	// StateStale means the primary container exists but its config hash
 	// differs from the current computed hash.
-	StateStale State = "stale"
+	StateStale ContainerState = "stale"
 
 	// StateBroken means managed containers exist but the primary is
 	// missing or in an inconsistent state.
-	StateBroken State = "broken"
+	StateBroken ContainerState = "broken"
 )
 
 // String returns the string representation of the state.
-func (s State) String() string {
+func (s ContainerState) String() string {
 	if s == StateUnknown {
 		return "unknown"
 	}
@@ -45,32 +46,32 @@ func (s State) String() string {
 }
 
 // IsUsable returns true if the environment can be used (started/exec'd).
-func (s State) IsUsable() bool {
+func (s ContainerState) IsUsable() bool {
 	return s == StateCreated || s == StateRunning || s == StateStopped
 }
 
 // NeedsRecreate returns true if the environment needs to be recreated.
-func (s State) NeedsRecreate() bool {
+func (s ContainerState) NeedsRecreate() bool {
 	return s == StateStale || s == StateBroken
 }
 
 // CanStart returns true if the environment can be started (without rebuild).
-func (s State) CanStart() bool {
+func (s ContainerState) CanStart() bool {
 	return s == StateCreated || s == StateStopped
 }
 
 // CanStop returns true if the environment can be stopped.
-func (s State) CanStop() bool {
+func (s ContainerState) CanStop() bool {
 	return s == StateRunning
 }
 
 // CanExec returns true if commands can be executed in the environment.
-func (s State) CanExec() bool {
+func (s ContainerState) CanExec() bool {
 	return s == StateRunning
 }
 
 // IsAbsent returns true if no containers exist.
-func (s State) IsAbsent() bool {
+func (s ContainerState) IsAbsent() bool {
 	return s == StateAbsent || s == StateUnknown
 }
 
@@ -98,7 +99,7 @@ const (
 )
 
 // GetRecovery returns the recommended recovery action for the current state.
-func (s State) GetRecovery() Recovery {
+func (s ContainerState) GetRecovery() Recovery {
 	switch s {
 	case StateAbsent, StateUnknown:
 		return Recovery{
@@ -162,7 +163,7 @@ type PlanActionResult struct {
 
 // DeterminePlanAction determines what action should be taken based on current state
 // and user options. This is the single source of truth for action decisions.
-func DeterminePlanAction(state State, rebuild, recreate bool) PlanActionResult {
+func DeterminePlanAction(state ContainerState, rebuild, recreate bool) PlanActionResult {
 	switch state {
 	case StateRunning:
 		if rebuild {
@@ -217,16 +218,16 @@ type ContainerInfo struct {
 	Status         string
 	Running        bool
 	ConfigHash     string
-	WorkspaceID    string // Stable identifier (replaces WorkspaceID)
+	WorkspaceID    string // Stable identifier
 	Plan           string
 	ComposeProject string
 	PrimaryService string
-	Labels         *labels.Labels
+	Labels         *ContainerLabels
 }
 
 // StateError represents an error related to environment state.
 type StateError struct {
-	State   State
+	State   ContainerState
 	Message string
 	Err     error
 }
@@ -243,7 +244,7 @@ func (e *StateError) Unwrap() error {
 }
 
 // NewStateError creates a new StateError.
-func NewStateError(state State, message string, err error) *StateError {
+func NewStateError(state ContainerState, message string, err error) *StateError {
 	return &StateError{
 		State:   state,
 		Message: message,
@@ -279,7 +280,7 @@ const (
 
 // Diagnostics contains diagnostic information about an environment.
 type Diagnostics struct {
-	State            State
+	State            ContainerState
 	Recovery         Recovery
 	PrimaryContainer *ContainerInfo
 	Containers       []ContainerInfo

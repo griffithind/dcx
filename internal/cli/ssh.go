@@ -7,11 +7,11 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/griffithind/dcx/internal/config"
-	ctr "github.com/griffithind/dcx/internal/containerstate"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/orchestrator"
-	"github.com/griffithind/dcx/internal/ssh/container"
+	containerPkg "github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/service"
+	sshContainer "github.com/griffithind/dcx/internal/ssh/container"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
 	"github.com/spf13/cobra"
@@ -44,13 +44,15 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Get identifiers (needed for both modes)
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := containerPkg.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
-	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	defer svc.Close()
+
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return fmt.Errorf("failed to get identifiers: %w", err)
@@ -89,14 +91,14 @@ func runSSH(cmd *cobra.Command, args []string) error {
 //	ProxyCommand dcx ssh --stdio <container-name>
 func runSSHStdio(ctx context.Context, containerName string) error {
 	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := containerPkg.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
 	// Initialize state manager
-	stateMgr := ctr.NewManager(dockerClient)
+	stateMgr := state.NewStateManager(dockerClient)
 
 	// Look up container by name
 	containerInfo, err := stateMgr.FindContainerByName(ctx, containerName)
@@ -120,7 +122,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	}
 
 	// Load config to get user and workspace folder
-	cfg, _, _ := config.Load(wsPath, configPath)
+	cfg, _, _ := devcontainer.Load(wsPath, configPath)
 
 	// Determine user and workdir
 	var user, workDir string
@@ -130,11 +132,11 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 			user = cfg.ContainerUser
 		}
 		if user != "" {
-			user = config.Substitute(user, &config.SubstitutionContext{
+			user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
 				LocalWorkspaceFolder: wsPath,
 			})
 		}
-		workDir = config.DetermineContainerWorkspaceFolder(cfg, wsPath)
+		workDir = devcontainer.DetermineContainerWorkspaceFolder(cfg, wsPath)
 	}
 
 	// Default values
@@ -147,7 +149,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 
 	// Deploy dcx binary to container if needed
 	binaryPath := fmt.Sprintf("/tmp/dcx-%s", version.Version)
-	if err := container.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
+	if err := sshContainer.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
 

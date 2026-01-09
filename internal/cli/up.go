@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/orchestrator"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh/agent"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -47,14 +48,14 @@ func runUp(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := container.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
 	// Load dcx.json configuration (optional) for up options
-	dcxCfg, err := config.LoadDcxConfig(workspacePath)
+	dcxCfg, err := devcontainer.LoadDcxConfig(workspacePath)
 	if err != nil {
 		return fmt.Errorf("failed to load dcx.json: %w", err)
 	}
@@ -75,23 +76,25 @@ func runUp(cmd *cobra.Command, args []string) error {
 	sshAgentEnabled := !effectiveNoAgent && agent.IsAvailable()
 
 	// Create service
-	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	defer svc.Close()
 
 	// Check if we can do a quick start (smart detection)
 	// Skip smart detection if --rebuild or --recreate or --pull are specified
 	if !rebuild && !recreate && !pull {
-		plan, err := svc.Plan(ctx, orchestrator.PlanOptions{})
+		plan, err := svc.Plan(ctx, service.PlanOptions{})
 		if err == nil {
 			switch plan.Action {
-			case orchestrator.PlanActionNone:
+			case state.PlanActionNone:
 				// Already running, nothing to do
 				ui.Success("Devcontainer is already running")
 				return nil
 
-			case orchestrator.PlanActionStart:
+			case state.PlanActionStart:
 				// Containers exist but stopped, just start them (offline-safe)
 				ui.Printf("Devcontainer exists and is up to date, starting...")
-				if err := svc.QuickStart(ctx, plan.ContainerInfo, plan.Info.ProjectName, plan.Info.WorkspaceID); err != nil {
+				ids, _ := svc.GetIdentifiers()
+				if err := svc.QuickStart(ctx, plan.ContainerInfo, ids.ProjectName, ids.WorkspaceID); err != nil {
 					return err
 				}
 				ui.Success("Devcontainer started")
@@ -103,7 +106,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Full up sequence required
-	if err := svc.Up(ctx, orchestrator.UpOptions{
+	if err := svc.Up(ctx, service.UpOptions{
 		Recreate:        recreate,
 		Rebuild:         rebuild,
 		Pull:            pull,

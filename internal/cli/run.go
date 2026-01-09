@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/shortcuts"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -53,7 +53,7 @@ func init() {
 
 func runRunCommand(cmd *cobra.Command, args []string) error {
 	// Load dcx.json for shortcuts
-	dcxCfg, err := config.LoadDcxConfig(workspacePath)
+	dcxCfg, err := devcontainer.LoadDcxConfig(workspacePath)
 	if err != nil {
 		return fmt.Errorf("failed to load dcx.json: %w", err)
 	}
@@ -81,7 +81,7 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 	return executeInContainer(resolved.Command)
 }
 
-func listShortcuts(dcxCfg *config.DcxConfig) error {
+func listShortcuts(dcxCfg *devcontainer.DcxConfig) error {
 	if dcxCfg == nil || len(dcxCfg.Shortcuts) == 0 {
 		ui.Println("No shortcuts defined.")
 		ui.Println("")
@@ -118,7 +118,7 @@ func executeInContainer(execArgs []string) error {
 	}
 
 	// Load config
-	cfg, _, _ := config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
+	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
 	// Execute command using ExecBuilder
 	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())

@@ -8,12 +8,11 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/selinux"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -187,7 +186,7 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 	})
 
 	// Parse configuration
-	cfg, err := config.ParseFile(cfgPath)
+	cfg, err := devcontainer.ParseFile(cfgPath)
 	if err != nil {
 		results = append(results, CheckResult{
 			Name:    "Config Syntax",
@@ -203,9 +202,9 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 		Message: "valid JSON",
 	})
 
-	// Build workspace model to validate structure
-	builder := workspace.NewBuilder(nil)
-	ws, err := builder.Build(ctx, workspace.BuilderOptions{
+	// Build resolved devcontainer to validate structure
+	builder := devcontainer.NewBuilder(nil)
+	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
 		Config:        cfg,
@@ -219,17 +218,21 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 		return results
 	}
 
+	planType := ""
+	if resolved.Plan != nil {
+		planType = string(resolved.Plan.Type())
+	}
 	results = append(results, CheckResult{
 		Name:    "Config Structure",
 		OK:      true,
-		Message: fmt.Sprintf("plan type: %s", ws.Resolved.PlanType),
+		Message: fmt.Sprintf("plan type: %s", planType),
 	})
 
 	// Validate plan-specific requirements
-	results = append(results, validatePlanRequirements(ws)...)
+	results = append(results, validatePlanRequirements(resolved)...)
 
 	// Validate file references
-	results = append(results, validateFileReferences(ws)...)
+	results = append(results, validateFileReferences(resolved)...)
 
 	// Validate features
 	results = append(results, validateFeatures(cfg)...)
@@ -237,12 +240,16 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 	return results
 }
 
-func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
+func validatePlanRequirements(resolved *devcontainer.ResolvedDevContainer) []CheckResult {
 	var results []CheckResult
 
-	switch ws.Resolved.PlanType {
-	case workspace.PlanTypeImage:
-		if ws.Resolved.Image == "" {
+	if resolved.Plan == nil {
+		return results
+	}
+
+	switch resolved.Plan.Type() {
+	case devcontainer.PlanTypeImage:
+		if resolved.BaseImage == "" {
 			results = append(results, CheckResult{
 				Name:    "Image",
 				OK:      false,
@@ -253,12 +260,13 @@ func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
 			results = append(results, CheckResult{
 				Name:    "Image",
 				OK:      true,
-				Message: ws.Resolved.Image,
+				Message: resolved.BaseImage,
 			})
 		}
 
-	case workspace.PlanTypeDockerfile:
-		if ws.Resolved.Dockerfile == nil || ws.Resolved.Dockerfile.Path == "" {
+	case devcontainer.PlanTypeDockerfile:
+		dfPlan, ok := resolved.Plan.(*devcontainer.DockerfilePlan)
+		if !ok || dfPlan.Dockerfile == "" {
 			results = append(results, CheckResult{
 				Name:    "Dockerfile",
 				OK:      false,
@@ -268,12 +276,13 @@ func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
 			results = append(results, CheckResult{
 				Name:    "Dockerfile",
 				OK:      true,
-				Message: ws.Resolved.Dockerfile.Path,
+				Message: dfPlan.Dockerfile,
 			})
 		}
 
-	case workspace.PlanTypeCompose:
-		if ws.Resolved.Compose == nil || len(ws.Resolved.Compose.Files) == 0 {
+	case devcontainer.PlanTypeCompose:
+		composePlan, ok := resolved.Plan.(*devcontainer.ComposePlan)
+		if !ok || len(composePlan.Files) == 0 {
 			results = append(results, CheckResult{
 				Name:    "Compose Files",
 				OK:      false,
@@ -283,22 +292,22 @@ func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
 			results = append(results, CheckResult{
 				Name:    "Compose Files",
 				OK:      true,
-				Message: fmt.Sprintf("%d file(s)", len(ws.Resolved.Compose.Files)),
+				Message: fmt.Sprintf("%d file(s)", len(composePlan.Files)),
 			})
 		}
 
-		if ws.Resolved.Compose != nil && ws.Resolved.Compose.Service == "" {
+		if composePlan != nil && composePlan.Service == "" {
 			results = append(results, CheckResult{
 				Name:    "Service",
 				OK:      false,
 				Message: "missing 'service' field",
 				Hint:    "Specify which service is the devcontainer",
 			})
-		} else if ws.Resolved.Compose != nil {
+		} else if composePlan != nil {
 			results = append(results, CheckResult{
 				Name:    "Service",
 				OK:      true,
-				Message: ws.Resolved.Compose.Service,
+				Message: composePlan.Service,
 			})
 		}
 	}
@@ -306,16 +315,20 @@ func validatePlanRequirements(ws *workspace.Workspace) []CheckResult {
 	return results
 }
 
-func validateFileReferences(ws *workspace.Workspace) []CheckResult {
+func validateFileReferences(resolved *devcontainer.ResolvedDevContainer) []CheckResult {
 	var results []CheckResult
 
+	if resolved.Plan == nil {
+		return results
+	}
+
 	// Check Dockerfile exists
-	if ws.Resolved.Dockerfile != nil && ws.Resolved.Dockerfile.Path != "" {
-		if _, err := os.Stat(ws.Resolved.Dockerfile.Path); os.IsNotExist(err) {
+	if dfPlan, ok := resolved.Plan.(*devcontainer.DockerfilePlan); ok && dfPlan.Dockerfile != "" {
+		if _, err := os.Stat(dfPlan.Dockerfile); os.IsNotExist(err) {
 			results = append(results, CheckResult{
 				Name:    "Dockerfile Exists",
 				OK:      false,
-				Message: fmt.Sprintf("not found: %s", ws.Resolved.Dockerfile.Path),
+				Message: fmt.Sprintf("not found: %s", dfPlan.Dockerfile),
 			})
 		} else {
 			results = append(results, CheckResult{
@@ -327,8 +340,8 @@ func validateFileReferences(ws *workspace.Workspace) []CheckResult {
 	}
 
 	// Check compose files exist
-	if ws.Resolved.Compose != nil {
-		for _, f := range ws.Resolved.Compose.Files {
+	if composePlan, ok := resolved.Plan.(*devcontainer.ComposePlan); ok {
+		for _, f := range composePlan.Files {
 			if _, err := os.Stat(f); os.IsNotExist(err) {
 				results = append(results, CheckResult{
 					Name:    "Compose File",
@@ -342,7 +355,7 @@ func validateFileReferences(ws *workspace.Workspace) []CheckResult {
 	return results
 }
 
-func validateFeatures(cfg *config.DevContainerConfig) []CheckResult {
+func validateFeatures(cfg *devcontainer.DevContainerConfig) []CheckResult {
 	var results []CheckResult
 
 	if len(cfg.Features) == 0 {
@@ -374,7 +387,7 @@ func validateFeatures(cfg *config.DevContainerConfig) []CheckResult {
 }
 
 func checkDocker(ctx context.Context) CheckResult {
-	client, err := docker.NewClient()
+	client, err := container.NewDockerClient()
 	if err != nil {
 		return CheckResult{
 			Name:    "Docker",

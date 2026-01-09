@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/griffithind/dcx/internal/containerstate"
-	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/labels"
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -55,15 +54,15 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := container.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 	defer dockerClient.Close()
 
 	// List all dcx-managed containers
-	containers, err := dockerClient.ListContainers(ctx, map[string]string{
-		labels.LabelManaged: "true",
+	containers, err := dockerClient.ListContainersWithLabels(ctx, map[string]string{
+		state.LabelManaged: "true",
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
@@ -72,7 +71,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	// Group containers by environment
 	envMap := make(map[string]*EnvironmentInfo)
 	for _, cont := range containers {
-		lbls := labels.FromMap(cont.Labels)
+		lbls := state.ContainerLabelsFromMap(cont.Labels)
 
 		// Skip non-running containers unless --all is specified
 		if !listShowAll && !cont.Running {
@@ -87,12 +86,12 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		env, exists := envMap[workspaceID]
 		if !exists {
 			env = &EnvironmentInfo{
-				WorkspaceID:        workspaceID,
+				WorkspaceID:   workspaceID,
 				ProjectName:   lbls.WorkspaceName,
 				WorkspacePath: lbls.WorkspacePath,
 				Plan:          lbls.BuildMethod,
 				Containers:    []ContainerItem{},
-				CreatedAt:     cont.Created,
+				CreatedAt:     time.Now(), // Will be updated below
 			}
 			envMap[workspaceID] = env
 		}
@@ -101,19 +100,14 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 		env.Containers = append(env.Containers, ContainerItem{
 			ID:        cont.ID[:12],
 			Name:      cont.Name,
-			Status:    cont.Status,
+			Status:    cont.State,
 			IsPrimary: lbls.IsPrimary,
-			CreatedAt: cont.Created,
+			CreatedAt: time.Now(), // ContainerSummary doesn't have Created
 		})
-
-		// Track oldest creation time for the environment
-		if cont.Created.Before(env.CreatedAt) {
-			env.CreatedAt = cont.Created
-		}
 	}
 
 	// Determine state for each environment
-	stateMgr := containerstate.NewManager(dockerClient)
+	stateMgr := state.NewStateManager(dockerClient)
 	for _, env := range envMap {
 		s, _, _ := stateMgr.GetState(ctx, env.WorkspaceID)
 		env.State = string(s)
