@@ -54,32 +54,6 @@ func NewCLIContext() (*CLIContext, error) {
 	}, nil
 }
 
-// NewCLIContextWithCustomPath creates a CLIContext with a custom workspace path.
-// Useful for commands that need to operate on a different workspace.
-func NewCLIContextWithCustomPath(customWorkspacePath, customConfigPath string) (*CLIContext, error) {
-	ctx := context.Background()
-
-	dockerClient, err := docker.NewClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
-	}
-
-	svc := service.NewEnvironmentService(dockerClient, customWorkspacePath, customConfigPath, verbose)
-
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		dockerClient.Close()
-		return nil, fmt.Errorf("failed to get identifiers: %w", err)
-	}
-
-	return &CLIContext{
-		Ctx:          ctx,
-		DockerClient: dockerClient,
-		Service:      svc,
-		Identifiers:  ids,
-	}, nil
-}
-
 // Close releases resources held by the CLIContext.
 // Always call this when done, typically with defer.
 func (c *CLIContext) Close() {
@@ -94,15 +68,6 @@ func (c *CLIContext) GetState() (container.State, *container.ContainerInfo, erro
 		c.Ctx,
 		c.Identifiers.ProjectName,
 		c.Identifiers.EnvKey,
-	)
-}
-
-// GetStateWithHashCheck retrieves the state with config hash verification.
-func (c *CLIContext) GetStateWithHashCheck(expectedHash string) (container.State, *container.ContainerInfo, error) {
-	return c.Service.GetStateMgr().GetStateWithHashCheck(
-		c.Ctx,
-		c.Identifiers.EnvKey,
-		expectedHash,
 	)
 }
 

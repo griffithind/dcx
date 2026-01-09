@@ -83,27 +83,3 @@ func Load(workspacePath, configPath string) (*DevcontainerConfig, string, error)
 
 	return cfg, resolvedPath, nil
 }
-
-// GetConfigDir returns the directory containing the devcontainer.json file.
-func GetConfigDir(configPath string) string {
-	return filepath.Dir(configPath)
-}
-
-// ResolveComposeFiles resolves compose file paths relative to the config directory.
-func ResolveComposeFiles(cfg *DevcontainerConfig, configDir string) ([]string, error) {
-	files := cfg.GetDockerComposeFiles()
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no docker compose files specified")
-	}
-
-	resolved := make([]string, 0, len(files))
-	for _, f := range files {
-		path := ResolveRelativePath(configDir, f)
-		if !util.IsFile(path) {
-			return nil, fmt.Errorf("compose file not found: %s", path)
-		}
-		resolved = append(resolved, path)
-	}
-
-	return resolved, nil
-}

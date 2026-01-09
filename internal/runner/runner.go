@@ -370,52 +370,31 @@ func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remo
 }
 
 // resolveFeatures resolves and orders features for installation.
+// It uses Manager.ResolveAll to recursively resolve feature dependencies.
 func (r *UnifiedRunner) resolveFeatures(ctx context.Context, pull bool) ([]*features.Feature, error) {
 	ws := r.workspace
 
-	// Build feature list from raw config
 	if ws.RawConfig == nil || len(ws.RawConfig.Features) == 0 {
 		return nil, nil
 	}
 
-	var featureList []*features.Feature
-	for id, opts := range ws.RawConfig.Features {
-		options := make(map[string]interface{})
-		if optsMap, ok := opts.(map[string]interface{}); ok {
-			options = optsMap
-		}
-		featureList = append(featureList, &features.Feature{
-			ID:      id,
-			Options: options,
-		})
-	}
-
-	// Order features by dependencies
-	ordered, err := features.OrderFeatures(featureList, nil)
+	// Create feature manager
+	featureMgr, err := features.NewManager(ws.ConfigDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to order features: %w", err)
-	}
-
-	// Resolve feature sources
-	resolver, err := features.NewResolver(ws.ConfigDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create feature resolver: %w", err)
+		return nil, fmt.Errorf("failed to create feature manager: %w", err)
 	}
 
 	if pull {
-		resolver.SetForcePull(true)
+		featureMgr.SetForcePull(true)
 	}
 
-	var resolvedList []*features.Feature
-	for _, f := range ordered {
-		resolved, err := resolver.Resolve(ctx, f.ID, f.Options)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve feature %s: %w", f.ID, err)
-		}
-		resolvedList = append(resolvedList, resolved)
+	// Resolve all features with dependency resolution
+	resolvedFeatures, err := featureMgr.ResolveAll(ctx, ws.RawConfig.Features, ws.RawConfig.OverrideFeatureInstallOrder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve features: %w", err)
 	}
 
-	return resolvedList, nil
+	return resolvedFeatures, nil
 }
 
 // createContainer creates a single container.
