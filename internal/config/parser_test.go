@@ -14,7 +14,7 @@ func TestParse(t *testing.T) {
 		name    string
 		input   string
 		wantErr bool
-		check   func(t *testing.T, cfg *DevcontainerConfig)
+		check   func(t *testing.T, cfg *DevContainerConfig)
 	}{
 		{
 			name: "simple compose config",
@@ -25,7 +25,7 @@ func TestParse(t *testing.T) {
 				"workspaceFolder": "/workspace"
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, "Test", cfg.Name)
 				assert.Equal(t, "app", cfg.Service)
 				assert.Equal(t, "/workspace", cfg.WorkspaceFolder)
@@ -41,7 +41,7 @@ func TestParse(t *testing.T) {
 				"workspaceFolder": "/app"
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, "node:18", cfg.Image)
 				assert.False(t, cfg.IsComposePlan())
 				assert.True(t, cfg.IsSinglePlan())
@@ -58,7 +58,7 @@ func TestParse(t *testing.T) {
 				"workspaceFolder": "/workspace"
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, "Test", cfg.Name)
 				assert.Equal(t, "alpine", cfg.Image)
 			},
@@ -70,7 +70,7 @@ func TestParse(t *testing.T) {
 				"image": "alpine",
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, "Test", cfg.Name)
 			},
 		},
@@ -82,7 +82,7 @@ func TestParse(t *testing.T) {
 				"service": "app"
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				files := cfg.GetDockerComposeFiles()
 				assert.Len(t, files, 2)
 				assert.Equal(t, "docker-compose.yml", files[0])
@@ -100,7 +100,7 @@ func TestParse(t *testing.T) {
 				}
 			}`,
 			wantErr: false,
-			check: func(t *testing.T, cfg *DevcontainerConfig) {
+			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, "bar", cfg.ContainerEnv["FOO"])
 				assert.Equal(t, "qux", cfg.ContainerEnv["BAZ"])
 			},
@@ -257,19 +257,19 @@ func TestUserHomeSubstitution(t *testing.T) {
 func TestDetermineContainerWorkspaceFolder(t *testing.T) {
 	tests := []struct {
 		name           string
-		cfg            *DevcontainerConfig
+		cfg            *DevContainerConfig
 		localWorkspace string
 		expected       string
 	}{
 		{
 			name:           "explicit workspace folder",
-			cfg:            &DevcontainerConfig{WorkspaceFolder: "/app"},
+			cfg:            &DevContainerConfig{WorkspaceFolder: "/app"},
 			localWorkspace: "/home/user/myproject",
 			expected:       "/app",
 		},
 		{
 			name:           "default workspace folder",
-			cfg:            &DevcontainerConfig{},
+			cfg:            &DevContainerConfig{},
 			localWorkspace: "/home/user/myproject",
 			expected:       "/workspaces/myproject",
 		},
@@ -471,7 +471,7 @@ func TestSubstituteConfigRemoteUser(t *testing.T) {
 		LocalWorkspaceFolder: "/home/testuser/project",
 	}
 
-	cfg := &DevcontainerConfig{
+	cfg := &DevContainerConfig{
 		RemoteUser: "${localEnv:USER}",
 	}
 

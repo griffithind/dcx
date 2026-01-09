@@ -28,7 +28,7 @@ func TestSSHServerE2E(t *testing.T) {
 	})
 
 	// Get the env key for this workspace (used in SSH hostname)
-	var envKey string
+	var workspaceID string
 
 	// Test dcx up --ssh adds SSH config
 	t.Run("up_with_ssh_flag", func(t *testing.T) {
@@ -42,16 +42,16 @@ func TestSSHServerE2E(t *testing.T) {
 				parts := strings.Fields(line)
 				for _, p := range parts {
 					if strings.HasSuffix(p, ".dcx") {
-						envKey = strings.TrimSuffix(p, ".dcx")
+						workspaceID = strings.TrimSuffix(p, ".dcx")
 						break
 					}
 				}
 			}
 		}
-		require.NotEmpty(t, envKey, "should extract envKey from SSH configured output")
+		require.NotEmpty(t, workspaceID, "should extract workspaceID from SSH configured output")
 	})
 
-	hostname := envKey + ".dcx"
+	hostname := workspaceID + ".dcx"
 
 	// Get the actual container name from status
 	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
@@ -254,7 +254,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 		dcxBinary := helpers.GetDCXBinary(t)
 
 		// Run SSH with ProxyCommand explicitly from /tmp
-		// The ProxyCommand uses the container name (dcx_<envKey>)
+		// The ProxyCommand uses the container name (dcx_<workspaceID>)
 		sshArgs := []string{
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",

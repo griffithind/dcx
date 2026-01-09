@@ -47,7 +47,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Try to load config and compute hash for staleness detection
 	var currentState container.State
 	var containerInfo *container.ContainerInfo
-	var cfg *config.DevcontainerConfig
+	var cfg *config.DevContainerConfig
 	var configHash string
 
 	cfg, _, err = config.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
@@ -57,7 +57,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			configHash = config.ComputeSimpleHash(raw)
 		}
 		if configHash != "" {
-			currentState, containerInfo, err = cliCtx.Service.GetStateMgr().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.EnvKey, configHash)
+			currentState, containerInfo, err = cliCtx.Service.GetStateMgr().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, configHash)
 		} else {
 			currentState, containerInfo, err = cliCtx.GetState()
 		}
@@ -75,7 +75,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if ids.ProjectName != "" {
 		ui.Printf("%s", ui.FormatLabel("Project", ids.ProjectName))
 	}
-	ui.Printf("%s", ui.FormatLabel("Env Key", ids.EnvKey))
+	ui.Printf("%s", ui.FormatLabel("Env Key", ids.WorkspaceID))
 	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
 
 	// Show SSH status

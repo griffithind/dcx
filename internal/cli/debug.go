@@ -251,12 +251,12 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	}
 
 	// Try to find container by workspace ID
-	envKey := debug.Workspace.ID
-	if envKey == "" {
-		envKey = ids.EnvKey
+	workspaceID := debug.Workspace.ID
+	if workspaceID == "" {
+		workspaceID = ids.WorkspaceID
 	}
 
-	s, info, _ := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, envKey)
+	s, info, _ := svc.GetStateMgr().GetStateWithProject(ctx, ids.ProjectName, workspaceID)
 
 	debug.Container = ContainerDebug{
 		Found: info != nil,

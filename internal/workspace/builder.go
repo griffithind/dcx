@@ -39,7 +39,7 @@ type BuildOptions struct {
 	WorkspaceRoot string
 
 	// Config is the parsed devcontainer configuration
-	Config *config.DevcontainerConfig
+	Config *config.DevContainerConfig
 
 	// SubstitutionContext provides variable substitution values
 	SubstitutionContext *config.SubstitutionContext
@@ -128,7 +128,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 }
 
 // resolveConfig resolves the base configuration.
-func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig, subCtx *config.SubstitutionContext) error {
+func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.DevContainerConfig, subCtx *config.SubstitutionContext) error {
 	resolved := ws.Resolved
 
 	// Service name (sanitized for Docker container naming requirements)
@@ -229,7 +229,7 @@ func (b *Builder) resolveConfig(ctx context.Context, ws *Workspace, cfg *config.
 
 // resolveFeatures resolves all features from the configuration.
 // Features are resolved and ordered by their installation order.
-func (b *Builder) resolveFeatures(ctx context.Context, ws *Workspace, cfg *config.DevcontainerConfig) error {
+func (b *Builder) resolveFeatures(ctx context.Context, ws *Workspace, cfg *config.DevContainerConfig) error {
 	mgr, err := features.NewManager(ws.ConfigDir)
 	if err != nil {
 		return fmt.Errorf("failed to create feature manager: %w", err)
@@ -274,7 +274,7 @@ func (b *Builder) mergeFeatureMounts(ws *Workspace) {
 }
 
 // populateHostContext populates host-specific context like UID/GID and effective user.
-func (b *Builder) populateHostContext(ws *Workspace, cfg *config.DevcontainerConfig) {
+func (b *Builder) populateHostContext(ws *Workspace, cfg *config.DevContainerConfig) {
 	resolved := ws.Resolved
 
 	// Determine effective user (remoteUser takes precedence, then containerUser)
@@ -289,7 +289,7 @@ func (b *Builder) populateHostContext(ws *Workspace, cfg *config.DevcontainerCon
 }
 
 // populateBuildDecisions populates build-time decisions based on resolved config.
-func (b *Builder) populateBuildDecisions(ws *Workspace, cfg *config.DevcontainerConfig) {
+func (b *Builder) populateBuildDecisions(ws *Workspace, cfg *config.DevContainerConfig) {
 	// UID update decision:
 	// - Must have an effective user that's not root
 	// - updateRemoteUserUID must be enabled (default true for non-root users)
@@ -305,7 +305,7 @@ func (b *Builder) populateBuildDecisions(ws *Workspace, cfg *config.Devcontainer
 }
 
 // computeHashes computes all configuration hashes.
-func (b *Builder) computeHashes(ws *Workspace, cfg *config.DevcontainerConfig) error {
+func (b *Builder) computeHashes(ws *Workspace, cfg *config.DevContainerConfig) error {
 	hashes := ws.Hashes
 
 	// Config hash (from raw JSON if available, otherwise marshal)
@@ -397,7 +397,7 @@ func parsePortForwards(ports []string) []PortForward {
 	return result
 }
 
-func parseLifecycleHooks(cfg *config.DevcontainerConfig) *LifecycleHooks {
+func parseLifecycleHooks(cfg *config.DevContainerConfig) *LifecycleHooks {
 	hooks := &LifecycleHooks{
 		WaitFor: cfg.WaitFor,
 	}

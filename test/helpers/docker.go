@@ -158,7 +158,7 @@ func DockerClient(t *testing.T) *docker.Client {
 }
 
 // CleanupTestContainers removes all test containers with the given env key prefix.
-func CleanupTestContainers(t *testing.T, envKey string) {
+func CleanupTestContainers(t *testing.T, workspaceID string) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -166,7 +166,7 @@ func CleanupTestContainers(t *testing.T, envKey string) {
 
 	// Find containers with our label
 	containers, err := client.ListContainers(ctx, map[string]string{
-		labels.LabelWorkspaceID: envKey,
+		labels.LabelWorkspaceID: workspaceID,
 	})
 	if err != nil {
 		t.Logf("Warning: failed to list containers for cleanup: %v", err)
@@ -208,14 +208,14 @@ func WaitForState(t *testing.T, dir string, expectedState string, timeout time.D
 }
 
 // ContainerIsRunning checks if a container with the given env key is running.
-func ContainerIsRunning(t *testing.T, envKey string) bool {
+func ContainerIsRunning(t *testing.T, workspaceID string) bool {
 	t.Helper()
 
 	ctx := context.Background()
 	client := DockerClient(t)
 
 	containers, err := client.ListContainers(ctx, map[string]string{
-		labels.LabelWorkspaceID: envKey,
+		labels.LabelWorkspaceID: workspaceID,
 		labels.LabelIsPrimary:   "true",
 	})
 	require.NoError(t, err)

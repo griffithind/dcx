@@ -91,7 +91,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			case service.PlanActionStart:
 				// Containers exist but stopped, just start them (offline-safe)
 				ui.Printf("Devcontainer exists and is up to date, starting...")
-				if err := svc.QuickStart(ctx, plan.ContainerInfo, plan.Info.ProjectName, plan.Info.EnvKey); err != nil {
+				if err := svc.QuickStart(ctx, plan.ContainerInfo, plan.Info.ProjectName, plan.Info.WorkspaceID); err != nil {
 					return err
 				}
 				ui.Success("Devcontainer started")

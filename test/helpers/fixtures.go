@@ -58,7 +58,7 @@ func FeatureFixture(t *testing.T, name string) string {
 }
 
 // LoadTestConfig loads a devcontainer configuration from a fixture.
-func LoadTestConfig(t *testing.T, fixtureName string) *config.DevcontainerConfig {
+func LoadTestConfig(t *testing.T, fixtureName string) *config.DevContainerConfig {
 	t.Helper()
 
 	fixtureDir := ConfigFixture(t, fixtureName)
@@ -213,8 +213,8 @@ func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAM
 	return tmpDir
 }
 
-// UniqueEnvKey generates a unique env key for a test.
-func UniqueEnvKey(t *testing.T) string {
+// UniqueWorkspaceID generates a unique env key for a test.
+func UniqueWorkspaceID(t *testing.T) string {
 	t.Helper()
 	// Use test name to generate a semi-unique key
 	name := t.Name()

@@ -464,8 +464,8 @@ func TestLegacyFilterFunctions(t *testing.T) {
 	}
 
 	// Verify legacy env_key filter
-	legacyEnvKey := LegacyFilterByEnvKey("abc123")
-	if legacyEnvKey != "label=io.github.dcx.env_key=abc123" {
-		t.Errorf("unexpected legacy env_key filter: %s", legacyEnvKey)
+	legacyWorkspaceID := LegacyFilterByWorkspaceID("abc123")
+	if legacyWorkspaceID != "label=io.github.dcx.env_key=abc123" {
+		t.Errorf("unexpected legacy env_key filter: %s", legacyWorkspaceID)
 	}
 }

@@ -49,9 +49,9 @@ func NewEnvironmentService(dockerClient *docker.Client, workspacePath, configPat
 type Identifiers struct {
 	// ProjectName is the sanitized project name from dcx.json (may be empty)
 	ProjectName string
-	// EnvKey is the stable workspace identifier (hash of workspace path)
-	EnvKey string
-	// SSHHost is the SSH hostname for this workspace (projectName.dcx or envKey.dcx)
+	// WorkspaceID is the stable workspace identifier (hash of workspace path)
+	WorkspaceID string
+	// SSHHost is the SSH hostname for this workspace (projectName.dcx or workspaceID.dcx)
 	SSHHost string
 }
 
@@ -68,10 +68,10 @@ func (s *EnvironmentService) GetIdentifiers() (*Identifiers, error) {
 	}
 
 	// Compute workspace ID
-	envKey := workspace.ComputeID(s.workspacePath)
+	workspaceID := workspace.ComputeID(s.workspacePath)
 
 	// Compute SSH host
-	sshHost := envKey
+	sshHost := workspaceID
 	if projectName != "" {
 		sshHost = projectName
 	}
@@ -79,18 +79,18 @@ func (s *EnvironmentService) GetIdentifiers() (*Identifiers, error) {
 
 	return &Identifiers{
 		ProjectName: projectName,
-		EnvKey:      envKey,
+		WorkspaceID:      workspaceID,
 		SSHHost:     sshHost,
 	}, nil
 }
 
 // EnvironmentInfo contains resolved environment configuration.
 type EnvironmentInfo struct {
-	Config      *config.DevcontainerConfig
+	Config      *config.DevContainerConfig
 	ConfigPath  string
 	DcxConfig   *config.DcxConfig
 	ProjectName string
-	EnvKey      string
+	WorkspaceID      string
 	ConfigHash  string
 }
 
@@ -127,7 +127,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	// Compute identifiers
-	envKey := workspace.ComputeID(s.workspacePath)
+	workspaceID := workspace.ComputeID(s.workspacePath)
 	// Use simple hash of raw JSON to match workspace builder
 	var configHash string
 	if raw := cfg.GetRawJSON(); len(raw) > 0 {
@@ -135,7 +135,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	if s.verbose {
-		ui.Printf("Env key: %s", envKey)
+		ui.Printf("Env key: %s", workspaceID)
 		ui.Printf("Config hash: %s", configHash[:12])
 	}
 
@@ -144,19 +144,19 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 		ConfigPath:  cfgPath,
 		DcxConfig:   dcxCfg,
 		ProjectName: projectName,
-		EnvKey:      envKey,
+		WorkspaceID:      workspaceID,
 		ConfigHash:  configHash,
 	}, nil
 }
 
 // GetState returns the current state of the environment.
 func (s *EnvironmentService) GetState(ctx context.Context, info *EnvironmentInfo) (container.State, *container.ContainerInfo, error) {
-	return s.stateMgr.GetStateWithProjectAndHash(ctx, info.ProjectName, info.EnvKey, info.ConfigHash)
+	return s.stateMgr.GetStateWithProjectAndHash(ctx, info.ProjectName, info.WorkspaceID, info.ConfigHash)
 }
 
 // GetStateBasic returns the current state without hash checking.
-func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, envKey string) (container.State, *container.ContainerInfo, error) {
-	return s.stateMgr.GetStateWithProject(ctx, projectName, envKey)
+func (s *EnvironmentService) GetStateBasic(ctx context.Context, projectName, workspaceID string) (container.State, *container.ContainerInfo, error) {
+	return s.stateMgr.GetStateWithProject(ctx, projectName, workspaceID)
 }
 
 // CreateRunner creates the unified runner for all configuration types.
@@ -226,7 +226,7 @@ func (s *EnvironmentService) Plan(ctx context.Context, opts PlanOptions) (*PlanR
 	}
 
 	currentState, containerInfo, err := s.stateMgr.GetStateWithProjectAndHash(
-		ctx, info.ProjectName, info.EnvKey, info.ConfigHash)
+		ctx, info.ProjectName, info.WorkspaceID, info.ConfigHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
@@ -361,7 +361,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Get container info for subsequent operations
-	_, containerInfo, err = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
+	_, containerInfo, err = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}
@@ -395,7 +395,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 // QuickStart attempts to start an existing container without full up sequence.
 // Returns (true, nil) if quick start succeeded, (false, nil) if full up is needed,
 // or (false, error) if an error occurred.
-func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *container.ContainerInfo, projectName, envKey string) error {
+func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *container.ContainerInfo, projectName, workspaceID string) error {
 	// Determine plan type (single-container vs compose)
 	isSingleContainer := containerInfo != nil && (containerInfo.Plan == labels.BuildMethodImage ||
 		containerInfo.Plan == labels.BuildMethodDockerfile)
@@ -413,7 +413,7 @@ func (s *EnvironmentService) QuickStart(ctx context.Context, containerInfo *cont
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, envKey)
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, workspaceID)
 		if err := r.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start containers: %w", err)
 		}
@@ -461,7 +461,7 @@ type DownOptions struct {
 
 // Down removes the environment.
 func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, opts DownOptions) error {
-	currentState, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
+	currentState, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -488,7 +488,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 		if actualProject == "" {
 			actualProject = info.ProjectName
 		}
-		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, info.EnvKey)
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, info.WorkspaceID)
 		if err := r.Down(ctx, runnerPkg.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,
@@ -505,9 +505,9 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 	return nil
 }
 
-// DownWithEnvKey removes the environment using just project name and env key.
-func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, envKey string, opts DownOptions) error {
-	currentState, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, projectName, envKey)
+// DownWithWorkspaceID removes the environment using just project name and env key.
+func (s *EnvironmentService) DownWithWorkspaceID(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
+	currentState, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, projectName, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -537,7 +537,7 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 		if actualProject == "" {
 			actualProject = projectName
 		}
-		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, envKey)
+		r := runnerPkg.NewUnifiedRunnerForExisting(s.workspacePath, actualProject, workspaceID)
 		if err := r.Down(ctx, runnerPkg.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,
@@ -615,7 +615,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 	if s.verbose {
 		ui.Println("  [hooks] Getting container state...")
 	}
-	_, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
+	_, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get container state: %w", err)
 	}
@@ -632,7 +632,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		containerInfo.ID,
 		s.workspacePath,
 		info.Config,
-		info.EnvKey,
+		info.WorkspaceID,
 		sshAgentEnabled,
 	)
 
@@ -643,45 +643,14 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 			ui.Printf("  [hooks] Using %d pre-resolved features", len(resolvedFeatures))
 		}
 
-		var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
-
-		for _, fh := range features.CollectOnCreateCommands(resolvedFeatures) {
-			onCreateHooks = append(onCreateHooks, lifecycle.FeatureHook{
-				FeatureID:   fh.FeatureID,
-				FeatureName: fh.FeatureName,
-				Command:     fh.Command,
-			})
-		}
-		for _, fh := range features.CollectUpdateContentCommands(resolvedFeatures) {
-			updateContentHooks = append(updateContentHooks, lifecycle.FeatureHook{
-				FeatureID:   fh.FeatureID,
-				FeatureName: fh.FeatureName,
-				Command:     fh.Command,
-			})
-		}
-		for _, fh := range features.CollectPostCreateCommands(resolvedFeatures) {
-			postCreateHooks = append(postCreateHooks, lifecycle.FeatureHook{
-				FeatureID:   fh.FeatureID,
-				FeatureName: fh.FeatureName,
-				Command:     fh.Command,
-			})
-		}
-		for _, fh := range features.CollectPostStartCommands(resolvedFeatures) {
-			postStartHooks = append(postStartHooks, lifecycle.FeatureHook{
-				FeatureID:   fh.FeatureID,
-				FeatureName: fh.FeatureName,
-				Command:     fh.Command,
-			})
-		}
-		for _, fh := range features.CollectPostAttachCommands(resolvedFeatures) {
-			postAttachHooks = append(postAttachHooks, lifecycle.FeatureHook{
-				FeatureID:   fh.FeatureID,
-				FeatureName: fh.FeatureName,
-				Command:     fh.Command,
-			})
-		}
-
-		hookRunner.SetFeatureHooks(onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks)
+		// Collect feature hooks - features.FeatureHook is now the canonical type
+		hookRunner.SetFeatureHooks(
+			features.CollectOnCreateCommands(resolvedFeatures),
+			features.CollectUpdateContentCommands(resolvedFeatures),
+			features.CollectPostCreateCommands(resolvedFeatures),
+			features.CollectPostStartCommands(resolvedFeatures),
+			features.CollectPostAttachCommands(resolvedFeatures),
+		)
 	}
 
 	// Run appropriate hooks based on whether this is a new environment
@@ -700,7 +669,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 // setupSSHAccess configures SSH access to the container.
 func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *EnvironmentInfo, containerInfo *container.ContainerInfo) error {
 	if containerInfo == nil {
-		_, containerInfo, _ = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
+		_, containerInfo, _ = s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.WorkspaceID)
 	}
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
@@ -726,7 +695,7 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 	}
 
 	// Use project name as SSH host if available, otherwise env key
-	hostName := info.EnvKey
+	hostName := info.WorkspaceID
 	if info.ProjectName != "" {
 		hostName = info.ProjectName
 	}

@@ -67,7 +67,7 @@ func (c *CLIContext) GetState() (container.State, *container.ContainerInfo, erro
 	return c.Service.GetStateMgr().GetStateWithProject(
 		c.Ctx,
 		c.Identifiers.ProjectName,
-		c.Identifiers.EnvKey,
+		c.Identifiers.WorkspaceID,
 	)
 }
 

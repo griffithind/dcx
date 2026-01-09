@@ -63,7 +63,7 @@ func runSSH(cmd *cobra.Command, args []string) error {
 			containerName = args[0]
 		} else {
 			// Try to find container from current directory
-			containerName = ids.EnvKey
+			containerName = ids.WorkspaceID
 		}
 		return runSSHStdio(ctx, containerName)
 	}

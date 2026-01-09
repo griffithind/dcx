@@ -38,12 +38,12 @@ type ExecOptions struct {
 // It consolidates the common exec pattern used in exec, shell, and run commands.
 type ExecBuilder struct {
 	containerInfo *container.ContainerInfo
-	cfg           *config.DevcontainerConfig
+	cfg           *config.DevContainerConfig
 	workspacePath string
 }
 
 // NewExecBuilder creates a new exec builder.
-func NewExecBuilder(containerInfo *container.ContainerInfo, cfg *config.DevcontainerConfig, workspacePath string) *ExecBuilder {
+func NewExecBuilder(containerInfo *container.ContainerInfo, cfg *config.DevContainerConfig, workspacePath string) *ExecBuilder {
 	return &ExecBuilder{
 		containerInfo: containerInfo,
 		cfg:           cfg,

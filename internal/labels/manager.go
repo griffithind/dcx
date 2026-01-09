@@ -146,7 +146,7 @@ func (m *Manager) GetCache(ctx context.Context, containerID string) (*CacheData,
 }
 
 // CheckStaleness compares current hashes with cached hashes on the container.
-func (m *Manager) CheckStaleness(ctx context.Context, containerID string, current *HashSet) (*StalenessResult, error) {
+func (m *Manager) CheckStaleness(ctx context.Context, containerID string, current *ConfigHashes) (*StalenessResult, error) {
 	labels, err := m.Read(ctx, containerID)
 	if err != nil {
 		return nil, fmt.Errorf("read labels: %w", err)
@@ -193,8 +193,8 @@ func (m *Manager) CheckStaleness(ctx context.Context, containerID string, curren
 	return result, nil
 }
 
-// HashSet contains hashes for staleness detection.
-type HashSet struct {
+// ConfigHashes contains hashes for staleness detection.
+type ConfigHashes struct {
 	Config     string
 	Dockerfile string
 	Compose    string

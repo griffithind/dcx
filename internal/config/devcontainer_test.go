@@ -164,7 +164,7 @@ func TestMountString(t *testing.T) {
 	}
 }
 
-func TestDevcontainerConfigMountsArray(t *testing.T) {
+func TestDevContainerConfigMountsArray(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -251,7 +251,7 @@ func TestDevcontainerConfigMountsArray(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var cfg DevcontainerConfig
+			var cfg DevContainerConfig
 			err := json.Unmarshal([]byte(tt.input), &cfg)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, cfg.Mounts)
@@ -294,7 +294,7 @@ func TestGetAppPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var cfg DevcontainerConfig
+			var cfg DevContainerConfig
 			err := json.Unmarshal([]byte(tt.input), &cfg)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, cfg.GetAppPorts())
@@ -332,7 +332,7 @@ func TestGetForwardPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var cfg DevcontainerConfig
+			var cfg DevContainerConfig
 			err := json.Unmarshal([]byte(tt.input), &cfg)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, cfg.GetForwardPorts())
@@ -353,7 +353,7 @@ func TestGetPortAttribute(t *testing.T) {
 		}
 	}`
 
-	var cfg DevcontainerConfig
+	var cfg DevContainerConfig
 	err := json.Unmarshal([]byte(input), &cfg)
 	require.NoError(t, err)
 

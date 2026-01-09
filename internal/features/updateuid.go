@@ -120,7 +120,7 @@ func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, ima
 //   - Host user is not root (UID 0)
 //   - updateRemoteUserUID is not explicitly disabled
 //   - remoteUser is not "root"
-func ShouldUpdateRemoteUserUID(cfg *config.DevcontainerConfig, remoteUser string, hostUID int) bool {
+func ShouldUpdateRemoteUserUID(cfg *config.DevContainerConfig, remoteUser string, hostUID int) bool {
 	// Skip on Windows (different file sharing semantics)
 	if runtime.GOOS == "windows" {
 		return false

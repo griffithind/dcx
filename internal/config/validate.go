@@ -40,7 +40,7 @@ func (e ValidationErrors) Error() string {
 }
 
 // Validate validates a devcontainer configuration.
-func Validate(cfg *DevcontainerConfig) error {
+func Validate(cfg *DevContainerConfig) error {
 	var errs ValidationErrors
 
 	// Must have exactly one of: image, build, or dockerComposeFile
@@ -126,7 +126,7 @@ func isAbsolutePath(path string) bool {
 }
 
 // ValidateForCompose validates compose-specific configuration.
-func ValidateForCompose(cfg *DevcontainerConfig, configDir string) error {
+func ValidateForCompose(cfg *DevContainerConfig, configDir string) error {
 	var errs ValidationErrors
 
 	if !cfg.IsComposePlan() {
@@ -153,7 +153,7 @@ func ValidateForCompose(cfg *DevcontainerConfig, configDir string) error {
 }
 
 // ValidateForBuild validates build-specific configuration.
-func ValidateForBuild(cfg *DevcontainerConfig, configDir string) error {
+func ValidateForBuild(cfg *DevContainerConfig, configDir string) error {
 	var errs ValidationErrors
 
 	if cfg.Build == nil {

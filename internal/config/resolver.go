@@ -48,7 +48,7 @@ func Resolve(workspacePath string) (string, error) {
 
 // Load loads and parses the devcontainer configuration.
 // Returns the parsed config and the path to the config file.
-func Load(workspacePath, configPath string) (*DevcontainerConfig, string, error) {
+func Load(workspacePath, configPath string) (*DevContainerConfig, string, error) {
 	// If config path is specified, use it
 	if configPath != "" {
 		if !filepath.IsAbs(configPath) {

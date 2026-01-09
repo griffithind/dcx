@@ -11,11 +11,11 @@ import (
 )
 
 // Parse parses a devcontainer.json file from bytes.
-func Parse(data []byte) (*DevcontainerConfig, error) {
+func Parse(data []byte) (*DevContainerConfig, error) {
 	// Strip comments and trailing commas
 	stripped := jsonc.ToJSON(data)
 
-	var cfg DevcontainerConfig
+	var cfg DevContainerConfig
 	if err := json.Unmarshal(stripped, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse devcontainer.json: %w", err)
 	}
@@ -27,7 +27,7 @@ func Parse(data []byte) (*DevcontainerConfig, error) {
 }
 
 // ParseFile parses a devcontainer.json file from a path.
-func ParseFile(path string) (*DevcontainerConfig, error) {
+func ParseFile(path string) (*DevContainerConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
@@ -53,7 +53,7 @@ func Substitute(s string, ctx *SubstitutionContext) string {
 }
 
 // SubstituteConfig performs variable substitution on the entire config.
-func SubstituteConfig(cfg *DevcontainerConfig, ctx *SubstitutionContext) {
+func SubstituteConfig(cfg *DevContainerConfig, ctx *SubstitutionContext) {
 	if cfg == nil || ctx == nil {
 		return
 	}
@@ -97,7 +97,7 @@ func SubstituteConfig(cfg *DevcontainerConfig, ctx *SubstitutionContext) {
 }
 
 // DetermineContainerWorkspaceFolder computes the container workspace folder.
-func DetermineContainerWorkspaceFolder(cfg *DevcontainerConfig, localWorkspace string) string {
+func DetermineContainerWorkspaceFolder(cfg *DevContainerConfig, localWorkspace string) string {
 	if cfg.WorkspaceFolder != "" {
 		return cfg.WorkspaceFolder
 	}

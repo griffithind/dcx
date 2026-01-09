@@ -78,7 +78,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 			if actualProject == "" {
 				actualProject = cliCtx.Identifiers.ProjectName
 			}
-			r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.EnvKey)
+			r := runner.NewUnifiedRunnerForExisting(cliCtx.WorkspacePath(), actualProject, cliCtx.Identifiers.WorkspaceID)
 			if err := r.Stop(cliCtx.Ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}

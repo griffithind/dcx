@@ -14,56 +14,56 @@ func TestShouldUpdateRemoteUserUID(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		cfg        *config.DevcontainerConfig
+		cfg        *config.DevContainerConfig
 		remoteUser string
 		hostUID    int
 		expected   bool
 	}{
 		{
 			name:       "explicitly true on supported platform",
-			cfg:        &config.DevcontainerConfig{UpdateRemoteUserUID: &trueVal},
+			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: &trueVal},
 			remoteUser: "vscode",
 			hostUID:    1000,
 			expected:   runtime.GOOS != "windows",
 		},
 		{
 			name:       "explicitly false",
-			cfg:        &config.DevcontainerConfig{UpdateRemoteUserUID: &falseVal},
+			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: &falseVal},
 			remoteUser: "vscode",
 			hostUID:    1000,
 			expected:   false,
 		},
 		{
 			name:       "not set (nil) - defaults to true on Linux/macOS",
-			cfg:        &config.DevcontainerConfig{UpdateRemoteUserUID: nil},
+			cfg:        &config.DevContainerConfig{UpdateRemoteUserUID: nil},
 			remoteUser: "vscode",
 			hostUID:    1000,
 			expected:   runtime.GOOS != "windows",
 		},
 		{
 			name:       "empty config with user",
-			cfg:        &config.DevcontainerConfig{},
+			cfg:        &config.DevContainerConfig{},
 			remoteUser: "vscode",
 			hostUID:    1000,
 			expected:   runtime.GOOS != "windows",
 		},
 		{
 			name:       "skip root user",
-			cfg:        &config.DevcontainerConfig{},
+			cfg:        &config.DevContainerConfig{},
 			remoteUser: "root",
 			hostUID:    1000,
 			expected:   false,
 		},
 		{
 			name:       "skip root user (numeric)",
-			cfg:        &config.DevcontainerConfig{},
+			cfg:        &config.DevContainerConfig{},
 			remoteUser: "0",
 			hostUID:    1000,
 			expected:   false,
 		},
 		{
 			name:       "skip when host is root",
-			cfg:        &config.DevcontainerConfig{},
+			cfg:        &config.DevContainerConfig{},
 			remoteUser: "vscode",
 			hostUID:    0,
 			expected:   false,
@@ -86,7 +86,7 @@ func TestShouldUpdateRemoteUserUID(t *testing.T) {
 }
 
 func TestShouldUpdateRemoteUserUID_PlatformSpecific(t *testing.T) {
-	cfg := &config.DevcontainerConfig{}
+	cfg := &config.DevContainerConfig{}
 
 	switch runtime.GOOS {
 	case "linux":

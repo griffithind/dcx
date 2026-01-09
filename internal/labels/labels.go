@@ -389,9 +389,9 @@ func LegacyFilterSelector() string {
 	return fmt.Sprintf("label=%smanaged=true", LegacyPrefix)
 }
 
-// LegacyFilterByEnvKey returns a filter for finding containers by legacy env_key.
-func LegacyFilterByEnvKey(envKey string) string {
-	return fmt.Sprintf("label=%senv_key=%s", LegacyPrefix, envKey)
+// LegacyFilterByWorkspaceID returns a filter for finding containers by legacy env_key.
+func LegacyFilterByWorkspaceID(workspaceID string) string {
+	return fmt.Sprintf("label=%senv_key=%s", LegacyPrefix, workspaceID)
 }
 
 // IsDCXManaged checks if a container has dcx labels (either new or legacy).

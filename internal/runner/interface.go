@@ -79,16 +79,3 @@ type ExecOptions struct {
 	// SSHAgentEnabled enables SSH agent forwarding.
 	SSHAgentEnabled bool
 }
-
-// State represents the current state of an environment.
-type State string
-
-const (
-	StateUnknown State = ""
-	StateAbsent  State = "absent"
-	StateCreated State = "created"
-	StateRunning State = "running"
-	StateStopped State = "stopped"
-	StateStale   State = "stale"
-	StateBroken  State = "broken"
-)
