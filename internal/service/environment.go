@@ -16,6 +16,7 @@ import (
 	runnerPkg "github.com/griffithind/dcx/internal/runner"
 	"github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 )
 
@@ -58,7 +59,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	if s.verbose {
-		fmt.Printf("Loaded configuration from: %s\n", cfgPath)
+		ui.Printf("Loaded configuration from: %s", cfgPath)
 	}
 
 	// Load dcx.json configuration (optional)
@@ -72,7 +73,7 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	if dcxCfg != nil && dcxCfg.Name != "" {
 		projectName = docker.SanitizeProjectName(dcxCfg.Name)
 		if s.verbose {
-			fmt.Printf("Project name: %s\n", projectName)
+			ui.Printf("Project name: %s", projectName)
 		}
 	}
 
@@ -90,8 +91,8 @@ func (s *EnvironmentService) LoadEnvironmentInfo() (*EnvironmentInfo, error) {
 	}
 
 	if s.verbose {
-		fmt.Printf("Env key: %s\n", envKey)
-		fmt.Printf("Config hash: %s\n", configHash[:12])
+		ui.Printf("Env key: %s", envKey)
+		ui.Printf("Config hash: %s", configHash[:12])
 	}
 
 	return &EnvironmentInfo{
@@ -162,15 +163,15 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	if info.Config.HostRequirements != nil {
 		dockerInfo, err := s.dockerClient.Info(ctx)
 		if err != nil {
-			fmt.Printf("Warning: Could not get Docker info for resource validation: %v\n", err)
+			ui.Warning("Could not get Docker info for resource validation: %v", err)
 			// Fall back to host-based check
 			result := config.ValidateHostRequirements(info.Config.HostRequirements)
 			for _, warning := range result.Warnings {
-				fmt.Printf("Warning: %s\n", warning)
+				ui.Warning("%s", warning)
 			}
 			if !result.Satisfied {
 				for _, errMsg := range result.Errors {
-					fmt.Printf("Error: %s\n", errMsg)
+					ui.Error("%s", errMsg)
 				}
 				return fmt.Errorf("host requirements not satisfied")
 			}
@@ -181,11 +182,11 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 			}
 			result := config.ValidateHostRequirementsWithDocker(info.Config.HostRequirements, dockerRes)
 			for _, warning := range result.Warnings {
-				fmt.Printf("Warning: %s\n", warning)
+				ui.Warning("%s", warning)
 			}
 			if !result.Satisfied {
 				for _, errMsg := range result.Errors {
-					fmt.Printf("Error: %s\n", errMsg)
+					ui.Error("%s", errMsg)
 				}
 				return fmt.Errorf("host requirements not satisfied")
 			}
@@ -199,7 +200,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	if s.verbose {
-		fmt.Printf("Current state: %s\n", currentState)
+		ui.Printf("Current state: %s", currentState)
 	}
 
 	// Handle state transitions
@@ -209,13 +210,13 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	switch currentState {
 	case state.StateRunning:
 		if !opts.Recreate && !opts.Rebuild {
-			fmt.Println("Environment is already running")
+			ui.Println("Devcontainer is already running")
 			return nil
 		}
 		fallthrough
 	case state.StateStale, state.StateBroken:
 		if s.verbose {
-			fmt.Println("Removing existing environment...")
+			ui.Println("Removing existing devcontainer...")
 		}
 		if err := s.Down(ctx, info, DownOptions{RemoveVolumes: true}); err != nil {
 			return fmt.Errorf("failed to remove existing environment: %w", err)
@@ -244,7 +245,7 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
 	if opts.SSHAgentEnabled && containerInfo != nil {
-		fmt.Println("Installing dcx agent...")
+		ui.Println("Installing dcx agent...")
 		if err := ssh.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
 		}
@@ -258,11 +259,10 @@ func (s *EnvironmentService) Up(ctx context.Context, opts UpOptions) error {
 	// Setup SSH server access if requested
 	if opts.EnableSSH {
 		if err := s.setupSSHAccess(ctx, info, containerInfo); err != nil {
-			fmt.Printf("Warning: Failed to setup SSH access: %v\n", err)
+			ui.Warning("Failed to setup SSH access: %v", err)
 		}
 	}
 
-	fmt.Println("Environment is ready")
 	return nil
 }
 
@@ -274,9 +274,9 @@ func (s *EnvironmentService) create(ctx context.Context, info *EnvironmentInfo, 
 	}
 
 	if info.Config.IsComposePlan() {
-		fmt.Println("Creating compose-based environment...")
+		ui.Println("Creating compose-based devcontainer...")
 	} else {
-		fmt.Println("Creating single-container environment...")
+		ui.Println("Creating single-container devcontainer...")
 	}
 
 	return envRunner.Up(ctx, runnerPkg.UpOptions{
@@ -288,7 +288,7 @@ func (s *EnvironmentService) create(ctx context.Context, info *EnvironmentInfo, 
 
 // start starts an existing stopped environment.
 func (s *EnvironmentService) start(ctx context.Context, info *EnvironmentInfo) error {
-	fmt.Println("Starting existing containers...")
+	ui.Println("Starting existing devcontainer...")
 
 	envRunner, err := s.CreateRunner(info)
 	if err != nil {
@@ -312,7 +312,7 @@ func (s *EnvironmentService) Down(ctx context.Context, info *EnvironmentInfo, op
 	}
 
 	if currentState == state.StateAbsent {
-		fmt.Println("No environment found")
+		ui.Println("No devcontainer found")
 		return nil
 	}
 
@@ -358,7 +358,7 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 	}
 
 	if currentState == state.StateAbsent {
-		fmt.Println("No environment found")
+		ui.Println("No devcontainer found")
 		return nil
 	}
 
@@ -396,7 +396,7 @@ func (s *EnvironmentService) DownWithEnvKey(ctx context.Context, projectName, en
 		ssh.RemoveSSHConfig(containerInfo.Name)
 	}
 
-	fmt.Println("Environment removed")
+	ui.Println("Devcontainer removed")
 	return nil
 }
 
@@ -419,7 +419,7 @@ func (s *EnvironmentService) Build(ctx context.Context, opts BuildOptions) error
 	}
 
 	if info.Config.IsComposePlan() {
-		fmt.Println("Building compose-based environment...")
+		ui.Println("Building compose-based devcontainer...")
 	}
 
 	if err := envRunner.Build(ctx, runnerPkg.BuildOptions{
@@ -429,7 +429,6 @@ func (s *EnvironmentService) Build(ctx context.Context, opts BuildOptions) error
 		return fmt.Errorf("failed to build: %w", err)
 	}
 
-	fmt.Println("Build complete")
 	return nil
 }
 
@@ -443,8 +442,8 @@ type StopOptions struct {
 func (s *EnvironmentService) Stop(ctx context.Context, info *EnvironmentInfo, opts StopOptions) error {
 	// Check shutdownAction setting
 	if !opts.Force && info.Config.ShutdownAction == "none" {
-		fmt.Println("Skipping stop: shutdownAction is set to 'none'")
-		fmt.Println("Use --force to stop anyway")
+		ui.Println("Skipping stop: shutdownAction is set to 'none'")
+		ui.Println("Use --force to stop anyway")
 		return nil
 	}
 
@@ -459,7 +458,7 @@ func (s *EnvironmentService) Stop(ctx context.Context, info *EnvironmentInfo, op
 // runLifecycleHooks runs appropriate lifecycle hooks based on whether this is a new environment.
 func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *EnvironmentInfo, isNew bool, sshAgentEnabled bool) error {
 	if s.verbose {
-		fmt.Println("  [hooks] Getting container state...")
+		ui.Println("  [hooks] Getting container state...")
 	}
 	_, containerInfo, err := s.stateMgr.GetStateWithProject(ctx, info.ProjectName, info.EnvKey)
 	if err != nil {
@@ -469,7 +468,7 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 		return fmt.Errorf("no primary container found")
 	}
 	if s.verbose {
-		fmt.Printf("  [hooks] Container: %s\n", containerInfo.Name)
+		ui.Printf("  [hooks] Container: %s", containerInfo.Name)
 	}
 
 	// Create hook runner
@@ -485,20 +484,20 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 	// Resolve features to get their lifecycle hooks
 	if len(info.Config.Features) > 0 {
 		if s.verbose {
-			fmt.Printf("  [hooks] Resolving %d features...\n", len(info.Config.Features))
+			ui.Printf("  [hooks] Resolving %d features...", len(info.Config.Features))
 			for id := range info.Config.Features {
-				fmt.Printf("  [hooks]   - %s\n", id)
+				ui.Printf("  [hooks]   - %s", id)
 			}
 		}
 		configDir := filepath.Dir(info.ConfigPath)
 		mgr, err := features.NewManager(configDir)
 		if err == nil {
 			if s.verbose {
-				fmt.Println("  [hooks] Calling ResolveAll...")
+				ui.Println("  [hooks] Calling ResolveAll...")
 			}
 			resolvedFeatures, err := mgr.ResolveAll(ctx, info.Config.Features, info.Config.OverrideFeatureInstallOrder)
 			if s.verbose {
-				fmt.Printf("  [hooks] ResolveAll returned %d features, err=%v\n", len(resolvedFeatures), err)
+				ui.Printf("  [hooks] ResolveAll returned %d features, err=%v", len(resolvedFeatures), err)
 			}
 			if err == nil && len(resolvedFeatures) > 0 {
 				var onCreateHooks, updateContentHooks, postCreateHooks, postStartHooks, postAttachHooks []lifecycle.FeatureHook
@@ -547,12 +546,12 @@ func (s *EnvironmentService) runLifecycleHooks(ctx context.Context, info *Enviro
 	// Run appropriate hooks based on whether this is a new environment
 	if isNew {
 		if s.verbose {
-			fmt.Println("  [hooks] Running create hooks...")
+			ui.Println("  [hooks] Running create hooks...")
 		}
 		return hookRunner.RunAllCreateHooks(ctx)
 	}
 	if s.verbose {
-		fmt.Println("  [hooks] Running start hooks...")
+		ui.Println("  [hooks] Running start hooks...")
 	}
 	return hookRunner.RunStartHooks(ctx)
 }
@@ -595,7 +594,7 @@ func (s *EnvironmentService) setupSSHAccess(ctx context.Context, info *Environme
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 
-	fmt.Printf("SSH configured: ssh %s\n", hostName)
+	ui.Printf("SSH configured: ssh %s", hostName)
 	return nil
 }
 
