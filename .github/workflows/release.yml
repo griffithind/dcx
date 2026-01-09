@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
 
       - name: Get version
         id: version
@@ -26,8 +26,8 @@ jobs:
       - name: Create placeholder embeds
         run: |
           mkdir -p internal/ssh/bin
-          echo "placeholder" | gzip > internal/ssh/bin/dcx-linux-amd64.gz
-          echo "placeholder" | gzip > internal/ssh/bin/dcx-linux-arm64.gz
+          echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-amd64.gz
+          echo "placeholder" | gzip > internal/ssh/container/bin/dcx-linux-arm64.gz
 
       # Build Linux binaries (with placeholder embeds)
       - name: Build Linux amd64
@@ -45,8 +45,8 @@ jobs:
       # Compress Linux binaries for embedding
       - name: Compress Linux binaries for embedding
         run: |
-          gzip -c bin/dcx-linux-amd64 > internal/ssh/bin/dcx-linux-amd64.gz
-          gzip -c bin/dcx-linux-arm64 > internal/ssh/bin/dcx-linux-arm64.gz
+          gzip -c bin/dcx-linux-amd64 > internal/ssh/container/bin/dcx-linux-amd64.gz
+          gzip -c bin/dcx-linux-arm64 > internal/ssh/container/bin/dcx-linux-arm64.gz
 
       # Rebuild Linux binaries with real embeds
       - name: Rebuild Linux amd64 (with embedded binaries)

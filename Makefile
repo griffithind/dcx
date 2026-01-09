@@ -18,16 +18,16 @@ build: build-linux-compress
 # Build and compress Linux binaries for embedding
 # Uses small placeholders for Linux build to avoid recursive embedding
 build-linux-compress:
-	@mkdir -p $(BUILD_DIR) internal/ssh/bin
+	@mkdir -p $(BUILD_DIR) internal/ssh/container/bin
 	@# Always use small placeholders for Linux build (avoids recursive embedding)
-	@echo "placeholder" | gzip > internal/ssh/bin/$(BINARY_NAME)-linux-amd64.gz
-	@echo "placeholder" | gzip > internal/ssh/bin/$(BINARY_NAME)-linux-arm64.gz
+	@echo "placeholder" | gzip > internal/ssh/container/bin/$(BINARY_NAME)-linux-amd64.gz
+	@echo "placeholder" | gzip > internal/ssh/container/bin/$(BINARY_NAME)-linux-arm64.gz
 	@echo "Building Linux binaries (with placeholder embeds)..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 	@echo "Compressing for embedding..."
-	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 > internal/ssh/bin/$(BINARY_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 > internal/ssh/bin/$(BINARY_NAME)-linux-arm64.gz
+	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 > internal/ssh/container/bin/$(BINARY_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 > internal/ssh/container/bin/$(BINARY_NAME)-linux-arm64.gz
 
 # Build Linux binaries only (for standalone distribution)
 build-linux:
