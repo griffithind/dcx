@@ -103,6 +103,8 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 		if err := b.resolveFeatures(ctx, ws, opts.Config); err != nil {
 			return nil, err
 		}
+		// Merge feature mounts into resolved mounts (after feature resolution)
+		b.mergeFeatureMounts(ws)
 	}
 
 	// Compute hashes (AFTER feature resolution so hashes are accurate)
@@ -110,11 +112,17 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (*Workspace, err
 		return nil, err
 	}
 
+	// Populate host context (UID/GID, effective user)
+	b.populateHostContext(ws, opts.Config)
+
 	// Initialize build plan with derived image tag
 	ws.Build = &BuildPlan{}
 	if ws.Hashes != nil && ws.Hashes.Config != "" && len(ws.Hashes.Config) >= 12 {
 		ws.Build.DerivedImage = fmt.Sprintf("dcx/%s:%s-features", ws.ID, ws.Hashes.Config[:12])
 	}
+
+	// Populate build decisions (ShouldUpdateUID, etc.)
+	b.populateBuildDecisions(ws, opts.Config)
 
 	return ws, nil
 }
@@ -235,6 +243,65 @@ func (b *Builder) resolveFeatures(ctx context.Context, ws *Workspace, cfg *confi
 	// Store resolved features on workspace
 	ws.ResolvedFeatures = resolved
 	return nil
+}
+
+// mergeFeatureMounts merges mounts from resolved features into ws.Resolved.Mounts.
+// Deduplicates by target path (existing config mounts take precedence).
+func (b *Builder) mergeFeatureMounts(ws *Workspace) {
+	// Build a map of existing mounts by target for deduplication
+	existingTargets := make(map[string]bool)
+	for _, m := range ws.Resolved.Mounts {
+		existingTargets[m.Target] = true
+	}
+
+	// Add feature mounts that don't already exist
+	for _, f := range ws.ResolvedFeatures {
+		if f.Metadata == nil {
+			continue
+		}
+		for _, fm := range f.Metadata.Mounts {
+			if existingTargets[fm.Target] {
+				continue // Skip duplicates
+			}
+			existingTargets[fm.Target] = true
+			ws.Resolved.Mounts = append(ws.Resolved.Mounts, mount.Mount{
+				Type:   mount.Type(fm.Type),
+				Source: fm.Source,
+				Target: fm.Target,
+			})
+		}
+	}
+}
+
+// populateHostContext populates host-specific context like UID/GID and effective user.
+func (b *Builder) populateHostContext(ws *Workspace, cfg *config.DevcontainerConfig) {
+	resolved := ws.Resolved
+
+	// Determine effective user (remoteUser takes precedence, then containerUser)
+	resolved.EffectiveUser = resolved.RemoteUser
+	if resolved.EffectiveUser == "" {
+		resolved.EffectiveUser = resolved.ContainerUser
+	}
+
+	// Capture host UID/GID
+	resolved.HostUID = os.Getuid()
+	resolved.HostGID = os.Getgid()
+}
+
+// populateBuildDecisions populates build-time decisions based on resolved config.
+func (b *Builder) populateBuildDecisions(ws *Workspace, cfg *config.DevcontainerConfig) {
+	// UID update decision:
+	// - Must have an effective user that's not root
+	// - updateRemoteUserUID must be enabled (default true for non-root users)
+	// - Host UID must not be root
+	if ws.Resolved.EffectiveUser != "" && ws.Resolved.EffectiveUser != "root" && ws.Resolved.HostUID != 0 {
+		// Check updateRemoteUserUID config (defaults to true if not specified)
+		shouldUpdate := true
+		if cfg.UpdateRemoteUserUID != nil {
+			shouldUpdate = *cfg.UpdateRemoteUserUID
+		}
+		ws.Build.ShouldUpdateUID = shouldUpdate
+	}
 }
 
 // computeHashes computes all configuration hashes.

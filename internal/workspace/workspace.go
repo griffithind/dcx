@@ -75,6 +75,11 @@ type ResolvedConfig struct {
 	ContainerUser       string
 	UpdateRemoteUserUID bool
 
+	// Effective user resolution (computed during build)
+	EffectiveUser string // RemoteUser or ContainerUser (for UID update)
+	HostUID       int    // Host user's UID
+	HostGID       int    // Host user's GID
+
 	// Environment variables
 	ContainerEnv map[string]string // Set at container creation
 	RemoteEnv    map[string]string // Set in shell sessions
@@ -175,12 +180,13 @@ type GPURequirements struct {
 
 // BuildPlan represents what needs to be built.
 type BuildPlan struct {
-	NeedsBuild     bool   // Whether any build is required
-	BuildReason    string // Why build is needed (new, stale, forced)
-	ImageToBuild   string // Image name to build
-	DerivedImage   string // Derived image with features
-	BaseImage      string // Original base image
-	BuildTimestamp time.Time
+	NeedsBuild      bool   // Whether any build is required
+	BuildReason     string // Why build is needed (new, stale, forced)
+	ImageToBuild    string // Image name to build
+	DerivedImage    string // Derived image with features
+	BaseImage       string // Original base image
+	BuildTimestamp  time.Time
+	ShouldUpdateUID bool // Whether UID update layer is needed
 }
 
 // RuntimeState represents container runtime state.

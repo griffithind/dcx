@@ -11,7 +11,6 @@ import (
 	"time"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
@@ -143,8 +142,6 @@ func (r *UnifiedRunner) upCompose(ctx context.Context, opts UpOptions, hasFeatur
 
 // upSingle handles single-container configurations (image or Dockerfile).
 func (r *UnifiedRunner) upSingle(ctx context.Context, opts UpOptions, hasFeatures bool) error {
-	ws := r.workspace
-
 	// Resolve the base image
 	baseImage, err := r.resolveBaseImage(ctx, opts)
 	if err != nil {
@@ -162,9 +159,7 @@ func (r *UnifiedRunner) upSingle(ctx context.Context, opts UpOptions, hasFeature
 		r.derivedImage = derivedImage
 	} else {
 		// Even without features, we may need to apply UID update layer
-		remoteUser := ws.Resolved.RemoteUser
-		containerUser := ws.Resolved.ContainerUser
-		uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, remoteUser, containerUser, opts.Rebuild)
+		uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, opts.Rebuild)
 		if err != nil {
 			return fmt.Errorf("failed to apply UID update: %w", err)
 		}
@@ -272,15 +267,9 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		}
 	}
 
-	// Get user config early for UID update decisions
-	remoteUser := ws.Resolved.RemoteUser
-	containerUser := ws.Resolved.ContainerUser
-
 	// Use pre-resolved features from workspace (populated by builder)
+	// Feature mounts are also pre-merged into ws.Resolved.Mounts by the builder
 	r.resolvedFeatures = ws.ResolvedFeatures
-
-	// Merge feature mounts into workspace resolved mounts
-	r.mergeFeatureMounts()
 
 	// Check if derived image already exists and is up-to-date
 	if !rebuild {
@@ -288,7 +277,7 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		if err == nil && exists {
 			fmt.Printf("Using cached derived image: %s\n", derivedTag)
 			// Still need to apply UID update layer (may be cached too)
-			return r.applyUIDUpdateLayer(ctx, derivedTag, remoteUser, containerUser, rebuild)
+			return r.applyUIDUpdateLayer(ctx, derivedTag, rebuild)
 		}
 	}
 
@@ -300,12 +289,14 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 		return "", fmt.Errorf("failed to create feature manager: %w", err)
 	}
 
+	remoteUser := ws.Resolved.RemoteUser
+	containerUser := ws.Resolved.ContainerUser
 	if err := featureMgr.BuildDerivedImage(ctx, baseImage, derivedTag, r.resolvedFeatures, ws.ConfigDir, remoteUser, containerUser); err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
 	}
 
 	// Apply UID update layer if needed (after features, per devcontainer spec)
-	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedTag, remoteUser, containerUser, rebuild)
+	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedTag, rebuild)
 	if err != nil {
 		return "", err
 	}
@@ -316,26 +307,18 @@ func (r *UnifiedRunner) buildDerivedImage(ctx context.Context, baseImage string,
 // applyUIDUpdateLayer applies a UID update layer to match host UID/GID.
 // This is done at build time per the devcontainer spec.
 // Returns the final image tag (may be same as input if no update needed).
-func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remoteUser, containerUser string, rebuild bool) (string, error) {
+func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage string, rebuild bool) (string, error) {
 	ws := r.workspace
 
-	// Determine effective user for UID update
-	effectiveUser := remoteUser
-	if effectiveUser == "" {
-		effectiveUser = containerUser
-	}
-	if effectiveUser == "" {
-		return baseImage, nil // No user to update
-	}
-
-	// Get host UID/GID
-	hostUID := os.Getuid()
-	hostGID := os.Getgid()
-
-	// Check if we should update UID
-	if !features.ShouldUpdateRemoteUserUID(ws.RawConfig, effectiveUser, hostUID) {
+	// Use pre-computed decision from workspace builder
+	if !ws.Build.ShouldUpdateUID {
 		return baseImage, nil
 	}
+
+	// Use pre-computed values from workspace
+	effectiveUser := ws.Resolved.EffectiveUser
+	hostUID := ws.Resolved.HostUID
+	hostGID := ws.Resolved.HostGID
 
 	// Build UID update image tag
 	uidTag := fmt.Sprintf("%s-uid%d", baseImage, hostUID)
@@ -352,7 +335,7 @@ func (r *UnifiedRunner) applyUIDUpdateLayer(ctx context.Context, baseImage, remo
 	fmt.Printf("Updating UID/GID to %d:%d for user %s...\n", hostUID, hostGID, effectiveUser)
 
 	// Determine the user the container should run as after UID update
-	imageUser := containerUser
+	imageUser := ws.Resolved.ContainerUser
 	if imageUser == "" {
 		imageUser = effectiveUser
 	}
@@ -456,36 +439,6 @@ func (r *UnifiedRunner) buildLabels() map[string]string {
 	}
 
 	return l.ToMap()
-}
-
-// mergeFeatureMounts merges mounts from resolved features into ws.Resolved.Mounts.
-// Deduplicates by target path (feature mounts override base config mounts with same target).
-func (r *UnifiedRunner) mergeFeatureMounts() {
-	ws := r.workspace
-
-	// Build a map of existing mounts by target for deduplication
-	existingTargets := make(map[string]bool)
-	for _, m := range ws.Resolved.Mounts {
-		existingTargets[m.Target] = true
-	}
-
-	// Add feature mounts that don't already exist
-	for _, f := range r.resolvedFeatures {
-		if f.Metadata == nil {
-			continue
-		}
-		for _, fm := range f.Metadata.Mounts {
-			if existingTargets[fm.Target] {
-				continue // Skip duplicates
-			}
-			existingTargets[fm.Target] = true
-			ws.Resolved.Mounts = append(ws.Resolved.Mounts, mount.Mount{
-				Type:   mount.Type(fm.Type),
-				Source: fm.Source,
-				Target: fm.Target,
-			})
-		}
-	}
 }
 
 // buildMounts builds the container mounts as strings in Docker bind format (source:target[:ro]).
@@ -775,21 +728,8 @@ func (r *UnifiedRunner) buildDerivedImageForCompose(ctx context.Context, opts Up
 func (r *UnifiedRunner) applyUIDUpdateForCompose(ctx context.Context, opts UpOptions) error {
 	ws := r.workspace
 
-	// Get user config
-	remoteUser := ws.Resolved.RemoteUser
-	containerUser := ws.Resolved.ContainerUser
-
-	// Check if we need UID update
-	effectiveUser := remoteUser
-	if effectiveUser == "" {
-		effectiveUser = containerUser
-	}
-	if effectiveUser == "" {
-		return nil // No user to update
-	}
-
-	hostUID := os.Getuid()
-	if !features.ShouldUpdateRemoteUserUID(ws.RawConfig, effectiveUser, hostUID) {
+	// Use pre-computed decision from workspace builder
+	if !ws.Build.ShouldUpdateUID {
 		return nil
 	}
 
@@ -800,7 +740,7 @@ func (r *UnifiedRunner) applyUIDUpdateForCompose(ctx context.Context, opts UpOpt
 	}
 
 	// Apply UID update layer
-	uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, remoteUser, containerUser, opts.Rebuild)
+	uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, opts.Rebuild)
 	if err != nil {
 		return err
 	}

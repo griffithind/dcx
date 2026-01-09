@@ -321,6 +321,40 @@ type FeatureHook struct {
 	Command interface{}
 }
 
+// HookType represents a lifecycle hook type.
+type HookType string
+
+const (
+	HookOnCreate      HookType = "onCreateCommand"
+	HookUpdateContent HookType = "updateContentCommand"
+	HookPostCreate    HookType = "postCreateCommand"
+	HookPostStart     HookType = "postStartCommand"
+	HookPostAttach    HookType = "postAttachCommand"
+)
+
+// CollectHooks collects lifecycle hooks of the specified type from features.
+// This is the generic form that can be used instead of the specific CollectXCommands functions.
+func CollectHooks(features []*Feature, hookType HookType) []FeatureHook {
+	var getter func(*FeatureMetadata) interface{}
+
+	switch hookType {
+	case HookOnCreate:
+		getter = func(m *FeatureMetadata) interface{} { return m.OnCreateCommand }
+	case HookUpdateContent:
+		getter = func(m *FeatureMetadata) interface{} { return m.UpdateContentCommand }
+	case HookPostCreate:
+		getter = func(m *FeatureMetadata) interface{} { return m.PostCreateCommand }
+	case HookPostStart:
+		getter = func(m *FeatureMetadata) interface{} { return m.PostStartCommand }
+	case HookPostAttach:
+		getter = func(m *FeatureMetadata) interface{} { return m.PostAttachCommand }
+	default:
+		return nil
+	}
+
+	return collectHooks(features, getter)
+}
+
 // collectHooks is a generic helper to collect lifecycle hooks from features.
 func collectHooks(features []*Feature, getCommand func(*FeatureMetadata) interface{}) []FeatureHook {
 	var hooks []FeatureHook
@@ -348,41 +382,31 @@ func collectHooks(features []*Feature, getCommand func(*FeatureMetadata) interfa
 // CollectOnCreateCommands collects all onCreateCommand hooks from features.
 // These run after feature installation, in feature order.
 func CollectOnCreateCommands(features []*Feature) []FeatureHook {
-	return collectHooks(features, func(m *FeatureMetadata) interface{} {
-		return m.OnCreateCommand
-	})
+	return CollectHooks(features, HookOnCreate)
 }
 
 // CollectPostCreateCommands collects all postCreateCommand hooks from features.
 // These run after all features are installed and container is ready.
 func CollectPostCreateCommands(features []*Feature) []FeatureHook {
-	return collectHooks(features, func(m *FeatureMetadata) interface{} {
-		return m.PostCreateCommand
-	})
+	return CollectHooks(features, HookPostCreate)
 }
 
 // CollectPostStartCommands collects all postStartCommand hooks from features.
 // These run on each container start.
 func CollectPostStartCommands(features []*Feature) []FeatureHook {
-	return collectHooks(features, func(m *FeatureMetadata) interface{} {
-		return m.PostStartCommand
-	})
+	return CollectHooks(features, HookPostStart)
 }
 
 // CollectUpdateContentCommands collects all updateContentCommand hooks from features.
 // These run after onCreateCommand and before postCreateCommand.
 func CollectUpdateContentCommands(features []*Feature) []FeatureHook {
-	return collectHooks(features, func(m *FeatureMetadata) interface{} {
-		return m.UpdateContentCommand
-	})
+	return CollectHooks(features, HookUpdateContent)
 }
 
 // CollectPostAttachCommands collects all postAttachCommand hooks from features.
 // These run when attaching to the container.
 func CollectPostAttachCommands(features []*Feature) []FeatureHook {
-	return collectHooks(features, func(m *FeatureMetadata) interface{} {
-		return m.PostAttachCommand
-	})
+	return CollectHooks(features, HookPostAttach)
 }
 
 // shellQuote quotes a string for use in shell.
