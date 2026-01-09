@@ -1,6 +1,12 @@
 // Package container provides unified container state management types.
 package container
 
+import (
+	"fmt"
+
+	"github.com/griffithind/dcx/internal/labels"
+)
+
 // State represents the lifecycle state of a container or environment.
 // This is the canonical state type used throughout dcx.
 type State string
@@ -127,43 +133,77 @@ func (s State) GetRecovery() Recovery {
 	}
 }
 
-// FromLegacyState converts the old uppercase state format to the new format.
-// This is for backwards compatibility during migration.
-func FromLegacyState(s string) State {
-	switch s {
-	case "ABSENT":
-		return StateAbsent
-	case "CREATED":
-		return StateCreated
-	case "RUNNING":
-		return StateRunning
-	case "STALE":
-		return StateStale
-	case "BROKEN":
-		return StateBroken
-	default:
-		// Already in new format or unknown
-		return State(s)
+// ContainerInfo holds information about a container relevant to state management.
+type ContainerInfo struct {
+	ID             string
+	Name           string
+	Status         string
+	Running        bool
+	ConfigHash     string
+	WorkspaceID    string // Stable identifier (replaces EnvKey)
+	Plan           string
+	ComposeProject string
+	PrimaryService string
+	Labels         *labels.Labels
+}
+
+// StateError represents an error related to environment state.
+type StateError struct {
+	State   State
+	Message string
+	Err     error
+}
+
+func (e *StateError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s (state: %s): %v", e.Message, e.State, e.Err)
+	}
+	return fmt.Sprintf("%s (state: %s)", e.Message, e.State)
+}
+
+func (e *StateError) Unwrap() error {
+	return e.Err
+}
+
+// NewStateError creates a new StateError.
+func NewStateError(state State, message string, err error) *StateError {
+	return &StateError{
+		State:   state,
+		Message: message,
+		Err:     err,
 	}
 }
 
-// ToLegacyState converts the new state format to the old uppercase format.
-// This is for backwards compatibility during migration.
-func (s State) ToLegacyState() string {
-	switch s {
-	case StateAbsent:
-		return "ABSENT"
-	case StateCreated:
-		return "CREATED"
-	case StateRunning:
-		return "RUNNING"
-	case StateStale:
-		return "STALE"
-	case StateBroken:
-		return "BROKEN"
-	case StateStopped:
-		return "CREATED" // Stopped maps to CREATED in legacy
-	default:
-		return string(s)
-	}
+// ErrNotRunning indicates the container is not running when it should be.
+var ErrNotRunning = NewStateError(StateCreated, "container is not running", nil)
+
+// ErrAlreadyRunning indicates the container is already running.
+var ErrAlreadyRunning = NewStateError(StateRunning, "container is already running", nil)
+
+// ErrNoContainer indicates no container exists.
+var ErrNoContainer = NewStateError(StateAbsent, "no container found for this environment", nil)
+
+// ErrStaleConfig indicates the configuration has changed.
+var ErrStaleConfig = NewStateError(StateStale, "configuration has changed, rebuild required", nil)
+
+// ErrBrokenState indicates the environment is in an inconsistent state.
+var ErrBrokenState = NewStateError(StateBroken, "environment is in an inconsistent state", nil)
+
+// Operation represents a dcx operation.
+type Operation string
+
+const (
+	OpStart Operation = "start"
+	OpStop  Operation = "stop"
+	OpExec  Operation = "exec"
+	OpDown  Operation = "down"
+	OpUp    Operation = "up"
+)
+
+// Diagnostics contains diagnostic information about an environment.
+type Diagnostics struct {
+	State            State
+	Recovery         Recovery
+	PrimaryContainer *ContainerInfo
+	Containers       []ContainerInfo
 }

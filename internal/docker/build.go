@@ -178,6 +178,13 @@ func (c *Client) BuildImage(ctx context.Context, opts BuildOptions) error {
 	return buildImageWithCLI(ctx, opts)
 }
 
+// BuildImageCLI builds a Docker image using the CLI.
+// This is the canonical function for all docker build operations.
+// It can be called without a Client instance.
+func BuildImageCLI(ctx context.Context, opts BuildOptions) error {
+	return buildImageWithCLI(ctx, opts)
+}
+
 // buildImageWithCLI builds an image using the docker CLI.
 func buildImageWithCLI(ctx context.Context, opts BuildOptions) error {
 	// Determine the config directory (for resolving relative paths)

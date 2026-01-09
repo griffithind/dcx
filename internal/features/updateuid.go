@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/griffithind/dcx/internal/config"
+	"github.com/griffithind/dcx/internal/docker"
 )
 
 // updateUIDDockerfile is the Dockerfile template for updating user UID/GID.
@@ -90,23 +91,21 @@ func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, ima
 	}
 
 	// Build the image with build args
-	args := []string{
-		"build",
-		"-t", newTag,
-		"-f", dockerfilePath,
-		"--build-arg", "BASE_IMAGE=" + baseImage,
-		"--build-arg", "REMOTE_USER=" + remoteUser,
-		"--build-arg", "NEW_UID=" + strconv.Itoa(hostUID),
-		"--build-arg", "NEW_GID=" + strconv.Itoa(hostGID),
-		"--build-arg", "IMAGE_USER=" + imageUser,
-		tempBuildDir,
-	}
-
-	cmd := execCommand(ctx, "docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	err = docker.BuildImageCLI(ctx, docker.BuildOptions{
+		Tag:        newTag,
+		Dockerfile: dockerfilePath,
+		Context:    tempBuildDir,
+		Args: map[string]string{
+			"BASE_IMAGE":  baseImage,
+			"REMOTE_USER": remoteUser,
+			"NEW_UID":     strconv.Itoa(hostUID),
+			"NEW_GID":     strconv.Itoa(hostGID),
+			"IMAGE_USER":  imageUser,
+		},
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to build updateUID image: %w", err)
 	}
 

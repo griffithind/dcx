@@ -8,10 +8,10 @@ import (
 	"syscall"
 
 	"github.com/griffithind/dcx/internal/config"
+	ctr "github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ssh/container"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
 	"github.com/spf13/cobra"
@@ -96,7 +96,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	defer dockerClient.Close()
 
 	// Initialize state manager
-	stateMgr := state.NewManager(dockerClient)
+	stateMgr := ctr.NewManager(dockerClient)
 
 	// Look up container by name
 	containerInfo, err := stateMgr.FindContainerByName(ctx, containerName)

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -113,7 +113,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine state for each environment
-	stateMgr := state.NewManager(dockerClient)
+	stateMgr := container.NewManager(dockerClient)
 	for _, env := range envMap {
 		s, _, _ := stateMgr.GetState(ctx, env.EnvKey)
 		env.State = string(s)

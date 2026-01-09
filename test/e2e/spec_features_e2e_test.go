@@ -36,7 +36,7 @@ func TestOverrideCommandE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Container should respond to exec commands
@@ -80,7 +80,7 @@ func TestOverrideCommandFalseE2E(t *testing.T) {
 	// Container should still be running because TTY keeps shell alive
 	t.Run("container_runs_with_default_cmd", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Verify we're running the default command (sh), not the override (sleep loop)
@@ -115,7 +115,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Equal(t, "RUNNING", helpers.GetContainerState(t, workspace))
+	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
 
 	// Stop without force should be skipped
 	t.Run("stop_skipped_without_force", func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 
 		// Container should still be running
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Stop with force should work
@@ -134,7 +134,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 
 		// Container should be stopped
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 }
 
@@ -158,7 +158,7 @@ func TestShutdownActionStopContainerE2E(t *testing.T) {
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Equal(t, "RUNNING", helpers.GetContainerState(t, workspace))
+	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
 
 	// Stop should work without force
 	t.Run("stop_works_without_force", func(t *testing.T) {
@@ -166,7 +166,7 @@ func TestShutdownActionStopContainerE2E(t *testing.T) {
 		assert.Contains(t, stdout, "stopped")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 }
 

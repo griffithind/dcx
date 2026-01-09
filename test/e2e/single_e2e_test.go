@@ -28,10 +28,10 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Test initial state is ABSENT
+	// Test initial state is absent
 	t.Run("initial_state_absent", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 
 	// Test dcx up
@@ -40,7 +40,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Test dcx exec
@@ -56,7 +56,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		assert.Contains(t, stdout, "stopped")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 
 	// Test dcx up (starts stopped container)
@@ -65,7 +65,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		assert.Contains(t, stdout, "started")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Test dcx down
@@ -74,7 +74,7 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		assert.Contains(t, stdout, "removed")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 }
 
@@ -120,7 +120,7 @@ RUN echo "built from dockerfile" > /built-marker
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, tmpDir)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Test that built content exists

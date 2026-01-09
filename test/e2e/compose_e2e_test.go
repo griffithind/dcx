@@ -45,10 +45,10 @@ services:
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Test initial state is ABSENT
+	// Test initial state is absent
 	t.Run("initial_state_absent", func(t *testing.T) {
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 
 	// Test dcx up
@@ -57,7 +57,7 @@ services:
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Test dcx exec
@@ -73,7 +73,7 @@ services:
 		assert.Contains(t, stdout, "stopped")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "CREATED", state)
+		assert.Equal(t, "created", state)
 	})
 
 	// Test dcx up (starts stopped container)
@@ -82,7 +82,7 @@ services:
 		assert.Contains(t, stdout, "started")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "RUNNING", state)
+		assert.Equal(t, "running", state)
 	})
 
 	// Test dcx down
@@ -91,7 +91,7 @@ services:
 		assert.Contains(t, stdout, "removed")
 
 		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "ABSENT", state)
+		assert.Equal(t, "absent", state)
 	})
 }
 
@@ -135,7 +135,7 @@ services:
 
 	// Verify state
 	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "RUNNING", state)
+	assert.Equal(t, "running", state)
 
 	// Verify we can exec into the primary service
 	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
@@ -178,9 +178,9 @@ services:
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.Contains(t, stdout, "already running")
 
-	// State should still be RUNNING
+	// State should still be running
 	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "RUNNING", state)
+	assert.Equal(t, "running", state)
 }
 
 // TestComposeRecreate tests the --recreate flag.
