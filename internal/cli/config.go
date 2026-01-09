@@ -7,7 +7,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -75,7 +75,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return fmt.Errorf("failed to get identifiers: %w", err)

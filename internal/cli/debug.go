@@ -11,7 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/config"
 	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/labels"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/workspace"
 	"github.com/spf13/cobra"
@@ -244,7 +244,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	}
 	defer client.Close()
 
-	svc := service.NewEnvironmentService(client, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(client, workspacePath, configPath, verbose)
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		return

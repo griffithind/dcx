@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -47,9 +47,9 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	defer dockerClient.Close()
 
 	// Create service and get plan
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
-	plan, err := svc.Plan(ctx, service.PlanOptions{})
+	plan, err := svc.Plan(ctx, orchestrator.PlanOptions{})
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func displayPlan(plan *service.PlanResult) {
+func displayPlan(plan *orchestrator.PlanResult) {
 	info := plan.Info
 	cfg := info.Config
 
@@ -233,22 +233,22 @@ func displayPlan(plan *service.PlanResult) {
 	}
 
 	ui.Println("")
-	if plan.Action != service.PlanActionNone {
+	if plan.Action != orchestrator.PlanActionNone {
 		ui.Println(ui.Dim("Run 'dcx up' to execute this plan."))
 	}
 }
 
-func colorAction(action service.PlanAction) string {
+func colorAction(action orchestrator.PlanAction) string {
 	switch action {
-	case service.PlanActionCreate:
+	case orchestrator.PlanActionCreate:
 		return pterm.FgGreen.Sprint(string(action))
-	case service.PlanActionRecreate:
+	case orchestrator.PlanActionRecreate:
 		return pterm.FgYellow.Sprint(string(action))
-	case service.PlanActionRebuild:
+	case orchestrator.PlanActionRebuild:
 		return pterm.FgRed.Sprint(string(action))
-	case service.PlanActionStart:
+	case orchestrator.PlanActionStart:
 		return pterm.FgCyan.Sprint(string(action))
-	case service.PlanActionNone:
+	case orchestrator.PlanActionNone:
 		return pterm.FgGreen.Sprint("none (up to date)")
 	default:
 		return string(action)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/docker"
-	"github.com/griffithind/dcx/internal/service"
+	"github.com/griffithind/dcx/internal/orchestrator"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -47,13 +47,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	defer dockerClient.Close()
 
 	// Create environment service
-	svc := service.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
+	svc := orchestrator.NewEnvironmentService(dockerClient, workspacePath, configPath, verbose)
 
 	// Start spinner for progress feedback
 	spinner := ui.StartSpinner("Building devcontainer images...")
 
 	// Execute build
-	buildErr := svc.Build(ctx, service.BuildOptions{
+	buildErr := svc.Build(ctx, orchestrator.BuildOptions{
 		NoCache: noCache,
 		Pull:    pullBuild,
 	})

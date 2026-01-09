@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/config"
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/containerstate"
 	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -45,8 +45,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	dcxCfg, _ := config.LoadDcxConfig(cliCtx.WorkspacePath())
 
 	// Try to load config and compute hash for staleness detection
-	var currentState container.State
-	var containerInfo *container.ContainerInfo
+	var currentState containerstate.State
+	var containerInfo *containerstate.ContainerInfo
 	var cfg *config.DevContainerConfig
 	var configHash string
 
@@ -81,7 +81,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Show SSH status
 	if containerInfo != nil && host.HasSSHConfig(containerInfo.Name) {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
-	} else if currentState != container.StateAbsent {
+	} else if currentState != containerstate.StateAbsent {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (use 'dcx up --ssh' to enable)")))
 	}
 
