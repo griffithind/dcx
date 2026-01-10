@@ -44,7 +44,7 @@ debug/
 
 # Build artifacts
 dist/
-build/
+/build/
 
 # Test artifacts
 test/fixtures/tmp/
