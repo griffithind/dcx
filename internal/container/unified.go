@@ -10,8 +10,8 @@ import (
 	"time"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -21,6 +21,7 @@ import (
 type UnifiedRuntime struct {
 	resolved     *devcontainer.ResolvedDevContainer
 	dockerClient *DockerClient
+	builder      build.ImageBuilder // SDK-based image builder
 
 	// Cached state
 	containerID   string
@@ -45,9 +46,13 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 		return nil, fmt.Errorf("docker client is required")
 	}
 
+	// Create SDK-based image builder using the same Docker client
+	builder := build.NewSDKBuilder(dockerClient.APIClient())
+
 	return &UnifiedRuntime{
 		resolved:      resolved,
 		dockerClient:  dockerClient,
+		builder:       builder,
 		containerName: resolved.ServiceName,
 	}, nil
 }
@@ -224,11 +229,21 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 	return "", fmt.Errorf("no image or build configuration found")
 }
 
-// buildDockerfile builds an image from a Dockerfile.
+// buildDockerfile builds an image from a Dockerfile using the SDK.
 func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan) error {
 	buildCtx := plan.Context
 	if buildCtx == "" {
 		buildCtx = r.resolved.ConfigDir
+	}
+
+	// Resolve relative paths
+	if !filepath.IsAbs(buildCtx) {
+		buildCtx = filepath.Join(r.resolved.ConfigDir, buildCtx)
+	}
+
+	dockerfilePath := plan.Dockerfile
+	if !filepath.IsAbs(dockerfilePath) {
+		dockerfilePath = filepath.Join(r.resolved.ConfigDir, dockerfilePath)
 	}
 
 	buildArgs := make(map[string]string)
@@ -236,19 +251,18 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 		buildArgs[k] = v
 	}
 
-	return r.dockerClient.BuildImage(ctx, ImageBuildOptions{
+	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
-		Dockerfile: plan.Dockerfile,
+		Dockerfile: dockerfilePath,
 		Context:    buildCtx,
 		Args:       buildArgs,
 		Target:     plan.Target,
-		ConfigDir:  r.resolved.ConfigDir,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
+		Progress:   os.Stdout,
 	})
+	return err
 }
 
-// buildDerivedImage builds an image with features installed.
+// buildDerivedImage builds an image with features installed using the SDK.
 func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string, rebuild, _ bool) (string, error) {
 	// Use pre-computed derived image tag from resolved
 	var derivedTag string
@@ -263,26 +277,25 @@ func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string
 		}
 	}
 
-	// Check if derived image already exists and is up-to-date
-	if !rebuild {
-		exists, err := r.dockerClient.ImageExists(ctx, derivedTag)
-		if err == nil && exists {
-			fmt.Printf("Using cached derived image: %s\n", derivedTag)
-			return r.applyUIDUpdateLayer(ctx, derivedTag, rebuild)
-		}
-	}
-
-	fmt.Printf("Building derived image: %s\n", derivedTag)
-
-	// Build the derived image using the resolved features
+	// Build the derived image using the SDK builder
 	remoteUser := r.resolved.RemoteUser
 	containerUser := r.resolved.ContainerUser
-	if err := features.BuildDerivedImage(ctx, baseImage, derivedTag, r.resolved.Features, remoteUser, containerUser); err != nil {
+
+	derivedImage, err := r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
+		BaseImage:     baseImage,
+		Tag:           derivedTag,
+		Features:      r.resolved.Features,
+		RemoteUser:    remoteUser,
+		ContainerUser: containerUser,
+		Rebuild:       rebuild,
+		Progress:      os.Stdout,
+	})
+	if err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
 	}
 
 	// Apply UID update layer if needed
-	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedTag, rebuild)
+	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedImage, rebuild)
 	if err != nil {
 		return "", err
 	}
@@ -290,7 +303,7 @@ func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string
 	return finalImage, nil
 }
 
-// applyUIDUpdateLayer applies a UID update layer to match host UID/GID.
+// applyUIDUpdateLayer applies a UID update layer to match host UID/GID using the SDK.
 func (r *UnifiedRuntime) applyUIDUpdateLayer(ctx context.Context, baseImage string, rebuild bool) (string, error) {
 	if !r.resolved.ShouldUpdateUID {
 		return baseImage, nil
@@ -302,26 +315,26 @@ func (r *UnifiedRuntime) applyUIDUpdateLayer(ctx context.Context, baseImage stri
 
 	uidTag := fmt.Sprintf("%s-uid%d", baseImage, hostUID)
 
-	if !rebuild {
-		exists, err := r.dockerClient.ImageExists(ctx, uidTag)
-		if err == nil && exists {
-			fmt.Printf("Using cached UID-updated image: %s\n", uidTag)
-			return uidTag, nil
-		}
-	}
-
-	fmt.Printf("Updating UID/GID to %d:%d for user %s...\n", hostUID, hostGID, effectiveUser)
-
 	imageUser := r.resolved.ContainerUser
 	if imageUser == "" {
 		imageUser = effectiveUser
 	}
 
-	if err := features.BuildUpdateUIDImage(ctx, baseImage, uidTag, effectiveUser, imageUser, hostUID, hostGID); err != nil {
+	finalImage, err := r.builder.BuildUIDUpdate(ctx, build.UIDBuildOptions{
+		BaseImage:  baseImage,
+		Tag:        uidTag,
+		RemoteUser: effectiveUser,
+		ImageUser:  imageUser,
+		HostUID:    hostUID,
+		HostGID:    hostGID,
+		Rebuild:    rebuild,
+		Progress:   os.Stdout,
+	})
+	if err != nil {
 		return "", fmt.Errorf("failed to build UID update image: %w", err)
 	}
 
-	return uidTag, nil
+	return finalImage, nil
 }
 
 // createContainer creates a single container.

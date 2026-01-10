@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/mount"
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -116,7 +117,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		resolved.Plan = NewComposePlan(
 			absolutePaths,
 			opts.Config.Service,
-			SanitizeProjectName(resolved.Name),
+			common.SanitizeProjectName(resolved.Name),
 		)
 	}
 
@@ -167,7 +168,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	resolved.Mounts = parseMounts(opts.Config.Mounts)
 
 	// Service name (sanitized for Docker)
-	resolved.ServiceName = SanitizeProjectName(resolved.Name)
+	resolved.ServiceName = common.SanitizeProjectName(resolved.Name)
 
 	// Customizations
 	resolved.Customizations = opts.Config.Customizations

@@ -3,10 +3,6 @@ package features
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/griffithind/dcx/internal/docker"
 )
 
 // Manager handles feature resolution, ordering, and installation.
@@ -183,53 +179,6 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 	}
 
 	return unresolved
-}
-
-// BuildDerivedImage builds a derived image with features installed.
-// This standalone function doesn't require a Manager instance.
-// remoteUser is the configured remoteUser from devcontainer.json (can be empty to default to containerUser).
-// containerUser is the container's user account (can be empty to default to "root").
-func BuildDerivedImage(ctx context.Context, baseImage, imageTag string, features []*Feature, remoteUser, containerUser string) error {
-	if len(features) == 0 {
-		return nil
-	}
-
-	// Create temporary build directory to avoid polluting .devcontainer
-	tempBuildDir, err := os.MkdirTemp("", "dcx-build-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp build directory: %w", err)
-	}
-	defer os.RemoveAll(tempBuildDir) // Cleanup after build completes
-
-	// Generate Dockerfile
-	generator := NewDockerfileGenerator(baseImage, features, tempBuildDir, remoteUser, containerUser)
-	dockerfile := generator.Generate()
-
-	// Prepare build context
-	if err := PrepareBuildContext(tempBuildDir, features, dockerfile); err != nil {
-		return fmt.Errorf("failed to prepare build context: %w", err)
-	}
-
-	// Build the image using docker CLI
-	dockerfilePath := filepath.Join(tempBuildDir, "Dockerfile.dcx-features")
-	if err := buildImage(ctx, tempBuildDir, dockerfilePath, imageTag); err != nil {
-		return fmt.Errorf("failed to build derived image: %w", err)
-	}
-
-	return nil
-}
-
-// buildImage builds a Docker image using the CLI.
-func buildImage(ctx context.Context, contextDir, dockerfilePath, tag string) error {
-	// Build derived image with features. Docker layer cache is used for performance.
-	// Cache is invalidated when config changes because the image tag includes configHash.
-	return docker.BuildImageCLI(ctx, docker.ImageBuildOptions{
-		Tag:        tag,
-		Dockerfile: dockerfilePath,
-		Context:    contextDir,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-	})
 }
 
 // HasFeatures returns true if the config has any features.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/spf13/cobra"
 )
 
@@ -46,21 +46,14 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Use legacy docker client for logs (GetLogs not in new container package yet)
-	legacyDocker, err := docker.NewClient()
-	if err != nil {
-		return fmt.Errorf("failed to create docker client: %w", err)
-	}
-	defer legacyDocker.Close()
-
 	// Get logs from container
-	opts := docker.LogsOptions{
+	opts := container.LogsOptions{
 		Follow:     logsFollow,
 		Timestamps: logsTimestamps,
 		Tail:       logsTail,
 	}
 
-	reader, err := legacyDocker.GetLogs(cliCtx.Ctx, containerInfo.ID, opts)
+	reader, err := cliCtx.DockerClient.GetLogs(cliCtx.Ctx, containerInfo.ID, opts)
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %w", err)
 	}

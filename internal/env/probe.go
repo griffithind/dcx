@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/container"
 )
 
 // ProbeType represents the type of shell probe to use.
@@ -40,11 +40,11 @@ func ProbeCommand(probeType ProbeType) []string {
 
 // Prober probes container environments.
 type Prober struct {
-	dockerClient *docker.Client
+	dockerClient *container.DockerClient
 }
 
 // NewProber creates a new environment prober.
-func NewProber(dockerClient *docker.Client) *Prober {
+func NewProber(dockerClient *container.DockerClient) *Prober {
 	return &Prober{dockerClient: dockerClient}
 }
 
@@ -61,14 +61,15 @@ func (p *Prober) Probe(ctx context.Context, containerID string, probeType ProbeT
 
 	// Capture output
 	var output strings.Builder
-	execConfig := docker.ExecConfig{
-		Cmd:    cmd,
-		User:   user,
-		Stdout: &output,
-		Stderr: &output,
+	execConfig := container.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         cmd,
+		User:        user,
+		Stdout:      &output,
+		Stderr:      &output,
 	}
 
-	exitCode, err := p.dockerClient.Exec(ctx, containerID, execConfig)
+	exitCode, err := container.Exec(ctx, p.dockerClient.APIClient(), execConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to probe environment: %w", err)
 	}

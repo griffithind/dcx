@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 	"syscall"
+
+	"github.com/griffithind/dcx/internal/common"
 )
 
 // DockerDesktopSSHSocket is the path to Docker Desktop's built-in SSH agent socket.
@@ -18,19 +17,7 @@ const DockerDesktopSSHSocket = "/run/host-services/ssh-auth.sock"
 // Docker Desktop uses a VM, so Unix sockets through bind mounts don't work.
 // Instead, Docker Desktop provides built-in SSH agent forwarding.
 func IsDockerDesktop() bool {
-	// Only relevant on macOS and Windows
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		return false
-	}
-
-	// Check docker info for "Docker Desktop" in Operating System
-	cmd := exec.Command("docker", "info", "--format", "{{.OperatingSystem}}")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	return strings.Contains(string(output), "Docker Desktop")
+	return common.IsDockerDesktop()
 }
 
 // GetUpstreamSocket returns the path to the host SSH agent socket.
@@ -66,11 +53,7 @@ func ValidateSocket(path string) error {
 
 // IsAvailable checks if an SSH agent is available.
 func IsAvailable() bool {
-	sock, err := GetUpstreamSocket()
-	if err != nil {
-		return false
-	}
-	return ValidateSocket(sock) == nil
+	return common.IsSSHAgentAvailable()
 }
 
 // GetSocketMode returns appropriate file permissions for socket files.
