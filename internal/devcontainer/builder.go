@@ -116,14 +116,14 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 			absolutePaths[i] = filepath.Join(resolved.ConfigDir, f)
 		}
 
-		// For compose projects, prefer compose.yaml name over devcontainer.json name
+		// For compose projects, prefer explicit compose.yaml name over devcontainer.json name
+		// Only use compose name if explicitly set in compose.yaml (not auto-derived from directory)
 		projectName := ""
-		composeProject, err := compose.LoadProjectWithDefaults(ctx, absolutePaths, "")
-		if err == nil && composeProject.Name != "" {
-			// Use compose.yaml name if set
-			projectName = common.SanitizeProjectName(composeProject.Name)
+		if explicitName := compose.GetExplicitProjectName(absolutePaths); explicitName != "" {
+			// Use explicit compose.yaml name
+			projectName = common.SanitizeProjectName(explicitName)
 			// Also update resolved.Name so SSH host and identifiers use compose name
-			resolved.Name = composeProject.Name
+			resolved.Name = explicitName
 		}
 		if projectName == "" {
 			// Fall back to devcontainer.json name or directory name

@@ -8,6 +8,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/cli"
 	"github.com/compose-spec/compose-go/v2/types"
+	"gopkg.in/yaml.v3"
 )
 
 // LoadOptions configures how to load a compose project.
@@ -96,6 +97,28 @@ func LoadProjectWithDefaults(ctx context.Context, files []string, projectName st
 		Interpolate:  true,
 		ResolvePaths: true,
 	})
+}
+
+// GetExplicitProjectName checks if any of the compose files has an explicit "name" field.
+// Returns the name if found, empty string otherwise.
+// This is useful to distinguish between an explicitly set name and one auto-derived from directory.
+func GetExplicitProjectName(files []string) string {
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		var raw map[string]interface{}
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+
+		if name, ok := raw["name"].(string); ok && name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 // GetServiceNames returns the names of all services in a project.
