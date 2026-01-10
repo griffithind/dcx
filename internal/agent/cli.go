@@ -1,4 +1,6 @@
-package cli
+// Package agent provides the CLI for dcx-agent, a minimal binary that runs inside containers.
+// It only includes commands needed for SSH server and agent proxy functionality.
+package agent
 
 import (
 	"fmt"
@@ -10,10 +12,65 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var rootCmd = &cobra.Command{
+	Use:   "dcx-agent",
+	Short: "DCX agent for container SSH functionality",
+}
+
+// Execute runs the agent CLI.
+func Execute() error {
+	return rootCmd.Execute()
+}
+
+// SSH Server command
+var sshServerCmd = &cobra.Command{
+	Use:   "ssh-server",
+	Short: "Run SSH server in stdio mode",
+	RunE:  runSSHServer,
+}
+
+var (
+	sshServerUser    string
+	sshServerWorkDir string
+	sshServerShell   string
+)
+
+func init() {
+	sshServerCmd.Flags().StringVar(&sshServerUser, "user", "", "User to run as")
+	sshServerCmd.Flags().StringVar(&sshServerWorkDir, "workdir", "/workspace", "Working directory")
+	sshServerCmd.Flags().StringVar(&sshServerShell, "shell", "", "Shell to use (auto-detected if empty)")
+	rootCmd.AddCommand(sshServerCmd)
+}
+
+func runSSHServer(cmd *cobra.Command, args []string) error {
+	shell := sshServerShell
+	if shell == "" {
+		shell = detectShell()
+	}
+
+	hostKeyPath := "/tmp/dcx-agent-ssh-hostkey"
+	server, err := NewServer(sshServerUser, shell, sshServerWorkDir, hostKeyPath)
+	if err != nil {
+		return err
+	}
+
+	return server.Serve()
+}
+
+func detectShell() string {
+	shells := []string{"/bin/bash", "/bin/zsh", "/bin/sh"}
+	for _, shell := range shells {
+		if _, err := os.Stat(shell); err == nil {
+			return shell
+		}
+	}
+	return "/bin/sh"
+}
+
+// SSH Agent Proxy commands
 var sshAgentProxyCmd = &cobra.Command{
-	Use:    "ssh-agent-proxy",
-	Short:  "SSH agent forwarding proxy (internal use)",
-	Hidden: true, // Internal command, not shown in help
+	Use:   "ssh-agent-proxy",
+	Short: "SSH agent forwarding proxy",
 }
 
 var sshProxyServerCmd = &cobra.Command{
@@ -49,7 +106,6 @@ func init() {
 
 	sshAgentProxyCmd.AddCommand(sshProxyServerCmd)
 	sshAgentProxyCmd.AddCommand(sshProxyClientCmd)
-	sshAgentProxyCmd.Hidden = true
 	rootCmd.AddCommand(sshAgentProxyCmd)
 }
 
@@ -64,7 +120,6 @@ func runSSHProxyServer(cmd *cobra.Command, args []string) error {
 	}
 	defer listener.Close()
 
-	// Print port for parent to read
 	port := listener.Addr().(*net.TCPAddr).Port
 	fmt.Println(port)
 	os.Stdout.Sync()
@@ -79,10 +134,8 @@ func runSSHProxyServer(cmd *cobra.Command, args []string) error {
 }
 
 func runSSHProxyClient(cmd *cobra.Command, args []string) error {
-	// Remove existing socket
 	os.Remove(sshProxyClientSocket)
 
-	// Create Unix socket listener
 	listener, err := net.Listen("unix", sshProxyClientSocket)
 	if err != nil {
 		return fmt.Errorf("failed to create socket: %w", err)
@@ -90,12 +143,10 @@ func runSSHProxyClient(cmd *cobra.Command, args []string) error {
 	defer listener.Close()
 	defer os.Remove(sshProxyClientSocket)
 
-	// Set ownership so non-root user can access
 	if err := syscall.Chown(sshProxyClientSocket, sshProxyClientUID, sshProxyClientGID); err != nil {
 		return fmt.Errorf("failed to chown socket: %w", err)
 	}
 
-	// Signal ready by creating marker file
 	readyFile := sshProxyClientSocket + ".ready"
 	if err := os.WriteFile(readyFile, []byte("ready"), 0644); err != nil {
 		return fmt.Errorf("failed to create ready file: %w", err)
@@ -121,7 +172,6 @@ func proxyToSSHAgent(tcpConn net.Conn, agentPath string) {
 	}
 	defer agentConn.Close()
 
-	// Bidirectional copy
 	done := make(chan struct{}, 2)
 	go func() {
 		io.Copy(agentConn, tcpConn)
@@ -143,7 +193,6 @@ func proxyToHost(unixConn net.Conn, hostAddr string) {
 	}
 	defer tcpConn.Close()
 
-	// Bidirectional copy
 	done := make(chan struct{}, 2)
 	go func() {
 		io.Copy(tcpConn, unixConn)
