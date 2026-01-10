@@ -1,7 +1,8 @@
-.PHONY: build build-linux build-all test test-unit test-integration test-e2e test-coverage lint clean install docs
+.PHONY: build build-agent build-linux build-all test test-unit test-integration test-e2e test-coverage lint clean install docs
 
 # Build variables
 BINARY_NAME=dcx
+AGENT_NAME=dcx-agent
 BUILD_DIR=bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
@@ -9,45 +10,40 @@ LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$
 # Default target
 all: build
 
-# Build Linux binaries, compress for embedding, then build host binary
-# CGO_ENABLED=0 ensures static linking for compatibility with all Linux distros (including Alpine/musl)
-# All builds now include embedded compressed Linux binaries for SSH agent forwarding
-build: build-linux-compress
+# Build agent binaries for Linux (to be embedded in main CLI)
+build-agent:
+	@mkdir -p $(BUILD_DIR)
+	@echo "Building agent binaries..."
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
+	@echo "Compressing agent binaries for embedding..."
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64.gz
+
+# Build main CLI with embedded agent binaries
+build: build-agent
+	@echo "Building main CLI..."
 	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dcx
 
-# Build and compress Linux binaries for embedding
-# Uses small placeholders for Linux build to avoid recursive embedding
-build-linux-compress:
-	@mkdir -p $(BUILD_DIR) internal/ssh/container/bin
-	@# Always use small placeholders for Linux build (avoids recursive embedding)
-	@echo "placeholder" | gzip > internal/ssh/container/bin/$(BINARY_NAME)-linux-amd64.gz
-	@echo "placeholder" | gzip > internal/ssh/container/bin/$(BINARY_NAME)-linux-arm64.gz
-	@echo "Building Linux binaries (with placeholder embeds)..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
-	@echo "Compressing for embedding..."
-	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 > internal/ssh/container/bin/$(BINARY_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 > internal/ssh/container/bin/$(BINARY_NAME)-linux-arm64.gz
-
-# Build Linux binaries only (for standalone distribution)
-build-linux:
+# Build Linux CLI binaries (for standalone distribution)
+build-linux: build-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
-# Build all platform binaries for release (all include embedded Linux binaries)
-build-release: build-linux-compress
+# Build all platform binaries for release
+build-release: build-agent
 	@echo "Building release binaries..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
-# Build all binaries for current platform + release
+# Build all binaries
 build-all: build build-release
 
 # Install to GOPATH/bin
-install:
-	go install $(LDFLAGS) ./cmd/dcx
+install: build
+	cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
 
 # Run all tests
 test: test-unit
@@ -60,7 +56,7 @@ test-unit:
 test-integration:
 	go test -v -tags=integration ./test/integration/...
 
-# Run end-to-end tests (requires Docker) with parallel execution
+# Run end-to-end tests (requires Docker)
 test-e2e:
 	go test -v -tags=e2e -parallel=8 ./test/e2e/...
 
@@ -103,15 +99,16 @@ vet:
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  build              - Build dcx with embedded Linux binaries (default)"
-	@echo "  build-linux        - Build Linux binaries only (for standalone distribution)"
+	@echo "  build              - Build dcx with embedded agent binaries (default)"
+	@echo "  build-agent        - Build agent binaries for Linux"
+	@echo "  build-linux        - Build Linux CLI binaries"
 	@echo "  build-release      - Build all platform binaries for release"
-	@echo "  build-all          - Build all binaries (current platform + release)"
+	@echo "  build-all          - Build all binaries"
 	@echo "  install            - Install dcx to GOPATH/bin"
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
 	@echo "  test-integration   - Run integration tests (requires Docker)"
-	@echo "  test-e2e           - Run end-to-end tests with parallel execution (requires Docker)"
+	@echo "  test-e2e           - Run end-to-end tests (requires Docker)"
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  lint               - Run golangci-lint"
 	@echo "  docs               - Generate API documentation"

@@ -1,13 +1,11 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -296,49 +294,9 @@ func GetContainerUserIDs(containerID, user string) (int, int) {
 	return uid, gid
 }
 
-// StartServerProcess starts the ssh-agent-proxy server as a subprocess.
-// This is an alternative to running the server in-process.
-// Returns the port number and a function to stop the server.
-func StartServerProcess() (int, func(), error) {
-	dcxPath, err := os.Executable()
-	if err != nil {
-		return 0, nil, err
-	}
-
-	cmd := exec.Command(dcxPath, "ssh-agent-proxy", "server", "--port", "0")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return 0, nil, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return 0, nil, err
-	}
-
-	// Read port from stdout
-	scanner := bufio.NewScanner(stdout)
-	if !scanner.Scan() {
-		cmd.Process.Kill()
-		return 0, nil, fmt.Errorf("failed to read port from server")
-	}
-
-	port, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
-	if err != nil {
-		cmd.Process.Kill()
-		return 0, nil, fmt.Errorf("invalid port: %w", err)
-	}
-
-	stop := func() {
-		cmd.Process.Kill()
-		cmd.Wait()
-	}
-
-	return port, stop, nil
-}
-
-// GetContainerBinaryPath returns the path for dcx binary in the container.
+// GetContainerBinaryPath returns the path for dcx-agent binary in the container.
 func GetContainerBinaryPath() string {
-	return "/tmp/dcx"
+	return "/tmp/dcx-agent"
 }
 
 // getDockerBridgeIP returns the gateway IP of the default Docker bridge network.

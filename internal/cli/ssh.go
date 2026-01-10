@@ -13,7 +13,6 @@ import (
 	sshContainer "github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
-	"github.com/griffithind/dcx/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -147,8 +146,8 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		workDir = "/workspace"
 	}
 
-	// Deploy dcx binary to container if needed
-	binaryPath := fmt.Sprintf("/tmp/dcx-%s", version.Version)
+	// Deploy dcx-agent binary to container if needed
+	binaryPath := sshContainer.GetContainerBinaryPath()
 	if err := sshContainer.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
