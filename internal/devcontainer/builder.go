@@ -13,6 +13,7 @@ import (
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -43,6 +44,13 @@ type BuilderOptions struct {
 
 	// ProjectName is the sanitized project name from devcontainer.json name field
 	ProjectName string
+
+	// Lockfile is the lockfile to use for feature resolution (optional)
+	// When set, features will be resolved using pinned versions from the lockfile.
+	Lockfile *lockfile.Lockfile
+
+	// ForcePull forces re-fetching features from the registry
+	ForcePull bool
 }
 
 // Build creates a ResolvedDevContainer from the given options.
@@ -196,7 +204,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	// Resolve features if any exist
 	if len(opts.Config.Features) > 0 {
-		if err := b.resolveFeatures(ctx, resolved, opts.Config); err != nil {
+		if err := b.resolveFeatures(ctx, resolved, opts); err != nil {
 			return nil, err
 		}
 	}
@@ -216,13 +224,21 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 }
 
 // resolveFeatures resolves all features from the configuration.
-func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevContainer, cfg *DevContainerConfig) error {
+func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevContainer, opts BuilderOptions) error {
 	mgr, err := features.NewManager(resolved.ConfigDir)
 	if err != nil {
 		return fmt.Errorf("failed to create feature manager: %w", err)
 	}
 
-	feats, err := mgr.ResolveAll(ctx, cfg.Features, cfg.OverrideFeatureInstallOrder)
+	// Configure manager with lockfile and force pull settings
+	if opts.Lockfile != nil {
+		mgr.SetLockfile(opts.Lockfile)
+	}
+	if opts.ForcePull {
+		mgr.SetForcePull(true)
+	}
+
+	feats, err := mgr.ResolveAll(ctx, opts.Config.Features, opts.Config.OverrideFeatureInstallOrder)
 	if err != nil {
 		return fmt.Errorf("failed to resolve features: %w", err)
 	}

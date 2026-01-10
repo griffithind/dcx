@@ -3,12 +3,15 @@ package features
 import (
 	"context"
 	"fmt"
+
+	"github.com/griffithind/dcx/internal/lockfile"
 )
 
 // Manager handles feature resolution, ordering, and installation.
 type Manager struct {
 	resolver  *Resolver
 	configDir string
+	lockfile  *lockfile.Lockfile
 }
 
 // NewManager creates a new feature manager.
@@ -29,8 +32,15 @@ func (m *Manager) SetForcePull(forcePull bool) {
 	m.resolver.SetForcePull(forcePull)
 }
 
+// SetLockfile sets the lockfile to use for feature resolution.
+// When set, features will be resolved using pinned versions from the lockfile.
+func (m *Manager) SetLockfile(lf *lockfile.Lockfile) {
+	m.lockfile = lf
+}
+
 // ResolveAll resolves all features from a devcontainer.json features map.
 // It recursively resolves dependencies specified in dependsOn and installsAfter.
+// If a lockfile is set via SetLockfile, pinned versions will be used.
 func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]interface{}, overrideOrder []string) ([]*Feature, error) {
 	if len(featuresConfig) == 0 {
 		return nil, nil
@@ -56,8 +66,8 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 			options = make(map[string]interface{})
 		}
 
-		// Resolve the feature
-		feature, err := m.resolver.Resolve(ctx, id, options)
+		// Resolve the feature (with lockfile if set)
+		feature, err := m.resolver.ResolveWithLockfile(ctx, id, options, m.lockfile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve feature %q: %w", id, err)
 		}
@@ -99,9 +109,9 @@ func (m *Manager) resolveDependencies(ctx context.Context, resolved map[string]*
 			break
 		}
 
-		// Resolve each unresolved dependency
+		// Resolve each unresolved dependency (with lockfile if set)
 		for depID, depOptions := range unresolved {
-			feature, err := m.resolver.Resolve(ctx, depID, depOptions)
+			feature, err := m.resolver.ResolveWithLockfile(ctx, depID, depOptions, m.lockfile)
 			if err != nil {
 				return fmt.Errorf("failed to resolve dependency %q: %w", depID, err)
 			}

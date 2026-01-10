@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/features"
 )
 
 // BuildWithFeatures builds a derived image with features installed.
-func (b *SDKBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOptions) (string, error) {
+// Uses BuildKit build contexts for efficient feature content delivery.
+func (b *CLIBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOptions) (string, error) {
 	if len(opts.Features) == 0 {
 		// No features to install, return base image
 		return opts.BaseImage, nil
@@ -34,12 +37,24 @@ func (b *SDKBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 		fmt.Printf(" => %d. %s\n", i+1, name)
 	}
 
-	// Create temporary build directory
-	tempBuildDir, err := os.MkdirTemp("", "dcx-build-*")
+	// Create temporary directories:
+	// - buildContextDir: contains only the Dockerfile (minimal build context)
+	// - featureSourceDir: contains staged feature files (passed via --build-context)
+	tempDir, err := os.MkdirTemp("", "dcx-build-*")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp build directory: %w", err)
+		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempBuildDir)
+	defer os.RemoveAll(tempDir)
+
+	buildContextDir := filepath.Join(tempDir, "context")
+	featureSourceDir := filepath.Join(tempDir, "features")
+
+	if err := os.MkdirAll(buildContextDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create build context directory: %w", err)
+	}
+	if err := os.MkdirAll(featureSourceDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create feature source directory: %w", err)
+	}
 
 	// Resolve user settings
 	containerUser := opts.ContainerUser
@@ -51,20 +66,40 @@ func (b *SDKBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 		remoteUser = containerUser
 	}
 
-	// Generate Dockerfile using the features package
-	generator := features.NewDockerfileGenerator(opts.BaseImage, opts.Features, tempBuildDir, remoteUser, containerUser)
-	dockerfile := generator.Generate()
-
-	// Prepare build context with feature files
-	if err := features.PrepareBuildContext(tempBuildDir, opts.Features, dockerfile); err != nil {
-		return "", fmt.Errorf("failed to prepare build context: %w", err)
+	// Generate metadata for the derived image
+	metadataLabel, err := GenerateMetadataLabel(
+		opts.BaseImageMetadata,
+		opts.Features,
+		opts.LocalConfig,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate metadata: %w", err)
 	}
 
-	// Build the image using Docker CLI
+	// Generate Dockerfile using the features package
+	generator := features.NewDockerfileGenerator(opts.BaseImage, opts.Features, buildContextDir, remoteUser, containerUser)
+	generator.SetMetadata(metadataLabel)
+	dockerfile := generator.Generate()
+
+	// Write Dockerfile to build context
+	dockerfilePath := filepath.Join(buildContextDir, "Dockerfile.dcx-features")
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
+		return "", fmt.Errorf("failed to write Dockerfile: %w", err)
+	}
+
+	// Stage features to feature source directory (for --build-context)
+	if err := stageFeatures(opts.Features, featureSourceDir, containerUser, remoteUser); err != nil {
+		return "", fmt.Errorf("failed to stage features: %w", err)
+	}
+
+	// Build the image using Docker CLI with BuildKit build context
 	_, err = b.BuildFromDockerfile(ctx, DockerfileBuildOptions{
 		Tag:        opts.Tag,
 		Dockerfile: "Dockerfile.dcx-features",
-		Context:    tempBuildDir,
+		Context:    buildContextDir,
+		BuildContexts: map[string]string{
+			"dev_containers_feature_content_source": featureSourceDir,
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
@@ -73,21 +108,66 @@ func (b *SDKBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 	return opts.Tag, nil
 }
 
-// BuildDerivedImage is a convenience function that builds a derived image with features.
-// This can be called without creating an SDKBuilder instance.
-func BuildDerivedImage(ctx context.Context, baseImage, imageTag string, feats []*features.Feature, remoteUser, containerUser string) error {
-	builder, err := NewSDKBuilderFromEnv()
-	if err != nil {
-		return fmt.Errorf("failed to create builder: %w", err)
+// stageFeatures copies feature directories and generates builtin.env for the build context.
+func stageFeatures(featureList []*features.Feature, destDir string, containerUser, remoteUser string) error {
+	// Copy each feature directory
+	for i, feature := range featureList {
+		featureDir := filepath.Join(destDir, fmt.Sprintf("feature_%d", i))
+		if err := copyDir(feature.CachePath, featureDir); err != nil {
+			return fmt.Errorf("failed to copy feature %s: %w", feature.ID, err)
+		}
 	}
-	defer builder.Close()
 
-	_, err = builder.BuildWithFeatures(ctx, FeatureBuildOptions{
-		BaseImage:     baseImage,
-		Tag:           imageTag,
-		Features:      feats,
-		RemoteUser:    remoteUser,
-		ContainerUser: containerUser,
+	// Generate builtin.env with home directory resolution script
+	builtinEnvContent := generateBuiltinEnv(containerUser, remoteUser)
+	builtinEnvPath := filepath.Join(destDir, "builtin.env")
+	if err := os.WriteFile(builtinEnvPath, []byte(builtinEnvContent), 0644); err != nil {
+		return fmt.Errorf("failed to write builtin.env: %w", err)
+	}
+
+	return nil
+}
+
+// generateBuiltinEnv creates the content for builtin.env file.
+// This file is sourced by feature install scripts to get user/home environment.
+func generateBuiltinEnv(containerUser, remoteUser string) string {
+	containerUserHome := common.GetDefaultHomeDir(containerUser)
+	remoteUserHome := common.GetDefaultHomeDir(remoteUser)
+
+	return fmt.Sprintf(`#!/bin/sh
+# Builtin environment for devcontainer features
+# Generated by dcx
+
+export _CONTAINER_USER="%s"
+export _CONTAINER_USER_HOME="%s"
+export _REMOTE_USER="%s"
+export _REMOTE_USER_HOME="%s"
+`, containerUser, containerUserHome, remoteUser, remoteUserHome)
+}
+
+// copyDir copies a directory recursively.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Calculate destination path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		// Copy file
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dstPath, data, info.Mode())
 	})
-	return err
 }

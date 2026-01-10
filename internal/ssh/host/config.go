@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -13,25 +14,54 @@ const (
 	sshConfigMarkerEnd   = "# End DCX - "
 )
 
-// AddSSHConfig adds or updates an SSH config entry for a container.
-// The entry is marked with comments so it can be identified and removed later.
-func AddSSHConfig(hostName, containerName, user string) error {
-	configPath := getSSHConfigPath()
+// withConfigLock executes a function while holding an exclusive lock on the SSH config.
+// This prevents race conditions when multiple processes modify the config simultaneously.
+func withConfigLock(fn func() error) error {
+	lockPath := getSSHConfigPath() + ".dcx.lock"
 
-	// Get the full path to dcx executable
-	dcxPath, err := os.Executable()
-	if err != nil {
-		dcxPath = "dcx" // Fallback to PATH lookup
+	// Ensure .ssh directory exists before creating lock file
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
+		return fmt.Errorf("failed to create .ssh directory: %w", err)
 	}
 
-	// Read existing config
-	content, _ := os.ReadFile(configPath)
+	// Open or create the lock file
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open lock file: %w", err)
+	}
+	defer func() { _ = lockFile.Close() }()
 
-	// Remove existing entry if present
-	content = removeSSHConfigEntry(content, containerName)
+	// Acquire exclusive lock (blocks until lock is available)
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	defer func() { _ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) }()
 
-	// Build new entry
-	entry := fmt.Sprintf(`%s%s
+	// Execute the function while holding the lock
+	return fn()
+}
+
+// AddSSHConfig adds or updates an SSH config entry for a container.
+// The entry is marked with comments so it can be identified and removed later.
+// This function is safe for concurrent use from multiple processes.
+func AddSSHConfig(hostName, containerName, user string) error {
+	return withConfigLock(func() error {
+		configPath := getSSHConfigPath()
+
+		// Get the full path to dcx executable
+		dcxPath, err := os.Executable()
+		if err != nil {
+			dcxPath = "dcx" // Fallback to PATH lookup
+		}
+
+		// Read existing config
+		content, _ := os.ReadFile(configPath)
+
+		// Remove existing entry if present
+		content = removeSSHConfigEntry(content, containerName)
+
+		// Build new entry
+		entry := fmt.Sprintf(`%s%s
 Host %s
   ProxyCommand %s ssh --stdio %s
   User %s
@@ -43,33 +73,37 @@ Host %s
 
 `, sshConfigMarkerStart, containerName, hostName, dcxPath, containerName, user, sshConfigMarkerEnd, containerName)
 
-	// Append to config (or create new file)
-	newContent := append(content, []byte(entry)...)
+		// Append to config (or create new file)
+		newContent := append(content, []byte(entry)...)
 
-	// Ensure .ssh directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-		return fmt.Errorf("failed to create .ssh directory: %w", err)
-	}
+		// Ensure .ssh directory exists
+		if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+			return fmt.Errorf("failed to create .ssh directory: %w", err)
+		}
 
-	return os.WriteFile(configPath, newContent, 0600)
+		return os.WriteFile(configPath, newContent, 0600)
+	})
 }
 
 // RemoveSSHConfig removes the SSH config entry for a container.
+// This function is safe for concurrent use from multiple processes.
 func RemoveSSHConfig(containerName string) error {
-	configPath := getSSHConfigPath()
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil // No config file, nothing to remove
-	}
+	return withConfigLock(func() error {
+		configPath := getSSHConfigPath()
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			return nil // No config file, nothing to remove
+		}
 
-	newContent := removeSSHConfigEntry(content, containerName)
+		newContent := removeSSHConfigEntry(content, containerName)
 
-	// Only write if content changed
-	if string(newContent) != string(content) {
-		return os.WriteFile(configPath, newContent, 0600)
-	}
+		// Only write if content changed
+		if string(newContent) != string(content) {
+			return os.WriteFile(configPath, newContent, 0600)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // HasSSHConfig checks if an SSH config entry exists for a container.

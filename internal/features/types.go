@@ -25,6 +25,14 @@ type Feature struct {
 
 	// CachePath is the local path to the cached feature contents
 	CachePath string
+
+	// ManifestDigest is the OCI manifest digest (sha256:...).
+	// Only populated for OCI features.
+	ManifestDigest string
+
+	// Integrity is the SHA256 checksum of the feature tarball (sha256:...).
+	// Used for lockfile integrity verification.
+	Integrity string
 }
 
 // FeatureSource represents a parsed feature source/reference.

@@ -11,6 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
+	"github.com/griffithind/dcx/internal/lockfile"
 	sshcontainer "github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/state"
@@ -149,8 +150,21 @@ func (s *DevContainerService) Plan(ctx context.Context, opts PlanOptions) (*Plan
 	}, nil
 }
 
+// LoadOptions configures the Load operation.
+type LoadOptions struct {
+	// ForcePull forces re-fetching features from the registry
+	ForcePull bool
+	// UseLockfile loads and uses the lockfile for feature resolution
+	UseLockfile bool
+}
+
 // Load resolves the devcontainer configuration.
 func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedDevContainer, error) {
+	return s.LoadWithOptions(ctx, LoadOptions{UseLockfile: true})
+}
+
+// LoadWithOptions resolves the devcontainer configuration with specified options.
+func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOptions) (*devcontainer.ResolvedDevContainer, error) {
 	cfg, configPath, err := devcontainer.Load(s.workspacePath, s.configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
@@ -165,11 +179,26 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 		projectName = common.SanitizeProjectName(cfg.Name)
 	}
 
+	// Load lockfile if requested and features exist
+	var lf *lockfile.Lockfile
+	if opts.UseLockfile && len(cfg.Features) > 0 {
+		var err error
+		lf, _, err = lockfile.Load(configPath)
+		if err != nil {
+			// Log warning but continue without lockfile
+			if s.verbose {
+				ui.Warning("Failed to load lockfile: %v", err)
+			}
+		}
+	}
+
 	resolved, err := s.builder.Build(ctx, devcontainer.BuilderOptions{
 		ConfigPath:    configPath,
 		WorkspaceRoot: s.workspacePath,
 		Config:        cfg,
 		ProjectName:   projectName,
+		Lockfile:      lf,
+		ForcePull:     opts.ForcePull,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve devcontainer: %w", err)
@@ -228,7 +257,10 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 
 // Up brings up a devcontainer environment.
 func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
-	resolved, err := s.Load(ctx)
+	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
+		ForcePull:   opts.Pull,
+		UseLockfile: true,
+	})
 	if err != nil {
 		return err
 	}
@@ -259,7 +291,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Check current state
-	currentState, containerInfo, err := s.stateManager.GetStateWithProjectAndHash(
+	currentState, _, err := s.stateManager.GetStateWithProjectAndHash(
 		ctx, ids.ProjectName, resolved.ID, resolved.Hashes.Config)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
@@ -301,7 +333,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Get container info for subsequent operations
-	_, containerInfo, err = s.stateManager.GetStateWithProject(ctx, ids.ProjectName, resolved.ID)
+	_, containerInfo, err := s.stateManager.GetStateWithProject(ctx, ids.ProjectName, resolved.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}
@@ -653,11 +685,55 @@ func (s *DevContainerService) Cleanup(ctx context.Context, workspaceID string, r
 type BuildOptions struct {
 	NoCache bool
 	Pull    bool
+
+	// UpdateLockfile updates the lockfile after successful build
+	UpdateLockfile bool
+	// FrozenLockfile fails if lockfile doesn't match resolved features
+	FrozenLockfile bool
+}
+
+// LockMode specifies the lockfile operation mode.
+type LockMode int
+
+const (
+	// LockModeGenerate creates or updates the lockfile
+	LockModeGenerate LockMode = iota
+	// LockModeVerify checks if lockfile matches without updating
+	LockModeVerify
+	// LockModeFrozen fails if lockfile doesn't exist or doesn't match
+	LockModeFrozen
+)
+
+// LockOptions configures the Lock operation.
+type LockOptions struct {
+	Mode LockMode
+}
+
+// LockAction describes what action was taken.
+type LockAction int
+
+const (
+	LockActionCreated LockAction = iota
+	LockActionUpdated
+	LockActionVerified
+	LockActionNoChange
+	LockActionNoFeatures
+)
+
+// LockResult contains the result of a lock operation.
+type LockResult struct {
+	Action       LockAction
+	LockfilePath string
+	FeatureCount int
+	Changes      []string
 }
 
 // Build builds the devcontainer images without starting containers.
 func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) error {
-	resolved, err := s.Load(ctx)
+	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
+		ForcePull:   opts.Pull,
+		UseLockfile: !opts.FrozenLockfile, // Don't use lockfile if frozen (verify mode)
+	})
 	if err != nil {
 		return err
 	}
@@ -671,4 +747,141 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		NoCache: opts.NoCache,
 		Pull:    opts.Pull,
 	})
+}
+
+// Lock generates, verifies, or checks the devcontainer-lock.json file.
+func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*LockResult, error) {
+	// Load and resolve the devcontainer configuration
+	cfg, configPath, err := devcontainer.Load(s.workspacePath, s.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Check if there are any features to lock
+	if len(cfg.Features) == 0 {
+		return &LockResult{
+			Action:       LockActionNoFeatures,
+			LockfilePath: lockfile.GetPath(configPath),
+		}, nil
+	}
+
+	// Load existing lockfile
+	existingLockfile, initMarker, err := lockfile.Load(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load existing lockfile: %w", err)
+	}
+
+	// For frozen mode, require existing lockfile
+	if opts.Mode == LockModeFrozen && existingLockfile == nil && !initMarker {
+		return nil, fmt.Errorf("lockfile not found: run 'dcx lock' to generate one")
+	}
+
+	// Create feature manager and resolve features
+	configDir := filepath.Dir(configPath)
+	mgr, err := features.NewManager(configDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create feature manager: %w", err)
+	}
+
+	// For verify/frozen modes, use existing lockfile for resolution
+	// This ensures we're checking against what the lockfile says
+	if opts.Mode != LockModeGenerate && existingLockfile != nil {
+		mgr.SetLockfile(existingLockfile)
+	}
+
+	// Resolve all features
+	var overrideOrder []string
+	if cfg.OverrideFeatureInstallOrder != nil {
+		overrideOrder = cfg.OverrideFeatureInstallOrder
+	}
+
+	resolvedFeatures, err := mgr.ResolveAll(ctx, cfg.Features, overrideOrder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve features: %w", err)
+	}
+
+	// Generate new lockfile from resolved features
+	newLockfile := features.GenerateLockfile(resolvedFeatures)
+	lockfilePath := lockfile.GetPath(configPath)
+
+	// Handle based on mode
+	switch opts.Mode {
+	case LockModeVerify:
+		mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile)
+		if len(mismatches) > 0 {
+			changes := make([]string, len(mismatches))
+			for i, m := range mismatches {
+				changes[i] = m.Message
+			}
+			return nil, fmt.Errorf("lockfile verification failed:\n  - %s", joinStrings(changes, "\n  - "))
+		}
+		return &LockResult{
+			Action:       LockActionVerified,
+			LockfilePath: lockfilePath,
+			FeatureCount: len(newLockfile.Features),
+		}, nil
+
+	case LockModeFrozen:
+		mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile)
+		if len(mismatches) > 0 {
+			changes := make([]string, len(mismatches))
+			for i, m := range mismatches {
+				changes[i] = m.Message
+			}
+			return nil, fmt.Errorf("lockfile mismatch (frozen mode):\n  - %s", joinStrings(changes, "\n  - "))
+		}
+		return &LockResult{
+			Action:       LockActionVerified,
+			LockfilePath: lockfilePath,
+			FeatureCount: len(newLockfile.Features),
+		}, nil
+
+	default: // LockModeGenerate
+		// Check if lockfile needs updating
+		if existingLockfile != nil && existingLockfile.Equals(newLockfile) {
+			return &LockResult{
+				Action:       LockActionNoChange,
+				LockfilePath: lockfilePath,
+				FeatureCount: len(newLockfile.Features),
+			}, nil
+		}
+
+		// Collect changes for reporting
+		var changes []string
+		if existingLockfile != nil {
+			mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile)
+			for _, m := range mismatches {
+				changes = append(changes, m.Message)
+			}
+		}
+
+		// Save the new lockfile
+		if err := newLockfile.Save(configPath); err != nil {
+			return nil, fmt.Errorf("failed to save lockfile: %w", err)
+		}
+
+		action := LockActionUpdated
+		if existingLockfile == nil || initMarker {
+			action = LockActionCreated
+		}
+
+		return &LockResult{
+			Action:       action,
+			LockfilePath: lockfilePath,
+			FeatureCount: len(newLockfile.Features),
+			Changes:      changes,
+		}, nil
+	}
+}
+
+// joinStrings joins strings with a separator.
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := strs[0]
+	for _, s := range strs[1:] {
+		result += sep + s
+	}
+	return result
 }

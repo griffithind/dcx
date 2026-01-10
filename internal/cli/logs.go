@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/spf13/cobra"
@@ -74,13 +73,4 @@ func init() {
 	logsCmd.Flags().BoolVarP(&logsTimestamps, "timestamps", "t", false, "show timestamps")
 	logsCmd.GroupID = "info"
 	rootCmd.AddCommand(logsCmd)
-}
-
-// ValidateTail validates the tail parameter.
-func validateTail(tail string) bool {
-	if tail == "all" {
-		return true
-	}
-	_, err := strconv.Atoi(tail)
-	return err == nil
 }

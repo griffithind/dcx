@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/griffithind/dcx/internal/lockfile"
 )
 
 // httpClient is the HTTP client with timeout for registry requests.
@@ -27,6 +29,77 @@ type Resolver struct {
 	cacheDir  string
 	configDir string
 	forcePull bool
+}
+
+// DigestInfo holds digest information for a resolved feature.
+type DigestInfo struct {
+	ManifestDigest string `json:"manifest_digest,omitempty"` // OCI manifest digest
+	Integrity      string `json:"integrity"`                 // Tarball SHA256 hash
+}
+
+const digestFileName = ".dcx-integrity"
+
+// computeIntegrity computes the SHA256 integrity hash of data.
+// Returns format: "sha256:hexstring"
+func computeIntegrity(data []byte) string {
+	hash := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(hash[:])
+}
+
+// saveDigestInfo saves digest information to the cache directory.
+func saveDigestInfo(cachePath string, info DigestInfo) error {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cachePath, digestFileName), data, 0644)
+}
+
+// loadDigestInfo loads digest information from the cache directory.
+func loadDigestInfo(cachePath string) (*DigestInfo, error) {
+	data, err := os.ReadFile(filepath.Join(cachePath, digestFileName))
+	if err != nil {
+		return nil, err
+	}
+	var info DigestInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// verifyIntegrity verifies that data matches the expected integrity hash.
+func verifyIntegrity(data []byte, expected string) error {
+	if expected == "" {
+		return nil // No expected integrity, skip verification
+	}
+	actual := computeIntegrity(data)
+	if actual != expected {
+		return fmt.Errorf("integrity mismatch: expected %s, got %s", expected, actual)
+	}
+	return nil
+}
+
+// extractDigestFromResolved extracts the manifest digest from a lockfile resolved field.
+// The resolved field format is: registry/repository/resource@sha256:...
+// Returns empty string if no digest is present (e.g., for tarball URLs or tag references).
+func extractDigestFromResolved(resolved string) string {
+	if resolved == "" {
+		return ""
+	}
+	// Look for @sha256: or @sha384: or @sha512: pattern
+	atIndex := strings.LastIndex(resolved, "@")
+	if atIndex == -1 {
+		return ""
+	}
+	digest := resolved[atIndex+1:]
+	// Validate it looks like a digest (starts with sha256:, sha384:, or sha512:)
+	if strings.HasPrefix(digest, "sha256:") ||
+		strings.HasPrefix(digest, "sha384:") ||
+		strings.HasPrefix(digest, "sha512:") {
+		return digest
+	}
+	return ""
 }
 
 // NewResolver creates a new feature resolver.
@@ -65,6 +138,11 @@ func getCacheDir() (string, error) {
 
 // Resolve resolves a feature from its ID and options.
 func (r *Resolver) Resolve(ctx context.Context, id string, options map[string]interface{}) (*Feature, error) {
+	return r.ResolveWithLockfile(ctx, id, options, nil)
+}
+
+// ResolveWithLockfile resolves a feature, optionally using a lockfile for pinned versions.
+func (r *Resolver) ResolveWithLockfile(ctx context.Context, id string, options map[string]interface{}, lockfile *lockfile.Lockfile) (*Feature, error) {
 	// Parse the feature reference
 	ref, err := ParseFeatureSource(id)
 	if err != nil {
@@ -84,11 +162,11 @@ func (r *Resolver) Resolve(ctx context.Context, id string, options map[string]in
 			return nil, fmt.Errorf("failed to resolve local feature: %w", err)
 		}
 	case SourceTypeOCI:
-		if err := r.resolveOCI(ctx, feature); err != nil {
+		if err := r.resolveOCIWithLockfile(ctx, feature, lockfile); err != nil {
 			return nil, fmt.Errorf("failed to resolve OCI feature: %w", err)
 		}
 	case SourceTypeTarball:
-		if err := r.resolveHTTP(ctx, feature); err != nil {
+		if err := r.resolveHTTPWithLockfile(ctx, feature, lockfile); err != nil {
 			return nil, fmt.Errorf("failed to resolve HTTP feature: %w", err)
 		}
 	default:
@@ -127,9 +205,20 @@ func (r *Resolver) resolveLocal(ctx context.Context, feature *Feature) error {
 	return nil
 }
 
-// resolveOCI resolves an OCI feature from a registry.
-func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
+// resolveOCIWithLockfile resolves an OCI feature, optionally using lockfile for pinned versions.
+func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature, lockfile *lockfile.Lockfile) error {
 	ref := feature.Source
+
+	// Check if we have a locked version
+	var expectedIntegrity string
+	var lockedManifestDigest string
+	if lockfile != nil {
+		if locked, ok := lockfile.Get(feature.ID); ok {
+			expectedIntegrity = locked.Integrity
+			// Extract manifest digest from Resolved field (format: registry/path@sha256:...)
+			lockedManifestDigest = extractDigestFromResolved(locked.Resolved)
+		}
+	}
 
 	// Compute cache key
 	cacheKey := computeCacheKey(ref.CanonicalID())
@@ -144,7 +233,26 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 				return fmt.Errorf("failed to load cached feature metadata: %w", err)
 			}
 			feature.Metadata = metadata
-			return nil
+
+			// Load and populate digest info from cache
+			if digestInfo, err := loadDigestInfo(cachePath); err == nil {
+				feature.ManifestDigest = digestInfo.ManifestDigest
+				feature.Integrity = digestInfo.Integrity
+
+				// Verify integrity against lockfile if available
+				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
+					// Cache integrity doesn't match lockfile, need to re-fetch
+					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.CanonicalID())
+					os.RemoveAll(cachePath)
+				} else {
+					return nil
+				}
+			}
+			// If no digest file exists, continue to use cached version
+			// (backwards compatibility with pre-lockfile caches)
+			if expectedIntegrity == "" {
+				return nil
+			}
 		}
 	} else {
 		// Force-pull: remove existing cache to re-fetch
@@ -152,12 +260,19 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 	}
 
 	// Fetch from OCI registry
-	fmt.Printf("    Fetching feature from registry: %s\n", ref.CanonicalID())
-	if err := r.fetchOCI(ctx, ref, cachePath); err != nil {
+	if lockedManifestDigest != "" {
+		fmt.Printf("    Fetching feature from registry: %s (locked to %s)\n", ref.CanonicalID(), lockedManifestDigest[:min(19, len(lockedManifestDigest))]+"...")
+	} else {
+		fmt.Printf("    Fetching feature from registry: %s\n", ref.CanonicalID())
+	}
+	digestInfo, err := r.fetchOCIWithDigest(ctx, ref, cachePath, lockedManifestDigest, expectedIntegrity)
+	if err != nil {
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
 
 	feature.CachePath = cachePath
+	feature.ManifestDigest = digestInfo.ManifestDigest
+	feature.Integrity = digestInfo.Integrity
 
 	// Load metadata
 	metadata, err := r.loadMetadata(cachePath)
@@ -169,9 +284,17 @@ func (r *Resolver) resolveOCI(ctx context.Context, feature *Feature) error {
 	return nil
 }
 
-// resolveHTTP resolves a feature from an HTTP URL.
-func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
+// resolveHTTPWithLockfile resolves an HTTP feature, optionally using lockfile for integrity verification.
+func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature, lockfile *lockfile.Lockfile) error {
 	ref := feature.Source
+
+	// Check if we have a locked version
+	var expectedIntegrity string
+	if lockfile != nil {
+		if locked, ok := lockfile.Get(feature.ID); ok {
+			expectedIntegrity = locked.Integrity
+		}
+	}
 
 	// Compute cache key
 	cacheKey := computeCacheKey(ref.URL)
@@ -186,7 +309,24 @@ func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
 				return fmt.Errorf("failed to load cached feature metadata: %w", err)
 			}
 			feature.Metadata = metadata
-			return nil
+
+			// Load and populate digest info from cache
+			if digestInfo, err := loadDigestInfo(cachePath); err == nil {
+				feature.Integrity = digestInfo.Integrity
+
+				// Verify integrity against lockfile if available
+				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
+					// Cache integrity doesn't match lockfile, need to re-fetch
+					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.URL)
+					os.RemoveAll(cachePath)
+				} else {
+					return nil
+				}
+			}
+			// If no digest file exists, continue to use cached version
+			if expectedIntegrity == "" {
+				return nil
+			}
 		}
 	} else {
 		// Force-pull: remove existing cache to re-fetch
@@ -194,11 +334,13 @@ func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
 	}
 
 	// Fetch from HTTP
-	if err := r.fetchHTTP(ctx, ref.URL, cachePath); err != nil {
+	integrity, err := r.fetchHTTPWithDigest(ctx, ref.URL, cachePath, expectedIntegrity)
+	if err != nil {
 		return fmt.Errorf("failed to fetch HTTP feature: %w", err)
 	}
 
 	feature.CachePath = cachePath
+	feature.Integrity = integrity
 
 	// Load metadata
 	metadata, err := r.loadMetadata(cachePath)
@@ -210,12 +352,19 @@ func (r *Resolver) resolveHTTP(ctx context.Context, feature *Feature) error {
 	return nil
 }
 
-// fetchOCI fetches a feature from an OCI registry.
-func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath string) error {
+// fetchOCIWithDigest fetches a feature from an OCI registry and returns digest info.
+// If lockedManifestDigest is provided (from lockfile), it fetches the manifest by digest
+// instead of by tag, ensuring exact reproducibility.
+func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, destPath string, lockedManifestDigest string, expectedIntegrity string) (*DigestInfo, error) {
 	// Build the OCI manifest URL
-	// For ghcr.io, the format is: https://ghcr.io/v2/{repository}/{feature}/manifests/{tag}
+	// For ghcr.io, the format is: https://ghcr.io/v2/{repository}/{feature}/manifests/{tag_or_digest}
+	// When we have a locked manifest digest, use it instead of the tag for exact reproducibility
+	manifestReference := ref.Version
+	if lockedManifestDigest != "" {
+		manifestReference = lockedManifestDigest
+	}
 	manifestURL := fmt.Sprintf("https://%s/v2/%s/%s/manifests/%s",
-		ref.Registry, ref.Repository, ref.Resource, ref.Version)
+		ref.Registry, ref.Repository, ref.Resource, manifestReference)
 
 	// Get token for authentication (required for most OCI registries)
 	token, err := r.getRegistryToken(ctx, ref)
@@ -227,7 +376,7 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", manifestURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Accept OCI manifest types
@@ -239,13 +388,25 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 	// Make request
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to fetch manifest: %w", err)
+		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("registry returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("registry returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Read manifest body for digest computation
+	manifestBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read manifest: %w", err)
+	}
+
+	// Capture manifest digest from header or compute it
+	manifestDigest := resp.Header.Get("Docker-Content-Digest")
+	if manifestDigest == "" {
+		manifestDigest = computeIntegrity(manifestBody)
 	}
 
 	// Parse manifest
@@ -257,12 +418,12 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 		} `json:"layers"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return fmt.Errorf("failed to parse manifest: %w", err)
+	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
 	if len(manifest.Layers) == 0 {
-		return fmt.Errorf("no layers found in manifest")
+		return nil, fmt.Errorf("no layers found in manifest")
 	}
 
 	// Find the feature layer (usually the first tar.gz layer)
@@ -279,7 +440,7 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 	}
 
 	if featureLayer.Digest == "" {
-		return fmt.Errorf("no feature layer found in manifest")
+		return nil, fmt.Errorf("no feature layer found in manifest")
 	}
 
 	// Fetch the layer blob
@@ -288,7 +449,7 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 
 	blobReq, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if token != "" {
 		blobReq.Header.Set("Authorization", "Bearer "+token)
@@ -296,58 +457,99 @@ func (r *Resolver) fetchOCI(ctx context.Context, ref FeatureSource, destPath str
 
 	blobResp, err := httpClient.Do(blobReq)
 	if err != nil {
-		return fmt.Errorf("failed to fetch blob: %w", err)
+		return nil, fmt.Errorf("failed to fetch blob: %w", err)
 	}
 	defer blobResp.Body.Close()
 
 	if blobResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch blob: status %d", blobResp.StatusCode)
+		return nil, fmt.Errorf("failed to fetch blob: status %d", blobResp.StatusCode)
 	}
 
-	// Read entire body first (needed for debugging and to handle streaming properly)
+	// Read entire body first (needed for digest computation and extraction)
 	bodyData, err := io.ReadAll(blobResp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read blob body: %w", err)
+		return nil, fmt.Errorf("failed to read blob body: %w", err)
+	}
+
+	// Compute tarball integrity
+	integrity := computeIntegrity(bodyData)
+
+	// Verify integrity against expected if provided
+	if err := verifyIntegrity(bodyData, expectedIntegrity); err != nil {
+		return nil, fmt.Errorf("feature %s/%s/%s: %w", ref.Registry, ref.Repository, ref.Resource, err)
 	}
 
 	// Extract the tarball based on media type
 	if strings.Contains(featureLayer.MediaType, "gzip") {
 		if err := extractTarGz(bytes.NewReader(bodyData), destPath); err != nil {
-			return fmt.Errorf("failed to extract gzip feature: %w", err)
+			return nil, fmt.Errorf("failed to extract gzip feature: %w", err)
 		}
 	} else {
 		// Assume uncompressed tar
 		if err := extractTar(bytes.NewReader(bodyData), destPath); err != nil {
-			return fmt.Errorf("failed to extract feature: %w", err)
+			return nil, fmt.Errorf("failed to extract feature: %w", err)
 		}
 	}
 
-	return nil
+	// Save digest info to cache
+	digestInfo := &DigestInfo{
+		ManifestDigest: manifestDigest,
+		Integrity:      integrity,
+	}
+	if err := saveDigestInfo(destPath, *digestInfo); err != nil {
+		// Log but don't fail - digest info is nice to have
+		fmt.Printf("    Warning: failed to save digest info: %v\n", err)
+	}
+
+	return digestInfo, nil
 }
 
-// fetchHTTP fetches a feature from an HTTP URL.
-func (r *Resolver) fetchHTTP(ctx context.Context, url, destPath string) error {
+// fetchHTTPWithDigest fetches a feature from an HTTP URL and returns integrity hash.
+func (r *Resolver) fetchHTTPWithDigest(ctx context.Context, url, destPath string, expectedIntegrity string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to fetch: %w", err)
+		return "", fmt.Errorf("failed to fetch: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP request failed with status %d", resp.StatusCode)
+		return "", fmt.Errorf("HTTP request failed with status %d", resp.StatusCode)
+	}
+
+	// Read entire body for integrity computation
+	bodyData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Compute integrity
+	integrity := computeIntegrity(bodyData)
+
+	// Verify integrity against expected if provided
+	if err := verifyIntegrity(bodyData, expectedIntegrity); err != nil {
+		return "", fmt.Errorf("feature %s: %w", url, err)
 	}
 
 	// Extract the tarball
-	if err := extractTarGz(resp.Body, destPath); err != nil {
-		return fmt.Errorf("failed to extract feature: %w", err)
+	if err := extractTarGz(bytes.NewReader(bodyData), destPath); err != nil {
+		return "", fmt.Errorf("failed to extract feature: %w", err)
 	}
 
-	return nil
+	// Save digest info to cache
+	digestInfo := DigestInfo{
+		Integrity: integrity,
+	}
+	if err := saveDigestInfo(destPath, digestInfo); err != nil {
+		// Log but don't fail
+		fmt.Printf("    Warning: failed to save digest info: %v\n", err)
+	}
+
+	return integrity, nil
 }
 
 // loadMetadata loads the devcontainer-feature.json from a feature directory.

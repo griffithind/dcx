@@ -56,7 +56,7 @@ func ParseMemorySizeWithError(s string) (int64, error) {
 	}
 
 	// Determine multiplier from unit
-	var multiplier int64 = 1
+	var multiplier int64
 
 	// Remove trailing 'b' if present (e.g., "kb" -> "k", "gb" -> "g")
 	if len(unitPart) > 0 && unitPart[len(unitPart)-1] == 'b' {

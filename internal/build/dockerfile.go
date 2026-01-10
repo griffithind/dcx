@@ -7,15 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
-	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
+	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
 // BuildFromDockerfile builds an image from a Dockerfile using Docker CLI.
 // This uses `docker buildx build` to get BuildKit-style progress output.
-func (b *SDKBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBuildOptions) (string, error) {
+func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBuildOptions) (string, error) {
 	// Resolve context path
 	contextPath := opts.Context
 	if contextPath == "" {
@@ -49,6 +48,11 @@ func (b *SDKBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Add metadata label if provided
+	if opts.Metadata != "" {
+		args = append(args, "--label", fmt.Sprintf("%s=%s", devcontainer.DevcontainerMetadataLabel, opts.Metadata))
+	}
+
 	// Cache from
 	for _, cache := range opts.CacheFrom {
 		args = append(args, "--cache-from", cache)
@@ -63,6 +67,11 @@ func (b *SDKBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 	}
 	if opts.Target != "" {
 		args = append(args, "--target", opts.Target)
+	}
+
+	// Add build contexts (for BuildKit builds with --build-context flag)
+	for name, path := range opts.BuildContexts {
+		args = append(args, "--build-context", fmt.Sprintf("%s=%s", name, path))
 	}
 
 	// Load the image into Docker (default for single-platform builds)
@@ -92,7 +101,7 @@ func (b *SDKBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 }
 
 // ImageExists checks if an image exists locally.
-func (b *SDKBuilder) ImageExists(ctx context.Context, imageRef string) (bool, error) {
+func (b *CLIBuilder) ImageExists(ctx context.Context, imageRef string) (bool, error) {
 	_, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
 	if err != nil {
 		if client.IsErrNotFound(err) {
@@ -104,7 +113,7 @@ func (b *SDKBuilder) ImageExists(ctx context.Context, imageRef string) (bool, er
 }
 
 // PullImage pulls an image from a registry using Docker CLI.
-func (b *SDKBuilder) PullImage(ctx context.Context, imageRef string, progress io.Writer) error {
+func (b *CLIBuilder) PullImage(ctx context.Context, imageRef string, progress io.Writer) error {
 	args := []string{"pull", imageRef}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
@@ -125,7 +134,7 @@ func (b *SDKBuilder) PullImage(ctx context.Context, imageRef string, progress io
 }
 
 // GetImageID returns the ID of an image.
-func (b *SDKBuilder) GetImageID(ctx context.Context, imageRef string) (string, error) {
+func (b *CLIBuilder) GetImageID(ctx context.Context, imageRef string) (string, error) {
 	info, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
@@ -134,7 +143,7 @@ func (b *SDKBuilder) GetImageID(ctx context.Context, imageRef string) (string, e
 }
 
 // GetImageLabels returns the labels for an image.
-func (b *SDKBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
+func (b *CLIBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
 	info, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
@@ -145,29 +154,8 @@ func (b *SDKBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[s
 	return info.Config.Labels, nil
 }
 
-// BuildFromDockerfileContent builds an image from Dockerfile content (not a file).
-// This is useful for generated Dockerfiles like feature installation.
-func (b *SDKBuilder) BuildFromDockerfileContent(ctx context.Context, dockerfileContent string, contextDir string, tag string, args map[string]string, progress io.Writer) error {
-	// Write Dockerfile to temp file in context
-	dockerfilePath := filepath.Join(contextDir, "Dockerfile.dcx-build")
-	if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
-		return fmt.Errorf("failed to write Dockerfile: %w", err)
-	}
-	defer os.Remove(dockerfilePath)
-
-	// Build using the standard method
-	_, err := b.BuildFromDockerfile(ctx, DockerfileBuildOptions{
-		Tag:        tag,
-		Dockerfile: dockerfilePath,
-		Context:    contextDir,
-		Args:       args,
-		Progress:   progress,
-	})
-	return err
-}
-
 // ResolveImage ensures an image is available locally, pulling if necessary.
-func (b *SDKBuilder) ResolveImage(ctx context.Context, imageRef string, pull bool, progress io.Writer) error {
+func (b *CLIBuilder) ResolveImage(ctx context.Context, imageRef string, pull bool, progress io.Writer) error {
 	exists, err := b.ImageExists(ctx, imageRef)
 	if err != nil {
 		return fmt.Errorf("failed to check image: %w", err)
@@ -186,23 +174,5 @@ func (b *SDKBuilder) ResolveImage(ctx context.Context, imageRef string, pull boo
 		}
 	}
 
-	return nil
-}
-
-// TagImage tags an image with a new tag.
-func (b *SDKBuilder) TagImage(ctx context.Context, source, target string) error {
-	return b.client.ImageTag(ctx, source, target)
-}
-
-// RemoveImage removes an image.
-func (b *SDKBuilder) RemoveImage(ctx context.Context, imageRef string, force bool) error {
-	_, err := b.client.ImageRemove(ctx, imageRef, image.RemoveOptions{
-		Force:         force,
-		PruneChildren: true,
-	})
-	// Ignore "image not found" errors
-	if err != nil && !client.IsErrNotFound(err) && !strings.Contains(err.Error(), "No such image") {
-		return err
-	}
 	return nil
 }

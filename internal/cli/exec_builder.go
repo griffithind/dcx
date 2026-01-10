@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/state"
@@ -108,7 +109,7 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 	if user != "" {
 		args = append(args, "-u", user)
 		args = append(args, "-e", fmt.Sprintf("USER=%s", user))
-		args = append(args, "-e", fmt.Sprintf("HOME=/home/%s", user))
+		args = append(args, "-e", fmt.Sprintf("HOME=%s", common.GetDefaultHomeDir(user)))
 	}
 
 	// Add remoteEnv from devcontainer config (session-specific per spec)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
@@ -517,7 +518,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 	// Set USER environment variable if we have a user
 	if user != "" {
 		execConfig.Env = append(execConfig.Env, fmt.Sprintf("USER=%s", user))
-		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=/home/%s", user))
+		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=%s", common.GetDefaultHomeDir(user)))
 	}
 
 	// Add remoteEnv from config (per spec, applies to all exec operations)

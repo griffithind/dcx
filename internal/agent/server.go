@@ -14,6 +14,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gliderlabs/ssh"
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/pkg/sftp"
 	gossh "golang.org/x/crypto/ssh"
 )
@@ -156,7 +157,7 @@ func (s *Server) buildEnvironment() []string {
 	if u, err := user.Lookup(s.user); err == nil {
 		env = append(env, "HOME="+u.HomeDir)
 	} else {
-		env = append(env, "HOME=/home/"+s.user)
+		env = append(env, "HOME="+common.GetDefaultHomeDir(s.user))
 	}
 
 	// Set shell

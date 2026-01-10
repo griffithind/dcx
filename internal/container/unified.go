@@ -22,7 +22,7 @@ import (
 type UnifiedRuntime struct {
 	resolved     *devcontainer.ResolvedDevContainer
 	dockerClient *DockerClient
-	builder      build.ImageBuilder // SDK-based image builder
+	builder      build.ImageBuilder // CLI-based image builder
 
 	// Cached state
 	containerID   string
@@ -47,8 +47,8 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 		return nil, fmt.Errorf("docker client is required")
 	}
 
-	// Create SDK-based image builder using the same Docker client
-	builder := build.NewSDKBuilder(dockerClient.APIClient())
+	// Create CLI-based image builder using the same Docker client
+	builder := build.NewCLIBuilder(dockerClient.APIClient())
 
 	return &UnifiedRuntime{
 		resolved:      resolved,
@@ -103,15 +103,19 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 
 // upCompose handles compose-based configurations.
 func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
-	// Ensure services with build configs are built first if needed
-	if hasFeatures || opts.Rebuild {
-		if err := r.ensureServicesBuilt(ctx, plan); err != nil {
-			return fmt.Errorf("failed to build services: %w", err)
-		}
-	}
-
 	// Build derived image with features if needed
 	if hasFeatures {
+		// Check if derived image is already cached before building compose services
+		derivedTag := r.getDerivedImageTag()
+		needsBuild := opts.Rebuild || !r.derivedImageExists(ctx, derivedTag)
+
+		if needsBuild {
+			// Only build compose services if we need to build a new derived image
+			if err := r.ensureServicesBuilt(ctx, plan); err != nil {
+				return fmt.Errorf("failed to build services: %w", err)
+			}
+		}
+
 		if err := r.buildDerivedImageForCompose(ctx, opts, plan); err != nil {
 			return fmt.Errorf("failed to build derived image with features: %w", err)
 		}
@@ -154,22 +158,35 @@ func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatu
 
 // upSingle handles single-container configurations (image or Dockerfile).
 func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatures bool) error {
-	// Resolve the base image
-	baseImage, err := r.resolveBaseImage(ctx, opts)
-	if err != nil {
-		return err
-	}
-
 	// Build derived image with features if needed
-	finalImage := baseImage
+	var finalImage string
 	if hasFeatures {
-		derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild, opts.Pull)
-		if err != nil {
-			return fmt.Errorf("failed to build derived image with features: %w", err)
+		// Check if derived image is already cached before building base image
+		derivedTag := r.getDerivedImageTag()
+		if !opts.Rebuild && r.derivedImageExists(ctx, derivedTag) {
+			fmt.Printf("Using cached derived image\n")
+			finalImage = derivedTag
+			r.derivedImage = derivedTag
+		} else {
+			// Need to build - resolve base image first
+			baseImage, err := r.resolveBaseImage(ctx, opts)
+			if err != nil {
+				return err
+			}
+			derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild)
+			if err != nil {
+				return fmt.Errorf("failed to build derived image with features: %w", err)
+			}
+			finalImage = derivedImage
+			r.derivedImage = derivedImage
 		}
-		finalImage = derivedImage
-		r.derivedImage = derivedImage
 	} else {
+		// No features - resolve base image
+		baseImage, err := r.resolveBaseImage(ctx, opts)
+		if err != nil {
+			return err
+		}
+		finalImage = baseImage
 		// Even without features, we may need to apply UID update layer
 		uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, opts.Rebuild)
 		if err != nil {
@@ -230,7 +247,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 	return "", fmt.Errorf("no image or build configuration found")
 }
 
-// buildDockerfile builds an image from a Dockerfile using the SDK.
+// buildDockerfile builds an image from a Dockerfile using the CLI.
 func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan) error {
 	buildCtx := plan.Context
 	if buildCtx == "" {
@@ -252,6 +269,9 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 		buildArgs[k] = v
 	}
 
+	// Generate metadata for the built image (local config only, no base or features yet)
+	metadata, _ := build.GenerateMetadataLabel("", nil, r.resolved.RawConfig)
+
 	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
 		Dockerfile: dockerfilePath,
@@ -259,37 +279,42 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 		Args:       buildArgs,
 		Target:     plan.Target,
 		Progress:   os.Stdout,
+		Metadata:   metadata,
 	})
 	return err
 }
 
-// buildDerivedImage builds an image with features installed using the SDK.
-func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string, rebuild, _ bool) (string, error) {
-	// Use pre-computed derived image tag from resolved
-	var derivedTag string
-	if r.resolved.DerivedImage != "" {
-		derivedTag = r.resolved.DerivedImage
-	} else if r.resolved.ID != "" && r.resolved.Hashes != nil && r.resolved.Hashes.Config != "" && len(r.resolved.Hashes.Config) >= 12 {
-		derivedTag = fmt.Sprintf("dcx/%s:%s-features", r.resolved.ID, r.resolved.Hashes.Config[:12])
-	} else {
-		derivedTag = fmt.Sprintf("dcx-derived-%s:latest", r.resolved.ID)
-		if r.resolved.ID == "" {
-			derivedTag = fmt.Sprintf("dcx-derived-temp:%d", time.Now().UnixNano())
+// buildDerivedImage builds an image with features installed using the CLI.
+func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string, rebuild bool) (string, error) {
+	// Get derived image tag (use temp tag if stable tag unavailable)
+	derivedTag := r.getDerivedImageTag()
+	if derivedTag == "" {
+		derivedTag = fmt.Sprintf("dcx-derived-temp:%d", time.Now().UnixNano())
+	}
+
+	// Get base image metadata for merging
+	baseImageMetadata := ""
+	if cliBuilder, ok := r.builder.(*build.CLIBuilder); ok {
+		labels, err := cliBuilder.GetImageLabels(ctx, baseImage)
+		if err == nil && labels != nil {
+			baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
 		}
 	}
 
-	// Build the derived image using the SDK builder
+	// Build the derived image using the CLI builder
 	remoteUser := r.resolved.RemoteUser
 	containerUser := r.resolved.ContainerUser
 
 	derivedImage, err := r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
-		BaseImage:     baseImage,
-		Tag:           derivedTag,
-		Features:      r.resolved.Features,
-		RemoteUser:    remoteUser,
-		ContainerUser: containerUser,
-		Rebuild:       rebuild,
-		Progress:      os.Stdout,
+		BaseImage:         baseImage,
+		Tag:               derivedTag,
+		Features:          r.resolved.Features,
+		RemoteUser:        remoteUser,
+		ContainerUser:     containerUser,
+		Rebuild:           rebuild,
+		Progress:          os.Stdout,
+		BaseImageMetadata: baseImageMetadata,
+		LocalConfig:       r.resolved.RawConfig,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
@@ -708,7 +733,7 @@ func (r *UnifiedRuntime) buildDerivedImageForCompose(ctx context.Context, opts U
 		return fmt.Errorf("failed to determine base image: %w", err)
 	}
 
-	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild, opts.Pull)
+	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild)
 	if err != nil {
 		return err
 	}
@@ -793,6 +818,31 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 	}
 
 	return "", fmt.Errorf("service %q not found in compose file", serviceName)
+}
+
+// getDerivedImageTag returns the expected tag for the derived image.
+// This mirrors the logic in buildDerivedImage but without building.
+func (r *UnifiedRuntime) getDerivedImageTag() string {
+	if r.resolved.DerivedImage != "" {
+		return r.resolved.DerivedImage
+	}
+	if r.resolved.ID != "" && r.resolved.Hashes != nil && r.resolved.Hashes.Config != "" && len(r.resolved.Hashes.Config) >= 12 {
+		return fmt.Sprintf("dcx/%s:%s-features", r.resolved.ID, r.resolved.Hashes.Config[:12])
+	}
+	if r.resolved.ID != "" {
+		return fmt.Sprintf("dcx-derived-%s:latest", r.resolved.ID)
+	}
+	// Fallback - can't cache without stable tag
+	return ""
+}
+
+// derivedImageExists checks if the derived image already exists locally.
+func (r *UnifiedRuntime) derivedImageExists(ctx context.Context, tag string) bool {
+	if tag == "" {
+		return false
+	}
+	exists, err := r.dockerClient.ImageExists(ctx, tag)
+	return err == nil && exists
 }
 
 func (r *UnifiedRuntime) writeToTempFile(content, pattern string) (string, error) {

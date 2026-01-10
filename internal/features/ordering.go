@@ -127,14 +127,6 @@ func topologicalSort(features []*Feature, graph *dependencyGraph) ([]*Feature, e
 		inDegree[id] = 0
 	}
 
-	for _, deps := range graph.hardDeps {
-		for _, dep := range deps {
-			if _, exists := inDegree[dep]; exists {
-				// dep is a dependency, no change to its in-degree
-			}
-		}
-	}
-
 	// For each feature, count how many hard dependencies it has that are in our set
 	for id := range inDegree {
 		for _, dep := range graph.hardDeps[id] {

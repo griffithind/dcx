@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/docker/docker/client"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 )
 
@@ -55,8 +56,17 @@ type DockerfileBuildOptions struct {
 	// Pull forces pulling the base image.
 	Pull bool
 
-	// Progress is the writer for build output (unused with CLI, kept for interface compatibility).
+	// Progress is the writer for build output.
 	Progress io.Writer
+
+	// Metadata is the devcontainer.metadata label value to embed in the image.
+	// If empty, no metadata label is added.
+	Metadata string
+
+	// BuildContexts are additional named build contexts (--build-context flag).
+	// Used for BuildKit builds to pass feature content without copying to main context.
+	// Map of context name to filesystem path.
+	BuildContexts map[string]string
 }
 
 // FeatureBuildOptions contains options for building with features.
@@ -79,8 +89,15 @@ type FeatureBuildOptions struct {
 	// Rebuild forces rebuilding even if cached.
 	Rebuild bool
 
-	// Progress is the writer for build output (unused with CLI, kept for interface compatibility).
+	// Progress is the writer for build output.
 	Progress io.Writer
+
+	// BaseImageMetadata is the devcontainer.metadata label from the base image.
+	// This will be merged with feature metadata in the final image.
+	BaseImageMetadata string
+
+	// LocalConfig is the local devcontainer.json config for metadata merging.
+	LocalConfig *devcontainer.DevContainerConfig
 }
 
 // UIDBuildOptions contains options for UID update builds.
@@ -106,22 +123,28 @@ type UIDBuildOptions struct {
 	// Rebuild forces rebuilding even if cached.
 	Rebuild bool
 
-	// Progress is the writer for build output (unused with CLI, kept for interface compatibility).
+	// Progress is the writer for build output.
 	Progress io.Writer
+
+	// Metadata is the devcontainer.metadata label value to preserve.
+	// The UID layer should preserve metadata from the base image.
+	Metadata string
 }
 
-// SDKBuilder implements ImageBuilder using Docker CLI for builds and SDK for inspection.
-type SDKBuilder struct {
+// CLIBuilder implements ImageBuilder using Docker CLI for builds and SDK for inspection.
+// The name reflects that all build operations use the Docker CLI (docker buildx build)
+// while the SDK is only used for image inspection operations.
+type CLIBuilder struct {
 	client *client.Client
 }
 
-// NewSDKBuilder creates a new image builder.
-func NewSDKBuilder(cli *client.Client) *SDKBuilder {
-	return &SDKBuilder{client: cli}
+// NewCLIBuilder creates a new image builder.
+func NewCLIBuilder(cli *client.Client) *CLIBuilder {
+	return &CLIBuilder{client: cli}
 }
 
-// NewSDKBuilderFromEnv creates a new image builder from environment.
-func NewSDKBuilderFromEnv() (*SDKBuilder, error) {
+// NewCLIBuilderFromEnv creates a new image builder from environment.
+func NewCLIBuilderFromEnv() (*CLIBuilder, error) {
 	cli, err := client.NewClientWithOpts(
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -129,18 +152,18 @@ func NewSDKBuilderFromEnv() (*SDKBuilder, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SDKBuilder{client: cli}, nil
+	return &CLIBuilder{client: cli}, nil
 }
 
 // Client returns the underlying Docker client.
-func (b *SDKBuilder) Client() *client.Client {
+func (b *CLIBuilder) Client() *client.Client {
 	return b.client
 }
 
 // Close closes the Docker client.
-func (b *SDKBuilder) Close() error {
+func (b *CLIBuilder) Close() error {
 	return b.client.Close()
 }
 
-// Ensure SDKBuilder implements ImageBuilder.
-var _ ImageBuilder = (*SDKBuilder)(nil)
+// Ensure CLIBuilder implements ImageBuilder.
+var _ ImageBuilder = (*CLIBuilder)(nil)

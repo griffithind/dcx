@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
 // updateUIDDockerfile is the Dockerfile template for updating user UID/GID.
@@ -44,12 +46,16 @@ RUN eval $(sed -n "s/${REMOTE_USER}:[^:]*:\([^:]*\):\([^:]*\):[^:]*:\([^:]*\).*/
 		chown -R $NEW_UID:$NEW_GID $HOME_FOLDER; \
 	fi;
 
+# Preserve metadata from base image
+ARG METADATA_LABEL
+LABEL devcontainer.metadata=${METADATA_LABEL}
+
 ARG IMAGE_USER
 USER $IMAGE_USER
 `
 
 // BuildUIDUpdate builds an image with updated UID/GID for the remote user.
-func (b *SDKBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (string, error) {
+func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (string, error) {
 	// Validate inputs
 	if opts.BaseImage == "" {
 		return "", fmt.Errorf("baseImage is required for UID update")
@@ -74,6 +80,15 @@ func (b *SDKBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 
 	fmt.Printf("[+] Updating UID/GID to %d:%d for user %s\n",
 		opts.HostUID, opts.HostGID, opts.RemoteUser)
+
+	// Get metadata from base image if not provided
+	metadata := opts.Metadata
+	if metadata == "" {
+		labels, err := b.GetImageLabels(ctx, opts.BaseImage)
+		if err == nil && labels != nil {
+			metadata = labels[devcontainer.DevcontainerMetadataLabel]
+		}
+	}
 
 	// Create temporary build directory
 	tempBuildDir, err := os.MkdirTemp("", "dcx-updateuid-*")
@@ -100,11 +115,12 @@ func (b *SDKBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 		Dockerfile: dockerfilePath,
 		Context:    tempBuildDir,
 		Args: map[string]string{
-			"BASE_IMAGE":  opts.BaseImage,
-			"REMOTE_USER": opts.RemoteUser,
-			"NEW_UID":     strconv.Itoa(opts.HostUID),
-			"NEW_GID":     strconv.Itoa(opts.HostGID),
-			"IMAGE_USER":  imageUser,
+			"BASE_IMAGE":     opts.BaseImage,
+			"REMOTE_USER":    opts.RemoteUser,
+			"NEW_UID":        strconv.Itoa(opts.HostUID),
+			"NEW_GID":        strconv.Itoa(opts.HostGID),
+			"IMAGE_USER":     imageUser,
+			"METADATA_LABEL": metadata,
 		},
 	})
 	if err != nil {
@@ -176,24 +192,4 @@ func ShouldUpdateRemoteUserUIDWithConfig(updateRemoteUserUID *bool, remoteUser s
 
 	// Default to true on Linux and macOS
 	return true
-}
-
-// BuildUpdateUIDImage is a convenience function that builds an image with updated UID/GID.
-// This can be called without creating an SDKBuilder instance.
-func BuildUpdateUIDImage(ctx context.Context, baseImage, newTag, remoteUser, imageUser string, hostUID, hostGID int) error {
-	builder, err := NewSDKBuilderFromEnv()
-	if err != nil {
-		return fmt.Errorf("failed to create builder: %w", err)
-	}
-	defer builder.Close()
-
-	_, err = builder.BuildUIDUpdate(ctx, UIDBuildOptions{
-		BaseImage:  baseImage,
-		Tag:        newTag,
-		RemoteUser: remoteUser,
-		ImageUser:  imageUser,
-		HostUID:    hostUID,
-		HostGID:    hostGID,
-	})
-	return err
 }
