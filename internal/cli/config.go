@@ -34,12 +34,12 @@ Examples:
 
 // ConfigOutput represents the output of the config command.
 type ConfigOutput struct {
-	ConfigPath        string                    `json:"config_path"`
-	WorkspaceID            string                    `json:"workspaceID"`
-	ConfigHash        string                    `json:"config_hash,omitempty"`
-	WorkspaceFolder   string                    `json:"workspace_folder"`
-	PlanType          string                    `json:"plan_type"`
-	Config            *devcontainer.DevContainerConfig `json:"config"`
+	ConfigPath      string                           `json:"config_path"`
+	WorkspaceID     string                           `json:"workspaceID"`
+	ConfigHash      string                           `json:"config_hash,omitempty"`
+	WorkspaceFolder string                           `json:"workspace_folder"`
+	PlanType        string                           `json:"plan_type"`
+	Config          *devcontainer.DevContainerConfig `json:"config"`
 }
 
 func runConfig(cmd *cobra.Command, args []string) error {
@@ -103,7 +103,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	// Build output
 	output := ConfigOutput{
 		ConfigPath:      cfgPath,
-		WorkspaceID:          ids.WorkspaceID,
+		WorkspaceID:     ids.WorkspaceID,
 		ConfigHash:      configHash,
 		WorkspaceFolder: wsFolder,
 		PlanType:        planType,

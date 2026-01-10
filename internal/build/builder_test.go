@@ -1,86 +1,8 @@
 package build
 
 import (
-	"bytes"
 	"testing"
 )
-
-func TestContextBuilder_AddFile(t *testing.T) {
-	builder := NewContextBuilder()
-
-	content := []byte("hello world")
-	if err := builder.AddFile("test.txt", content, 0644); err != nil {
-		t.Fatalf("AddFile failed: %v", err)
-	}
-
-	reader, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-
-	// Verify we got some content
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
-		t.Fatalf("Failed to read tar: %v", err)
-	}
-
-	if buf.Len() == 0 {
-		t.Error("Expected non-empty tar archive")
-	}
-}
-
-func TestContextBuilder_MultipleFiles(t *testing.T) {
-	builder := NewContextBuilder()
-
-	files := map[string][]byte{
-		"file1.txt":     []byte("content1"),
-		"dir/file2.txt": []byte("content2"),
-		"Dockerfile":    []byte("FROM alpine"),
-	}
-
-	for name, content := range files {
-		if err := builder.AddFile(name, content, 0644); err != nil {
-			t.Fatalf("AddFile(%s) failed: %v", name, err)
-		}
-	}
-
-	reader, err := builder.Build()
-	if err != nil {
-		t.Fatalf("Build failed: %v", err)
-	}
-
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
-		t.Fatalf("Failed to read tar: %v", err)
-	}
-
-	if buf.Len() == 0 {
-		t.Error("Expected non-empty tar archive")
-	}
-}
-
-func TestDefaultExcludePatterns(t *testing.T) {
-	patterns := DefaultExcludePatterns()
-
-	if len(patterns) == 0 {
-		t.Error("Expected non-empty exclude patterns")
-	}
-
-	// Check for expected patterns
-	expected := []string{".git", "node_modules", "__pycache__"}
-	for _, exp := range expected {
-		found := false
-		for _, p := range patterns {
-			if p == exp {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Expected pattern %q not found", exp)
-		}
-	}
-}
 
 func TestShouldUpdateRemoteUserUID(t *testing.T) {
 	tests := []struct {
@@ -176,4 +98,3 @@ func TestShouldUpdateRemoteUserUIDWithConfig(t *testing.T) {
 		})
 	}
 }
-

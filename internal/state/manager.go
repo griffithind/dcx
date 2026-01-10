@@ -184,7 +184,6 @@ func (m *StateManager) processContainers(containers []ContainerSummary) (Contain
 	return StateCreated, info, nil
 }
 
-
 // GetStateWithProjectAndHash combines project lookup with hash check.
 func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectName, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
 	state, info, err := m.GetStateWithProject(ctx, projectName, workspaceID)

@@ -23,7 +23,7 @@ func GenerateSocketName() string {
 
 // Proxy manages an SSH agent proxy socket.
 type Proxy struct {
-	workspaceID         string
+	workspaceID    string
 	upstreamSocket string
 	proxyDir       string
 	socketPath     string
@@ -62,7 +62,7 @@ func NewProxyWithSocket(workspaceID, socketName string) (*Proxy, error) {
 	socketPath := filepath.Join(proxyDir, socketName)
 
 	return &Proxy{
-		workspaceID:         workspaceID,
+		workspaceID:    workspaceID,
 		upstreamSocket: upstreamSocket,
 		proxyDir:       proxyDir,
 		socketPath:     socketPath,

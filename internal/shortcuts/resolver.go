@@ -21,6 +21,7 @@ type ResolvedCommand struct {
 // Returns the resolved command or the original if no shortcut matches.
 //
 // Examples:
+//
 //   - shortcuts["rw"] = "bin/jobs --skip-recurring"
 //     Resolve(shortcuts, ["rw"]) -> ["bin/jobs", "--skip-recurring"]
 //

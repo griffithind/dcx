@@ -11,7 +11,6 @@ import (
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -51,19 +50,19 @@ func init() {
 
 // DebugInfo contains all debugging information.
 type DebugInfo struct {
-	Version     string           `json:"version"`
-	Platform    PlatformInfo     `json:"platform"`
-	Docker      DockerInfo       `json:"docker"`
-	Workspace   WorkspaceDebug   `json:"workspace"`
-	Config      ConfigDebug      `json:"config"`
-	Container   ContainerDebug   `json:"container"`
-	Staleness   StalenessDebug   `json:"staleness"`
+	Version   string         `json:"version"`
+	Platform  PlatformInfo   `json:"platform"`
+	Docker    DockerInfo     `json:"docker"`
+	Workspace WorkspaceDebug `json:"workspace"`
+	Config    ConfigDebug    `json:"config"`
+	Container ContainerDebug `json:"container"`
+	Staleness StalenessDebug `json:"staleness"`
 }
 
 type PlatformInfo struct {
-	OS      string `json:"os"`
-	Arch    string `json:"arch"`
-	GoVer   string `json:"go_version"`
+	OS    string `json:"os"`
+	Arch  string `json:"arch"`
+	GoVer string `json:"go_version"`
 }
 
 type DockerInfo struct {
@@ -75,22 +74,22 @@ type DockerInfo struct {
 }
 
 type WorkspaceDebug struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Path          string `json:"path"`
-	ConfigPath    string `json:"config_path"`
-	PlanType      string `json:"plan_type"`
-	Image         string `json:"image,omitempty"`
-	FinalImage    string `json:"final_image,omitempty"`
-	ServiceName   string `json:"service_name"`
-	FeatureCount  int    `json:"feature_count"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Path         string `json:"path"`
+	ConfigPath   string `json:"config_path"`
+	PlanType     string `json:"plan_type"`
+	Image        string `json:"image,omitempty"`
+	FinalImage   string `json:"final_image,omitempty"`
+	ServiceName  string `json:"service_name"`
+	FeatureCount int    `json:"feature_count"`
 }
 
 type ConfigDebug struct {
-	HasImage      bool     `json:"has_image"`
-	HasDockerfile bool     `json:"has_dockerfile"`
-	HasCompose    bool     `json:"has_compose"`
-	Features      []string `json:"features,omitempty"`
+	HasImage      bool        `json:"has_image"`
+	HasDockerfile bool        `json:"has_dockerfile"`
+	HasCompose    bool        `json:"has_compose"`
+	Features      []string    `json:"features,omitempty"`
 	Hashes        HashesDebug `json:"hashes"`
 }
 
@@ -103,19 +102,19 @@ type HashesDebug struct {
 }
 
 type ContainerDebug struct {
-	Found         bool              `json:"found"`
-	ID            string            `json:"id,omitempty"`
-	Name          string            `json:"name,omitempty"`
-	State         string            `json:"state,omitempty"`
-	Running       bool              `json:"running,omitempty"`
-	Labels        map[string]string `json:"labels,omitempty"`
-	LegacyLabels  bool              `json:"legacy_labels,omitempty"`
+	Found        bool              `json:"found"`
+	ID           string            `json:"id,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	State        string            `json:"state,omitempty"`
+	Running      bool              `json:"running,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	LegacyLabels bool              `json:"legacy_labels,omitempty"`
 }
 
 type StalenessDebug struct {
-	IsStale   bool     `json:"is_stale"`
-	Reason    string   `json:"reason,omitempty"`
-	Changes   []string `json:"changes,omitempty"`
+	IsStale bool     `json:"is_stale"`
+	Reason  string   `json:"reason,omitempty"`
+	Changes []string `json:"changes,omitempty"`
 }
 
 func runDebug(cmd *cobra.Command, args []string) error {
@@ -439,6 +438,3 @@ func outputDebugTable(debug *DebugInfo) error {
 
 	return nil
 }
-
-// Ensure state package is imported for label prefix
-var _ = state.LabelManaged

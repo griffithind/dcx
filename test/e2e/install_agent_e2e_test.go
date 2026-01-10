@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	dcxembed "github.com/griffithind/dcx"
 	"github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
@@ -37,12 +38,12 @@ func getContainerName(statusOutput string) string {
 func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !container.HasEmbeddedBinaries() {
+	if !dcxembed.HasBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
 	// Check if embeds are valid (not placeholders)
-	binary, err := container.GetEmbeddedBinary("amd64")
+	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -81,22 +82,22 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	err = checkCmd.Run()
 	require.NoError(t, err, "binary should be executable")
 
-	// Run the binary with --version
-	versionCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--version")
-	output, err := versionCmd.CombinedOutput()
-	require.NoError(t, err, "binary --version should succeed: %s", string(output))
-	assert.Contains(t, string(output), "dcx", "version output should contain 'dcx'")
+	// Run the binary with --help
+	helpCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--help")
+	output, err := helpCmd.CombinedOutput()
+	require.NoError(t, err, "binary --help should succeed: %s", string(output))
+	assert.Contains(t, string(output), "dcx-agent", "help output should contain 'dcx-agent'")
 }
 
 // TestInstallAgentIdempotentE2E tests that deploying twice is idempotent.
 func TestInstallAgentIdempotentE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !container.HasEmbeddedBinaries() {
+	if !dcxembed.HasBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := container.GetEmbeddedBinary("amd64")
+	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -137,11 +138,11 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 func TestInstallAgentPreDeployE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !container.HasEmbeddedBinaries() {
+	if !dcxembed.HasBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := container.GetEmbeddedBinary("amd64")
+	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -168,21 +169,21 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 
 	// Verify binary exists and runs
 	binaryPath := container.GetContainerBinaryPath()
-	versionCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--version")
-	output, err := versionCmd.CombinedOutput()
+	helpCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--help")
+	output, err := helpCmd.CombinedOutput()
 	require.NoError(t, err, "deployed binary should run: %s", string(output))
-	assert.Contains(t, string(output), "dcx")
+	assert.Contains(t, string(output), "dcx-agent")
 }
 
 // TestInstallAgentArchitectureE2E tests that the correct architecture binary is deployed.
 func TestInstallAgentArchitectureE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
-	if !container.HasEmbeddedBinaries() {
+	if !dcxembed.HasBinaries() {
 		t.Skip("Skipping: no embedded binaries available")
 	}
 
-	binary, err := container.GetEmbeddedBinary("amd64")
+	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
@@ -216,8 +217,8 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify binary can run (which confirms correct architecture)
-	versionCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--version")
-	output, err := versionCmd.CombinedOutput()
+	helpCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--help")
+	output, err := helpCmd.CombinedOutput()
 	require.NoError(t, err, "binary should run on %s architecture: %s", containerArch, string(output))
 
 	// Check binary architecture using file command (if available)

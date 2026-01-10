@@ -164,20 +164,6 @@ func substituteWithRegistry(s string, ctx *SubstitutionContext) string {
 	return s
 }
 
-// RegisterSubstitution adds a custom substitution pattern.
-// This allows extensions to add their own patterns.
-func RegisterSubstitution(pattern string, handler func(match []string, ctx *SubstitutionContext) string) error {
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return err
-	}
-	substitutions = append(substitutions, substitution{
-		pattern: re,
-		handler: handler,
-	})
-	return nil
-}
-
 // Substitute performs variable substitution on a string.
 func Substitute(s string, ctx *SubstitutionContext) string {
 	return substituteWithRegistry(s, ctx)

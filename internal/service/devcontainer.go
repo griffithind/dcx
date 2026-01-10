@@ -479,10 +479,10 @@ func (s *DevContainerService) Stop(ctx context.Context, opts StopOptions) error 
 
 // DownOptions contains options for tearing down a devcontainer.
 type DownOptions struct {
-	WorkspaceID    string
-	ProjectName    string
-	RemoveVolumes  bool
-	RemoveOrphans  bool
+	WorkspaceID   string
+	ProjectName   string
+	RemoveVolumes bool
+	RemoveOrphans bool
 }
 
 // Down tears down a devcontainer environment.

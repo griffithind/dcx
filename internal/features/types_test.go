@@ -260,11 +260,11 @@ func TestFeatureOptionsHandling(t *testing.T) {
 	feature := &Feature{
 		ID: "ghcr.io/devcontainers/features/common-utils:2",
 		Options: map[string]interface{}{
-			"username":              "testuser",
-			"installZsh":            false,
-			"installOhMyZsh":        false,
-			"installOhMyZshConfig":  false,
-			"upgradePackages":       false,
+			"username":             "testuser",
+			"installZsh":           false,
+			"installOhMyZsh":       false,
+			"installOhMyZshConfig": false,
+			"upgradePackages":      false,
 		},
 		Metadata: &FeatureMetadata{
 			Options: map[string]OptionDefinition{
@@ -487,8 +487,8 @@ func TestGetEnvVarsWithNormalization(t *testing.T) {
 	feature := &Feature{
 		ID: "test-feature",
 		Options: map[string]interface{}{
-			"my-option":    "value1",
-			"another.opt":  "value2",
+			"my-option":     "value1",
+			"another.opt":   "value2",
 			"2fast2furious": "value3",
 		},
 		Metadata: &FeatureMetadata{

@@ -133,4 +133,3 @@ func getLatestRelease() (*githubRelease, error) {
 
 	return &release, nil
 }
-

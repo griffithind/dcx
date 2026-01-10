@@ -32,7 +32,7 @@ Examples:
 
 // EnvironmentInfo represents a dcx-managed environment for listing.
 type EnvironmentInfo struct {
-	WorkspaceID        string          `json:"workspaceID"`
+	WorkspaceID   string          `json:"workspaceID"`
 	ProjectName   string          `json:"projectName,omitempty"`
 	WorkspacePath string          `json:"workspacePath"`
 	State         string          `json:"state"`

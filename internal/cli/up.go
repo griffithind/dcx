@@ -100,7 +100,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 				ui.Success("Devcontainer started")
 				return nil
 
-			// For CREATE, RECREATE, REBUILD - continue to full up
+				// For CREATE, RECREATE, REBUILD - continue to full up
 			}
 		}
 	}

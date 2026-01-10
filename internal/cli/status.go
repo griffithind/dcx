@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/ssh/host"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )

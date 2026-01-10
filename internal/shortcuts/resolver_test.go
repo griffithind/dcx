@@ -9,10 +9,10 @@ import (
 
 func TestResolve(t *testing.T) {
 	shortcuts := map[string]devcontainer.Shortcut{
-		"rw": {Command: "bin/jobs --skip-recurring"},
-		"r":  {Prefix: "rails", PassArgs: true},
-		"rs": {Command: "rails server -b 0.0.0.0"},
-		"be": {Prefix: "bundle exec"},          // No passArgs
+		"rw":   {Command: "bin/jobs --skip-recurring"},
+		"r":    {Prefix: "rails", PassArgs: true},
+		"rs":   {Command: "rails server -b 0.0.0.0"},
+		"be":   {Prefix: "bundle exec"}, // No passArgs
 		"test": {Prefix: "rails test", PassArgs: true},
 	}
 

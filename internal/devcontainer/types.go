@@ -56,11 +56,6 @@ type LifecycleEntry struct {
 	Args []string
 }
 
-// IsEmpty returns true if the lifecycle command has no entries.
-func (c *LifecycleCommand) IsEmpty() bool {
-	return c == nil || len(c.Commands) == 0
-}
-
 // GetCommands returns all command strings, joining args with spaces if needed.
 func (c *LifecycleCommand) GetCommands() []string {
 	if c == nil {
@@ -397,24 +392,6 @@ func ParseFeatures(features map[string]interface{}) []FeatureConfig {
 	return result
 }
 
-// ToMap converts a slice of FeatureConfig back to map[string]interface{}.
-func FeaturesToMap(features []FeatureConfig) map[string]interface{} {
-	if features == nil {
-		return nil
-	}
-	result := make(map[string]interface{}, len(features))
-	for _, f := range features {
-		if !f.Enabled {
-			result[f.ID] = false
-		} else if len(f.Options) == 0 {
-			result[f.ID] = true
-		} else {
-			result[f.ID] = f.Options
-		}
-	}
-	return result
-}
-
 // PortSpecs is a slice of PortSpec with custom JSON handling.
 type PortSpecs []PortSpec
 
@@ -434,13 +411,4 @@ func (ps *PortSpecs) UnmarshalJSON(data []byte) error {
 		*ps = append(*ps, spec)
 	}
 	return nil
-}
-
-// ToStrings converts port specs to docker-style port strings.
-func (ps PortSpecs) ToStrings() []string {
-	result := make([]string, len(ps))
-	for i, p := range ps {
-		result[i] = p.String()
-	}
-	return result
 }

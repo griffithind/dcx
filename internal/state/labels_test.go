@@ -131,7 +131,7 @@ func TestGetWorkspaceID(t *testing.T) {
 
 	t.Run("prefers new format", func(t *testing.T) {
 		m := map[string]string{
-			LabelWorkspaceID:           "new-id",
+			LabelWorkspaceID:         "new-id",
 			LegacyPrefix + "env_key": "legacy-id",
 		}
 		assert.Equal(t, "new-id", GetWorkspaceID(m))
@@ -140,12 +140,12 @@ func TestGetWorkspaceID(t *testing.T) {
 
 func TestMigrateFromLegacy(t *testing.T) {
 	legacy := map[string]string{
-		LegacyPrefix + "managed":        "true",
-		LegacyPrefix + "env_key":        "workspace-123",
-		LegacyPrefix + "workspace_path": "/home/user/project",
-		LegacyPrefix + "config_hash":    "abc123",
-		LegacyPrefix + "plan":           "compose",
-		LegacyPrefix + "primary":        "true",
+		LegacyPrefix + "managed":         "true",
+		LegacyPrefix + "env_key":         "workspace-123",
+		LegacyPrefix + "workspace_path":  "/home/user/project",
+		LegacyPrefix + "config_hash":     "abc123",
+		LegacyPrefix + "plan":            "compose",
+		LegacyPrefix + "primary":         "true",
 		LegacyPrefix + "compose_project": "my-project",
 		LegacyPrefix + "primary_service": "app",
 	}

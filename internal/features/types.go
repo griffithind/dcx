@@ -55,9 +55,9 @@ type FeatureSource struct {
 type SourceType string
 
 const (
-	SourceTypeOCI   SourceType = "oci"
+	SourceTypeOCI       SourceType = "oci"
 	SourceTypeLocalPath SourceType = "local"
-	SourceTypeTarball  SourceType = "http"
+	SourceTypeTarball   SourceType = "http"
 )
 
 // FeatureMetadata represents the devcontainer-feature.json contents.
@@ -362,4 +362,3 @@ func substituteEnvVars(s string) string {
 		return value
 	})
 }
-
