@@ -60,7 +60,7 @@ Works the same as VSCode with Remote SSH.
 - **SSH agent forwarding** - Use your local SSH keys for Git operations inside containers
 - **Docker Compose support** - Full support for compose-based devcontainers
 - **Devcontainer features** - Install tools and runtimes from the features ecosystem
-- **Command shortcuts** - Define project-specific commands in dcx.json
+- **Command shortcuts** - Define project-specific commands in devcontainer.json
 - **Self-updating** - Run `dcx upgrade` to update to the latest version
 
 ## Installation
@@ -104,7 +104,7 @@ make build
 |---------|-------------|
 | `dcx exec -- <cmd>` | Run a command in the container |
 | `dcx shell` | Open an interactive shell |
-| `dcx run <shortcut>` | Run a command shortcut from dcx.json |
+| `dcx run <shortcut>` | Run a command shortcut from customizations.dcx |
 
 ### Information
 
@@ -138,32 +138,43 @@ make build
 
 ## Configuration
 
-### dcx.json
+### DCX Customizations
 
-Create `.devcontainer/dcx.json` for project-specific settings:
+DCX-specific settings are defined in your `devcontainer.json` under `customizations.dcx`:
 
 ```json
 {
   "name": "myproject",
-  "up": {
-    "ssh": true
-  },
-  "shortcuts": {
-    "test": "npm test",
-    "dev": { "prefix": "npm run", "passArgs": true },
-    "lint": { "command": "npm run lint", "description": "Run linter" }
+  "image": "node:20",
+  "customizations": {
+    "dcx": {
+      "up": {
+        "ssh": true
+      },
+      "shortcuts": {
+        "test": "npm test",
+        "dev": { "prefix": "npm run", "passArgs": true },
+        "lint": { "command": "npm run lint", "description": "Run linter" }
+      }
+    }
   }
 }
 ```
 
-#### Options
+### Project Naming
+
+The `name` field in devcontainer.json is used for:
+- Container and Docker Compose project naming
+- SSH host (`myproject.dcx`)
+- Display in `dcx status`
+
+#### DCX Options
 
 | Field | Description |
 |-------|-------------|
-| `name` | Project name, used as the SSH host |
-| `up.ssh` | Enable SSH server by default |
-| `up.noAgent` | Disable SSH agent forwarding |
-| `shortcuts` | Command aliases for `dcx run` |
+| `customizations.dcx.up.ssh` | Enable SSH server by default |
+| `customizations.dcx.up.noAgent` | Disable SSH agent forwarding |
+| `customizations.dcx.shortcuts` | Command aliases for `dcx run` |
 
 ### Shortcuts
 

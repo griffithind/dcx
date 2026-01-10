@@ -40,7 +40,7 @@ internal/
   lifecycle/       → Hook execution (onCreateCommand, postStartCommand, etc.)
   ssh/             → SSH agent detection, container deployment, host config
   compose/         → Docker Compose override generation
-  shortcuts/       → dcx.json shortcut resolution
+  shortcuts/       → Shortcut resolution from customizations.dcx
 ```
 
 ### Key Data Flow
@@ -88,6 +88,38 @@ When `dcx up --ssh` is used:
 1. Agent binary deployed to container
 2. SSH server configured with container user/shell
 3. Host SSH config updated for `projectname.dcx` access
+
+## DCX Customizations
+
+DCX-specific settings are stored in `customizations.dcx` within devcontainer.json:
+
+```json
+{
+  "name": "my-project",
+  "image": "ubuntu",
+  "customizations": {
+    "dcx": {
+      "up": {
+        "ssh": true,
+        "noAgent": false
+      },
+      "shortcuts": {
+        "r": {"prefix": "rails", "passArgs": true},
+        "rw": "bin/jobs --skip-recurring"
+      }
+    }
+  }
+}
+```
+
+### Project Naming
+
+The `name` field in devcontainer.json is used for:
+- Container/Compose project naming (sanitized)
+- SSH host (`<sanitized-name>.dcx`)
+- Display name in `dcx status`
+
+If no `name` is provided, the workspace ID (hash-based) is used as fallback.
 
 ## Key Patterns
 

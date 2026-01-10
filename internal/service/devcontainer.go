@@ -58,26 +58,25 @@ type Identifiers struct {
 }
 
 // GetIdentifiers computes the core identifiers for this workspace.
+// Project name is derived from the devcontainer.json name field.
 func (s *DevContainerService) GetIdentifiers() (*Identifiers, error) {
-	dcxCfg, _ := devcontainer.LoadDcxConfig(s.workspacePath)
-
-	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = common.SanitizeProjectName(dcxCfg.Name)
+	// Load devcontainer.json to get the name
+	cfg, _, err := devcontainer.Load(s.workspacePath, s.configPath)
+	if err != nil {
+		// Fall back to workspace-based ID if config not loadable
+		workspaceID := devcontainer.ComputeID(s.workspacePath)
+		return &Identifiers{
+			WorkspaceID: workspaceID,
+			SSHHost:     workspaceID + ".dcx",
+		}, nil
 	}
 
-	workspaceID := devcontainer.ComputeID(s.workspacePath)
-
-	sshHost := workspaceID
-	if projectName != "" {
-		sshHost = projectName
-	}
-	sshHost = sshHost + ".dcx"
+	dcID := devcontainer.ComputeDevContainerID(s.workspacePath, cfg)
 
 	return &Identifiers{
-		ProjectName: projectName,
-		WorkspaceID: workspaceID,
-		SSHHost:     sshHost,
+		ProjectName: dcID.ProjectName,
+		WorkspaceID: dcID.ID,
+		SSHHost:     dcID.SSHHost,
 	}, nil
 }
 
@@ -163,10 +162,10 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	dcxCfg, _ := devcontainer.LoadDcxConfig(s.workspacePath)
+	// Project name from devcontainer.json name field
 	var projectName string
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = common.SanitizeProjectName(dcxCfg.Name)
+	if cfg.Name != "" {
+		projectName = common.SanitizeProjectName(cfg.Name)
 	}
 
 	resolved, err := s.builder.Build(ctx, devcontainer.BuilderOptions{

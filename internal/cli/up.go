@@ -54,20 +54,23 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	defer dockerClient.Close()
 
-	// Load dcx.json configuration (optional) for up options
-	dcxCfg, err := devcontainer.LoadDcxConfig(workspacePath)
+	// Load devcontainer.json for up options from customizations.dcx
+	cfg, _, err := devcontainer.Load(workspacePath, configPath)
 	if err != nil {
-		return fmt.Errorf("failed to load dcx.json: %w", err)
+		return fmt.Errorf("failed to load devcontainer.json: %w", err)
 	}
 
-	// Apply dcx.json up options (CLI flags take precedence)
+	// Get DCX customizations
+	dcxCustom := devcontainer.GetDcxCustomizations(cfg)
+
+	// Apply customizations.dcx up options (CLI flags take precedence)
 	effectiveSSH := enableSSH
 	effectiveNoAgent := noAgent
-	if dcxCfg != nil {
-		if !cmd.Flags().Changed("ssh") && dcxCfg.Up.SSH {
+	if dcxCustom != nil {
+		if !cmd.Flags().Changed("ssh") && dcxCustom.Up.SSH {
 			effectiveSSH = true
 		}
-		if !cmd.Flags().Changed("no-agent") && dcxCfg.Up.NoAgent {
+		if !cmd.Flags().Changed("no-agent") && dcxCustom.Up.NoAgent {
 			effectiveNoAgent = true
 		}
 	}

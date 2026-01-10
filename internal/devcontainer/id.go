@@ -67,8 +67,9 @@ func ComputeName(workspacePath string, cfg *DevContainerConfig) string {
 	return filepath.Base(workspacePath)
 }
 
-// ComputeDevContainerID creates a DevContainerID from workspace path and optional configurations.
-func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig, dcxCfg *DcxConfig) *DevContainerID {
+// ComputeDevContainerID creates a DevContainerID from workspace path and config.
+// The ProjectName is derived from the devcontainer.json name field (sanitized).
+func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevContainerID {
 	id := ComputeID(workspacePath)
 
 	name := filepath.Base(workspacePath)
@@ -76,12 +77,13 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig, dcxCfg
 		name = cfg.Name
 	}
 
+	// ProjectName = sanitized devcontainer name (if set)
 	projectName := ""
-	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = dcxCfg.Name
+	if cfg != nil && cfg.Name != "" {
+		projectName = common.SanitizeProjectName(cfg.Name)
 	}
 
-	// SSH host: prefer project name if set, otherwise use ID
+	// SSH host: prefer sanitized project name, otherwise use ID
 	sshHost := id
 	if projectName != "" {
 		sshHost = projectName

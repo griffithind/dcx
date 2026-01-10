@@ -19,15 +19,20 @@ var runCmd = &cobra.Command{
 	Short: "Run a command shortcut in the container",
 	Long: `Run a configured command shortcut in the devcontainer.
 
-Shortcuts are defined in .devcontainer/dcx.json under the "shortcuts" key.
+Shortcuts are defined in devcontainer.json under "customizations.dcx.shortcuts".
 
-Example dcx.json:
+Example devcontainer.json:
 {
   "name": "myproject",
-  "shortcuts": {
-    "rw": "bin/jobs --skip-recurring",
-    "r": {"prefix": "rails", "passArgs": true},
-    "test": {"prefix": "rails test", "passArgs": true, "description": "Run tests"}
+  "image": "ubuntu",
+  "customizations": {
+    "dcx": {
+      "shortcuts": {
+        "rw": "bin/jobs --skip-recurring",
+        "r": {"prefix": "rails", "passArgs": true},
+        "test": {"prefix": "rails test", "passArgs": true, "description": "Run tests"}
+      }
+    }
   }
 }
 
@@ -52,15 +57,18 @@ func init() {
 }
 
 func runRunCommand(cmd *cobra.Command, args []string) error {
-	// Load dcx.json for shortcuts
-	dcxCfg, err := devcontainer.LoadDcxConfig(workspacePath)
+	// Load devcontainer.json for shortcuts
+	cfg, _, err := devcontainer.Load(workspacePath, configPath)
 	if err != nil {
-		return fmt.Errorf("failed to load dcx.json: %w", err)
+		return fmt.Errorf("failed to load devcontainer.json: %w", err)
 	}
+
+	// Get DCX customizations
+	dcxCustom := devcontainer.GetDcxCustomizations(cfg)
 
 	// Handle --list flag
 	if runList {
-		return listShortcuts(dcxCfg)
+		return listShortcuts(dcxCustom)
 	}
 
 	if len(args) == 0 {
@@ -68,11 +76,11 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve shortcut
-	if dcxCfg == nil || len(dcxCfg.Shortcuts) == 0 {
-		return fmt.Errorf("no shortcuts defined in .devcontainer/dcx.json")
+	if dcxCustom == nil || len(dcxCustom.Shortcuts) == 0 {
+		return fmt.Errorf("no shortcuts defined in devcontainer.json customizations.dcx")
 	}
 
-	resolved := shortcuts.Resolve(dcxCfg.Shortcuts, args)
+	resolved := shortcuts.Resolve(dcxCustom.Shortcuts, args)
 	if !resolved.Found {
 		return fmt.Errorf("unknown shortcut %q; use --list to see available shortcuts", args[0])
 	}
@@ -81,15 +89,15 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 	return executeInContainer(resolved.Command)
 }
 
-func listShortcuts(dcxCfg *devcontainer.DcxConfig) error {
-	if dcxCfg == nil || len(dcxCfg.Shortcuts) == 0 {
+func listShortcuts(dcxCustom *devcontainer.DcxCustomizations) error {
+	if dcxCustom == nil || len(dcxCustom.Shortcuts) == 0 {
 		ui.Println("No shortcuts defined.")
 		ui.Println("")
-		ui.Println("To define shortcuts, create .devcontainer/dcx.json with a \"shortcuts\" key.")
+		ui.Println("To define shortcuts, add \"customizations.dcx.shortcuts\" to devcontainer.json.")
 		return nil
 	}
 
-	infos := shortcuts.ListShortcuts(dcxCfg.Shortcuts)
+	infos := shortcuts.ListShortcuts(dcxCustom.Shortcuts)
 
 	ui.Println(ui.Bold("Available shortcuts:"))
 	ui.Println("")

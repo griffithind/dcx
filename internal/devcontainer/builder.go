@@ -40,7 +40,7 @@ type BuilderOptions struct {
 	// SubstitutionContext provides variable substitution values
 	SubstitutionContext *SubstitutionContext
 
-	// ProjectName overrides the workspace name (from dcx.json)
+	// ProjectName is the sanitized project name from devcontainer.json name field
 	ProjectName string
 }
 

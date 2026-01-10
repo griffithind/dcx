@@ -3,22 +3,11 @@ package devcontainer
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/griffithind/dcx/internal/util"
-	"github.com/tidwall/jsonc"
 )
 
-// dcxConfigPath is the standard location for dcx.json
-const dcxConfigPath = ".devcontainer/dcx.json"
-
-// DcxConfig represents the dcx-specific configuration from dcx.json.
-type DcxConfig struct {
-	// Name is the project name, used for container naming and SSH host.
-	// Replaces the hash-based env_key when set.
-	Name string `json:"name,omitempty"`
-
+// DcxCustomizations represents DCX-specific settings from customizations.dcx
+// in devcontainer.json. This replaces the old separate dcx.json file.
+type DcxCustomizations struct {
 	// Up contains default options for the 'up' command.
 	Up DcxUpOptions `json:"up,omitempty"`
 
@@ -104,27 +93,24 @@ func (s Shortcut) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// LoadDcxConfig loads the dcx-specific configuration if present.
-// Returns nil (not an error) if the file doesn't exist.
-func LoadDcxConfig(workspacePath string) (*DcxConfig, error) {
-	configPath := filepath.Join(workspacePath, dcxConfigPath)
-
-	if !util.IsFile(configPath) {
-		return nil, nil // Not an error - dcx.json is optional
+// GetDcxCustomizations extracts DCX customizations from a DevContainerConfig.
+// Returns nil if no customizations.dcx section exists.
+func GetDcxCustomizations(cfg *DevContainerConfig) *DcxCustomizations {
+	if cfg == nil || cfg.Customizations == nil {
+		return nil
 	}
-
-	data, err := os.ReadFile(configPath)
+	dcxRaw, ok := cfg.Customizations["dcx"]
+	if !ok {
+		return nil
+	}
+	// Marshal and unmarshal to parse the structure
+	data, err := json.Marshal(dcxRaw)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read dcx.json: %w", err)
+		return nil
 	}
-
-	// Strip comments using jsonc (same as devcontainer.json)
-	stripped := jsonc.ToJSON(data)
-
-	var cfg DcxConfig
-	if err := json.Unmarshal(stripped, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse dcx.json: %w", err)
+	var dcx DcxCustomizations
+	if err := json.Unmarshal(data, &dcx); err != nil {
+		return nil
 	}
-
-	return &cfg, nil
+	return &dcx
 }

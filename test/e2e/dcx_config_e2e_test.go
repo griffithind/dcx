@@ -12,17 +12,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDcxConfigProjectNameE2E tests that the project name from dcx.json is used for container naming.
+// TestDcxConfigProjectNameE2E tests that the project name from devcontainer.json name field is used for container naming.
 func TestDcxConfigProjectNameE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Project Name Test",
+		"name": "testproject",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"customizations": {
+			"dcx": {
+				"up": {
+					"ssh": true
+				}
+			}
+		}
 	}`
 
 	dockerComposeYAML := `version: '3.8'
@@ -34,14 +41,7 @@ services:
       - ..:/workspace:cached
 `
 
-	dcxJSON := `{
-		"name": "testproject",
-		"up": {
-			"ssh": true
-		}
-	}`
-
-	workspace := helpers.CreateTempComposeWorkspaceWithDcx(t, devcontainerJSON, dockerComposeYAML, dcxJSON)
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
@@ -83,17 +83,26 @@ services:
 	})
 }
 
-// TestDcxConfigShortcutsE2E tests the shortcuts functionality from dcx.json.
+// TestDcxConfigShortcutsE2E tests the shortcuts functionality from customizations.dcx.
 func TestDcxConfigShortcutsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Shortcuts Test",
+		"name": "shortcutstest",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"customizations": {
+			"dcx": {
+				"shortcuts": {
+					"hello": "echo hello from shortcut",
+					"greet": {"command": "echo greeting", "description": "Say hello"},
+					"say": {"prefix": "echo", "passArgs": true, "description": "Echo with args"}
+				}
+			}
+		}
 	}`
 
 	dockerComposeYAML := `version: '3.8'
@@ -105,16 +114,7 @@ services:
       - ..:/workspace:cached
 `
 
-	dcxJSON := `{
-		"name": "shortcutstest",
-		"shortcuts": {
-			"hello": "echo hello from shortcut",
-			"greet": {"command": "echo greeting", "description": "Say hello"},
-			"say": {"prefix": "echo", "passArgs": true, "description": "Echo with args"}
-		}
-	}`
-
-	workspace := helpers.CreateTempComposeWorkspaceWithDcx(t, devcontainerJSON, dockerComposeYAML, dcxJSON)
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
@@ -130,7 +130,7 @@ services:
 		assert.Contains(t, stdout, "hello")
 		assert.Contains(t, stdout, "greet")
 		assert.Contains(t, stdout, "say")
-		assert.Contains(t, stdout, "Say hello") // description
+		assert.Contains(t, stdout, "Say hello")      // description
 		assert.Contains(t, stdout, "Echo with args") // description
 	})
 
@@ -177,17 +177,24 @@ services:
 	})
 }
 
-// TestDcxConfigUpOptionsE2E tests that up options from dcx.json are respected.
+// TestDcxConfigUpOptionsE2E tests that up options from customizations.dcx are respected.
 func TestDcxConfigUpOptionsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Up Options Test",
+		"name": "upoptionstest",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"customizations": {
+			"dcx": {
+				"up": {
+					"ssh": true
+				}
+			}
+		}
 	}`
 
 	dockerComposeYAML := `version: '3.8'
@@ -199,21 +206,13 @@ services:
       - ..:/workspace:cached
 `
 
-	// Test with ssh: true in dcx.json
-	dcxJSON := `{
-		"name": "upoptionstest",
-		"up": {
-			"ssh": true
-		}
-	}`
-
-	workspace := helpers.CreateTempComposeWorkspaceWithDcx(t, devcontainerJSON, dockerComposeYAML, dcxJSON)
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Bring up - should enable SSH automatically from dcx.json
+	// Bring up - should enable SSH automatically from customizations.dcx
 	t.Run("up_respects_ssh_option", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 		assert.Contains(t, stdout, "SSH configured:")
@@ -227,90 +226,6 @@ services:
 	})
 }
 
-// TestDcxConfigMigrationE2E tests that existing containers are still found after adding dcx.json.
-func TestDcxConfigMigrationE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Migration Test",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:latest
-    command: sleep infinity
-    volumes:
-      - ..:/workspace:cached
-`
-
-	// Start without dcx.json
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Create environment without dcx.json
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Get status before adding dcx.json
-	statusBefore := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	assert.True(t, helpers.ContainsLabel(statusBefore, "State", "running"), "should be running")
-	// Container uses compose-style naming (project-service-instance)
-	assert.Contains(t, statusBefore, "-app-")
-
-	// Now add dcx.json with a project name
-	dcxJSON := `{
-		"name": "migrationtest"
-	}`
-
-	// Write dcx.json
-	dcxPath := workspace + "/.devcontainer/dcx.json"
-	require.NoError(t, exec.Command("sh", "-c", "echo '"+dcxJSON+"' > "+dcxPath).Run())
-
-	// Status should still find the container (labels are used for lookup, not name)
-	t.Run("status_finds_old_container_after_adding_dcx_json", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.True(t, helpers.ContainsLabel(stdout, "State", "running"), "should be running")
-		assert.True(t, helpers.ContainsLabel(stdout, "Project", "migrationtest"), "should show project name")
-		// Container name still has compose naming
-		assert.Contains(t, stdout, "-app-")
-	})
-
-	// Stop should work with migration support
-	t.Run("stop_works_with_migration", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "stop")
-		assert.Contains(t, stdout, "stopped")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "created", state)
-	})
-
-	// Up should work with migration support (start stopped container)
-	t.Run("up_works_with_migration", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "started")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Down should work with migration support
-	t.Run("down_works_with_migration", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
-		assert.Contains(t, stdout, "removed")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
-	})
-}
-
 // TestDcxConfigFlagPassthroughE2E tests that flags are passed through to shortcuts.
 func TestDcxConfigFlagPassthroughE2E(t *testing.T) {
 	t.Parallel()
@@ -318,10 +233,17 @@ func TestDcxConfigFlagPassthroughE2E(t *testing.T) {
 	helpers.RequireComposeAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Flag Passthrough Test",
+		"name": "flagtest",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"customizations": {
+			"dcx": {
+				"shortcuts": {
+					"echoflags": {"prefix": "echo", "passArgs": true}
+				}
+			}
+		}
 	}`
 
 	dockerComposeYAML := `version: '3.8'
@@ -333,14 +255,7 @@ services:
       - ..:/workspace:cached
 `
 
-	dcxJSON := `{
-		"name": "flagtest",
-		"shortcuts": {
-			"echoflags": {"prefix": "echo", "passArgs": true}
-		}
-	}`
-
-	workspace := helpers.CreateTempComposeWorkspaceWithDcx(t, devcontainerJSON, dockerComposeYAML, dcxJSON)
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")
@@ -364,19 +279,19 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := `{
-		"name": "Status No Env Test",
-		"image": "alpine:latest",
-		"workspaceFolder": "/workspace"
-	}`
-
-	dcxJSON := `{
 		"name": "noenvtest",
-		"shortcuts": {
-			"test": "echo test"
+		"image": "alpine:latest",
+		"workspaceFolder": "/workspace",
+		"customizations": {
+			"dcx": {
+				"shortcuts": {
+					"test": "echo test"
+				}
+			}
 		}
 	}`
 
-	workspace := helpers.CreateTempWorkspaceWithDcx(t, devcontainerJSON, dcxJSON)
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Don't bring up, just check status
 	t.Run("status_shows_project_and_shortcuts_when_absent", func(t *testing.T) {
@@ -395,8 +310,9 @@ func TestDcxConfigNoShortcutsE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 	helpers.RequireComposeAvailable(t)
 
+	// devcontainer.json with name but no shortcuts in customizations
 	devcontainerJSON := `{
-		"name": "No Shortcuts Test",
+		"name": "noshortcuts",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
 		"workspaceFolder": "/workspace"
@@ -411,12 +327,7 @@ services:
       - ..:/workspace:cached
 `
 
-	// dcx.json with name but no shortcuts
-	dcxJSON := `{
-		"name": "noshortcuts"
-	}`
-
-	workspace := helpers.CreateTempComposeWorkspaceWithDcx(t, devcontainerJSON, dockerComposeYAML, dcxJSON)
+	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
 	t.Cleanup(func() {
 		helpers.RunDCXInDir(t, workspace, "down")

@@ -41,8 +41,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	ids := cliCtx.Identifiers
 
-	// Load dcx.json for shortcuts display (optional)
-	dcxCfg, _ := devcontainer.LoadDcxConfig(cliCtx.WorkspacePath())
+	// DCX customizations will be loaded later with cfg
+	var dcxCustom *devcontainer.DcxCustomizations
 
 	// Try to load config and compute hash for staleness detection
 	var currentState state.ContainerState
@@ -52,6 +52,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	cfg, _, err = devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 	if err == nil {
+		// Get DCX customizations for shortcuts display
+		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
 		// Config exists, check for staleness
 		if raw := cfg.GetRawJSON(); len(raw) > 0 {
 			configHash = devcontainer.ComputeSimpleHash(raw)
@@ -86,8 +88,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show shortcuts count
-	if dcxCfg != nil && len(dcxCfg.Shortcuts) > 0 {
-		ui.Printf("%s", ui.FormatLabel("Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", len(dcxCfg.Shortcuts))))
+	if dcxCustom != nil && len(dcxCustom.Shortcuts) > 0 {
+		ui.Printf("%s", ui.FormatLabel("Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", len(dcxCustom.Shortcuts))))
 	}
 
 	// Container details
