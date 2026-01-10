@@ -19,16 +19,11 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Vet
-        run: go vet ./...
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-      - name: Check formatting
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "Code is not formatted. Run 'go fmt ./...'"
-            gofmt -d .
-            exit 1
-          fi
+      - name: Lint
+        run: make lint
 
   test:
     runs-on: ubuntu-latest
@@ -41,24 +36,8 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Build agent binaries
-        run: |
-          mkdir -p bin
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/dcx-agent-linux-amd64 ./cmd/dcx-agent &
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/dcx-agent-linux-arm64 ./cmd/dcx-agent &
-          wait
-          gzip -c bin/dcx-agent-linux-amd64 > bin/dcx-agent-linux-amd64.gz
-          gzip -c bin/dcx-agent-linux-arm64 > bin/dcx-agent-linux-arm64.gz
+      - name: Build
+        run: make build
 
-      - name: Build CLI
-        run: CGO_ENABLED=0 go build -o bin/dcx ./cmd/dcx
-
-      - name: Test with coverage
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-          verbose: true
+      - name: Run unit tests
+        run: go test -race ./...

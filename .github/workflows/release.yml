@@ -8,109 +8,36 @@ permissions:
   contents: write
 
 jobs:
-  build-agent:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Build agent binaries (parallel)
-        run: |
-          mkdir -p bin
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
-            -o bin/dcx-agent-linux-amd64 ./cmd/dcx-agent &
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
-            -o bin/dcx-agent-linux-arm64 ./cmd/dcx-agent &
-          wait
-          gzip -c bin/dcx-agent-linux-amd64 > bin/dcx-agent-linux-amd64.gz
-          gzip -c bin/dcx-agent-linux-arm64 > bin/dcx-agent-linux-arm64.gz
-
-      - name: Upload agent artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-binaries
-          path: bin/dcx-agent-linux-*.gz
-
-  build-cli:
-    needs: build-agent
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            name: dcx-linux-amd64
-          - goos: linux
-            goarch: arm64
-            name: dcx-linux-arm64
-          - goos: darwin
-            goarch: amd64
-            name: dcx-darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            name: dcx-darwin-arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Download agent artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-binaries
-          path: bin/
-
-      - name: Build ${{ matrix.name }}
-        run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
-            -ldflags="-s -w -X github.com/griffithind/dcx/internal/version.Version=${{ steps.version.outputs.VERSION }}" \
-            -o ${{ matrix.name }} ./cmd/dcx
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
-
   release:
-    needs: build-cli
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          path: artifacts/
+          fetch-depth: 0
 
-      - name: Prepare release files
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Lint
         run: |
-          mkdir -p release
-          cp artifacts/dcx-*/dcx-* release/
-          cd release && sha256sum dcx-* > checksums.txt
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          make lint
+
+      - name: Test
+        run: make build && go test -race ./...
+
+      - name: Build release binaries
+        run: make release VERSION=${{ github.ref_name }}
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/dcx-linux-amd64
-            release/dcx-linux-arm64
-            release/dcx-darwin-amd64
-            release/dcx-darwin-arm64
-            release/checksums.txt
+            bin/dcx-linux-amd64
+            bin/dcx-linux-arm64
+            bin/dcx-darwin-amd64
+            bin/dcx-darwin-arm64
+            bin/checksums.txt
           generate_release_notes: true

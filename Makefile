@@ -1,4 +1,4 @@
-.PHONY: build build-agent build-linux build-all test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs
+.PHONY: build build-agent build-linux release release-agent test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs
 
 # Build variables
 BINARY_NAME=dcx
@@ -6,6 +6,7 @@ AGENT_NAME=dcx-agent
 BUILD_DIR=bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
+RELEASE_LDFLAGS=-ldflags "-s -w -trimpath -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
 
 # Number of CPU cores for parallel test execution (works on macOS and Linux)
 NCPU ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -33,16 +34,25 @@ build-linux: build-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 
-# Build all platform binaries for release
-build-release: build-agent
+# Build optimized release binaries for all platforms
+release: release-agent
 	@echo "Building release binaries..."
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
+	@echo "Generating checksums..."
+	cd $(BUILD_DIR) && sha256sum $(BINARY_NAME)-* > checksums.txt
 
-# Build all binaries
-build-all: build build-release
+# Build optimized agent binaries for release
+release-agent:
+	@mkdir -p $(BUILD_DIR)
+	@echo "Building agent binaries..."
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
+	@echo "Compressing agent binaries for embedding..."
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64.gz
 
 # Install to GOPATH/bin
 install: build
@@ -112,8 +122,7 @@ help:
 	@echo "  build              - Build dcx with embedded agent binaries (default)"
 	@echo "  build-agent        - Build agent binaries for Linux"
 	@echo "  build-linux        - Build Linux CLI binaries"
-	@echo "  build-release      - Build all platform binaries for release"
-	@echo "  build-all          - Build all binaries"
+	@echo "  release            - Build optimized release binaries for all platforms"
 	@echo "  install            - Install dcx to GOPATH/bin"
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
