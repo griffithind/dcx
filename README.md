@@ -1,20 +1,67 @@
-# dcx - Devcontainer Executor
+# dcx
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go 1.24+](https://img.shields.io/badge/Go-1.24+-00ADD8.svg)](https://go.dev/)
 
-> **Warning:** This project is new and under active development. APIs and features may change without notice.
+A lightweight, single-binary CLI for running [devcontainers](https://containers.dev/) with built-in SSH support for seamless editor integration.
 
-A lightweight, single-binary CLI for running devcontainers. Works offline, tracks state via Docker labels, and includes built-in SSH support—agent forwarding for Git operations and an SSH server for remote development with any editor.
+## Quick Start
+
+```bash
+# Install
+curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | sh
+
+# Navigate to a project with a devcontainer.json
+cd myproject
+
+# Start the devcontainer
+dcx up
+
+# Run commands
+dcx exec -- npm install
+dcx shell
+```
+
+## Editor Integration
+
+dcx includes a built-in SSH server that lets you connect with any editor that supports remote development.
+
+### Setup
+
+```bash
+dcx up --ssh
+```
+
+This starts your devcontainer and configures SSH access. Your project name becomes the SSH host, so you can connect with:
+
+```bash
+ssh myproject.dcx
+```
+
+### VSCode
+
+1. Install the [Remote - SSH](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh) extension
+2. `Cmd/Ctrl+Shift+P` → "Remote-SSH: Connect to Host"
+3. Select your project name
+
+### Zed
+
+1. `Cmd+Shift+P` → "projects: Open Remote"
+2. Connect via SSH to your project name
+
+### Cursor
+
+Works the same as VSCode with Remote SSH.
 
 ## Features
 
-- **Native Docker integration** - Uses Docker Engine API and docker compose CLI directly
-- **Offline-safe operations** - `stop`, `exec`, `shell`, and more commands work without network access
-- **Labels as database** - Container state tracked via Docker labels, no local state files required
-- **SSH agent forwarding** - Automatic forwarding of SSH agent to containers via TCP proxy
-- **SELinux support** - Automatic detection and :Z relabeling on enforcing systems
-- **Compose support** - Full support for docker compose-based devcontainers
-- **Self-updating** - Built-in `upgrade` command to update to latest version
+- **Single binary** - No runtime dependencies, just download and run
+- **Built-in SSH server** - Connect with VSCode, Zed, Cursor, or any SSH client
+- **SSH agent forwarding** - Use your local SSH keys for Git operations inside containers
+- **Docker Compose support** - Full support for compose-based devcontainers
+- **Devcontainer features** - Install tools and runtimes from the features ecosystem
+- **Command shortcuts** - Define project-specific commands in dcx.json
+- **Self-updating** - Run `dcx upgrade` to update to the latest version
 
 ## Installation
 
@@ -26,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | s
 
 This installs dcx to `~/.local/bin/dcx`.
 
-### Using Go Install
+### Using Go
 
 ```bash
 go install github.com/griffithind/dcx/cmd/dcx@latest
@@ -40,40 +87,45 @@ cd dcx
 make build
 ```
 
-## Quick Start
-
-```bash
-# In a directory with a devcontainer.json
-dcx up                    # Build and start the environment
-dcx status                # Check current state
-dcx exec -- npm install   # Run a command
-dcx shell                 # Open an interactive shell
-dcx stop                  # Stop containers (offline-safe)
-dcx down                  # Remove containers
-```
-
 ## Commands
 
-| Command | Offline-Safe | Description |
-|---------|--------------|-------------|
-| `dcx up` | Partial | Build/pull images and start environment |
-| `dcx build` | No | Build images without starting |
-| `dcx stop` | Yes | Stop running containers |
-| `dcx restart` | No | Stop and start containers |
-| `dcx exec` | Yes | Run command in container |
-| `dcx shell` | Yes | Interactive shell |
-| `dcx run` | Yes | Execute shortcuts from dcx.json |
-| `dcx down` | Yes | Stop and remove containers |
-| `dcx status` | Yes | Show environment state |
-| `dcx list` | Yes | List managed environments |
-| `dcx logs` | Yes | View container logs |
-| `dcx config` | Yes | Show resolved configuration |
-| `dcx clean` | Yes | Remove orphaned dcx images |
-| `dcx ssh` | Yes | SSH access to container |
-| `dcx doctor` | Partial | Check system requirements |
-| `dcx upgrade` | No | Update dcx to latest version |
+### Lifecycle
 
-## Global Flags
+| Command | Description |
+|---------|-------------|
+| `dcx up` | Build and start the devcontainer |
+| `dcx down` | Stop and remove containers |
+| `dcx stop` | Stop running containers |
+| `dcx restart` | Restart containers |
+
+### Execution
+
+| Command | Description |
+|---------|-------------|
+| `dcx exec -- <cmd>` | Run a command in the container |
+| `dcx shell` | Open an interactive shell |
+| `dcx run <shortcut>` | Run a command shortcut from dcx.json |
+
+### Information
+
+| Command | Description |
+|---------|-------------|
+| `dcx status` | Show devcontainer status |
+| `dcx list` | List all managed devcontainers |
+| `dcx logs` | View container logs |
+| `dcx config` | Show resolved configuration |
+
+### Utilities
+
+| Command | Description |
+|---------|-------------|
+| `dcx build` | Build images without starting |
+| `dcx clean` | Remove orphaned dcx images |
+| `dcx doctor` | Check system requirements |
+| `dcx upgrade` | Update dcx to latest version |
+| `dcx ssh` | SSH connection info |
+
+### Global Flags
 
 ```
 -w, --workspace   Workspace directory (default: current directory)
@@ -82,17 +134,64 @@ dcx down                  # Remove containers
 -q, --quiet       Minimal output (errors only)
     --json        Output as JSON
     --no-color    Disable colored output
-    --version     Show version
 ```
 
-## Upgrading
+## Configuration
+
+### dcx.json
+
+Create `.devcontainer/dcx.json` for project-specific settings:
+
+```json
+{
+  "name": "myproject",
+  "up": {
+    "ssh": true
+  },
+  "shortcuts": {
+    "test": "npm test",
+    "dev": { "prefix": "npm run", "passArgs": true },
+    "lint": { "command": "npm run lint", "description": "Run linter" }
+  }
+}
+```
+
+#### Options
+
+| Field | Description |
+|-------|-------------|
+| `name` | Project name, used as the SSH host |
+| `up.ssh` | Enable SSH server by default |
+| `up.noAgent` | Disable SSH agent forwarding |
+| `shortcuts` | Command aliases for `dcx run` |
+
+### Shortcuts
+
+Shortcuts can be defined as:
+
+- **Simple string**: `"test": "npm test"`
+- **Object with prefix**: `"dev": { "prefix": "npm run", "passArgs": true }` - runs `npm run <args>`
+- **Object with command**: `"lint": { "command": "npm run lint" }`
+
+Run shortcuts with:
 
 ```bash
-# Check current version
-dcx --version
+dcx run test
+dcx run dev start    # runs: npm run start
+dcx run --list       # show available shortcuts
+```
 
-# Upgrade to latest
-dcx upgrade
+## Shell Completions
+
+```bash
+# Bash
+dcx completion bash > /etc/bash_completion.d/dcx
+
+# Zsh
+dcx completion zsh > "${fpath[1]}/_dcx"
+
+# Fish
+dcx completion fish > ~/.config/fish/completions/dcx.fish
 ```
 
 ## Development
@@ -104,25 +203,22 @@ make build
 # Run tests
 make test
 
-# Build release binaries (with embedded Linux binaries for macOS)
+# Build release binaries
 make build-release
 
 # Run with verbose output
 ./bin/dcx -v up
 ```
 
-## Requirements
+### Requirements
 
-- Go 1.24+ (for building from source)
+- Go 1.24+
 - Docker Engine
 - docker compose CLI plugin
 
-## Documentation
+## Built With
 
-- [Quick Start Guide](docs/user/QUICKSTART.md)
-- [Command Reference](docs/user/COMMANDS.md)
-- [Configuration Guide](docs/user/CONFIGURATION.md)
-- [Design Overview](docs/design/DESIGN.md)
+Developed using [Claude Code](https://claude.ai/code) by Anthropic.
 
 ## License
 
