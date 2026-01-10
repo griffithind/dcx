@@ -23,13 +23,12 @@ func TestUpCommandFlags(t *testing.T) {
 	assert.NotNil(t, pullFlag, "pull flag should exist")
 	assert.Equal(t, "false", pullFlag.DefValue)
 
+	// Verify removed flags don't exist
 	noAgentFlag := flags.Lookup("no-agent")
-	assert.NotNil(t, noAgentFlag, "no-agent flag should exist")
-	assert.Equal(t, "false", noAgentFlag.DefValue)
+	assert.Nil(t, noAgentFlag, "no-agent flag should not exist (SSH agent is always enabled)")
 
 	sshFlag := flags.Lookup("ssh")
-	assert.NotNil(t, sshFlag, "ssh flag should exist")
-	assert.Equal(t, "false", sshFlag.DefValue)
+	assert.Nil(t, sshFlag, "ssh flag should not exist (SSH is always enabled)")
 }
 
 func TestUpCommandMetadata(t *testing.T) {
@@ -77,9 +76,9 @@ func TestStatusCommandMetadata(t *testing.T) {
 func TestExecCommandFlags(t *testing.T) {
 	flags := execCmd.Flags()
 
+	// Verify removed flag doesn't exist
 	noAgentFlag := flags.Lookup("no-agent")
-	assert.NotNil(t, noAgentFlag, "no-agent flag should exist")
-	assert.Equal(t, "false", noAgentFlag.DefValue)
+	assert.Nil(t, noAgentFlag, "no-agent flag should not exist (SSH agent is always enabled)")
 }
 
 func TestExecCommandMetadata(t *testing.T) {

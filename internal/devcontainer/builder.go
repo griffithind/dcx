@@ -59,7 +59,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	resolved.LocalRoot = opts.WorkspaceRoot
 	resolved.ID = ComputeID(opts.WorkspaceRoot)
 
-	// Use project name from dcx.json if provided, otherwise compute from config
+	// Use project name if provided, otherwise compute from config
 	if opts.ProjectName != "" {
 		resolved.Name = opts.ProjectName
 	} else {

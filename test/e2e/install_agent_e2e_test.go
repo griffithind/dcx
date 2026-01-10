@@ -57,7 +57,7 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	})
 
 	// Bring up the environment
-	helpers.RunDCXInDirSuccess(t, workspace, "up", "--no-agent")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Get the container name from status
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
@@ -109,7 +109,7 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	helpers.RunDCXInDirSuccess(t, workspace, "up", "--no-agent")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 	containerName := getContainerName(stdout)
@@ -154,7 +154,7 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	helpers.RunDCXInDirSuccess(t, workspace, "up", "--no-agent")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 	containerName := getContainerName(stdout)
@@ -195,7 +195,7 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	helpers.RunDCXInDirSuccess(t, workspace, "up", "--no-agent")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 	containerName := getContainerName(stdout)

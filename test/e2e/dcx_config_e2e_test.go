@@ -22,14 +22,7 @@ func TestDcxConfigProjectNameE2E(t *testing.T) {
 		"name": "testproject",
 		"dockerComposeFile": "docker-compose.yml",
 		"service": "app",
-		"workspaceFolder": "/workspace",
-		"customizations": {
-			"dcx": {
-				"up": {
-					"ssh": true
-				}
-			}
-		}
+		"workspaceFolder": "/workspace"
 	}`
 
 	dockerComposeYAML := `version: '3.8'
@@ -174,55 +167,6 @@ services:
 		_, stderr, err := helpers.RunDCXInDir(t, workspace, "run", "nonexistent")
 		require.Error(t, err)
 		assert.Contains(t, stderr, "unknown shortcut")
-	})
-}
-
-// TestDcxConfigUpOptionsE2E tests that up options from customizations.dcx are respected.
-func TestDcxConfigUpOptionsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "upoptionstest",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"customizations": {
-			"dcx": {
-				"up": {
-					"ssh": true
-				}
-			}
-		}
-	}`
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:latest
-    command: sleep infinity
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up - should enable SSH automatically from customizations.dcx
-	t.Run("up_respects_ssh_option", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "SSH configured:")
-	})
-
-	// Status should show SSH is configured
-	t.Run("status_shows_ssh_enabled", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "SSH:")
-		assert.Contains(t, stdout, "ssh upoptionstest.dcx")
 	})
 }
 

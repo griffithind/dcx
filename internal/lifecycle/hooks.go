@@ -65,12 +65,11 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	dockerClient    *container.DockerClient
-	containerID     string
-	workspacePath   string
-	cfg             *devcontainer.DevContainerConfig
-	workspaceID     string
-	sshAgentEnabled bool
+	dockerClient  *container.DockerClient
+	containerID   string
+	workspacePath string
+	cfg           *devcontainer.DevContainerConfig
+	workspaceID   string
 
 	// Feature hooks (optional, set via SetFeatureHooks)
 	featureOnCreateHooks      []features.FeatureHook
@@ -82,15 +81,13 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
-// sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *container.DockerClient, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
+func NewHookRunner(dockerClient *container.DockerClient, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	return &HookRunner{
-		dockerClient:    dockerClient,
-		containerID:     containerID,
-		workspacePath:   workspacePath,
-		cfg:             cfg,
-		workspaceID:     workspaceID,
-		sshAgentEnabled: sshAgentEnabled,
+		dockerClient:  dockerClient,
+		containerID:   containerID,
+		workspacePath: workspacePath,
+		cfg:           cfg,
+		workspaceID:   workspaceID,
 	}
 }
 
@@ -523,9 +520,9 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=/home/%s", user))
 	}
 
-	// Setup SSH agent forwarding if enabled
+	// Setup SSH agent forwarding when available
 	var agentProxy *agent.AgentProxy
-	if r.sshAgentEnabled && agent.IsAvailable() {
+	if agent.IsAvailable() {
 		// Get UID/GID for the container user (use containerID for both ID and name, docker accepts either)
 		uid, gid := agent.GetContainerUserIDs(r.containerID, user)
 

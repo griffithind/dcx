@@ -146,9 +146,14 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	})
 }
 
-// TestSSHAgentDisabledE2E tests that --no-agent flag disables SSH forwarding.
-func TestSSHAgentDisabledE2E(t *testing.T) {
+// TestSSHAgentAlwaysEnabledE2E verifies that SSH agent is always enabled when available.
+func TestSSHAgentAlwaysEnabledE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
+
+	// Skip if no SSH agent is available on the host
+	if os.Getenv("SSH_AUTH_SOCK") == "" {
+		t.Skip("SSH_AUTH_SOCK not set, skipping SSH agent test")
+	}
 
 	// Create a simple workspace
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
@@ -158,14 +163,16 @@ func TestSSHAgentDisabledE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Bring up with --no-agent (disables SSH agent directory mounting)
-	helpers.RunDCXInDirSuccess(t, workspace, "up", "--no-agent")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Verify SSH_AUTH_SOCK is NOT set inside the container with --no-agent on exec
-	t.Run("ssh_auth_sock_not_set_with_no_agent", func(t *testing.T) {
-		stdout, _, _ := helpers.RunDCXInDir(t, workspace, "exec", "--no-agent", "--", "printenv", "SSH_AUTH_SOCK")
-		// Should be empty or command should fail (no such variable)
-		assert.Empty(t, strings.TrimSpace(stdout), "SSH_AUTH_SOCK should not be set when --no-agent is used")
+	// Verify SSH_AUTH_SOCK is always set inside the container when host has SSH agent
+	t.Run("ssh_auth_sock_always_set", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SSH_AUTH_SOCK")
+		require.NoError(t, err)
+		sockPath := strings.TrimSpace(stdout)
+		assert.True(t,
+			strings.HasPrefix(sockPath, "/tmp/ssh-agent-"),
+			"SSH_AUTH_SOCK should always be set when host has SSH agent, got: %s", sockPath)
 	})
 }
 
@@ -252,42 +259,6 @@ func TestSSHAgentProxyCleanupE2E(t *testing.T) {
 	})
 }
 
-// TestSSHAgentExecNoAgentFlag tests the --no-agent flag specifically on exec.
-func TestSSHAgentExecNoAgentFlag(t *testing.T) {
-	helpers.RequireDockerAvailable(t)
-
-	// Skip if no SSH agent is available on the host
-	if os.Getenv("SSH_AUTH_SOCK") == "" {
-		t.Skip("SSH_AUTH_SOCK not set, skipping SSH agent test")
-	}
-
-	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up normally (with SSH agent enabled)
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify exec without --no-agent has SSH_AUTH_SOCK
-	t.Run("exec_with_agent", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SSH_AUTH_SOCK")
-		require.NoError(t, err)
-		sockPath := strings.TrimSpace(stdout)
-		assert.True(t,
-			strings.HasPrefix(sockPath, "/tmp/ssh-agent-"),
-			"SSH_AUTH_SOCK should be set, got: %s", sockPath)
-	})
-
-	// Verify exec with --no-agent does NOT have SSH_AUTH_SOCK
-	t.Run("exec_without_agent", func(t *testing.T) {
-		stdout, _, _ := helpers.RunDCXInDir(t, workspace, "exec", "--no-agent", "--", "printenv", "SSH_AUTH_SOCK")
-		assert.Empty(t, strings.TrimSpace(stdout), "SSH_AUTH_SOCK should not be set with --no-agent on exec")
-	})
-}
 
 // TestSSHAgentConcurrentExecE2E tests that concurrent execs don't interfere with each other.
 func TestSSHAgentConcurrentExecE2E(t *testing.T) {

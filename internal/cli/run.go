@@ -9,10 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	runNoAgent bool
-	runList    bool
-)
+var runList bool
 
 var runCmd = &cobra.Command{
 	Use:   "run [shortcut] [args...]",
@@ -48,7 +45,6 @@ Use --list to see all available shortcuts.`,
 }
 
 func init() {
-	runCmd.Flags().BoolVar(&runNoAgent, "no-agent", false, "disable SSH agent forwarding")
 	runCmd.Flags().BoolVarP(&runList, "list", "l", false, "list available shortcuts")
 	// Stop parsing flags after the shortcut name so args like --version pass through
 	runCmd.Flags().SetInterspersed(false)
@@ -131,7 +127,6 @@ func executeInContainer(execArgs []string) error {
 	// Execute command using ExecBuilder
 	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
 	return builder.Execute(cliCtx.Ctx, ExecFlags{
-		Command:        execArgs,
-		EnableSSHAgent: !runNoAgent,
+		Command: execArgs,
 	})
 }

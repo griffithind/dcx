@@ -30,9 +30,9 @@ func TestSSHServerE2E(t *testing.T) {
 	// Get the workspace ID for this workspace (used in SSH hostname)
 	var workspaceID string
 
-	// Test dcx up --ssh adds SSH config
-	t.Run("up_with_ssh_flag", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	// Test dcx up adds SSH config (SSH is always enabled)
+	t.Run("up_configures_ssh", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 		assert.Contains(t, stdout, "SSH configured")
 		assert.Contains(t, stdout, ".dcx")
 
@@ -159,9 +159,9 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace2, "down")
 	})
 
-	// Start both with SSH
-	stdout1 := helpers.RunDCXInDirSuccess(t, workspace1, "up", "--ssh")
-	stdout2 := helpers.RunDCXInDirSuccess(t, workspace2, "up", "--ssh")
+	// Start both containers (SSH is always configured)
+	stdout1 := helpers.RunDCXInDirSuccess(t, workspace1, "up")
+	stdout2 := helpers.RunDCXInDirSuccess(t, workspace2, "up")
 
 	// Extract hostnames
 	hostname1 := extractSSHHostname(t, stdout1)
@@ -184,8 +184,8 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	})
 }
 
-// TestSSHServerWithoutFlagE2E tests that SSH is not configured without --ssh flag.
-func TestSSHServerWithoutFlagE2E(t *testing.T) {
+// TestSSHServerAlwaysEnabledE2E verifies that SSH is always configured when running dcx up.
+func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
@@ -195,9 +195,9 @@ func TestSSHServerWithoutFlagE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Start without --ssh flag
+	// SSH is always configured
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.NotContains(t, stdout, "SSH configured", "SSH should not be configured without --ssh flag")
+	assert.Contains(t, stdout, "SSH configured", "SSH should always be configured with dcx up")
 }
 
 // TestSSHFromDifferentDirectoryE2E tests that SSH works from any directory.
@@ -220,7 +220,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	})
 
 	// Start container with SSH
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	hostname := extractSSHHostname(t, stdout)
 
 	// Get the actual container name from status
@@ -316,7 +316,7 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 	})
 
 	// Start with SSH enabled
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	hostname := extractSSHHostname(t, stdout)
 
 	// Get container name for direct docker exec checks
@@ -385,7 +385,7 @@ func TestSSHCommandHandlingE2E(t *testing.T) {
 	})
 
 	// Start with SSH enabled
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up", "--ssh")
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	hostname := extractSSHHostname(t, stdout)
 
 	// Test simple echo

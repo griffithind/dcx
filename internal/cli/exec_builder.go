@@ -18,9 +18,6 @@ type ExecFlags struct {
 	// Command is the command and arguments to run.
 	Command []string
 
-	// EnableSSHAgent enables SSH agent forwarding if available.
-	EnableSSHAgent bool
-
 	// User overrides the container user.
 	User string
 
@@ -107,14 +104,14 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 	return args, user
 }
 
-// Execute runs a command in the container with optional SSH agent support.
+// Execute runs a command in the container with SSH agent support.
 // This handles the full execution lifecycle including SSH proxy setup and cleanup.
 func (b *ExecBuilder) Execute(ctx context.Context, opts ExecFlags) error {
 	dockerArgs, user := b.BuildArgs(opts)
 
-	// Setup SSH agent forwarding if enabled
+	// Setup SSH agent forwarding when available
 	var agentProxy *agent.AgentProxy
-	if opts.EnableSSHAgent && agent.IsAvailable() {
+	if agent.IsAvailable() {
 		uid, gid := agent.GetContainerUserIDs(b.containerInfo.Name, user)
 		var err error
 		agentProxy, err = agent.NewAgentProxy(b.containerInfo.ID, b.containerInfo.Name, uid, gid)
@@ -161,9 +158,9 @@ func (b *ExecBuilder) Execute(ctx context.Context, opts ExecFlags) error {
 func (b *ExecBuilder) ExecuteWithOutput(ctx context.Context, opts ExecFlags) ([]byte, error) {
 	dockerArgs, user := b.BuildArgs(opts)
 
-	// Setup SSH agent forwarding if enabled
+	// Setup SSH agent forwarding when available
 	var agentProxy *agent.AgentProxy
-	if opts.EnableSSHAgent && agent.IsAvailable() {
+	if agent.IsAvailable() {
 		uid, gid := agent.GetContainerUserIDs(b.containerInfo.Name, user)
 		var err error
 		agentProxy, err = agent.NewAgentProxy(b.containerInfo.ID, b.containerInfo.Name, uid, gid)
@@ -196,16 +193,15 @@ func (b *ExecBuilder) ExecuteWithOutput(ctx context.Context, opts ExecFlags) ([]
 }
 
 // Shell opens an interactive shell in the container.
-func (b *ExecBuilder) Shell(ctx context.Context, shell string, enableSSHAgent bool) error {
+func (b *ExecBuilder) Shell(ctx context.Context, shell string) error {
 	if shell == "" {
 		shell = "/bin/bash"
 	}
 
 	// Use login shell for proper environment setup
 	return b.Execute(ctx, ExecFlags{
-		Command:        []string{shell, "-l"},
-		EnableSSHAgent: enableSSHAgent,
-		TTY:            boolPtr(true),
+		Command: []string{shell, "-l"},
+		TTY:     boolPtr(true),
 	})
 }
 

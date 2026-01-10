@@ -231,12 +231,11 @@ func TestExecFlags(t *testing.T) {
 		{
 			name: "with all options",
 			flags: ExecFlags{
-				Command:        []string{"ls", "-la"},
-				EnableSSHAgent: true,
-				User:           "vscode",
-				WorkDir:        "/workspace",
-				Env:            []string{"FOO=bar"},
-				TTY:            boolPtr(true),
+				Command: []string{"ls", "-la"},
+				User:    "vscode",
+				WorkDir: "/workspace",
+				Env:     []string{"FOO=bar"},
+				TTY:     boolPtr(true),
 			},
 			wantLen: 2,
 		},

@@ -15,7 +15,7 @@ make lint           # Run golangci-lint
 Run a single test:
 ```bash
 go test -v -run TestShouldUpdateRemoteUserUID ./internal/build/...
-go test -v -tags=e2e -run TestSingleImageBasedE2E ./test/e2e/...
+make build && go test -v -tags=e2e -run TestSingleImageBasedE2E ./test/e2e/...
 ```
 
 ## Architecture Overview
@@ -40,7 +40,7 @@ internal/
   lifecycle/       → Hook execution (onCreateCommand, postStartCommand, etc.)
   ssh/             → SSH agent detection, container deployment, host config
   compose/         → Docker Compose override generation
-  shortcuts/       → Shortcut resolution from customizations.dcx
+  shortcuts/       → Shortcut resolution from devcontainer.json customizations
 ```
 
 ### Key Data Flow
@@ -84,7 +84,7 @@ The `dcx-agent` binary provides:
 - `ssh-server`: SSH server in stdio mode for editor connections
 - `ssh-agent-proxy`: TCP↔Unix socket proxy for SSH agent forwarding
 
-When `dcx up --ssh` is used:
+SSH is always enabled with `dcx up`:
 1. Agent binary deployed to container
 2. SSH server configured with container user/shell
 3. Host SSH config updated for `projectname.dcx` access
@@ -99,10 +99,6 @@ DCX-specific settings are stored in `customizations.dcx` within devcontainer.jso
   "image": "ubuntu",
   "customizations": {
     "dcx": {
-      "up": {
-        "ssh": true,
-        "noAgent": false
-      },
       "shortcuts": {
         "r": {"prefix": "rails", "passArgs": true},
         "rw": "bin/jobs --skip-recurring"

@@ -98,45 +98,36 @@ func TestIdentifiers(t *testing.T) {
 
 func TestUpOptions(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    UpOptions
-		wantSSH bool
+		name        string
+		opts        UpOptions
+		wantRebuild bool
 	}{
 		{
-			name:    "default options",
-			opts:    UpOptions{},
-			wantSSH: false,
-		},
-		{
-			name: "with SSH enabled",
-			opts: UpOptions{
-				EnableSSH: true,
-			},
-			wantSSH: true,
+			name:        "default options",
+			opts:        UpOptions{},
+			wantRebuild: false,
 		},
 		{
 			name: "with rebuild",
 			opts: UpOptions{
 				Rebuild: true,
 			},
-			wantSSH: false,
+			wantRebuild: true,
 		},
 		{
 			name: "with all flags",
 			opts: UpOptions{
-				Rebuild:         true,
-				Recreate:        true,
-				Pull:            true,
-				SSHAgentEnabled: true,
-				EnableSSH:       true,
+				Rebuild:  true,
+				Recreate: true,
+				Pull:     true,
 			},
-			wantSSH: true,
+			wantRebuild: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.wantSSH, tt.opts.EnableSSH)
+			assert.Equal(t, tt.wantRebuild, tt.opts.Rebuild)
 		})
 	}
 }

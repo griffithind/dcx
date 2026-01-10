@@ -84,7 +84,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if containerInfo != nil && host.HasSSHConfig(containerInfo.Name) {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
 	} else if currentState != state.StateAbsent {
-		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (use 'dcx up --ssh' to enable)")))
+		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (run 'dcx up' to configure)")))
 	}
 
 	// Show shortcuts count

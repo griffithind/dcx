@@ -105,12 +105,6 @@ type UpOptions struct {
 
 	// Pull forces pulling base images
 	Pull bool
-
-	// SSHAgentEnabled enables SSH agent forwarding during lifecycle hooks
-	SSHAgentEnabled bool
-
-	// EnableSSH enables SSH server access to the container
-	EnableSSH bool
 }
 
 // PlanOptions configures the Plan operation.
@@ -262,8 +256,8 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}
 
-	// Pre-deploy agent binary before lifecycle hooks if SSH agent is enabled
-	if opts.SSHAgentEnabled && containerInfo != nil {
+	// Pre-deploy agent binary before lifecycle hooks
+	if containerInfo != nil {
 		ui.Println("Installing dcx agent...")
 		if err := sshcontainer.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
@@ -271,15 +265,13 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Run lifecycle hooks
-	if err := s.runLifecycleHooks(ctx, resolved, containerInfo, isNewEnvironment, opts.SSHAgentEnabled); err != nil {
+	if err := s.runLifecycleHooks(ctx, resolved, containerInfo, isNewEnvironment); err != nil {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
-	// Setup SSH server access if requested
-	if opts.EnableSSH {
-		if err := s.setupSSHAccess(ctx, resolved, containerInfo); err != nil {
-			ui.Warning("Failed to setup SSH access: %v", err)
-		}
+	// Setup SSH server access
+	if err := s.setupSSHAccess(ctx, resolved, containerInfo); err != nil {
+		ui.Warning("Failed to setup SSH access: %v", err)
 	}
 
 	return nil
@@ -347,7 +339,7 @@ func (s *DevContainerService) start(ctx context.Context, resolved *devcontainer.
 }
 
 // runLifecycleHooks runs appropriate lifecycle hooks.
-func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo, isNew bool, sshAgentEnabled bool) error {
+func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo, isNew bool) error {
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
 	}
@@ -358,7 +350,6 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 		s.workspacePath,
 		resolved.RawConfig,
 		resolved.ID,
-		sshAgentEnabled,
 	)
 
 	// Use pre-resolved features

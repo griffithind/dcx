@@ -29,10 +29,10 @@ dcx includes a built-in SSH server that lets you connect with any editor that su
 ### Setup
 
 ```bash
-dcx up --ssh
+dcx up
 ```
 
-This starts your devcontainer and configures SSH access. Your project name becomes the SSH host, so you can connect with:
+This starts your devcontainer and automatically configures SSH access. Your project name becomes the SSH host, so you can connect with:
 
 ```bash
 ssh myproject.dcx
@@ -56,8 +56,8 @@ Works the same as VSCode with Remote SSH.
 ## Features
 
 - **Single binary** - No runtime dependencies, just download and run
-- **Built-in SSH server** - Connect with VSCode, Zed, Cursor, or any SSH client
-- **SSH agent forwarding** - Use your local SSH keys for Git operations inside containers
+- **Built-in SSH server** - Automatically configured, connect with VSCode, Zed, Cursor, or any SSH client
+- **SSH agent forwarding** - Your local SSH keys are automatically available for Git operations inside containers
 - **Docker Compose support** - Full support for compose-based devcontainers
 - **Devcontainer features** - Install tools and runtimes from the features ecosystem
 - **Command shortcuts** - Define project-specific commands in devcontainer.json
@@ -104,7 +104,7 @@ make build
 |---------|-------------|
 | `dcx exec -- <cmd>` | Run a command in the container |
 | `dcx shell` | Open an interactive shell |
-| `dcx run <shortcut>` | Run a command shortcut from customizations.dcx |
+| `dcx run <shortcut>` | Run a command shortcut defined in devcontainer.json |
 
 ### Information
 
@@ -148,9 +148,6 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   "image": "node:20",
   "customizations": {
     "dcx": {
-      "up": {
-        "ssh": true
-      },
       "shortcuts": {
         "test": "npm test",
         "dev": { "prefix": "npm run", "passArgs": true },
@@ -177,8 +174,6 @@ The resolved name is used for:
 
 | Field | Description |
 |-------|-------------|
-| `customizations.dcx.up.ssh` | Enable SSH server by default |
-| `customizations.dcx.up.noAgent` | Disable SSH agent forwarding |
 | `customizations.dcx.shortcuts` | Command aliases for `dcx run` |
 
 ### Shortcuts

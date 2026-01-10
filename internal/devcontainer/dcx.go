@@ -8,20 +8,8 @@ import (
 // DcxCustomizations represents DCX-specific settings from customizations.dcx
 // in devcontainer.json. This replaces the old separate dcx.json file.
 type DcxCustomizations struct {
-	// Up contains default options for the 'up' command.
-	Up DcxUpOptions `json:"up,omitempty"`
-
 	// Shortcuts defines command aliases for the 'run' command.
 	Shortcuts map[string]Shortcut `json:"shortcuts,omitempty"`
-}
-
-// DcxUpOptions contains default options for the 'up' command.
-type DcxUpOptions struct {
-	// SSH enables SSH server access when true.
-	SSH bool `json:"ssh,omitempty"`
-
-	// NoAgent disables SSH agent forwarding when true.
-	NoAgent bool `json:"noAgent,omitempty"`
 }
 
 // Shortcut represents a command shortcut configuration.
