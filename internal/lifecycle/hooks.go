@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
@@ -65,11 +65,11 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	dockerClient     *docker.Client
+	dockerClient    *container.DockerClient
 	containerID     string
 	workspacePath   string
 	cfg             *devcontainer.DevContainerConfig
-	workspaceID          string
+	workspaceID     string
 	sshAgentEnabled bool
 
 	// Feature hooks (optional, set via SetFeatureHooks)
@@ -83,13 +83,13 @@ type HookRunner struct {
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
 // sshAgentEnabled controls whether SSH agent forwarding is used during hook execution.
-func NewHookRunner(dockerClient *docker.Client, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
+func NewHookRunner(dockerClient *container.DockerClient, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string, sshAgentEnabled bool) *HookRunner {
 	return &HookRunner{
 		dockerClient:    dockerClient,
 		containerID:     containerID,
 		workspacePath:   workspacePath,
 		cfg:             cfg,
-		workspaceID:          workspaceID,
+		workspaceID:     workspaceID,
 		sshAgentEnabled: sshAgentEnabled,
 	}
 }
@@ -508,12 +508,13 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		execCmd = cmdSpec.Args
 	}
 
-	execConfig := docker.ExecConfig{
-		Cmd:        execCmd,
-		WorkingDir: workspaceFolder,
-		User:       user,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
+	execConfig := container.ExecConfig{
+		ContainerID: r.containerID,
+		Cmd:         execCmd,
+		WorkingDir:  workspaceFolder,
+		User:        user,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
 	}
 
 	// Set USER environment variable if we have a user
@@ -543,7 +544,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		}
 	}()
 
-	exitCode, err := r.dockerClient.Exec(ctx, r.containerID, execConfig)
+	exitCode, err := container.Exec(ctx, r.dockerClient.APIClient(), execConfig)
 	if err != nil {
 		return err
 	}

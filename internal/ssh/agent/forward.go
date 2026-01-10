@@ -16,6 +16,8 @@ import (
 
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/griffithind/dcx/internal/common"
+	"github.com/griffithind/dcx/internal/container"
 )
 
 // AgentProxy manages SSH agent forwarding between host and container.
@@ -28,11 +30,12 @@ type AgentProxy struct {
 	gid           int
 
 	// Host-side
-	listener  net.Listener
-	port      int
-	done      chan struct{}
-	wg        sync.WaitGroup
-	agentSock string
+	listener     net.Listener
+	port         int
+	done         chan struct{}
+	wg           sync.WaitGroup
+	agentSock    string
+	dockerClient *client.Client
 
 	// Container-side
 	socketPath string
@@ -51,6 +54,12 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 		return nil, fmt.Errorf("SSH agent not accessible: %w", err)
 	}
 
+	// Create Docker client for SDK-based exec operations
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
 	// Generate unique ID for this proxy instance to avoid conflicts with concurrent execs
 	// Using process ID and timestamp ensures uniqueness
 	uniqueID := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -61,6 +70,7 @@ func NewAgentProxy(containerID, containerName string, uid, gid int) (*AgentProxy
 		uid:           uid,
 		gid:           gid,
 		agentSock:     agentSock,
+		dockerClient:  dockerClient,
 		done:          make(chan struct{}),
 		socketPath:    fmt.Sprintf("/tmp/ssh-agent-%d-%s.sock", uid, uniqueID),
 	}, nil
@@ -73,7 +83,7 @@ func (p *AgentProxy) Start() (string, error) {
 	// On native Linux, bind to docker bridge to accept connections from containers.
 	// On Docker Desktop (Mac/Windows), localhost works because of the VM networking.
 	bindAddr := "127.0.0.1:0"
-	if runtime.GOOS == "linux" && !IsDockerDesktop() {
+	if runtime.GOOS == "linux" && !common.IsDockerDesktop() {
 		// Use docker0 bridge IP (host-gateway) for native Linux
 		bindAddr = getDockerBridgeIP() + ":0"
 	}
@@ -118,14 +128,21 @@ func (p *AgentProxy) Stop() {
 		p.listener.Close()
 	}
 
+	ctx := context.Background()
+
 	// Kill client process(es) in container using pkill with pattern matching
 	// This is more reliable than capturing PIDs as it handles multiple processes
 	// Run as root since the client was started as root
 	pkillPattern := fmt.Sprintf("ssh-agent-proxy client.*%s", p.socketPath)
-	exec.Command("docker", "exec", "--user", "root", p.containerName, "pkill", "-f", pkillPattern).Run()
+	container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"pkill", "-f", pkillPattern}, "root")
 
 	// Clean up socket and ready file in container
-	exec.Command("docker", "exec", p.containerName, "rm", "-f", p.socketPath, p.socketPath+".ready").Run()
+	container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"rm", "-f", p.socketPath, p.socketPath + ".ready"}, "")
+
+	// Close Docker client
+	if p.dockerClient != nil {
+		p.dockerClient.Close()
+	}
 
 	// Wait for goroutines
 	p.wg.Wait()
@@ -199,21 +216,22 @@ func (p *AgentProxy) startClient() error {
 	// On Docker Desktop, use host.docker.internal (built-in).
 	// On native Linux, use the bridge gateway IP directly.
 	var hostAddr string
-	if runtime.GOOS == "linux" && !IsDockerDesktop() {
+	if runtime.GOOS == "linux" && !common.IsDockerDesktop() {
 		hostAddr = fmt.Sprintf("%s:%d", getDockerBridgeIP(), p.port)
 	} else {
 		hostAddr = fmt.Sprintf("host.docker.internal:%d", p.port)
 	}
-	startCmd := exec.CommandContext(ctx, "docker", "exec", "-d", "--user", "root",
-		p.containerName,
+
+	// Use SDK-based detached exec instead of CLI
+	cmd := []string{
 		binaryPath, "ssh-agent-proxy", "client",
 		"--host", hostAddr,
 		"--socket", p.socketPath,
 		"--uid", strconv.Itoa(p.uid),
 		"--gid", strconv.Itoa(p.gid),
-	)
+	}
 
-	if err := startCmd.Run(); err != nil {
+	if err := container.ExecDetached(ctx, p.dockerClient, p.containerID, cmd, "root"); err != nil {
 		return fmt.Errorf("failed to start client: %w", err)
 	}
 
@@ -222,11 +240,13 @@ func (p *AgentProxy) startClient() error {
 
 // waitForSocket waits for the client socket to be ready.
 func (p *AgentProxy) waitForSocket() error {
+	ctx := context.Background()
 	readyFile := p.socketPath + ".ready"
 
 	for i := 0; i < 50; i++ { // Wait up to 5 seconds
-		checkCmd := exec.Command("docker", "exec", p.containerName, "test", "-f", readyFile)
-		if err := checkCmd.Run(); err == nil {
+		// Use SDK-based exec to check if ready file exists
+		exitCode, err := container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"test", "-f", readyFile}, "")
+		if err == nil && exitCode == 0 {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -242,29 +262,36 @@ func (p *AgentProxy) SocketPath() string {
 
 // GetContainerUserIDs gets the UID and GID for a user in a container.
 // If user is empty, returns default IDs (1000, 1000).
-func GetContainerUserIDs(containerName, user string) (int, int) {
+func GetContainerUserIDs(containerID, user string) (int, int) {
 	if user == "" {
 		return 1000, 1000
 	}
 
-	// Run id command to get UID and GID
 	ctx := context.Background()
-	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-u", user)
-	uidOut, err := uidCmd.Output()
+
+	// Create Docker client for SDK-based exec
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return 1000, 1000
 	}
+	defer dockerClient.Close()
 
-	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-g", user)
-	gidOut, err := gidCmd.Output()
-	if err != nil {
+	// Run id command to get UID
+	uidOut, exitCode, err := container.ExecOutput(ctx, dockerClient, containerID, []string{"id", "-u", user}, "")
+	if err != nil || exitCode != 0 {
+		return 1000, 1000
+	}
+
+	// Run id command to get GID
+	gidOut, exitCode, err := container.ExecOutput(ctx, dockerClient, containerID, []string{"id", "-g", user}, "")
+	if err != nil || exitCode != 0 {
 		return 1000, 1000
 	}
 
 	uid := 1000
 	gid := 1000
-	fmt.Sscanf(string(uidOut), "%d", &uid)
-	fmt.Sscanf(string(gidOut), "%d", &gid)
+	fmt.Sscanf(strings.TrimSpace(uidOut), "%d", &uid)
+	fmt.Sscanf(strings.TrimSpace(gidOut), "%d", &gid)
 
 	return uid, gid
 }
@@ -325,12 +352,12 @@ func getDockerBridgeIP() string {
 	}
 	defer cli.Close()
 
-	network, err := cli.NetworkInspect(ctx, "bridge", network.InspectOptions{})
+	nw, err := cli.NetworkInspect(ctx, "bridge", network.InspectOptions{})
 	if err != nil {
 		return "127.0.0.1"
 	}
 
-	for _, config := range network.IPAM.Config {
+	for _, config := range nw.IPAM.Config {
 		if config.Gateway != "" {
 			return config.Gateway
 		}

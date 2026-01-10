@@ -18,8 +18,8 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/parse"
-	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -155,8 +155,12 @@ func (c *DockerClient) InspectContainer(ctx context.Context, containerID string)
 var _ state.ContainerClient = (*DockerClient)(nil)
 
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
+// Deprecated: Use common.SanitizeProjectName instead.
+// This function is kept for backward compatibility and will be removed.
 func SanitizeProjectName(name string) string {
+	// Delegate to the canonical implementation in the common package
+	// to avoid code duplication while maintaining backward compatibility.
+	// This will be removed when all consumers are updated.
 	if name == "" {
 		return ""
 	}
@@ -399,7 +403,7 @@ func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainer
 	}
 
 	if opts.SSHMountPath != "" {
-		if agent.IsDockerDesktop() {
+		if common.IsDockerDesktop() {
 			hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s:ro", opts.SSHMountPath, opts.SSHMountPath))
 		} else {
 			hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:/ssh-agent:ro", opts.SSHMountPath))
@@ -497,7 +501,7 @@ func (c *DockerClient) BuildImage(ctx context.Context, opts ImageBuildOptions) e
 		args = append(args, "--cache-from", cache)
 	}
 
-	if agent.IsAvailable() {
+	if common.IsSSHAgentAvailable() {
 		args = append(args, "--ssh", "default")
 	}
 
@@ -560,7 +564,7 @@ func BuildImageCLI(ctx context.Context, opts ImageBuildOptions) error {
 		args = append(args, "--cache-from", cache)
 	}
 
-	if agent.IsAvailable() {
+	if common.IsSSHAgentAvailable() {
 		args = append(args, "--ssh", "default")
 	}
 
@@ -621,4 +625,144 @@ func parseMountSpec(spec string) string {
 		result += ":" + strings.Join(opts, ",")
 	}
 	return result
+}
+
+// CleanupResult contains statistics about cleaned up resources.
+type CleanupResult struct {
+	ImagesRemoved  int
+	SpaceReclaimed int64
+}
+
+// CleanupDerivedImages removes derived images created by dcx.
+// If workspaceID is provided, only images for that environment are removed.
+// If keepCurrent is true, the current derived image (matching configHash) is preserved.
+func (c *DockerClient) CleanupDerivedImages(ctx context.Context, workspaceID, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
+	result := &CleanupResult{}
+
+	images, err := c.cli.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			// Derived images follow the pattern: dcx-derived/<workspaceID>:<hash>
+			if !strings.HasPrefix(tag, "dcx-derived/") {
+				continue
+			}
+
+			// Parse the tag
+			parts := strings.SplitN(strings.TrimPrefix(tag, "dcx-derived/"), ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+
+			imageWorkspaceID := parts[0]
+			imageHash := parts[1]
+
+			// If workspaceID filter is provided, only match that environment
+			if workspaceID != "" && imageWorkspaceID != workspaceID {
+				continue
+			}
+
+			// If keepCurrent is true and this is the current image, skip it
+			if keepCurrent && currentConfigHash != "" && imageHash == currentConfigHash {
+				continue
+			}
+
+			// Remove the image
+			_, err := c.cli.ImageRemove(ctx, img.ID, image.RemoveOptions{
+				Force:         false,
+				PruneChildren: true,
+			})
+			if err != nil {
+				// Log but continue - image might be in use
+				continue
+			}
+
+			result.ImagesRemoved++
+			result.SpaceReclaimed += img.Size
+		}
+	}
+
+	return result, nil
+}
+
+// CleanupAllDerivedImages removes all derived images created by dcx.
+func (c *DockerClient) CleanupAllDerivedImages(ctx context.Context) (*CleanupResult, error) {
+	return c.CleanupDerivedImages(ctx, "", "", false)
+}
+
+// CleanupDanglingImages removes dangling (untagged) images.
+func (c *DockerClient) CleanupDanglingImages(ctx context.Context) (*CleanupResult, error) {
+	result := &CleanupResult{}
+
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("dangling", "true")
+
+	images, err := c.cli.ImageList(ctx, image.ListOptions{
+		All:     true,
+		Filters: filterArgs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list dangling images: %w", err)
+	}
+
+	for _, img := range images {
+		_, err := c.cli.ImageRemove(ctx, img.ID, image.RemoveOptions{
+			Force:         false,
+			PruneChildren: true,
+		})
+		if err != nil {
+			continue
+		}
+
+		result.ImagesRemoved++
+		result.SpaceReclaimed += img.Size
+	}
+
+	return result, nil
+}
+
+// GetDerivedImageStats returns statistics about derived images.
+func (c *DockerClient) GetDerivedImageStats(ctx context.Context) (count int, totalSize int64, err error) {
+	images, err := c.cli.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to list images: %w", err)
+	}
+
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if strings.HasPrefix(tag, "dcx-derived/") {
+				count++
+				totalSize += img.Size
+				break
+			}
+		}
+	}
+
+	return count, totalSize, nil
+}
+
+// LogsOptions contains options for retrieving container logs.
+type LogsOptions struct {
+	Follow     bool
+	Timestamps bool
+	Tail       string // Number of lines or "all"
+}
+
+// GetLogs retrieves logs from a container.
+func (c *DockerClient) GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     opts.Follow,
+		Timestamps: opts.Timestamps,
+	}
+
+	if opts.Tail != "" && opts.Tail != "all" {
+		options.Tail = opts.Tail
+	}
+
+	return c.cli.ContainerLogs(ctx, containerID, options)
 }

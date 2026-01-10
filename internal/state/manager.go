@@ -2,8 +2,9 @@ package state
 
 import (
 	"context"
-	"strings"
 	"time"
+
+	"github.com/griffithind/dcx/internal/common"
 )
 
 // ContainerClient is the interface for container operations needed by the state manager.
@@ -137,7 +138,7 @@ func (m *StateManager) GetStateWithHashCheck(ctx context.Context, workspaceID, c
 func (m *StateManager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (ContainerState, *ContainerInfo, error) {
 	// First try project name if set
 	if projectName != "" {
-		sanitized := sanitizeProjectName(projectName)
+		sanitized := common.SanitizeProjectName(projectName)
 		containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
 			LabelWorkspaceID: sanitized,
 		})
@@ -183,27 +184,6 @@ func (m *StateManager) processContainers(containers []ContainerSummary) (Contain
 	return StateCreated, info, nil
 }
 
-// sanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// This is a local copy to avoid import cycles. The canonical version is in devcontainer.SanitizeProjectName.
-func sanitizeProjectName(name string) string {
-	if name == "" {
-		return ""
-	}
-	name = strings.ToLower(name)
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			result.WriteRune(r)
-		} else if r == ' ' {
-			result.WriteRune('_')
-		}
-	}
-	sanitized := result.String()
-	if len(sanitized) > 0 && (sanitized[0] >= '0' && sanitized[0] <= '9') {
-		sanitized = "dcx-" + sanitized
-	}
-	return sanitized
-}
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
 func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectName, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {

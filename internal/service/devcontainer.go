@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/docker"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	sshcontainer "github.com/griffithind/dcx/internal/ssh/container"
@@ -20,14 +20,13 @@ import (
 // DevContainerService provides high-level operations for devcontainer environments.
 // This replaces the previous EnvironmentService in internal/orchestrator.
 type DevContainerService struct {
-	logger          *slog.Logger
-	dockerClient    *container.DockerClient
-	legacyDocker    *docker.Client // For lifecycle hooks (until migration complete)
-	stateManager    *state.StateManager
-	builder         *devcontainer.Builder
-	workspacePath   string
-	configPath      string
-	verbose         bool
+	logger        *slog.Logger
+	dockerClient  *container.DockerClient
+	stateManager  *state.StateManager
+	builder       *devcontainer.Builder
+	workspacePath string
+	configPath    string
+	verbose       bool
 
 	// Cached resolved devcontainer from last operation
 	lastResolved *devcontainer.ResolvedDevContainer
@@ -35,13 +34,9 @@ type DevContainerService struct {
 
 // NewDevContainerService creates a new devcontainer service.
 func NewDevContainerService(dockerClient *container.DockerClient, workspacePath, configPath string, verbose bool) *DevContainerService {
-	// Create a legacy docker client for lifecycle hooks
-	legacyDocker, _ := docker.NewClient()
-
 	return &DevContainerService{
 		logger:        slog.Default(),
 		dockerClient:  dockerClient,
-		legacyDocker:  legacyDocker,
 		stateManager:  state.NewStateManager(dockerClient),
 		builder:       devcontainer.NewBuilder(slog.Default()),
 		workspacePath: workspacePath,
@@ -52,9 +47,7 @@ func NewDevContainerService(dockerClient *container.DockerClient, workspacePath,
 
 // Close releases resources held by the service.
 func (s *DevContainerService) Close() {
-	if s.legacyDocker != nil {
-		s.legacyDocker.Close()
-	}
+	// No additional resources to clean up
 }
 
 // Identifiers contains the core identifiers for a workspace.
@@ -70,7 +63,7 @@ func (s *DevContainerService) GetIdentifiers() (*Identifiers, error) {
 
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = container.SanitizeProjectName(dcxCfg.Name)
+		projectName = common.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	workspaceID := devcontainer.ComputeID(s.workspacePath)
@@ -173,7 +166,7 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 	dcxCfg, _ := devcontainer.LoadDcxConfig(s.workspacePath)
 	var projectName string
 	if dcxCfg != nil && dcxCfg.Name != "" {
-		projectName = container.SanitizeProjectName(dcxCfg.Name)
+		projectName = common.SanitizeProjectName(dcxCfg.Name)
 	}
 
 	resolved, err := s.builder.Build(ctx, devcontainer.BuilderOptions{
@@ -360,9 +353,8 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 		return fmt.Errorf("no primary container found")
 	}
 
-	// Use legacy docker client for lifecycle hooks (until lifecycle package is migrated)
 	hookRunner := lifecycle.NewHookRunner(
-		s.legacyDocker,
+		s.dockerClient,
 		containerInfo.ID,
 		s.workspacePath,
 		resolved.RawConfig,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/util"
 )
 
@@ -112,31 +113,5 @@ func (d *DevContainerID) ContainerPrefix() string {
 }
 
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// Docker requires lowercase alphanumeric with hyphens/underscores, starting with letter.
-func SanitizeProjectName(name string) string {
-	if name == "" {
-		return ""
-	}
-
-	// Convert to lowercase
-	name = strings.ToLower(name)
-
-	// Replace spaces with underscores and filter invalid characters
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			result.WriteRune(r)
-		} else if r == ' ' {
-			result.WriteRune('_')
-		}
-	}
-
-	sanitized := result.String()
-
-	// Ensure starts with a letter
-	if len(sanitized) > 0 && (sanitized[0] >= '0' && sanitized[0] <= '9') {
-		sanitized = "dcx-" + sanitized
-	}
-
-	return sanitized
-}
+// Deprecated: Use common.SanitizeProjectName instead. This is kept for backward compatibility.
+var SanitizeProjectName = common.SanitizeProjectName

@@ -153,23 +153,27 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
 
-	// Run docker exec with SSH server (stdio mode)
+	// Run exec with SSH server (stdio mode) using Docker SDK
 	// Run as the target user so the SSH server process has the correct identity
-	dockerArgs := []string{
-		"exec", "-i",
-		"-u", user,
-		containerInfo.Name,
+	cmd := []string{
 		binaryPath, "ssh-server",
 		"--user", user,
 		"--workdir", workDir,
 	}
 
-	dockerCmd := exec.Command("docker", dockerArgs...)
-
-	// Pipe stdin/stdout through docker exec
-	dockerCmd.Stdin = os.Stdin
-	dockerCmd.Stdout = os.Stdout
-	dockerCmd.Stderr = os.Stderr
-
-	return dockerCmd.Run()
+	exitCode, err := containerPkg.Exec(ctx, dockerClient.APIClient(), containerPkg.ExecConfig{
+		ContainerID: containerInfo.ID,
+		Cmd:         cmd,
+		User:        user,
+		Stdin:       os.Stdin,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+	})
+	if err != nil {
+		return fmt.Errorf("exec failed: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("ssh-server exited with code %d", exitCode)
+	}
+	return nil
 }

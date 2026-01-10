@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/docker"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +42,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize Docker client
-	dockerClient, err := docker.NewClient()
+	dockerClient, err := container.NewDockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
@@ -101,7 +101,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func showCleanStats(ctx context.Context, dockerClient *docker.Client) error {
+func showCleanStats(ctx context.Context, dockerClient *container.DockerClient) error {
 	ui.Println(ui.Bold("Dry run - showing what would be cleaned:"))
 	ui.Println("")
 
