@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/common"
+	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -114,10 +115,25 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		for i, f := range composeFiles {
 			absolutePaths[i] = filepath.Join(resolved.ConfigDir, f)
 		}
+
+		// For compose projects, prefer compose.yaml name over devcontainer.json name
+		projectName := ""
+		composeProject, err := compose.LoadProjectWithDefaults(ctx, absolutePaths, "")
+		if err == nil && composeProject.Name != "" {
+			// Use compose.yaml name if set
+			projectName = common.SanitizeProjectName(composeProject.Name)
+			// Also update resolved.Name so SSH host and identifiers use compose name
+			resolved.Name = composeProject.Name
+		}
+		if projectName == "" {
+			// Fall back to devcontainer.json name or directory name
+			projectName = common.SanitizeProjectName(resolved.Name)
+		}
+
 		resolved.Plan = NewComposePlan(
 			absolutePaths,
 			opts.Config.Service,
-			common.SanitizeProjectName(resolved.Name),
+			projectName,
 		)
 	}
 

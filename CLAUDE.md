@@ -114,12 +114,17 @@ DCX-specific settings are stored in `customizations.dcx` within devcontainer.jso
 
 ### Project Naming
 
-The `name` field in devcontainer.json is used for:
+Project name resolution order:
+1. **Compose projects**: `compose.yaml` `name` field (preferred)
+2. `devcontainer.json` `name` field
+3. Workspace directory name (fallback)
+
+The resolved name is used for:
 - Container/Compose project naming (sanitized)
 - SSH host (`<sanitized-name>.dcx`)
 - Display name in `dcx status`
 
-If no `name` is provided, the workspace ID (hash-based) is used as fallback.
+If no name is found, the workspace ID (hash-based) is used as fallback.
 
 ## Key Patterns
 

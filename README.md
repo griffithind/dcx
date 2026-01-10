@@ -163,7 +163,12 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
 
 ### Project Naming
 
-The `name` field in devcontainer.json is used for:
+Project name resolution order:
+1. **Compose projects**: `name` field in compose.yaml (preferred)
+2. `name` field in devcontainer.json
+3. Workspace directory name (fallback)
+
+The resolved name is used for:
 - Container and Docker Compose project naming
 - SSH host (`myproject.dcx`)
 - Display in `dcx status`
