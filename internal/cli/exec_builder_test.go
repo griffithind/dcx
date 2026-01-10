@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -273,6 +274,116 @@ func TestExecBuilderNilConfig(t *testing.T) {
 	assert.Contains(t, args, "exec")
 	assert.Contains(t, args, "-i")
 	assert.Empty(t, user)
+}
+
+func TestExecBuilderRemoteEnv(t *testing.T) {
+	tests := []struct {
+		name         string
+		remoteEnv    map[string]string
+		optsEnv      []string
+		wantContains []string
+	}{
+		{
+			name: "remoteEnv is included in args",
+			remoteEnv: map[string]string{
+				"EDITOR":    "vim",
+				"TERM":      "xterm-256color",
+				"MY_SECRET": "value123",
+			},
+			wantContains: []string{"EDITOR=vim", "TERM=xterm-256color", "MY_SECRET=value123"},
+		},
+		{
+			name:         "empty remoteEnv produces no extra args",
+			remoteEnv:    map[string]string{},
+			wantContains: []string{},
+		},
+		{
+			name:         "nil remoteEnv produces no extra args",
+			remoteEnv:    nil,
+			wantContains: []string{},
+		},
+		{
+			name: "opts.Env comes after remoteEnv (can override)",
+			remoteEnv: map[string]string{
+				"FOO": "from_remote",
+			},
+			optsEnv:      []string{"FOO=from_opts"},
+			wantContains: []string{"FOO=from_remote", "FOO=from_opts"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containerInfo := &state.ContainerInfo{
+				ID:   "test-id",
+				Name: "test-container",
+			}
+			cfg := &devcontainer.DevContainerConfig{
+				RemoteEnv: tt.remoteEnv,
+			}
+
+			builder := NewExecBuilder(containerInfo, cfg, "/workspace")
+			args, _ := builder.BuildArgs(ExecFlags{
+				Command: []string{"env"},
+				Env:     tt.optsEnv,
+				TTY:     boolPtr(false),
+			})
+
+			argsStr := strings.Join(args, " ")
+			for _, want := range tt.wantContains {
+				assert.Contains(t, argsStr, want, "args should contain %q", want)
+			}
+		})
+	}
+}
+
+func TestExecBuilderTTYEnvironment(t *testing.T) {
+	// Test that TERM and locale vars are passed when TTY is enabled
+	// This aligns with OpenSSH SendEnv defaults (TERM, LANG, LC_*)
+	containerInfo := &state.ContainerInfo{
+		ID:   "test-id",
+		Name: "test-container",
+	}
+
+	// Set test environment variables
+	originalTerm := os.Getenv("TERM")
+	originalLang := os.Getenv("LANG")
+	os.Setenv("TERM", "xterm-256color")
+	os.Setenv("LANG", "en_US.UTF-8")
+	defer func() {
+		if originalTerm != "" {
+			os.Setenv("TERM", originalTerm)
+		} else {
+			os.Unsetenv("TERM")
+		}
+		if originalLang != "" {
+			os.Setenv("LANG", originalLang)
+		} else {
+			os.Unsetenv("LANG")
+		}
+	}()
+
+	builder := NewExecBuilder(containerInfo, nil, "/workspace")
+
+	t.Run("TTY passes TERM and LANG", func(t *testing.T) {
+		args, _ := builder.BuildArgs(ExecFlags{
+			Command: []string{"bash"},
+			TTY:     boolPtr(true),
+		})
+		argsStr := strings.Join(args, " ")
+		assert.Contains(t, argsStr, "TERM=xterm-256color")
+		assert.Contains(t, argsStr, "LANG=en_US.UTF-8")
+	})
+
+	t.Run("no TTY does not pass TERM", func(t *testing.T) {
+		args, _ := builder.BuildArgs(ExecFlags{
+			Command: []string{"echo", "test"},
+			TTY:     boolPtr(false),
+		})
+		argsStr := strings.Join(args, " ")
+		assert.NotContains(t, argsStr, "TERM=")
+		assert.NotContains(t, argsStr, "LANG=")
+	})
 }
 
 func TestExecBuilderUserResolution(t *testing.T) {

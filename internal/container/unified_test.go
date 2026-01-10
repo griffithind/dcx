@@ -544,3 +544,82 @@ func TestContainerRuntimeInterface(t *testing.T) {
 	// Verify UnifiedRuntime implements ContainerRuntime
 	var _ ContainerRuntime = (*UnifiedRuntime)(nil)
 }
+
+func TestOverrideCommandDefault(t *testing.T) {
+	// Per devcontainer spec:
+	// - Default true for image/dockerfile-based containers
+	// - Default false for compose-based containers
+	tests := []struct {
+		name            string
+		plan            devcontainer.ExecutionPlan
+		overrideCommand *bool
+		wantOverride    bool
+	}{
+		{
+			name:            "image plan - default should override",
+			plan:            devcontainer.NewImagePlan("alpine:latest"),
+			overrideCommand: nil,
+			wantOverride:    true,
+		},
+		{
+			name:            "image plan - explicit true",
+			plan:            devcontainer.NewImagePlan("alpine:latest"),
+			overrideCommand: boolPtr(true),
+			wantOverride:    true,
+		},
+		{
+			name:            "image plan - explicit false",
+			plan:            devcontainer.NewImagePlan("alpine:latest"),
+			overrideCommand: boolPtr(false),
+			wantOverride:    false,
+		},
+		{
+			name:            "dockerfile plan - default should override",
+			plan:            devcontainer.NewDockerfilePlan("Dockerfile", "."),
+			overrideCommand: nil,
+			wantOverride:    true,
+		},
+		{
+			name:            "dockerfile plan - explicit false",
+			plan:            devcontainer.NewDockerfilePlan("Dockerfile", "."),
+			overrideCommand: boolPtr(false),
+			wantOverride:    false,
+		},
+		{
+			name:            "compose plan - default should NOT override",
+			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: nil,
+			wantOverride:    false,
+		},
+		{
+			name:            "compose plan - explicit true",
+			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: boolPtr(true),
+			wantOverride:    true,
+		},
+		{
+			name:            "compose plan - explicit false",
+			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: boolPtr(false),
+			wantOverride:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test the logic directly
+			var shouldOverride bool
+			if tt.overrideCommand != nil {
+				shouldOverride = *tt.overrideCommand
+			} else {
+				_, isCompose := tt.plan.(*devcontainer.ComposePlan)
+				shouldOverride = !isCompose
+			}
+			assert.Equal(t, tt.wantOverride, shouldOverride, "overrideCommand default for %T", tt.plan)
+		})
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}

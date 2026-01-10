@@ -45,13 +45,14 @@ func ParseFile(path string) (*DevContainerConfig, error) {
 }
 
 // Resolve finds the devcontainer.json file in a workspace.
+// Per spec, supports multi-folder configurations: .devcontainer/<folder>/devcontainer.json
 func Resolve(workspacePath string) (string, error) {
 	// Ensure workspace exists
 	if !util.IsDir(workspacePath) {
 		return "", fmt.Errorf("workspace directory does not exist: %s", workspacePath)
 	}
 
-	// Try each standard location
+	// Try each standard location first
 	for _, loc := range configLocations {
 		configPath := filepath.Join(workspacePath, loc)
 		if util.IsFile(configPath) {
@@ -59,16 +60,43 @@ func Resolve(workspacePath string) (string, error) {
 		}
 	}
 
-	// Check for devcontainer directory with custom named JSON file
 	devcontainerDir := filepath.Join(workspacePath, ".devcontainer")
-	if util.IsDir(devcontainerDir) {
-		entries, err := os.ReadDir(devcontainerDir)
-		if err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
-					return filepath.Join(devcontainerDir, entry.Name()), nil
-				}
+	if !util.IsDir(devcontainerDir) {
+		return "", fmt.Errorf("no devcontainer.json found in %s", workspacePath)
+	}
+
+	entries, err := os.ReadDir(devcontainerDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read .devcontainer directory: %w", err)
+	}
+
+	// Check for multi-folder configurations: .devcontainer/<folder>/devcontainer.json
+	var folderConfigs []string
+	var folderNames []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			configPath := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+			if util.IsFile(configPath) {
+				folderConfigs = append(folderConfigs, configPath)
+				folderNames = append(folderNames, entry.Name())
 			}
+		}
+	}
+
+	// If multiple folder configurations found, return error listing options
+	if len(folderConfigs) > 1 {
+		return "", fmt.Errorf("multiple devcontainer configurations found: %v. Use --config to select one (e.g., --config .devcontainer/%s/devcontainer.json)", folderNames, folderNames[0])
+	}
+
+	// If exactly one folder config, use it
+	if len(folderConfigs) == 1 {
+		return folderConfigs[0], nil
+	}
+
+	// Fall back to custom named JSON file in .devcontainer directory
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+			return filepath.Join(devcontainerDir, entry.Name()), nil
 		}
 	}
 

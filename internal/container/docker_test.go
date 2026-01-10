@@ -314,6 +314,22 @@ func TestCreateContainerOptions(t *testing.T) {
 				Sysctls: map[string]string{"net.core.somaxconn": "1024"},
 			},
 		},
+		{
+			name: "with GPU request all",
+			opts: CreateContainerOptions{
+				Name:       "test-container",
+				Image:      "alpine:latest",
+				GPURequest: "all",
+			},
+		},
+		{
+			name: "with GPU request count",
+			opts: CreateContainerOptions{
+				Name:       "test-container",
+				Image:      "alpine:latest",
+				GPURequest: "2",
+			},
+		},
 	}
 
 	for _, tt := range tests {

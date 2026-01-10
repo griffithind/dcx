@@ -10,6 +10,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -354,6 +355,7 @@ type CreateContainerOptions struct {
 	Ports           []string
 	Entrypoint      []string
 	Cmd             []string
+	GPURequest      string // GPU request: "all" or count like "1", "2"
 }
 
 // CreateContainer creates a new container.
@@ -379,6 +381,21 @@ func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainer
 	}
 	if opts.ShmSize > 0 {
 		hostConfig.ShmSize = opts.ShmSize
+	}
+
+	// Handle GPU request (per devcontainer spec hostRequirements.gpu)
+	// Empty Driver uses the default GPU runtime (nvidia, amd, etc.)
+	if opts.GPURequest != "" {
+		count := -1 // -1 means all GPUs
+		if opts.GPURequest != "all" {
+			if n, err := strconv.Atoi(opts.GPURequest); err == nil && n > 0 {
+				count = n
+			}
+		}
+		hostConfig.DeviceRequests = append(hostConfig.DeviceRequests, container.DeviceRequest{
+			Count:        count,
+			Capabilities: [][]string{{"gpu"}},
+		})
 	}
 
 	for _, device := range opts.Devices {

@@ -1,4 +1,4 @@
-.PHONY: build build-agent build-linux build-all test test-unit test-integration test-e2e test-coverage lint clean install docs
+.PHONY: build build-agent build-linux build-all test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs
 
 # Build variables
 BINARY_NAME=dcx
@@ -6,6 +6,9 @@ AGENT_NAME=dcx-agent
 BUILD_DIR=bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
+
+# Number of CPU cores for parallel test execution (works on macOS and Linux)
+NCPU ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Default target
 all: build
@@ -56,9 +59,16 @@ test-unit:
 test-integration:
 	go test -v -tags=integration ./test/integration/...
 
-# Run end-to-end tests (requires Docker)
-test-e2e:
-	go test -v -tags=e2e -parallel=8 ./test/e2e/...
+# Run end-to-end tests (requires Docker, builds first)
+test-e2e: build
+	go test -v -tags=e2e -parallel=$(NCPU) ./test/e2e/...
+
+# Run conformance tests (devcontainer spec compliance)
+test-conformance:
+	go test -v ./test/conformance/...
+
+# Run all tests (unit, conformance, e2e)
+test-all: test-unit test-conformance test-e2e
 
 # Run tests with coverage
 test-coverage:
@@ -108,7 +118,9 @@ help:
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
 	@echo "  test-integration   - Run integration tests (requires Docker)"
-	@echo "  test-e2e           - Run end-to-end tests (requires Docker)"
+	@echo "  test-e2e           - Run end-to-end tests (builds first, requires Docker)"
+	@echo "  test-conformance   - Run conformance tests (spec compliance)"
+	@echo "  test-all           - Run all tests (unit, conformance, e2e; builds first)"
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  lint               - Run golangci-lint"
 	@echo "  docs               - Generate API documentation"

@@ -160,10 +160,20 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		"--workdir", workDir,
 	}
 
+	// Build remoteEnv for SSH server process
+	// The SSH server inherits these env vars, and sessions spawned will have them
+	var env []string
+	if cfg != nil {
+		for k, v := range cfg.RemoteEnv {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
 	exitCode, err := containerPkg.Exec(ctx, dockerClient.APIClient(), containerPkg.ExecConfig{
 		ContainerID: containerInfo.ID,
 		Cmd:         cmd,
 		User:        user,
+		Env:         env,
 		Stdin:       os.Stdin,
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,

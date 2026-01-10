@@ -214,12 +214,17 @@ func SubstituteConfig(cfg *DevContainerConfig, ctx *SubstitutionContext) {
 }
 
 // DetermineContainerWorkspaceFolder computes the container workspace folder.
+// Per spec: default is /workspaces/<basename> for image/dockerfile, "/" for compose.
 func DetermineContainerWorkspaceFolder(cfg *DevContainerConfig, localWorkspace string) string {
 	if cfg.WorkspaceFolder != "" {
 		return cfg.WorkspaceFolder
 	}
 
-	// Default to /workspaces/<basename>
+	// Per spec: compose defaults to "/", image/dockerfile defaults to /workspaces/<basename>
+	if cfg.PlanType() == PlanTypeCompose {
+		return "/"
+	}
+
 	basename := filepath.Base(localWorkspace)
 	return "/workspaces/" + basename
 }

@@ -63,6 +63,21 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 
 	if isTTY {
 		args = append(args, "-it")
+		// Pass TERM and locale vars from host (aligned with OpenSSH SendEnv defaults)
+		// TERM is required for terminal applications to work correctly
+		if termEnv := os.Getenv("TERM"); termEnv != "" {
+			args = append(args, "-e", fmt.Sprintf("TERM=%s", termEnv))
+		}
+		// LANG and LC_* are the default SendEnv in most SSH configs
+		if lang := os.Getenv("LANG"); lang != "" {
+			args = append(args, "-e", fmt.Sprintf("LANG=%s", lang))
+		}
+		// Pass LC_* locale variables
+		for _, env := range os.Environ() {
+			if len(env) > 3 && env[:3] == "LC_" {
+				args = append(args, "-e", env)
+			}
+		}
 	} else {
 		args = append(args, "-i")
 	}
@@ -96,7 +111,14 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 		args = append(args, "-e", fmt.Sprintf("HOME=/home/%s", user))
 	}
 
-	// Add custom environment variables
+	// Add remoteEnv from devcontainer config (session-specific per spec)
+	if b.cfg != nil {
+		for k, v := range b.cfg.RemoteEnv {
+			args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	// Add custom environment variables (opts.Env takes precedence)
 	for _, env := range opts.Env {
 		args = append(args, "-e", env)
 	}

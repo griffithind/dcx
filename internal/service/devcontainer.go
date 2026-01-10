@@ -156,6 +156,9 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Merge image metadata if available (per spec)
+	cfg = s.mergeImageMetadata(ctx, cfg)
+
 	// Project name from devcontainer.json name field
 	var projectName string
 	if cfg.Name != "" {
@@ -174,6 +177,53 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 
 	s.lastResolved = resolved
 	return resolved, nil
+}
+
+// mergeImageMetadata merges devcontainer.metadata from the base image with local config.
+// Per spec, images can embed configuration in the devcontainer.metadata label.
+func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devcontainer.DevContainerConfig) *devcontainer.DevContainerConfig {
+	// Get base image reference from config
+	imageRef := cfg.Image
+	if imageRef == "" {
+		// For Dockerfile-based configs, we'd need to parse FROM which is complex.
+		// Skip for now - image metadata is most useful for pre-built images anyway.
+		return cfg
+	}
+
+	// Try to get image labels (the image may not be pulled yet)
+	labels, err := s.dockerClient.GetImageLabels(ctx, imageRef)
+	if err != nil {
+		// Image not available locally, skip metadata merge
+		// It will be pulled later during Up
+		return cfg
+	}
+
+	// Look for devcontainer.metadata label
+	label := labels[devcontainer.DevcontainerMetadataLabel]
+	if label == "" {
+		return cfg
+	}
+
+	// Parse the metadata
+	imageConfigs, err := devcontainer.ParseImageMetadata(label)
+	if err != nil {
+		if s.verbose {
+			ui.Warning("Failed to parse image metadata: %v", err)
+		}
+		return cfg
+	}
+
+	if len(imageConfigs) == 0 {
+		return cfg
+	}
+
+	// Merge image metadata with local config (local config takes precedence)
+	merged := devcontainer.MergeMetadata(cfg, imageConfigs)
+	if s.verbose {
+		ui.Printf("Merged configuration from %d image metadata layer(s)", len(imageConfigs))
+	}
+
+	return merged
 }
 
 // Up brings up a devcontainer environment.

@@ -36,6 +36,7 @@ func getContainerName(statusOutput string) string {
 // TestInstallAgentDeploysToContainerE2E tests that the install agent can deploy
 // the dcx binary to a container and run it.
 func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	if !dcxembed.HasBinaries() {
@@ -91,6 +92,7 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 
 // TestInstallAgentIdempotentE2E tests that deploying twice is idempotent.
 func TestInstallAgentIdempotentE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	if !dcxembed.HasBinaries() {
@@ -136,6 +138,7 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 
 // TestInstallAgentPreDeployE2E tests the PreDeployAgent function.
 func TestInstallAgentPreDeployE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	if !dcxembed.HasBinaries() {
@@ -177,6 +180,7 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 
 // TestInstallAgentArchitectureE2E tests that the correct architecture binary is deployed.
 func TestInstallAgentArchitectureE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	if !dcxembed.HasBinaries() {

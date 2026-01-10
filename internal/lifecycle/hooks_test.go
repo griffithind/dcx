@@ -118,12 +118,12 @@ func TestShouldBlock(t *testing.T) {
 		hookType WaitFor
 		expected bool
 	}{
-		// Default (postStartCommand) - all hooks should block
+		// Default per spec is updateContentCommand - initialize, onCreate, updateContent block
 		{"default blocks initialize", "", WaitForInitializeCommand, true},
 		{"default blocks onCreate", "", WaitForOnCreateCommand, true},
 		{"default blocks updateContent", "", WaitForUpdateContentCommand, true},
-		{"default blocks postCreate", "", WaitForPostCreateCommand, true},
-		{"default blocks postStart", "", WaitForPostStartCommand, true},
+		{"default doesn't block postCreate", "", WaitForPostCreateCommand, false},
+		{"default doesn't block postStart", "", WaitForPostStartCommand, false},
 
 		// waitFor: onCreateCommand - only initialize and onCreate should block
 		{"onCreate blocks initialize", "onCreateCommand", WaitForInitializeCommand, true},
@@ -136,8 +136,9 @@ func TestShouldBlock(t *testing.T) {
 		{"initialize blocks initialize", "initializeCommand", WaitForInitializeCommand, true},
 		{"initialize doesn't block onCreate", "initializeCommand", WaitForOnCreateCommand, false},
 
-		// Invalid waitFor value should default to postStartCommand
-		{"invalid defaults to postStart", "invalidValue", WaitForPostStartCommand, true},
+		// Invalid waitFor value should default to updateContentCommand per spec
+		{"invalid defaults to updateContent", "invalidValue", WaitForUpdateContentCommand, true},
+		{"invalid doesn't block postCreate", "invalidValue", WaitForPostCreateCommand, false},
 	}
 
 	for _, tt := range tests {
@@ -159,11 +160,13 @@ func TestGetWaitFor(t *testing.T) {
 		waitFor  string
 		expected WaitFor
 	}{
-		{"empty defaults to postStartCommand", "", WaitForPostStartCommand},
+		// Per spec, default is updateContentCommand
+		{"empty defaults to updateContentCommand", "", WaitForUpdateContentCommand},
 		{"valid onCreateCommand", "onCreateCommand", WaitForOnCreateCommand},
+		{"valid updateContentCommand", "updateContentCommand", WaitForUpdateContentCommand},
 		{"valid postCreateCommand", "postCreateCommand", WaitForPostCreateCommand},
 		{"valid postStartCommand", "postStartCommand", WaitForPostStartCommand},
-		{"invalid defaults to postStartCommand", "invalidValue", WaitForPostStartCommand},
+		{"invalid defaults to updateContentCommand", "invalidValue", WaitForUpdateContentCommand},
 	}
 
 	for _, tt := range tests {
@@ -177,4 +180,40 @@ func TestGetWaitFor(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestHookRunnerWithRemoteEnv(t *testing.T) {
+	// Verify HookRunner stores remoteEnv in config for use during command execution
+	// The actual application of remoteEnv in executeContainerCommand is tested via e2e tests
+	cfg := &devcontainer.DevContainerConfig{
+		RemoteEnv: map[string]string{
+			"EDITOR": "vim",
+			"TERM":   "xterm-256color",
+		},
+		RemoteUser: "vscode",
+	}
+
+	runner := &HookRunner{
+		cfg: cfg,
+	}
+
+	// Verify config is accessible
+	require.NotNil(t, runner.cfg)
+	assert.Equal(t, "vim", runner.cfg.RemoteEnv["EDITOR"])
+	assert.Equal(t, "xterm-256color", runner.cfg.RemoteEnv["TERM"])
+	assert.Equal(t, "vscode", runner.cfg.RemoteUser)
+}
+
+func TestHookRunnerRemoteEnvNil(t *testing.T) {
+	// Verify HookRunner handles nil remoteEnv gracefully
+	cfg := &devcontainer.DevContainerConfig{
+		RemoteEnv: nil,
+	}
+
+	runner := &HookRunner{
+		cfg: cfg,
+	}
+
+	require.NotNil(t, runner.cfg)
+	assert.Nil(t, runner.cfg.RemoteEnv)
 }

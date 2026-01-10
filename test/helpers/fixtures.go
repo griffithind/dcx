@@ -1,6 +1,8 @@
 package helpers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,7 +19,8 @@ import (
 var sanitizeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
 
 // UniqueTestName generates a unique name for a test suitable for container naming.
-// It uses a sanitized version of the test name, which is unique for each test.
+// It uses a sanitized version of the test name plus a random suffix to ensure
+// uniqueness across parallel test runs and avoid conflicts with leftover containers.
 func UniqueTestName(t *testing.T) string {
 	t.Helper()
 
@@ -25,12 +28,25 @@ func UniqueTestName(t *testing.T) string {
 	name := t.Name()
 	// Replace path separators and other invalid chars with underscore
 	name = sanitizeNameRegexp.ReplaceAllString(name, "_")
-	// Limit length to avoid overly long container names
-	if len(name) > 50 {
-		name = name[:50]
+	// Limit length to leave room for random suffix (8 chars + underscore)
+	if len(name) > 40 {
+		name = name[:40]
 	}
 
-	return name
+	// Add random suffix for uniqueness
+	suffix := randomSuffix(8)
+	return name + "_" + suffix
+}
+
+// randomSuffix generates a random hex string of the specified length.
+func randomSuffix(length int) string {
+	bytes := make([]byte, (length+1)/2)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		// Fallback to timestamp-based if crypto/rand fails
+		return fmt.Sprintf("%x", os.Getpid())
+	}
+	return hex.EncodeToString(bytes)[:length]
 }
 
 // FixtureDir returns the path to the testdata directory.

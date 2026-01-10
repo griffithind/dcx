@@ -100,15 +100,15 @@ func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postSt
 	r.featurePostAttachHooks = postAttach
 }
 
-// getWaitFor returns the WaitFor value from config, defaulting to postStartCommand.
+// getWaitFor returns the WaitFor value from config, defaulting to updateContentCommand per spec.
 func (r *HookRunner) getWaitFor() WaitFor {
 	if r.cfg.WaitFor == "" {
-		return WaitForPostStartCommand
+		return WaitForUpdateContentCommand // Spec default
 	}
 	wf := WaitFor(r.cfg.WaitFor)
 	if _, ok := waitForOrder[wf]; !ok {
 		// Invalid value, use default
-		return WaitForPostStartCommand
+		return WaitForUpdateContentCommand
 	}
 	return wf
 }
@@ -518,6 +518,13 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 	if user != "" {
 		execConfig.Env = append(execConfig.Env, fmt.Sprintf("USER=%s", user))
 		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=/home/%s", user))
+	}
+
+	// Add remoteEnv from config (per spec, applies to all exec operations)
+	if r.cfg != nil {
+		for k, v := range r.cfg.RemoteEnv {
+			execConfig.Env = append(execConfig.Env, fmt.Sprintf("%s=%s", k, v))
+		}
 	}
 
 	// Setup SSH agent forwarding when available

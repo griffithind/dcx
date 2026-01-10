@@ -13,6 +13,7 @@ import (
 // TestExecE2E tests exec functionality with a shared container.
 // This consolidates basic exec, shell commands, and exit code tests.
 func TestExecE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")

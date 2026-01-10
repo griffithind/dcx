@@ -18,6 +18,7 @@ import (
 // TestSSHAgentForwardingE2E tests that SSH agent forwarding works.
 // With the per-exec proxy approach, the socket is created uniquely for each exec.
 func TestSSHAgentForwardingE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Skip if no SSH agent is available on the host
@@ -148,6 +149,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 
 // TestSSHAgentAlwaysEnabledE2E verifies that SSH agent is always enabled when available.
 func TestSSHAgentAlwaysEnabledE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Skip if no SSH agent is available on the host
@@ -178,6 +180,7 @@ func TestSSHAgentAlwaysEnabledE2E(t *testing.T) {
 
 // TestSSHAgentProxyCleanupE2E tests that the SSH agent proxy is cleaned up after exec completes.
 func TestSSHAgentProxyCleanupE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Skip if no SSH agent is available on the host
@@ -262,6 +265,7 @@ func TestSSHAgentProxyCleanupE2E(t *testing.T) {
 
 // TestSSHAgentConcurrentExecE2E tests that concurrent execs don't interfere with each other.
 func TestSSHAgentConcurrentExecE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Skip if no SSH agent is available on the host

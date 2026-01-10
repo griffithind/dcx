@@ -17,6 +17,7 @@ import (
 
 // TestSSHServerE2E tests the built-in SSH server functionality.
 func TestSSHServerE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
@@ -146,6 +147,7 @@ func TestSSHServerE2E(t *testing.T) {
 
 // TestSSHServerMultipleContainersE2E tests SSH with multiple containers.
 func TestSSHServerMultipleContainersE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create two separate workspaces with unique container names
@@ -186,6 +188,7 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 
 // TestSSHServerAlwaysEnabledE2E verifies that SSH is always configured when running dcx up.
 func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
@@ -204,6 +207,7 @@ func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 // This simulates VS Code Remote SSH behavior where the ProxyCommand is executed
 // from an arbitrary working directory.
 func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	// Create workspace with a specific remoteUser to verify config is loaded correctly
@@ -306,6 +310,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 
 // TestSSHServerCleanupE2E tests that the SSH server process is cleaned up after SSH session ends.
 func TestSSHServerCleanupE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
@@ -375,6 +380,7 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 // TestSSHCommandHandlingE2E tests that SSH properly handles complex shell commands.
 // This verifies the RawCommand() fix - commands with quotes and nested shells must work.
 func TestSSHCommandHandlingE2E(t *testing.T) {
+	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")

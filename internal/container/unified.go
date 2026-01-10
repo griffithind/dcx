@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -370,8 +371,27 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		User:            r.resolved.ContainerUser,
 	}
 
+	// Pass GPU requirements to container creation
+	if r.resolved.GPURequirements != nil && r.resolved.GPURequirements.Enabled {
+		if r.resolved.GPURequirements.Count > 0 {
+			createOpts.GPURequest = strconv.Itoa(r.resolved.GPURequirements.Count)
+		} else {
+			createOpts.GPURequest = "all"
+		}
+	}
+
 	// Handle overrideCommand
-	if r.resolved.RawConfig != nil && r.resolved.RawConfig.OverrideCommand != nil && *r.resolved.RawConfig.OverrideCommand {
+	// Per spec: default true for image/dockerfile, false for compose
+	shouldOverride := false
+	if r.resolved.RawConfig != nil && r.resolved.RawConfig.OverrideCommand != nil {
+		// Explicit setting takes precedence
+		shouldOverride = *r.resolved.RawConfig.OverrideCommand
+	} else {
+		// Default: true for image/dockerfile, false for compose
+		_, isCompose := r.resolved.Plan.(*devcontainer.ComposePlan)
+		shouldOverride = !isCompose
+	}
+	if shouldOverride {
 		createOpts.Entrypoint = []string{"sleep"}
 		createOpts.Cmd = []string{"infinity"}
 	}
