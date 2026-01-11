@@ -3,10 +3,6 @@
 // with clearer naming (ContainerState instead of State).
 package state
 
-import (
-	"fmt"
-)
-
 // ContainerState represents the lifecycle state of a container or environment.
 // This is the canonical state type used throughout dcx.
 // Renamed from State to ContainerState for clarity.
@@ -223,32 +219,5 @@ type ContainerInfo struct {
 	ComposeProject string
 	PrimaryService string
 	Labels         *ContainerLabels
-}
-
-// StateError represents an error related to environment state.
-type StateError struct {
-	State   ContainerState
-	Message string
-	Err     error
-}
-
-func (e *StateError) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("%s (state: %s): %v", e.Message, e.State, e.Err)
-	}
-	return fmt.Sprintf("%s (state: %s)", e.Message, e.State)
-}
-
-func (e *StateError) Unwrap() error {
-	return e.Err
-}
-
-// NewStateError creates a new StateError.
-func NewStateError(state ContainerState, message string, err error) *StateError {
-	return &StateError{
-		State:   state,
-		Message: message,
-		Err:     err,
-	}
 }
 

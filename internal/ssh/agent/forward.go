@@ -243,11 +243,6 @@ func (p *AgentProxy) waitForSocket() error {
 	return fmt.Errorf("timeout waiting for socket")
 }
 
-// SocketPath returns the socket path inside the container.
-func (p *AgentProxy) SocketPath() string {
-	return p.socketPath
-}
-
 // GetContainerUserIDs gets the UID and GID for a user in a container.
 // If user is empty, returns default IDs (1000, 1000).
 func GetContainerUserIDs(containerID, user string) (int, int) {

@@ -190,8 +190,3 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 
 	return unresolved
 }
-
-// HasFeatures returns true if the config has any features.
-func HasFeatures(featuresConfig map[string]interface{}) bool {
-	return len(featuresConfig) > 0
-}

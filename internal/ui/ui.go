@@ -112,30 +112,6 @@ func Warning(format string, args ...interface{}) {
 	pterm.Warning.WithWriter(ErrWriter()).Printf(format+"\n", args...)
 }
 
-// Info prints an info message if not in quiet mode.
-func Info(format string, args ...interface{}) {
-	if IsQuiet() {
-		return
-	}
-	pterm.Info.Printf(format+"\n", args...)
-}
-
-// Verbose prints a message only in verbose mode.
-func Verbose(format string, args ...interface{}) {
-	if !IsVerbose() {
-		return
-	}
-	pterm.FgGray.Printf(format+"\n", args...)
-}
-
-// Print prints a message if not in quiet mode.
-func Print(format string, args ...interface{}) {
-	if IsQuiet() {
-		return
-	}
-	pterm.Printf(format, args...)
-}
-
 // Println prints a line if not in quiet mode.
 func Println(args ...interface{}) {
 	if IsQuiet() {
@@ -191,19 +167,5 @@ func (s *Spinner) Success(message string) {
 func (s *Spinner) Fail(message string) {
 	if s.printer != nil {
 		s.printer.Fail(message)
-	}
-}
-
-// UpdateText updates the spinner text.
-func (s *Spinner) UpdateText(message string) {
-	if s.printer != nil {
-		s.printer.UpdateText(message)
-	}
-}
-
-// Stop stops the spinner without a message.
-func (s *Spinner) Stop() {
-	if s.printer != nil {
-		_ = s.printer.Stop()
 	}
 }

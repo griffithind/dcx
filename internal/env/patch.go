@@ -114,14 +114,3 @@ touch %s
 
 	return nil
 }
-
-// PatchAll applies all necessary patches to the container.
-func (p *Patcher) PatchAll(ctx context.Context, containerID string, env map[string]string) error {
-	if err := p.PatchEtcEnvironment(ctx, containerID, env); err != nil {
-		return err
-	}
-	if err := p.PatchEtcProfile(ctx, containerID); err != nil {
-		return err
-	}
-	return nil
-}

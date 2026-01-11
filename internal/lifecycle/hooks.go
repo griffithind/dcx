@@ -174,24 +174,6 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 	return r.runContainerCommand(ctx, r.cfg.PostStartCommand)
 }
 
-// RunPostAttach runs postAttachCommand in the container.
-// Per spec: feature hooks run BEFORE devcontainer hooks.
-func (r *HookRunner) RunPostAttach(ctx context.Context) error {
-	// Feature postAttachCommands run before devcontainer postAttachCommand
-	if err := r.runFeatureHooks(ctx, r.featurePostAttachHooks, "postAttachCommand"); err != nil {
-		return err
-	}
-
-	if r.cfg.PostAttachCommand != nil {
-		ui.Println("Running postAttachCommand...")
-		if err := r.runContainerCommand(ctx, r.cfg.PostAttachCommand); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // RunAllCreateHooks runs all hooks needed when a container is first created.
 // All hooks run sequentially to ensure they complete before the CLI exits.
 // The waitFor setting determines when the "container ready" message is shown,

@@ -2,7 +2,6 @@
 package errors
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -120,55 +119,4 @@ func (e *DCXError) WithContext(key, value string) *DCXError {
 	}
 	e.Context[key] = value
 	return e
-}
-
-// New creates a new DCXError.
-func New(category Category, code string, message string) *DCXError {
-	return &DCXError{
-		Category: category,
-		Code:     code,
-		Message:  message,
-		Context:  make(map[string]string),
-	}
-}
-
-// Newf creates a new DCXError with formatted message.
-func Newf(category Category, code string, format string, args ...interface{}) *DCXError {
-	return &DCXError{
-		Category: category,
-		Code:     code,
-		Message:  fmt.Sprintf(format, args...),
-		Context:  make(map[string]string),
-	}
-}
-
-// Wrap wraps an existing error as a DCXError.
-func Wrap(err error, category Category, code string, message string) *DCXError {
-	return &DCXError{
-		Category: category,
-		Code:     code,
-		Message:  message,
-		Cause:    err,
-		Context:  make(map[string]string),
-	}
-}
-
-// Wrapf wraps an existing error with a formatted message.
-func Wrapf(err error, category Category, code string, format string, args ...interface{}) *DCXError {
-	return &DCXError{
-		Category: category,
-		Code:     code,
-		Message:  fmt.Sprintf(format, args...),
-		Cause:    err,
-		Context:  make(map[string]string),
-	}
-}
-
-// Is checks if the error is a DCXError with the given code.
-func Is(err error, code string) bool {
-	var dcxErr *DCXError
-	if errors.As(err, &dcxErr) {
-		return dcxErr.Code == code
-	}
-	return false
 }

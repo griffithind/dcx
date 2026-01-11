@@ -71,25 +71,3 @@ func ParsePortBindings(specs []string) []*PortBinding {
 	}
 	return result
 }
-
-// String returns the port binding in a standard format for display.
-func (p *PortBinding) String() string {
-	if p == nil {
-		return ""
-	}
-
-	var result string
-	if p.HostIP != "" {
-		result = p.HostIP + ":" + p.HostPort + ":" + p.ContainerPort
-	} else if p.HostPort != p.ContainerPort {
-		result = p.HostPort + ":" + p.ContainerPort
-	} else {
-		result = p.ContainerPort
-	}
-
-	if p.Protocol != "tcp" {
-		result += "/" + p.Protocol
-	}
-
-	return result
-}

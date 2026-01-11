@@ -219,30 +219,3 @@ func pickBestCandidate(queue []string, softDeps map[string][]string, processed m
 
 	return bestIdx
 }
-
-// ValidateDependencies checks that all hard dependencies are present.
-func ValidateDependencies(features []*Feature) error {
-	// Build set of available feature IDs
-	available := make(map[string]bool)
-	for _, f := range features {
-		available[f.ID] = true
-		if f.Metadata != nil && f.Metadata.ID != "" {
-			available[f.Metadata.ID] = true
-		}
-	}
-
-	// Check each feature's hard dependencies
-	for _, f := range features {
-		if f.Metadata == nil {
-			continue
-		}
-
-		for dep := range f.Metadata.DependsOn {
-			if !available[dep] {
-				return fmt.Errorf("feature %q requires missing dependency %q", f.ID, dep)
-			}
-		}
-	}
-
-	return nil
-}

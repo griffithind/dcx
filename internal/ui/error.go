@@ -111,32 +111,3 @@ func PrintError(err error) {
 	formatter := NewErrorFormatter(ErrWriter())
 	formatter.Write(err)
 }
-
-// FormatErrorBrief returns a brief one-line error message.
-func FormatErrorBrief(err error) string {
-	if err == nil {
-		return ""
-	}
-
-	var dcxErr *dcxerrors.DCXError
-	if errors.As(err, &dcxErr) {
-		return fmt.Sprintf("[%s/%s] %s", dcxErr.Category, dcxErr.Code, dcxErr.Message)
-	}
-
-	return err.Error()
-}
-
-// IsUserError returns true if the error is likely a user error (vs internal error).
-func IsUserError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var dcxErr *dcxerrors.DCXError
-	if errors.As(err, &dcxErr) {
-		// Internal errors are not user errors
-		return dcxErr.Category != dcxerrors.CategoryInternal
-	}
-
-	return true
-}

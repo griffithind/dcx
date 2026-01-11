@@ -84,8 +84,3 @@ func (c *CLIContext) WorkspacePath() string {
 func (c *CLIContext) ConfigPath() string {
 	return configPath
 }
-
-// IsVerbose returns whether verbose mode is enabled.
-func (c *CLIContext) IsVerbose() bool {
-	return verbose
-}

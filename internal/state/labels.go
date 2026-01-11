@@ -2,7 +2,6 @@ package state
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/griffithind/dcx/internal/util"
@@ -347,98 +346,6 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	l.CacheProbedEnvHash = m[LabelCacheProbedEnvHash]
 
 	return l
-}
-
-// IsLegacy returns true if the labels use the legacy prefix.
-func IsLegacy(m map[string]string) bool {
-	_, hasLegacy := m[LegacyPrefix+"managed"]
-	_, hasNew := m[LabelManaged]
-	return hasLegacy && !hasNew
-}
-
-// MigrateFromLegacy converts legacy labels to the new format.
-func MigrateFromLegacy(m map[string]string) *ContainerLabels {
-	l := NewContainerLabels()
-
-	// Map legacy labels to new format
-	l.Managed = m[LegacyPrefix+"managed"] == "true"
-	l.WorkspaceID = m[LegacyPrefix+"env_key"]
-	l.WorkspacePath = m[LegacyPrefix+"workspace_path"]
-	l.HashConfig = m[LegacyPrefix+"config_hash"]
-	l.HashOverall = m[LegacyPrefix+"workspace_root_hash"]
-
-	// Build method from plan
-	switch m[LegacyPrefix+"plan"] {
-	case "compose":
-		l.BuildMethod = BuildMethodCompose
-	case "single":
-		l.BuildMethod = BuildMethodImage // or dockerfile, we don't know
-	}
-
-	l.IsPrimary = m[LegacyPrefix+"primary"] == "true"
-	l.ComposeProject = m[LegacyPrefix+"compose_project"]
-	l.ComposeService = m[LegacyPrefix+"primary_service"]
-	l.WorkspaceName = m[LegacyPrefix+"project_name"]
-
-	// Preserve derived image tag if present
-	if imgTag := m[LegacyPrefix+"image_tag"]; imgTag != "" {
-		l.DerivedImage = imgTag
-	}
-
-	return l
-}
-
-// FilterSelector returns a Docker filter string to find dcx containers.
-func FilterSelector() string {
-	return fmt.Sprintf("label=%s=true", LabelManaged)
-}
-
-// FilterByWorkspace returns a Docker filter string to find containers for a workspace.
-func FilterByWorkspace(workspaceID string) string {
-	return fmt.Sprintf("label=%s=%s", LabelWorkspaceID, workspaceID)
-}
-
-// FilterByComposeProject returns a Docker filter for a compose project.
-func FilterByComposeProject(project string) string {
-	return fmt.Sprintf("label=%s=%s", LabelComposeProject, project)
-}
-
-// LegacyFilterSelector returns a filter for finding containers with legacy labels.
-func LegacyFilterSelector() string {
-	return fmt.Sprintf("label=%smanaged=true", LegacyPrefix)
-}
-
-// LegacyFilterByWorkspaceID returns a filter for finding containers by legacy env_key.
-func LegacyFilterByWorkspaceID(workspaceID string) string {
-	return fmt.Sprintf("label=%senv_key=%s", LegacyPrefix, workspaceID)
-}
-
-// IsDCXManaged checks if a container has dcx labels (either new or legacy).
-func IsDCXManaged(labelMap map[string]string) bool {
-	if labelMap[LabelManaged] == "true" {
-		return true
-	}
-	if labelMap[LegacyPrefix+"managed"] == "true" {
-		return true
-	}
-	return false
-}
-
-// GetWorkspaceID extracts the workspace ID from labels (handles both formats).
-func GetWorkspaceID(labelMap map[string]string) string {
-	if id := labelMap[LabelWorkspaceID]; id != "" {
-		return id
-	}
-	// Fall back to legacy env_key
-	return labelMap[LegacyPrefix+"env_key"]
-}
-
-// GetWorkspacePath extracts the workspace path from labels (handles both formats).
-func GetWorkspacePath(labelMap map[string]string) string {
-	if path := labelMap[LabelWorkspacePath]; path != "" {
-		return path
-	}
-	return labelMap[LegacyPrefix+"workspace_path"]
 }
 
 // IsPrimaryContainer checks if container is primary (handles both formats).

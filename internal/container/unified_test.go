@@ -254,44 +254,60 @@ func TestExecOptions(t *testing.T) {
 
 func TestBuildMounts(t *testing.T) {
 	tests := []struct {
-		name     string
-		resolved *devcontainer.ResolvedDevContainer
-		want     []string
+		name      string
+		resolved  *devcontainer.ResolvedDevContainer
+		wantBinds []string
+		wantTmpfs map[string]string
 	}{
 		{
 			name: "no mounts",
 			resolved: &devcontainer.ResolvedDevContainer{
 				Mounts: nil,
 			},
-			want: nil,
+			wantBinds: nil,
+			wantTmpfs: map[string]string{},
 		},
 		{
-			name: "single mount",
+			name: "single bind mount",
 			resolved: &devcontainer.ResolvedDevContainer{
 				Mounts: []mount.Mount{
-					{Source: "/host/path", Target: "/container/path"},
+					{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind},
 				},
 			},
-			want: []string{"/host/path:/container/path"},
+			wantBinds: []string{"/host/path:/container/path"},
+			wantTmpfs: map[string]string{},
 		},
 		{
-			name: "readonly mount",
+			name: "readonly bind mount",
 			resolved: &devcontainer.ResolvedDevContainer{
 				Mounts: []mount.Mount{
-					{Source: "/host/path", Target: "/container/path", ReadOnly: true},
+					{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind, ReadOnly: true},
 				},
 			},
-			want: []string{"/host/path:/container/path:ro"},
+			wantBinds: []string{"/host/path:/container/path:ro"},
+			wantTmpfs: map[string]string{},
 		},
 		{
-			name: "multiple mounts",
+			name: "tmpfs mount",
 			resolved: &devcontainer.ResolvedDevContainer{
 				Mounts: []mount.Mount{
-					{Source: "/path1", Target: "/target1"},
-					{Source: "/path2", Target: "/target2", ReadOnly: true},
+					{Target: "/tmp/test", Type: mount.TypeTmpfs},
 				},
 			},
-			want: []string{"/path1:/target1", "/path2:/target2:ro"},
+			wantBinds: nil,
+			wantTmpfs: map[string]string{"/tmp/test": ""},
+		},
+		{
+			name: "mixed mounts",
+			resolved: &devcontainer.ResolvedDevContainer{
+				Mounts: []mount.Mount{
+					{Source: "/path1", Target: "/target1", Type: mount.TypeBind},
+					{Target: "/run", Type: mount.TypeTmpfs},
+					{Source: "/path2", Target: "/target2", Type: mount.TypeBind, ReadOnly: true},
+				},
+			},
+			wantBinds: []string{"/path1:/target1", "/path2:/target2:ro"},
+			wantTmpfs: map[string]string{"/run": ""},
 		},
 	}
 
@@ -299,7 +315,8 @@ func TestBuildMounts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runtime := &UnifiedRuntime{resolved: tt.resolved}
 			got := runtime.buildMounts()
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantBinds, got.Binds)
+			assert.Equal(t, tt.wantTmpfs, got.Tmpfs)
 		})
 	}
 }

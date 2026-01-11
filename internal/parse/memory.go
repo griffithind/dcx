@@ -6,14 +6,6 @@ import (
 	"strings"
 )
 
-// ParseMemorySize parses a memory size string (e.g., "4gb", "512m", "1.5g", "1024").
-// Supported units: k/K, m/M, g/G, t/T (with optional 'b'/'B' suffix).
-// Returns the size in bytes. Returns 0 for invalid/empty input.
-func ParseMemorySize(s string) int64 {
-	result, _ := ParseMemorySizeWithError(s)
-	return result
-}
-
 // ParseMemorySizeWithError parses a memory size string with error reporting.
 // Supported formats:
 //   - Plain number: "1024" (interpreted as bytes)
@@ -79,11 +71,4 @@ func ParseMemorySizeWithError(s string) (int64, error) {
 	}
 
 	return int64(value * float64(multiplier)), nil
-}
-
-// ParseShmSize parses a shared memory size string (e.g., "1g", "512m", "1024").
-// This is an alias for ParseMemorySize for backward compatibility.
-// Returns the size in bytes.
-func ParseShmSize(size string) int64 {
-	return ParseMemorySize(size)
 }

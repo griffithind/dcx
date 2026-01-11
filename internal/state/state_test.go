@@ -155,9 +155,3 @@ func TestGetRecovery(t *testing.T) {
 		assert.Equal(t, RecoveryRemove, r.Action)
 	})
 }
-
-func TestStateError(t *testing.T) {
-	err := NewStateError(StateStale, "config changed", nil)
-	assert.Contains(t, err.Error(), "config changed")
-	assert.Contains(t, err.Error(), "stale")
-}

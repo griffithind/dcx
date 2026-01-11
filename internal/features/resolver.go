@@ -136,11 +136,6 @@ func getCacheDir() (string, error) {
 	return filepath.Join(cacheHome, "dcx", "features"), nil
 }
 
-// Resolve resolves a feature from its ID and options.
-func (r *Resolver) Resolve(ctx context.Context, id string, options map[string]interface{}) (*Feature, error) {
-	return r.ResolveWithLockfile(ctx, id, options, nil)
-}
-
 // ResolveWithLockfile resolves a feature, optionally using a lockfile for pinned versions.
 func (r *Resolver) ResolveWithLockfile(ctx context.Context, id string, options map[string]interface{}, lockfile *lockfile.Lockfile) (*Feature, error) {
 	// Parse the feature reference

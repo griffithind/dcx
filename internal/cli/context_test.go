@@ -25,7 +25,4 @@ func TestCLIContextMethods(t *testing.T) {
 	assert.NotPanics(t, func() {
 		_ = ctx.ConfigPath()
 	})
-	assert.NotPanics(t, func() {
-		_ = ctx.IsVerbose()
-	})
 }

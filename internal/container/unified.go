@@ -11,6 +11,7 @@ import (
 	"time"
 
 	composecli "github.com/compose-spec/compose-go/v2/cli"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
@@ -376,7 +377,8 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		WorkspacePath:   r.resolved.LocalRoot,
 		WorkspaceFolder: workspaceFolder,
 		WorkspaceMount:  workspaceMount,
-		Mounts:          mounts,
+		Mounts:          mounts.Binds,
+		Tmpfs:           mounts.Tmpfs,
 		Ports:           ports,
 		CapAdd:          r.resolved.CapAdd,
 		SecurityOpt:     r.resolved.SecurityOpt,
@@ -484,17 +486,32 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
-// buildMounts builds the container mounts as strings.
-func (r *UnifiedRuntime) buildMounts() []string {
-	var mounts []string
-	for _, m := range r.resolved.Mounts {
-		mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
-		if m.ReadOnly {
-			mountStr += ":ro"
-		}
-		mounts = append(mounts, mountStr)
+// mountCollections holds separated mount types for Docker API.
+type mountCollections struct {
+	Binds []string          // For HostConfig.Binds (bind and volume mounts)
+	Tmpfs map[string]string // For HostConfig.Tmpfs (tmpfs mounts)
+}
+
+// buildMounts builds the container mounts, separating tmpfs from bind mounts.
+func (r *UnifiedRuntime) buildMounts() mountCollections {
+	result := mountCollections{
+		Tmpfs: make(map[string]string),
 	}
-	return mounts
+	for _, m := range r.resolved.Mounts {
+		switch m.Type {
+		case mount.TypeTmpfs:
+			// Tmpfs format: target -> options (empty string for defaults)
+			result.Tmpfs[m.Target] = ""
+		default:
+			// Bind and volume mounts use the same format
+			mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
+			if m.ReadOnly {
+				mountStr += ":ro"
+			}
+			result.Binds = append(result.Binds, mountStr)
+		}
+	}
+	return result
 }
 
 // buildEnvironment builds the container environment.
@@ -691,10 +708,18 @@ func (r *UnifiedRuntime) generateComposeOverride(plan *devcontainer.ComposePlan)
 
 	// Add mounts
 	mounts := r.buildMounts()
-	if len(mounts) > 0 {
+	if len(mounts.Binds) > 0 {
 		sb.WriteString("    volumes:\n")
-		for _, m := range mounts {
+		for _, m := range mounts.Binds {
 			sb.WriteString(fmt.Sprintf("      - %q\n", m))
+		}
+	}
+
+	// Add tmpfs mounts
+	if len(mounts.Tmpfs) > 0 {
+		sb.WriteString("    tmpfs:\n")
+		for path := range mounts.Tmpfs {
+			sb.WriteString(fmt.Sprintf("      - %q\n", path))
 		}
 	}
 

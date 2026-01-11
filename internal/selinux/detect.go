@@ -97,22 +97,3 @@ func getModeFromCommand() (Mode, error) {
 		return ModeUnknown, nil
 	}
 }
-
-// IsAvailable returns true if SELinux is available on this system.
-func IsAvailable() bool {
-	if runtime.GOOS != "linux" {
-		return false
-	}
-
-	// Check for SELinux filesystem
-	if _, err := os.Stat("/sys/fs/selinux"); err == nil {
-		return true
-	}
-
-	// Check for getenforce command
-	if _, err := exec.LookPath("getenforce"); err == nil {
-		return true
-	}
-
-	return false
-}

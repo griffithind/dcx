@@ -175,20 +175,3 @@ const (
 	MismatchVersion   MismatchType = "version"   // Version mismatch
 	MismatchIntegrity MismatchType = "integrity" // Integrity mismatch
 )
-
-// IsOutdated returns true if there are any mismatches.
-func IsOutdated(mismatches []LockfileMismatch) bool {
-	return len(mismatches) > 0
-}
-
-// NeedsUpdate returns true if the lockfile needs to be updated.
-// This is true if there are missing or extra features, or version/integrity mismatches.
-func NeedsUpdate(mismatches []LockfileMismatch) bool {
-	for _, m := range mismatches {
-		switch m.Type {
-		case MismatchMissing, MismatchExtra, MismatchVersion, MismatchIntegrity:
-			return true
-		}
-	}
-	return false
-}

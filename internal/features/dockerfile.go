@@ -176,86 +176,6 @@ func (g *DockerfileGenerator) collectContainerEnv() map[string]string {
 	return env
 }
 
-// GetFeaturePaths returns the source paths for features to be copied into the build context.
-func (g *DockerfileGenerator) GetFeaturePaths() []FeatureCopyPath {
-	paths := make([]FeatureCopyPath, len(g.features))
-
-	for i, feature := range g.features {
-		paths[i] = FeatureCopyPath{
-			Source: feature.CachePath,
-			Dest:   fmt.Sprintf("feature_%d", i),
-		}
-	}
-
-	return paths
-}
-
-// FeatureCopyPath represents a feature directory to copy into the build context.
-type FeatureCopyPath struct {
-	Source string // Absolute path to feature directory
-	Dest   string // Destination directory name in build context
-}
-
-// collectUniqueStrings is a generic helper to collect unique strings from features.
-func collectUniqueStrings(features []*Feature, getStrings func(*FeatureMetadata) []string) []string {
-	seen := make(map[string]bool)
-
-	for _, feature := range features {
-		if feature.Metadata == nil {
-			continue
-		}
-		for _, s := range getStrings(feature.Metadata) {
-			seen[s] = true
-		}
-	}
-
-	result := make([]string, 0, len(seen))
-	for s := range seen {
-		result = append(result, s)
-	}
-
-	return result
-}
-
-// CollectCapabilities collects all capabilities needed by features.
-func CollectCapabilities(features []*Feature) []string {
-	return collectUniqueStrings(features, func(m *FeatureMetadata) []string {
-		return m.CapAdd
-	})
-}
-
-// CollectSecurityOpts collects all security options needed by features.
-func CollectSecurityOpts(features []*Feature) []string {
-	return collectUniqueStrings(features, func(m *FeatureMetadata) []string {
-		return m.SecurityOpt
-	})
-}
-
-// NeedsPrivileged returns true if any feature requires privileged mode.
-func NeedsPrivileged(features []*Feature) bool {
-	for _, feature := range features {
-		if feature.Metadata != nil && feature.Metadata.Privileged {
-			return true
-		}
-	}
-	return false
-}
-
-// GetPrivilegedFeatures returns the names of features that require privileged mode.
-func GetPrivilegedFeatures(features []*Feature) []string {
-	var names []string
-	for _, feature := range features {
-		if feature.Metadata != nil && feature.Metadata.Privileged {
-			name := feature.Metadata.Name
-			if name == "" {
-				name = feature.Metadata.ID
-			}
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // SecurityRequirements summarizes the security requirements from features.
 type SecurityRequirements struct {
 	Privileged   bool
@@ -312,30 +232,6 @@ func NeedsInit(features []*Feature) bool {
 		}
 	}
 	return false
-}
-
-// MountSubstituteFunc is a function that performs variable substitution on mount strings.
-type MountSubstituteFunc func(string) string
-
-// CollectMounts collects all mounts needed by features.
-// If substitute is provided, it will be applied to each mount string for variable substitution.
-func CollectMounts(features []*Feature, substitute MountSubstituteFunc) []string {
-	mounts := make([]string, 0)
-
-	for _, feature := range features {
-		if feature.Metadata == nil {
-			continue
-		}
-		for _, m := range feature.Metadata.Mounts {
-			mount := m.String()
-			if substitute != nil {
-				mount = substitute(mount)
-			}
-			mounts = append(mounts, mount)
-		}
-	}
-
-	return mounts
 }
 
 // CollectContainerEnv collects all container environment variables from features.

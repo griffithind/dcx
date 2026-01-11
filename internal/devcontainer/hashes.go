@@ -147,14 +147,6 @@ func ComputeAllHashes(cfg *DevContainerConfig, dockerfilePath string, composeFil
 	return hashes, nil
 }
 
-// IsStale checks if the current hashes indicate staleness compared to stored hashes.
-func (h *ContentHashes) IsStale(stored *ContentHashes) bool {
-	if stored == nil {
-		return true
-	}
-	return h.Overall != stored.Overall
-}
-
 // hashBytes computes a SHA256 hash of the given data and returns it as a hex string.
 func hashBytes(data []byte) string {
 	h := sha256.Sum256(data)

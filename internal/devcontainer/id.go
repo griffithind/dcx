@@ -98,22 +98,6 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevCo
 	}
 }
 
-// String returns a string representation of the DevContainerID.
-func (d *DevContainerID) String() string {
-	if d.ProjectName != "" {
-		return d.ProjectName
-	}
-	return d.ID
-}
-
-// ContainerPrefix returns a prefix suitable for container naming.
-func (d *DevContainerID) ContainerPrefix() string {
-	if d.ProjectName != "" {
-		return d.ProjectName
-	}
-	return "dcx-" + d.ID
-}
-
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
 // Deprecated: Use common.SanitizeProjectName instead. This is kept for backward compatibility.
 var SanitizeProjectName = common.SanitizeProjectName

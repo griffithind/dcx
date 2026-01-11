@@ -86,26 +86,6 @@ func TestOrderFeatures_CycleDetection(t *testing.T) {
 	assert.Contains(t, err.Error(), "circular dependency")
 }
 
-func TestValidateDependencies_MissingDep(t *testing.T) {
-	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"missing": map[string]interface{}{}}}},
-	}
-
-	err := ValidateDependencies(features)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing dependency")
-}
-
-func TestValidateDependencies_AllPresent(t *testing.T) {
-	features := []*Feature{
-		{ID: "feature-a", Metadata: &FeatureMetadata{ID: "a", DependsOn: map[string]interface{}{"b": map[string]interface{}{}}}},
-		{ID: "feature-b", Metadata: &FeatureMetadata{ID: "b"}},
-	}
-
-	err := ValidateDependencies(features)
-	assert.NoError(t, err)
-}
-
 func findFeatureIndex(features []*Feature, id string) int {
 	for i, f := range features {
 		if f.ID == id {
