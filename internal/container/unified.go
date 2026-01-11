@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/griffithind/dcx/internal/build"
+	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
@@ -22,9 +23,8 @@ import (
 // It handles image-based, Dockerfile-based, and compose-based devcontainers
 // through a single unified implementation.
 type UnifiedRuntime struct {
-	resolved     *devcontainer.ResolvedDevContainer
-	dockerClient *DockerClient
-	builder      build.ImageBuilder // CLI-based image builder
+	resolved *devcontainer.ResolvedDevContainer
+	builder  build.ImageBuilder // CLI-based image builder
 
 	// Cached state
 	containerID   string
@@ -36,17 +36,15 @@ type UnifiedRuntime struct {
 
 	// For lightweight existing container operations
 	workspacePath  string
-	composeProject string // Set when working with existing compose environment
-	isCompose      bool   // Whether this is a compose environment
+	composeProject string   // Set when working with existing compose environment
+	isCompose      bool     // Whether this is a compose environment
+	compose        *Compose // Compose client for compose operations
 }
 
 // NewUnifiedRuntime creates a new runtime for a resolved devcontainer.
-func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient *DockerClient) (*UnifiedRuntime, error) {
+func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer) (*UnifiedRuntime, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("resolved devcontainer is required")
-	}
-	if dockerClient == nil {
-		return nil, fmt.Errorf("docker client is required")
 	}
 
 	// Create CLI-based image builder
@@ -54,7 +52,6 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 
 	return &UnifiedRuntime{
 		resolved:      resolved,
-		dockerClient:  dockerClient,
 		builder:       builder,
 		containerName: resolved.ServiceName,
 	}, nil
@@ -62,12 +59,12 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 
 // NewUnifiedRuntimeForExistingCompose creates a lightweight runtime for existing compose environments.
 // The configDir parameter should be the directory containing devcontainer.json (and typically the compose files).
-func NewUnifiedRuntimeForExistingCompose(configDir, composeProject string, dockerClient *DockerClient) *UnifiedRuntime {
+func NewUnifiedRuntimeForExistingCompose(configDir, composeProject string) *UnifiedRuntime {
 	return &UnifiedRuntime{
-		dockerClient:   dockerClient,
 		workspacePath:  configDir, // Use configDir as working dir for compose commands
 		composeProject: composeProject,
 		isCompose:      true,
+		compose:        ComposeClient(configDir, composeProject),
 	}
 }
 
@@ -194,7 +191,7 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatur
 	}
 
 	// Start the container
-	if err := r.dockerClient.StartContainer(ctx, containerID); err != nil {
+	if err := MustDocker().StartContainer(ctx, containerID); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -208,14 +205,14 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 	case *devcontainer.ImagePlan:
 		fmt.Printf("Using image: %s\n", plan.Image)
 
-		exists, err := r.dockerClient.ImageExists(ctx, plan.Image)
+		exists, err := MustDocker().ImageExists(ctx, plan.Image)
 		if err != nil {
 			return "", fmt.Errorf("failed to check image: %w", err)
 		}
 
 		if !exists || opts.Pull {
 			fmt.Printf("Pulling image: %s\n", plan.Image)
-			if err := r.dockerClient.PullImageWithProgress(ctx, plan.Image, os.Stdout); err != nil {
+			if err := MustDocker().PullImageWithProgress(ctx, plan.Image, os.Stdout); err != nil {
 				return "", fmt.Errorf("failed to pull image: %w", err)
 			}
 		}
@@ -223,7 +220,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
-		imageTag := fmt.Sprintf("dcx/%s:%s", r.resolved.ID, r.resolved.Hashes.Overall[:12])
+		imageTag := fmt.Sprintf("%s%s:%s", common.ImageTagPrefix, r.resolved.ID, r.resolved.Hashes.Overall[:common.HashTruncationLength])
 		fmt.Printf("Building image: %s\n", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
@@ -488,7 +485,7 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		createOpts.Cmd = []string{"infinity"}
 	}
 
-	return r.dockerClient.CreateContainer(ctx, createOpts)
+	return MustDocker().CreateContainer(ctx, createOpts)
 }
 
 // buildLabels builds the container labels.
@@ -591,15 +588,13 @@ func (r *UnifiedRuntime) Start(ctx context.Context) error {
 		}
 	}
 
-	// Lightweight compose runtime
-	if r.isCompose {
-		args := r.composeBaseArgs(nil)
-		args = append(args, "start")
-		return r.runCompose(ctx, args)
+	// Lightweight compose runtime - use Compose client
+	if r.compose != nil {
+		return r.compose.Start(ctx)
 	}
 
 	// Single container
-	return r.dockerClient.StartContainer(ctx, r.containerName)
+	return MustDocker().StartContainer(ctx, r.containerName)
 }
 
 // Stop implements ContainerRuntime.Stop.
@@ -612,15 +607,13 @@ func (r *UnifiedRuntime) Stop(ctx context.Context) error {
 		}
 	}
 
-	// Lightweight compose runtime
-	if r.isCompose {
-		args := r.composeBaseArgs(nil)
-		args = append(args, "stop")
-		return r.runCompose(ctx, args)
+	// Lightweight compose runtime - use Compose client
+	if r.compose != nil {
+		return r.compose.Stop(ctx)
 	}
 
 	// Single container
-	return r.dockerClient.StopContainer(ctx, r.containerName, nil)
+	return MustDocker().StopContainer(ctx, r.containerName, nil)
 }
 
 // Down implements ContainerRuntime.Down.
@@ -639,21 +632,13 @@ func (r *UnifiedRuntime) Down(ctx context.Context, opts DownOptions) error {
 		}
 	}
 
-	// Lightweight compose runtime
-	if r.isCompose {
-		args := r.composeBaseArgs(nil)
-		args = append(args, "down")
-		if opts.RemoveVolumes {
-			args = append(args, "-v")
-		}
-		if opts.RemoveOrphans {
-			args = append(args, "--remove-orphans")
-		}
-		return r.runCompose(ctx, args)
+	// Lightweight compose runtime - use Compose client
+	if r.compose != nil {
+		return r.compose.Down(ctx, ComposeDownOptions(opts))
 	}
 
 	// Single container
-	return r.dockerClient.RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
+	return MustDocker().RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
 }
 
 // Build implements ContainerRuntime.Build.
@@ -884,8 +869,8 @@ func (r *UnifiedRuntime) getDerivedImageTag() string {
 	if r.resolved.DerivedImage != "" {
 		return r.resolved.DerivedImage
 	}
-	if r.resolved.ID != "" && r.resolved.Hashes != nil && r.resolved.Hashes.Config != "" && len(r.resolved.Hashes.Config) >= 12 {
-		return fmt.Sprintf("dcx/%s:%s-features", r.resolved.ID, r.resolved.Hashes.Config[:12])
+	if r.resolved.ID != "" && r.resolved.Hashes != nil && r.resolved.Hashes.Config != "" && len(r.resolved.Hashes.Config) >= common.HashTruncationLength {
+		return fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, r.resolved.ID, r.resolved.Hashes.Config[:common.HashTruncationLength])
 	}
 	if r.resolved.ID != "" {
 		return fmt.Sprintf("dcx-derived-%s:latest", r.resolved.ID)
@@ -899,7 +884,7 @@ func (r *UnifiedRuntime) derivedImageExists(ctx context.Context, tag string) boo
 	if tag == "" {
 		return false
 	}
-	exists, err := r.dockerClient.ImageExists(ctx, tag)
+	exists, err := MustDocker().ImageExists(ctx, tag)
 	return err == nil && exists
 }
 

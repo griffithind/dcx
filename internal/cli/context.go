@@ -15,8 +15,8 @@ type CLIContext struct {
 	// Ctx is the context for the operation.
 	Ctx context.Context
 
-	// DockerClient is the initialized Docker client.
-	DockerClient *container.DockerClient
+	// Docker is the initialized Docker client.
+	Docker *container.Docker
 
 	// Service is the devcontainer service for devcontainer operations.
 	Service *service.DevContainerService
@@ -30,28 +30,27 @@ type CLIContext struct {
 func NewCLIContext() (*CLIContext, error) {
 	ctx := context.Background()
 
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	// Initialize Docker client (uses singleton)
+	docker, err := container.DockerClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
 	// Create service
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
 
 	// Get identifiers
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
-		_ = dockerClient.Close()
 		svc.Close()
 		return nil, fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
 	return &CLIContext{
-		Ctx:          ctx,
-		DockerClient: dockerClient,
-		Service:      svc,
-		Identifiers:  ids,
+		Ctx:         ctx,
+		Docker:      docker,
+		Service:     svc,
+		Identifiers: ids,
 	}, nil
 }
 
@@ -61,9 +60,7 @@ func (c *CLIContext) Close() {
 	if c.Service != nil {
 		c.Service.Close()
 	}
-	if c.DockerClient != nil {
-		_ = c.DockerClient.Close()
-	}
+	// Docker is a singleton, no need to close
 }
 
 // GetState retrieves the current container state.

@@ -1,10 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -30,25 +26,13 @@ func init() {
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer func() { _ = dockerClient.Close() }()
+	defer cliCtx.Close()
 
-	// Create service and get identifiers
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
-	defer svc.Close()
-
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
-	}
-
-	return svc.DownWithIDs(ctx, ids.ProjectName, ids.WorkspaceID, service.DownOptions{
+	return cliCtx.Service.DownWithIDs(cliCtx.Ctx, cliCtx.Identifiers.ProjectName, cliCtx.Identifiers.WorkspaceID, service.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	})

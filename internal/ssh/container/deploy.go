@@ -8,7 +8,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/griffithind/dcx"
+	dcxembed "github.com/griffithind/dcx"
+	"github.com/griffithind/dcx/internal/common"
 )
 
 // DeployToContainer deploys the dcx-agent binary to a container.
@@ -81,7 +82,7 @@ func getContainerArch(ctx context.Context, containerName string) string {
 
 // GetContainerBinaryPath returns the path for dcx-agent binary in the container.
 func GetContainerBinaryPath() string {
-	return "/tmp/dcx-agent"
+	return common.AgentBinaryPath
 }
 
 // PreDeployAgent deploys the dcx-agent binary to the specified container.

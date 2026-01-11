@@ -52,7 +52,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		Tail:       logsTail,
 	}
 
-	reader, err := cliCtx.DockerClient.GetLogs(cliCtx.Ctx, containerInfo.ID, opts)
+	reader, err := cliCtx.Docker.GetLogs(cliCtx.Ctx, containerInfo.ID, opts)
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %w", err)
 	}

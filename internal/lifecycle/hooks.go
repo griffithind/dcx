@@ -66,7 +66,6 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	dockerClient  *container.DockerClient
 	containerID   string
 	workspacePath string
 	cfg           *devcontainer.DevContainerConfig
@@ -85,9 +84,8 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
-func NewHookRunner(dockerClient *container.DockerClient, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
+func NewHookRunner(containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	return &HookRunner{
-		dockerClient:  dockerClient,
 		containerID:   containerID,
 		workspacePath: workspacePath,
 		cfg:           cfg,

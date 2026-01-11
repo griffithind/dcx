@@ -43,13 +43,12 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Get identifiers (needed for both modes)
-	dockerClient, err := containerPkg.NewDockerClient()
+	_, err := containerPkg.DockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer func() { _ = dockerClient.Close() }()
 
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
@@ -89,15 +88,14 @@ func runSSH(cmd *cobra.Command, args []string) error {
 //
 //	ProxyCommand dcx ssh --stdio <container-name>
 func runSSHStdio(ctx context.Context, containerName string) error {
-	// Initialize Docker client
-	dockerClient, err := containerPkg.NewDockerClient()
+	// Initialize Docker client (uses singleton)
+	docker, err := containerPkg.DockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer func() { _ = dockerClient.Close() }()
 
 	// Initialize state manager
-	stateMgr := state.NewStateManager(dockerClient)
+	stateMgr := state.NewStateManager(docker)
 
 	// Look up container by name
 	containerInfo, err := stateMgr.FindContainerByName(ctx, containerName)

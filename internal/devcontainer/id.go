@@ -88,7 +88,7 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevCo
 	if projectName != "" {
 		sshHost = projectName
 	}
-	sshHost = sshHost + ".dcx"
+	sshHost = sshHost + common.SSHHostSuffix
 
 	return &DevContainerID{
 		ID:          id,

@@ -387,7 +387,7 @@ func validateFeatures(cfg *devcontainer.DevContainerConfig) []CheckResult {
 }
 
 func checkDocker(ctx context.Context) CheckResult {
-	client, err := container.NewDockerClient()
+	client, err := container.DockerClient()
 	if err != nil {
 		return CheckResult{
 			Name:    "Docker",
@@ -396,7 +396,6 @@ func checkDocker(ctx context.Context) CheckResult {
 			Hint:    "Start Docker Desktop or the Docker daemon",
 		}
 	}
-	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(ctx); err != nil {
 		return CheckResult{

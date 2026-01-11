@@ -24,7 +24,6 @@ import (
 // This replaces the previous EnvironmentService in internal/orchestrator.
 type DevContainerService struct {
 	logger        *slog.Logger
-	dockerClient  *container.DockerClient
 	stateManager  *state.StateManager
 	builder       *devcontainer.Builder
 	workspacePath string
@@ -36,11 +35,10 @@ type DevContainerService struct {
 }
 
 // NewDevContainerService creates a new devcontainer service.
-func NewDevContainerService(dockerClient *container.DockerClient, workspacePath, configPath string, verbose bool) *DevContainerService {
+func NewDevContainerService(workspacePath, configPath string, verbose bool) *DevContainerService {
 	return &DevContainerService{
 		logger:        slog.Default(),
-		dockerClient:  dockerClient,
-		stateManager:  state.NewStateManager(dockerClient),
+		stateManager:  state.NewStateManager(container.MustDocker()),
 		builder:       devcontainer.NewBuilder(slog.Default()),
 		workspacePath: workspacePath,
 		configPath:    configPath,
@@ -70,7 +68,7 @@ func (s *DevContainerService) GetIdentifiers() (*Identifiers, error) {
 		workspaceID := devcontainer.ComputeID(s.workspacePath)
 		return &Identifiers{
 			WorkspaceID: workspaceID,
-			SSHHost:     workspaceID + ".dcx",
+			SSHHost:     workspaceID + common.SSHHostSuffix,
 		}, nil
 	}
 
@@ -212,7 +210,7 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 	}
 
 	// Try to get image labels (the image may not be pulled yet)
-	labels, err := s.dockerClient.GetImageLabels(ctx, imageRef)
+	labels, err := container.MustDocker().GetImageLabels(ctx, imageRef)
 	if err != nil {
 		// Image not available locally, skip metadata merge
 		// It will be pulled later during Up
@@ -261,7 +259,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Validate host requirements
 	if resolved.RawConfig != nil && resolved.RawConfig.HostRequirements != nil {
-		dockerInfo, err := s.dockerClient.Info(ctx)
+		dockerInfo, err := container.MustDocker().Info(ctx)
 		if err != nil {
 			ui.Warning("Could not get Docker info for resource validation: %v", err)
 		} else {
@@ -403,26 +401,14 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 // QuickStart attempts to start an existing container without full up sequence.
 func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *state.ContainerInfo, projectName, workspaceID string) error {
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == state.BuildMethodImage ||
-		containerInfo.Plan == state.BuildMethodDockerfile)
-	if isSingleContainer {
-		if err := s.dockerClient.StartContainer(ctx, containerInfo.ID); err != nil {
+	if containerInfo.IsSingleContainer() {
+		if err := container.MustDocker().StartContainer(ctx, containerInfo.ID); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
 	} else {
-		actualProject := ""
-		if containerInfo != nil {
-			actualProject = containerInfo.ComposeProject
-		}
-		if actualProject == "" {
-			actualProject = projectName
-		}
-		// Get config directory for compose commands
-		configDir := s.workspacePath
-		if containerInfo != nil && containerInfo.Labels != nil && containerInfo.Labels.ConfigPath != "" {
-			configDir = filepath.Dir(containerInfo.Labels.ConfigPath)
-		}
-		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject, s.dockerClient)
+		actualProject := containerInfo.GetComposeProject(projectName)
+		configDir := containerInfo.GetConfigDir(s.workspacePath)
+		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
 		if err := r.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start containers: %w", err)
 		}
@@ -432,7 +418,7 @@ func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *sta
 
 // create creates a new environment.
 func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, forceRebuild, forcePull bool, buildSecrets map[string]string) error {
-	runtime, err := container.NewUnifiedRuntime(resolved, s.dockerClient)
+	runtime, err := container.NewUnifiedRuntime(resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
@@ -455,7 +441,7 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 func (s *DevContainerService) start(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
 	ui.Println("Starting existing devcontainer...")
 
-	runtime, err := container.NewUnifiedRuntime(resolved, s.dockerClient)
+	runtime, err := container.NewUnifiedRuntime(resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
@@ -477,7 +463,6 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 	}
 
 	hookRunner := lifecycle.NewHookRunner(
-		s.dockerClient,
 		containerInfo.ID,
 		s.workspacePath,
 		resolved.RawConfig,
@@ -644,31 +629,19 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 	}
 
 	// Handle based on plan type (single-container vs compose)
-	isSingleContainer := containerInfo != nil && (containerInfo.Plan == state.BuildMethodImage ||
-		containerInfo.Plan == state.BuildMethodDockerfile)
-	if isSingleContainer {
+	if containerInfo.IsSingleContainer() {
 		if containerInfo.Running {
-			if err := s.dockerClient.StopContainer(ctx, containerInfo.ID, nil); err != nil {
+			if err := container.MustDocker().StopContainer(ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
-		if err := s.dockerClient.RemoveContainer(ctx, containerInfo.ID, true, opts.RemoveVolumes); err != nil {
+		if err := container.MustDocker().RemoveContainer(ctx, containerInfo.ID, true, opts.RemoveVolumes); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {
-		actualProject := ""
-		if containerInfo != nil {
-			actualProject = containerInfo.ComposeProject
-		}
-		if actualProject == "" {
-			actualProject = projectName
-		}
-		// Get config directory for compose commands
-		configDir := s.workspacePath
-		if containerInfo != nil && containerInfo.Labels != nil && containerInfo.Labels.ConfigPath != "" {
-			configDir = filepath.Dir(containerInfo.Labels.ConfigPath)
-		}
-		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject, s.dockerClient)
+		actualProject := containerInfo.GetComposeProject(projectName)
+		configDir := containerInfo.GetConfigDir(s.workspacePath)
+		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
 		if err := r.Down(ctx, container.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,
@@ -743,7 +716,7 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		return err
 	}
 
-	runtime, err := container.NewUnifiedRuntime(resolved, s.dockerClient)
+	runtime, err := container.NewUnifiedRuntime(resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}

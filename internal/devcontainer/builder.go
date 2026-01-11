@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/common"
-	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 // Builder constructs a ResolvedDevContainer from configuration and resolves all references.
@@ -125,7 +125,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		// For compose projects, prefer explicit compose.yaml name over devcontainer.json name
 		// Only use compose name if explicitly set in compose.yaml (not auto-derived from directory)
 		projectName := ""
-		if explicitName := compose.GetExplicitProjectName(absolutePaths); explicitName != "" {
+		if explicitName := getExplicitProjectName(absolutePaths); explicitName != "" {
 			// Use explicit compose.yaml name
 			projectName = common.SanitizeProjectName(explicitName)
 			// Also update resolved.Name so SSH host and identifiers use compose name
@@ -354,8 +354,8 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 	resolved.Hashes = hashes
 
 	// Set derived image tag based on hash
-	if hashes.Config != "" && len(hashes.Config) >= 12 {
-		resolved.DerivedImage = fmt.Sprintf("dcx/%s:%s-features", resolved.ID, hashes.Config[:12])
+	if hashes.Config != "" && len(hashes.Config) >= common.HashTruncationLength {
+		resolved.DerivedImage = fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, resolved.ID, hashes.Config[:common.HashTruncationLength])
 	}
 
 	return nil
@@ -479,4 +479,26 @@ func parseMounts(mounts []Mount) []Mount {
 		result = append(result, m)
 	}
 	return result
+}
+
+// getExplicitProjectName checks compose files for an explicit "name" field.
+// Returns the last name found (matching Docker Compose merge behavior).
+func getExplicitProjectName(files []string) string {
+	var name string
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+
+		var raw map[string]interface{}
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+
+		if n, ok := raw["name"].(string); ok && n != "" {
+			name = n // Keep going, use the last one
+		}
+	}
+	return name
 }

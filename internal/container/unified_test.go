@@ -11,34 +11,30 @@ import (
 
 func TestNewUnifiedRuntime(t *testing.T) {
 	tests := []struct {
-		name         string
-		resolved     *devcontainer.ResolvedDevContainer
-		dockerClient *DockerClient
-		wantErr      bool
-		errContains  string
+		name        string
+		resolved    *devcontainer.ResolvedDevContainer
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name:         "nil resolved",
-			resolved:     nil,
-			dockerClient: &DockerClient{},
-			wantErr:      true,
-			errContains:  "resolved devcontainer is required",
+			name:        "nil resolved",
+			resolved:    nil,
+			wantErr:     true,
+			errContains: "resolved devcontainer is required",
 		},
 		{
-			name: "nil docker client",
+			name: "valid resolved",
 			resolved: &devcontainer.ResolvedDevContainer{
 				ID:          "test-id",
 				ServiceName: "test-service",
 			},
-			dockerClient: nil,
-			wantErr:      true,
-			errContains:  "docker client is required",
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime, err := NewUnifiedRuntime(tt.resolved, tt.dockerClient)
+			runtime, err := NewUnifiedRuntime(tt.resolved)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -74,12 +70,12 @@ func TestNewUnifiedRuntimeForExistingCompose(t *testing.T) {
 			runtime := NewUnifiedRuntimeForExistingCompose(
 				tt.configDir,
 				tt.composeProject,
-				&DockerClient{},
 			)
 			require.NotNil(t, runtime)
 			assert.Equal(t, tt.composeProject, runtime.composeProject)
 			assert.True(t, runtime.isCompose)
 			assert.Equal(t, tt.configDir, runtime.workspacePath)
+			assert.NotNil(t, runtime.compose, "compose client should be initialized")
 		})
 	}
 }

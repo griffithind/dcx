@@ -106,7 +106,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 		// Detailed mode: show more container info
 		if statusDetailed {
-			fullContainer, inspectErr := cliCtx.DockerClient.InspectContainer(cliCtx.Ctx, containerInfo.ID)
+			fullContainer, inspectErr := cliCtx.Docker.InspectContainer(cliCtx.Ctx, containerInfo.ID)
 			if inspectErr == nil {
 				ui.Println("")
 				ui.Println(ui.Bold("Container Details"))

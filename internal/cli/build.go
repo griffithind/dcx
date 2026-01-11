@@ -1,10 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -37,24 +33,17 @@ func init() {
 }
 
 func runBuild(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer func() { _ = dockerClient.Close() }()
-
-	// Create devcontainer service
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
-	defer svc.Close()
+	defer cliCtx.Close()
 
 	// Start spinner for progress feedback
 	spinner := ui.StartSpinner("Building devcontainer images...")
 
 	// Execute build
-	buildErr := svc.Build(ctx, service.BuildOptions{
+	buildErr := cliCtx.Service.Build(cliCtx.Ctx, service.BuildOptions{
 		NoCache: noCache,
 		Pull:    pullBuild,
 	})

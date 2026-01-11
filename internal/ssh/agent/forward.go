@@ -264,7 +264,7 @@ func GetContainerUserIDs(containerID, user string) (int, int) {
 
 // GetContainerBinaryPath returns the path for dcx-agent binary in the container.
 func GetContainerBinaryPath() string {
-	return "/tmp/dcx-agent"
+	return common.AgentBinaryPath
 }
 
 // getDockerBridgeIP returns the gateway IP of the default Docker bridge network.

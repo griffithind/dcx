@@ -152,13 +152,12 @@ func runDebug(cmd *cobra.Command, args []string) error {
 func getDockerInfo(ctx context.Context) DockerInfo {
 	info := DockerInfo{}
 
-	client, err := container.NewDockerClient()
+	client, err := container.DockerClient()
 	if err != nil {
 		info.Available = false
 		info.Error = err.Error()
 		return info
 	}
-	defer func() { _ = client.Close() }()
 
 	version, err := client.ServerVersion(ctx)
 	if err != nil {
@@ -240,13 +239,12 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 }
 
 func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
-	client, err := container.NewDockerClient()
+	_, err := container.DockerClient()
 	if err != nil {
 		return
 	}
-	defer func() { _ = client.Close() }()
 
-	svc := service.NewDevContainerService(client, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()

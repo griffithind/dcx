@@ -68,14 +68,13 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get identifiers from service
-	dockerClient, err := container.NewDockerClient()
+	// Get identifiers from service (uses singleton Docker client)
+	_, err = container.DockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer func() { _ = dockerClient.Close() }()
 
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()

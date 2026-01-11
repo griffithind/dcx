@@ -41,15 +41,14 @@ func init() {
 func runClean(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	// Initialize Docker client (uses singleton)
+	docker, err := container.DockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer func() { _ = dockerClient.Close() }()
 
 	if dryRun {
-		return showCleanStats(ctx, dockerClient)
+		return showCleanStats(ctx, docker)
 	}
 
 	var totalImages int
@@ -58,7 +57,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Clean derived images (unless only dangling is requested)
 	if !cleanDangling {
 		ui.Println("Cleaning derived images...")
-		result, err := dockerClient.CleanupAllDerivedImages(ctx)
+		result, err := docker.CleanupAllDerivedImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean derived images: %w", err)
 		}
@@ -76,7 +75,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Clean dangling images if requested
 	if cleanAll || cleanDangling {
 		ui.Println("Cleaning dangling images...")
-		result, err := dockerClient.CleanupDanglingImages(ctx)
+		result, err := docker.CleanupDanglingImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean dangling images: %w", err)
 		}
@@ -101,12 +100,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func showCleanStats(ctx context.Context, dockerClient *container.DockerClient) error {
+func showCleanStats(ctx context.Context, docker *container.Docker) error {
 	ui.Println(ui.Bold("Dry run - showing what would be cleaned:"))
 	ui.Println("")
 
 	// Show derived images
-	count, size, err := dockerClient.GetDerivedImageStats(ctx)
+	count, size, err := docker.GetDerivedImageStats(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get derived image stats: %w", err)
 	}

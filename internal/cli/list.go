@@ -53,15 +53,14 @@ type ContainerItem struct {
 func runListEnvironments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	// Initialize Docker client (uses singleton)
+	docker, err := container.DockerClient()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer func() { _ = dockerClient.Close() }()
 
 	// List all dcx-managed containers
-	containers, err := dockerClient.ListContainersWithLabels(ctx, map[string]string{
+	containers, err := docker.ListContainersWithLabels(ctx, map[string]string{
 		state.LabelManaged: "true",
 	})
 	if err != nil {
@@ -107,7 +106,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine state for each environment
-	stateMgr := state.NewStateManager(dockerClient)
+	stateMgr := state.NewStateManager(docker)
 	for _, env := range envMap {
 		s, _, _ := stateMgr.GetState(ctx, env.WorkspaceID)
 		env.State = string(s)

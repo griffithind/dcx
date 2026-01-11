@@ -1,6 +1,6 @@
 // Package container provides container runtime management for devcontainers.
 // This package replaces the previous internal/docker and internal/runner packages
-// with clearer naming (DockerClient, ContainerRuntime).
+// with clearer naming (Docker, ContainerRuntime).
 package container
 
 import (
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/griffithind/dcx/internal/common"
@@ -19,34 +20,52 @@ import (
 	"github.com/griffithind/dcx/internal/state"
 )
 
-// DockerClient wraps the Docker client with dcx-specific functionality.
-// This replaces the previous docker.Client type.
+// Docker wraps the Docker CLI with dcx-specific functionality.
 // All operations use the Docker CLI for reliability and simplicity.
-type DockerClient struct{}
+type Docker struct{}
 
-// NewDockerClient creates a new Docker client.
+// Singleton instance for Docker.
+var (
+	docker     *Docker
+	dockerOnce sync.Once
+	dockerErr  error
+)
+
+// NewDocker creates a new Docker client.
 // Validates that Docker is accessible via the CLI.
-func NewDockerClient() (*DockerClient, error) {
+func NewDocker() (*Docker, error) {
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("docker not accessible: %w", err)
 	}
-	return &DockerClient{}, nil
+	return &Docker{}, nil
 }
 
-// Close is a no-op for CLI-based client.
-func (c *DockerClient) Close() error {
-	return nil
+// DockerClient returns the singleton Docker instance, validating Docker access on first use.
+func DockerClient() (*Docker, error) {
+	dockerOnce.Do(func() {
+		docker, dockerErr = NewDocker()
+	})
+	return docker, dockerErr
+}
+
+// MustDocker returns the singleton Docker instance, panicking if Docker is not accessible.
+func MustDocker() *Docker {
+	d, err := DockerClient()
+	if err != nil {
+		panic(fmt.Sprintf("docker not accessible: %v", err))
+	}
+	return d
 }
 
 // Ping checks if the Docker daemon is accessible.
-func (c *DockerClient) Ping(ctx context.Context) error {
+func (d *Docker) Ping(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "docker", "info")
 	return cmd.Run()
 }
 
 // ServerVersion returns the Docker server version.
-func (c *DockerClient) ServerVersion(ctx context.Context) (string, error) {
+func (d *Docker) ServerVersion(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
 	output, err := cmd.Output()
 	if err != nil {
@@ -66,7 +85,7 @@ type SystemInfo struct {
 // Info returns system-wide information about Docker.
 // This reflects Docker's configured resource limits, which may be less than the host's
 // actual resources (e.g., Docker Desktop VM limits, cgroup limits).
-func (c *DockerClient) Info(ctx context.Context) (*SystemInfo, error) {
+func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 	cmd := exec.CommandContext(ctx, "docker", "info", "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -93,7 +112,7 @@ func (c *DockerClient) Info(ctx context.Context) (*SystemInfo, error) {
 
 // ListContainersWithLabels returns containers matching label filters.
 // Implements state.ContainerClient.
-func (c *DockerClient) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]state.ContainerSummary, error) {
+func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]state.ContainerSummary, error) {
 	args := []string{"ps", "-a", "--format", "json", "--no-trunc"}
 	for k, v := range labels {
 		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", k, v))
@@ -147,7 +166,7 @@ func (c *DockerClient) ListContainersWithLabels(ctx context.Context, labels map[
 
 // InspectContainer returns detailed information about a container.
 // Implements state.ContainerClient.
-func (c *DockerClient) InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error) {
+func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error) {
 	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "json", containerID)
 	output, err := cmd.Output()
 	if err != nil {
@@ -200,11 +219,11 @@ func (c *DockerClient) InspectContainer(ctx context.Context, containerID string)
 	}, nil
 }
 
-// Ensure DockerClient implements state.ContainerClient.
-var _ state.ContainerClient = (*DockerClient)(nil)
+// Ensure Docker implements state.ContainerClient.
+var _ state.ContainerClient = (*Docker)(nil)
 
 // ImageExists checks if an image exists locally.
-func (c *DockerClient) ImageExists(ctx context.Context, imageRef string) (bool, error) {
+func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef)
 	if err := cmd.Run(); err != nil {
 		// Exit code 1 means image not found
@@ -217,7 +236,7 @@ func (c *DockerClient) ImageExists(ctx context.Context, imageRef string) (bool, 
 }
 
 // GetImageLabels returns the labels for an image.
-func (c *DockerClient) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
+func (d *Docker) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
 	output, err := cmd.Output()
 	if err != nil {
@@ -240,7 +259,7 @@ func (c *DockerClient) GetImageLabels(ctx context.Context, imageRef string) (map
 }
 
 // GetImageID returns the ID of an image.
-func (c *DockerClient) GetImageID(ctx context.Context, imageRef string) (string, error) {
+func (d *Docker) GetImageID(ctx context.Context, imageRef string) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
 	output, err := cmd.Output()
 	if err != nil {
@@ -250,7 +269,7 @@ func (c *DockerClient) GetImageID(ctx context.Context, imageRef string) (string,
 }
 
 // PullImageWithProgress pulls an image with optional progress display.
-func (c *DockerClient) PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error {
+func (d *Docker) PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error {
 	cmd := exec.CommandContext(ctx, "docker", "pull", imageRef)
 	if progressOut != nil {
 		cmd.Stdout = progressOut
@@ -263,7 +282,7 @@ func (c *DockerClient) PullImageWithProgress(ctx context.Context, imageRef strin
 }
 
 // StartContainer starts a stopped container using Docker CLI.
-func (c *DockerClient) StartContainer(ctx context.Context, containerID string) error {
+func (d *Docker) StartContainer(ctx context.Context, containerID string) error {
 	cmd := exec.CommandContext(ctx, "docker", "start", containerID)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start container: %s", strings.TrimSpace(string(output)))
@@ -272,7 +291,7 @@ func (c *DockerClient) StartContainer(ctx context.Context, containerID string) e
 }
 
 // StopContainer stops a running container using Docker CLI.
-func (c *DockerClient) StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error {
+func (d *Docker) StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error {
 	args := []string{"stop"}
 	if timeout != nil {
 		args = append(args, "-t", strconv.Itoa(int(timeout.Seconds())))
@@ -287,7 +306,7 @@ func (c *DockerClient) StopContainer(ctx context.Context, containerID string, ti
 }
 
 // RemoveContainer removes a container using Docker CLI.
-func (c *DockerClient) RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error {
+func (d *Docker) RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error {
 	args := []string{"rm"}
 	if force {
 		args = append(args, "-f")
@@ -305,7 +324,7 @@ func (c *DockerClient) RemoveContainer(ctx context.Context, containerID string, 
 }
 
 // KillContainer sends a signal to a container using Docker CLI.
-func (c *DockerClient) KillContainer(ctx context.Context, containerID, signal string) error {
+func (d *Docker) KillContainer(ctx context.Context, containerID, signal string) error {
 	args := []string{"kill"}
 	if signal != "" {
 		args = append(args, "-s", signal)
@@ -352,7 +371,7 @@ type CreateContainerOptions struct {
 
 // CreateContainer creates a new container using Docker CLI.
 // Returns the container ID.
-func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainerOptions) (string, error) {
+func (d *Docker) CreateContainer(ctx context.Context, opts CreateContainerOptions) (string, error) {
 	args := []string{"run", "-d"}
 
 	// Container name
@@ -549,7 +568,7 @@ type ImageBuildOptions struct {
 }
 
 // BuildImage builds a Docker image from a Dockerfile.
-func (c *DockerClient) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
+func (d *Docker) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
 	configDir := opts.ConfigDir
 	if configDir == "" {
 		configDir = "."
@@ -624,7 +643,7 @@ type imageInfo struct {
 }
 
 // listImages lists all images using docker images command.
-func (c *DockerClient) listImages(ctx context.Context, filters ...string) ([]imageInfo, error) {
+func (d *Docker) listImages(ctx context.Context, filters ...string) ([]imageInfo, error) {
 	args := []string{"images", "--format", "json", "--no-trunc"}
 	for _, f := range filters {
 		args = append(args, "--filter", f)
@@ -652,7 +671,7 @@ func (c *DockerClient) listImages(ctx context.Context, filters ...string) ([]ima
 }
 
 // removeImage removes an image by ID using docker rmi.
-func (c *DockerClient) removeImage(ctx context.Context, imageID string) error {
+func (d *Docker) removeImage(ctx context.Context, imageID string) error {
 	cmd := exec.CommandContext(ctx, "docker", "rmi", imageID)
 	return cmd.Run()
 }
@@ -689,10 +708,10 @@ func parseImageSize(sizeStr string) int64 {
 // CleanupDerivedImages removes derived images created by dcx.
 // If workspaceID is provided, only images for that environment are removed.
 // If keepCurrent is true, the current derived image (matching configHash) is preserved.
-func (c *DockerClient) CleanupDerivedImages(ctx context.Context, workspaceID, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
+func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
 	result := &CleanupResult{}
 
-	images, err := c.listImages(ctx)
+	images, err := d.listImages(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +737,7 @@ func (c *DockerClient) CleanupDerivedImages(ctx context.Context, workspaceID, cu
 		}
 
 		// Remove the image
-		if err := c.removeImage(ctx, img.ID); err != nil {
+		if err := d.removeImage(ctx, img.ID); err != nil {
 			// Log but continue - image might be in use
 			continue
 		}
@@ -731,21 +750,21 @@ func (c *DockerClient) CleanupDerivedImages(ctx context.Context, workspaceID, cu
 }
 
 // CleanupAllDerivedImages removes all derived images created by dcx.
-func (c *DockerClient) CleanupAllDerivedImages(ctx context.Context) (*CleanupResult, error) {
-	return c.CleanupDerivedImages(ctx, "", "", false)
+func (d *Docker) CleanupAllDerivedImages(ctx context.Context) (*CleanupResult, error) {
+	return d.CleanupDerivedImages(ctx, "", "", false)
 }
 
 // CleanupDanglingImages removes dangling (untagged) images.
-func (c *DockerClient) CleanupDanglingImages(ctx context.Context) (*CleanupResult, error) {
+func (d *Docker) CleanupDanglingImages(ctx context.Context) (*CleanupResult, error) {
 	result := &CleanupResult{}
 
-	images, err := c.listImages(ctx, "dangling=true")
+	images, err := d.listImages(ctx, "dangling=true")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list dangling images: %w", err)
 	}
 
 	for _, img := range images {
-		if err := c.removeImage(ctx, img.ID); err != nil {
+		if err := d.removeImage(ctx, img.ID); err != nil {
 			continue
 		}
 
@@ -757,8 +776,8 @@ func (c *DockerClient) CleanupDanglingImages(ctx context.Context) (*CleanupResul
 }
 
 // GetDerivedImageStats returns statistics about derived images.
-func (c *DockerClient) GetDerivedImageStats(ctx context.Context) (count int, totalSize int64, err error) {
-	images, err := c.listImages(ctx)
+func (d *Docker) GetDerivedImageStats(ctx context.Context) (count int, totalSize int64, err error) {
+	images, err := d.listImages(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -781,7 +800,7 @@ type LogsOptions struct {
 }
 
 // GetLogs retrieves logs from a container.
-func (c *DockerClient) GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
+func (d *Docker) GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
 	args := []string{"logs"}
 	if opts.Follow {
 		args = append(args, "-f")
@@ -805,4 +824,63 @@ func (c *DockerClient) GetLogs(ctx context.Context, containerID string, opts Log
 	}()
 
 	return pr, nil
+}
+
+// SimpleExecOptions contains options for simple exec operations.
+type SimpleExecOptions struct {
+	User string
+	Cmd  []string
+}
+
+// SimpleExecInContainer runs a command in a container and returns the combined output.
+// This is a simplified version for internal use by helper operations.
+func (d *Docker) SimpleExecInContainer(ctx context.Context, containerName string, opts SimpleExecOptions) ([]byte, error) {
+	args := []string{"exec"}
+	if opts.User != "" {
+		args = append(args, "--user", opts.User)
+	}
+	args = append(args, containerName)
+	args = append(args, opts.Cmd...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	return cmd.CombinedOutput()
+}
+
+// CopyToContainer copies a file to a container.
+func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
+	cmd := exec.CommandContext(ctx, "docker", "cp", src, containerName+":"+dest)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker cp failed: %w, output: %s", err, output)
+	}
+	return nil
+}
+
+// ChmodInContainer changes file permissions inside a container.
+func (d *Docker) ChmodInContainer(ctx context.Context, containerName, path, mode, user string) error {
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args, containerName, "chmod", mode, path)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("chmod failed: %w, output: %s", err, output)
+	}
+	return nil
+}
+
+// MkdirInContainer creates a directory inside a container.
+func (d *Docker) MkdirInContainer(ctx context.Context, containerName, path, user string) error {
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(args, containerName, "mkdir", "-p", path)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("mkdir failed: %w, output: %s", err, output)
+	}
+	return nil
 }

@@ -3,6 +3,8 @@
 // with clearer naming (ContainerState instead of State).
 package state
 
+import "path/filepath"
+
 // ContainerState represents the lifecycle state of a container or environment.
 // This is the canonical state type used throughout dcx.
 // Renamed from State to ContainerState for clarity.
@@ -219,5 +221,31 @@ type ContainerInfo struct {
 	ComposeProject string
 	PrimaryService string
 	Labels         *ContainerLabels
+}
+
+// IsSingleContainer returns true if this is a single-container (non-compose) devcontainer.
+func (c *ContainerInfo) IsSingleContainer() bool {
+	return c != nil && (c.Plan == BuildMethodImage || c.Plan == BuildMethodDockerfile)
+}
+
+// IsCompose returns true if this is a compose-based devcontainer.
+func (c *ContainerInfo) IsCompose() bool {
+	return c != nil && c.Plan == BuildMethodCompose
+}
+
+// GetComposeProject returns the compose project name, falling back to the provided default.
+func (c *ContainerInfo) GetComposeProject(defaultProject string) string {
+	if c != nil && c.ComposeProject != "" {
+		return c.ComposeProject
+	}
+	return defaultProject
+}
+
+// GetConfigDir returns the config directory from labels, falling back to the provided default.
+func (c *ContainerInfo) GetConfigDir(defaultDir string) string {
+	if c != nil && c.Labels != nil && c.Labels.ConfigPath != "" {
+		return filepath.Dir(c.Labels.ConfigPath)
+	}
+	return defaultDir
 }
 

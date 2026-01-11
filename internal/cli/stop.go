@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -65,25 +64,16 @@ func runStop(cmd *cobra.Command, args []string) error {
 		}
 
 		// Determine plan type from container labels (single-container vs compose)
-		isSingleContainer := containerInfo != nil && (containerInfo.Plan == state.BuildMethodImage ||
-			containerInfo.Plan == state.BuildMethodDockerfile)
-		if isSingleContainer {
+		if containerInfo.IsSingleContainer() {
 			// Single container - use Docker API directly
-			if err := cliCtx.DockerClient.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
+			if err := cliCtx.Docker.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		} else {
 			// Compose plan - use docker compose
-			actualProject := containerInfo.ComposeProject
-			if actualProject == "" {
-				actualProject = cliCtx.Identifiers.ProjectName
-			}
-			// Get config directory for compose commands
-			configDir := cliCtx.WorkspacePath()
-			if containerInfo.Labels != nil && containerInfo.Labels.ConfigPath != "" {
-				configDir = filepath.Dir(containerInfo.Labels.ConfigPath)
-			}
-			r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject, cliCtx.DockerClient)
+			actualProject := containerInfo.GetComposeProject(cliCtx.Identifiers.ProjectName)
+			configDir := containerInfo.GetConfigDir(cliCtx.WorkspacePath())
+			r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
 			if err := r.Stop(cliCtx.Ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}

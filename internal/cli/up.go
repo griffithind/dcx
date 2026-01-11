@@ -1,10 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
@@ -39,23 +35,16 @@ func init() {
 }
 
 func runUp(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	// Initialize Docker client
-	dockerClient, err := container.NewDockerClient()
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
-	defer func() { _ = dockerClient.Close() }()
-
-	// Create service
-	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
-	defer svc.Close()
+	defer cliCtx.Close()
 
 	// Check if we can do a quick start (smart detection)
 	// Skip smart detection if --rebuild or --recreate or --pull are specified
 	if !rebuild && !recreate && !pull {
-		plan, err := svc.Plan(ctx, service.PlanOptions{})
+		plan, err := cliCtx.Service.Plan(cliCtx.Ctx, service.PlanOptions{})
 		if err == nil {
 			switch plan.Action {
 			case state.PlanActionNone:
@@ -66,8 +55,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 			case state.PlanActionStart:
 				// Containers exist but stopped, just start them (offline-safe)
 				ui.Printf("Devcontainer exists and is up to date, starting...")
-				ids, _ := svc.GetIdentifiers()
-				if err := svc.QuickStart(ctx, plan.ContainerInfo, ids.ProjectName, ids.WorkspaceID); err != nil {
+				if err := cliCtx.Service.QuickStart(cliCtx.Ctx, plan.ContainerInfo, cliCtx.Identifiers.ProjectName, cliCtx.Identifiers.WorkspaceID); err != nil {
 					return err
 				}
 				ui.Success("Devcontainer started")
@@ -79,7 +67,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Full up sequence required
-	if err := svc.Up(ctx, service.UpOptions{
+	if err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{
 		Recreate: recreate,
 		Rebuild:  rebuild,
 		Pull:     pull,
