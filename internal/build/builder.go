@@ -143,18 +143,6 @@ func NewCLIBuilder(cli *client.Client) *CLIBuilder {
 	return &CLIBuilder{client: cli}
 }
 
-// NewCLIBuilderFromEnv creates a new image builder from environment.
-func NewCLIBuilderFromEnv() (*CLIBuilder, error) {
-	cli, err := client.NewClientWithOpts(
-		client.FromEnv,
-		client.WithAPIVersionNegotiation(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &CLIBuilder{client: cli}, nil
-}
-
 // Client returns the underlying Docker client.
 func (b *CLIBuilder) Client() *client.Client {
 	return b.client

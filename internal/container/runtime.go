@@ -24,15 +24,6 @@ type ContainerRuntime interface {
 
 	// Build builds the environment images without starting containers.
 	Build(ctx context.Context, opts BuildOptions) error
-
-	// Exec executes a command in the running environment.
-	Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error)
-
-	// WorkspaceFolder returns the workspace folder path inside the container.
-	WorkspaceFolder() string
-
-	// ContainerName returns the name/ID of the primary container.
-	ContainerName() string
 }
 
 // UpOptions configures the Up operation.

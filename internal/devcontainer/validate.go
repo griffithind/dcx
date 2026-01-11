@@ -2,7 +2,6 @@ package devcontainer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -123,68 +122,4 @@ func isAbsolutePath(path string) bool {
 		return true
 	}
 	return false
-}
-
-// ValidateForCompose validates compose-specific configuration.
-func ValidateForCompose(cfg *DevContainerConfig, configDir string) error {
-	var errs ValidationErrors
-
-	if !cfg.IsComposePlan() {
-		return nil
-	}
-
-	// Check that compose files exist
-	files := cfg.GetDockerComposeFiles()
-	for _, f := range files {
-		path := ResolveRelativePath(configDir, f)
-		if _, err := os.Stat(path); err != nil {
-			errs = append(errs, ValidationError{
-				Field:   "dockerComposeFile",
-				Message: fmt.Sprintf("file not found: %s", f),
-			})
-		}
-	}
-
-	if len(errs) > 0 {
-		return errs
-	}
-
-	return nil
-}
-
-// ValidateForBuild validates build-specific configuration.
-func ValidateForBuild(cfg *DevContainerConfig, configDir string) error {
-	var errs ValidationErrors
-
-	if cfg.Build == nil {
-		return nil
-	}
-
-	// Check Dockerfile exists
-	if cfg.Build.Dockerfile != "" {
-		path := ResolveRelativePath(configDir, cfg.Build.Dockerfile)
-		if _, err := os.Stat(path); err != nil {
-			errs = append(errs, ValidationError{
-				Field:   "build.dockerfile",
-				Message: fmt.Sprintf("file not found: %s", cfg.Build.Dockerfile),
-			})
-		}
-	}
-
-	// Check context directory exists
-	if cfg.Build.Context != "" {
-		path := ResolveRelativePath(configDir, cfg.Build.Context)
-		if info, err := os.Stat(path); err != nil || !info.IsDir() {
-			errs = append(errs, ValidationError{
-				Field:   "build.context",
-				Message: fmt.Sprintf("directory not found: %s", cfg.Build.Context),
-			})
-		}
-	}
-
-	if len(errs) > 0 {
-		return errs
-	}
-
-	return nil
 }

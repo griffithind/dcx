@@ -290,46 +290,6 @@ func TestGPUConfig_UnmarshalJSON(t *testing.T) {
 	}
 }
 
-func TestParseFeatures(t *testing.T) {
-	features := map[string]interface{}{
-		"ghcr.io/devcontainers/features/go:1":   true,
-		"ghcr.io/devcontainers/features/node:1": map[string]interface{}{"version": "18"},
-		"ghcr.io/devcontainers/features/git:1":  false,
-	}
-
-	result := ParseFeatures(features)
-	if len(result) != 3 {
-		t.Fatalf("expected 3 features, got %d", len(result))
-	}
-
-	// Check that features are parsed correctly
-	featureMap := make(map[string]FeatureConfig)
-	for _, f := range result {
-		featureMap[f.ID] = f
-	}
-
-	goFeature := featureMap["ghcr.io/devcontainers/features/go:1"]
-	if !goFeature.Enabled {
-		t.Error("go feature should be enabled")
-	}
-	if len(goFeature.Options) != 0 {
-		t.Error("go feature should have no options")
-	}
-
-	nodeFeature := featureMap["ghcr.io/devcontainers/features/node:1"]
-	if !nodeFeature.Enabled {
-		t.Error("node feature should be enabled")
-	}
-	if nodeFeature.Options["version"] != "18" {
-		t.Errorf("node version: got %v, expected 18", nodeFeature.Options["version"])
-	}
-
-	gitFeature := featureMap["ghcr.io/devcontainers/features/git:1"]
-	if gitFeature.Enabled {
-		t.Error("git feature should be disabled")
-	}
-}
-
 func TestPortSpecs_UnmarshalJSON(t *testing.T) {
 	input := `[8080, "3000:8080", {"containerPort": 5000}]`
 	var specs PortSpecs

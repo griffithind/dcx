@@ -87,16 +87,6 @@ func (s *DevContainerService) GetStateManager() *state.StateManager {
 	return s.stateManager
 }
 
-// GetDockerClient returns the Docker client for direct access when needed.
-func (s *DevContainerService) GetDockerClient() *container.DockerClient {
-	return s.dockerClient
-}
-
-// GetWorkspacePath returns the workspace path.
-func (s *DevContainerService) GetWorkspacePath() string {
-	return s.workspacePath
-}
-
 // UpOptions contains options for bringing up a devcontainer.
 type UpOptions struct {
 	// Rebuild forces a rebuild of the container image
@@ -590,70 +580,10 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 	return nil
 }
 
-// StartOptions contains options for starting a stopped devcontainer.
-type StartOptions struct {
-	WorkspaceID string
-	ProjectName string
-}
-
-// Start starts a stopped devcontainer.
-func (s *DevContainerService) Start(ctx context.Context, opts StartOptions) error {
-	// Validate state
-	if err := s.stateManager.ValidateState(ctx, opts.WorkspaceID, state.OpStart); err != nil {
-		return err
-	}
-
-	// Create lightweight runtime for existing container
-	runtime := container.NewUnifiedRuntimeForExisting(
-		"", // workspace path not needed for start
-		opts.ProjectName,
-		opts.WorkspaceID,
-		s.dockerClient,
-	)
-
-	return runtime.Start(ctx)
-}
-
-// StopOptions contains options for stopping a devcontainer.
-type StopOptions struct {
-	WorkspaceID string
-	ProjectName string
-}
-
-// Stop stops a running devcontainer.
-func (s *DevContainerService) Stop(ctx context.Context, opts StopOptions) error {
-	// Validate state
-	if err := s.stateManager.ValidateState(ctx, opts.WorkspaceID, state.OpStop); err != nil {
-		return err
-	}
-
-	// Create lightweight runtime for existing container
-	runtime := container.NewUnifiedRuntimeForExisting(
-		"",
-		opts.ProjectName,
-		opts.WorkspaceID,
-		s.dockerClient,
-	)
-
-	return runtime.Stop(ctx)
-}
-
 // DownOptions contains options for tearing down a devcontainer.
 type DownOptions struct {
-	WorkspaceID   string
-	ProjectName   string
 	RemoveVolumes bool
 	RemoveOrphans bool
-}
-
-// Down tears down a devcontainer environment.
-func (s *DevContainerService) Down(ctx context.Context, opts DownOptions) error {
-	// Validate state
-	if err := s.stateManager.ValidateState(ctx, opts.WorkspaceID, state.OpDown); err != nil {
-		return err
-	}
-
-	return s.DownWithIDs(ctx, opts.ProjectName, opts.WorkspaceID, opts)
 }
 
 // DownWithIDs removes the environment using just project name and workspace ID.
@@ -709,65 +639,6 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 
 	ui.Println("Devcontainer removed")
 	return nil
-}
-
-// ExecOptions contains options for executing a command.
-type ExecOptions struct {
-	WorkspaceID string
-	ProjectName string
-	Command     []string
-	WorkingDir  string
-	User        string
-	Env         []string
-	TTY         bool
-}
-
-// Exec executes a command in a running devcontainer.
-func (s *DevContainerService) Exec(ctx context.Context, opts ExecOptions) (int, error) {
-	// Validate state
-	if err := s.stateManager.ValidateState(ctx, opts.WorkspaceID, state.OpExec); err != nil {
-		return -1, err
-	}
-
-	// Create lightweight runtime for existing container
-	runtime := container.NewUnifiedRuntimeForExisting(
-		"",
-		opts.ProjectName,
-		opts.WorkspaceID,
-		s.dockerClient,
-	)
-
-	return runtime.Exec(ctx, opts.Command, container.ExecOptions{
-		WorkingDir: opts.WorkingDir,
-		User:       opts.User,
-		Env:        opts.Env,
-		TTY:        opts.TTY,
-	})
-}
-
-// StatusOptions contains options for getting status.
-type StatusOptions struct {
-	WorkspaceID string
-	ProjectName string
-	ConfigHash  string
-}
-
-// Status returns the current state of a devcontainer.
-func (s *DevContainerService) Status(ctx context.Context, opts StatusOptions) (state.ContainerState, *state.ContainerInfo, error) {
-	if opts.ConfigHash != "" {
-		return s.stateManager.GetStateWithProjectAndHash(ctx, opts.ProjectName, opts.WorkspaceID, opts.ConfigHash)
-	}
-	return s.stateManager.GetStateWithProject(ctx, opts.ProjectName, opts.WorkspaceID)
-}
-
-// GetDiagnostics returns diagnostic information for troubleshooting.
-func (s *DevContainerService) GetDiagnostics(ctx context.Context, workspaceID string) (*state.Diagnostics, error) {
-	return s.stateManager.GetDiagnostics(ctx, workspaceID)
-}
-
-// Cleanup removes all containers and optionally volumes for a workspace.
-func (s *DevContainerService) Cleanup(ctx context.Context, workspaceID string, removeVolumes bool) error {
-	return s.stateManager.Cleanup(ctx, workspaceID, removeVolumes)
 }
 
 // BuildOptions configures the Build operation.

@@ -15,12 +15,6 @@ func RealPath(path string) (string, error) {
 	return filepath.EvalSymlinks(absPath)
 }
 
-// Exists checks if a path exists.
-func Exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 // IsDir checks if a path is a directory.
 func IsDir(path string) bool {
 	info, err := os.Stat(path)
@@ -37,15 +31,6 @@ func IsFile(path string) bool {
 		return false
 	}
 	return info.Mode().IsRegular()
-}
-
-// EnsureDir creates a directory with the specified permissions if it doesn't exist.
-func EnsureDir(path string, perm os.FileMode) error {
-	if err := os.MkdirAll(path, perm); err != nil {
-		return err
-	}
-	// Ensure permissions are set correctly even if dir existed
-	return os.Chmod(path, perm)
 }
 
 // NormalizePath normalizes a path for comparison.

@@ -287,38 +287,3 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestResolveRelativePath(t *testing.T) {
-	tests := []struct {
-		name string
-		base string
-		path string
-		want string
-	}{
-		{
-			name: "absolute path unchanged",
-			base: "/home/user",
-			path: "/absolute/path",
-			want: "/absolute/path",
-		},
-		{
-			name: "relative path joined",
-			base: "/home/user",
-			path: "relative/path",
-			want: "/home/user/relative/path",
-		},
-		{
-			name: "dot path",
-			base: "/home/user",
-			path: "./local",
-			want: "/home/user/local",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveRelativePath(tt.base, tt.path)
-			// Use filepath.Clean to normalize for comparison
-			assert.Equal(t, filepath.Clean(tt.want), filepath.Clean(got))
-		})
-	}
-}

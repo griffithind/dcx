@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/griffithind/dcx/internal/util"
 	"github.com/tidwall/jsonc"
@@ -139,25 +138,4 @@ func Load(workspacePath, configPath string) (*DevContainerConfig, string, error)
 	SubstituteConfig(cfg, ctx)
 
 	return cfg, resolvedPath, nil
-}
-
-// ResolveRelativePath resolves a path relative to a base path.
-func ResolveRelativePath(base, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(base, path)
-}
-
-// NormalizeMountPath normalizes a mount path for the current platform.
-func NormalizeMountPath(path string) string {
-	// Clean the path
-	path = filepath.Clean(path)
-
-	// On Windows, convert backslashes to forward slashes for Docker
-	if os.PathSeparator == '\\' {
-		path = strings.ReplaceAll(path, "\\", "/")
-	}
-
-	return path
 }

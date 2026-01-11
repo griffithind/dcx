@@ -119,21 +119,6 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 	}
 }
 
-// GetStateWithHashCheck determines state and checks for staleness.
-func (m *StateManager) GetStateWithHashCheck(ctx context.Context, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
-	state, info, err := m.GetState(ctx, workspaceID)
-	if err != nil || info == nil {
-		return state, info, err
-	}
-
-	// Check if config has changed
-	if info.ConfigHash != "" && info.ConfigHash != currentConfigHash {
-		return StateStale, info, nil
-	}
-
-	return state, info, nil
-}
-
 // GetStateWithProject handles lookup for both project-named and workspace ID containers.
 func (m *StateManager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (ContainerState, *ContainerInfo, error) {
 	// First try project name if set
@@ -199,40 +184,6 @@ func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectNa
 	return state, info, nil
 }
 
-// FindContainers returns all containers for an environment.
-func (m *StateManager) FindContainers(ctx context.Context, workspaceID string) ([]ContainerInfo, error) {
-	containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
-		LabelWorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]ContainerInfo, 0, len(containers))
-	for i := range containers {
-		result = append(result, *containerInfoFromSummary(&containers[i]))
-	}
-
-	return result, nil
-}
-
-// FindPrimaryContainer returns the primary container for an environment.
-func (m *StateManager) FindPrimaryContainer(ctx context.Context, workspaceID string) (*ContainerInfo, error) {
-	containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
-		LabelWorkspaceID: workspaceID,
-		LabelIsPrimary:   "true",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if len(containers) == 0 {
-		return nil, nil
-	}
-
-	return containerInfoFromSummary(&containers[0]), nil
-}
-
 // FindContainerByName returns a container by its name.
 // This is used by the SSH command to find a specific container.
 func (m *StateManager) FindContainerByName(ctx context.Context, containerName string) (*ContainerInfo, error) {
@@ -252,97 +203,3 @@ func (m *StateManager) FindContainerByName(ctx context.Context, containerName st
 	return nil, nil
 }
 
-// Cleanup removes all containers for an environment.
-// This is useful for recovering from broken states.
-// If removeVolumes is true, anonymous volumes attached to containers are also removed.
-func (m *StateManager) Cleanup(ctx context.Context, workspaceID string, removeVolumes bool) error {
-	containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
-		LabelWorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return err
-	}
-
-	var lastErr error
-	for _, c := range containers {
-		// Stop if running
-		if c.Running || c.State == "running" {
-			if err := m.client.StopContainer(ctx, c.ID, nil); err != nil {
-				lastErr = err
-				continue
-			}
-		}
-
-		// Remove container and optionally volumes
-		if err := m.client.RemoveContainer(ctx, c.ID, true, removeVolumes); err != nil {
-			lastErr = err
-		}
-	}
-
-	return lastErr
-}
-
-// ValidateState checks if the current state allows the requested operation.
-func (m *StateManager) ValidateState(ctx context.Context, workspaceID string, operation Operation) error {
-	state, _, err := m.GetState(ctx, workspaceID)
-	if err != nil {
-		return err
-	}
-
-	switch operation {
-	case OpStart:
-		if state == StateRunning {
-			return ErrAlreadyRunning
-		}
-		if state == StateAbsent {
-			return ErrNoContainer
-		}
-		if state == StateStale {
-			return ErrStaleConfig
-		}
-		if state == StateBroken {
-			return ErrBrokenState
-		}
-	case OpStop:
-		if state != StateRunning {
-			return ErrNotRunning
-		}
-	case OpExec:
-		if state != StateRunning {
-			return ErrNotRunning
-		}
-	case OpDown:
-		if state == StateAbsent {
-			return ErrNoContainer
-		}
-	case OpUp:
-		// Up can be run in any state
-	}
-
-	return nil
-}
-
-// GetDiagnostics returns diagnostic information for troubleshooting.
-func (m *StateManager) GetDiagnostics(ctx context.Context, workspaceID string) (*Diagnostics, error) {
-	state, info, err := m.GetState(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	containers, err := m.FindContainers(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	diag := &Diagnostics{
-		State:      state,
-		Recovery:   state.GetRecovery(),
-		Containers: containers,
-	}
-
-	if info != nil {
-		diag.PrimaryContainer = info
-	}
-
-	return diag, nil
-}

@@ -60,11 +60,6 @@ func GetBinary(arch string) ([]byte, error) {
 	}
 }
 
-// HasBinaries returns true if agent binaries are embedded.
-func HasBinaries() bool {
-	return len(agentLinuxAmd64Compressed) > 0 || len(agentLinuxArm64Compressed) > 0
-}
-
 func decompress(data []byte) ([]byte, error) {
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {

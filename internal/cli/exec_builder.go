@@ -202,44 +202,6 @@ func (b *ExecBuilder) Execute(ctx context.Context, opts ExecFlags) error {
 	return nil
 }
 
-// ExecuteWithOutput runs a command and returns its output instead of streaming.
-func (b *ExecBuilder) ExecuteWithOutput(ctx context.Context, opts ExecFlags) ([]byte, error) {
-	dockerArgs, user := b.BuildArgs(opts)
-
-	// Setup SSH agent forwarding when available
-	var agentProxy *agent.AgentProxy
-	if agent.IsAvailable() {
-		uid, gid := agent.GetContainerUserIDs(b.containerInfo.Name, user)
-		var err error
-		agentProxy, err = agent.NewAgentProxy(b.containerInfo.ID, b.containerInfo.Name, uid, gid)
-		if err != nil {
-			ui.Warning("SSH agent proxy setup failed: %v", err)
-		} else {
-			socketPath, startErr := agentProxy.Start()
-			if startErr != nil {
-				ui.Warning("SSH agent proxy start failed: %v", startErr)
-			} else {
-				dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("SSH_AUTH_SOCK=%s", socketPath))
-			}
-		}
-	}
-
-	// Add container name and command
-	dockerArgs = append(dockerArgs, b.containerInfo.Name)
-	dockerArgs = append(dockerArgs, opts.Command...)
-
-	// Run docker exec and capture output
-	dockerCmd := exec.CommandContext(ctx, "docker", dockerArgs...)
-	output, err := dockerCmd.CombinedOutput()
-
-	// Clean up SSH agent proxy
-	if agentProxy != nil {
-		agentProxy.Stop()
-	}
-
-	return output, err
-}
-
 // Shell opens an interactive shell in the container.
 func (b *ExecBuilder) Shell(ctx context.Context, shell string) error {
 	if shell == "" {

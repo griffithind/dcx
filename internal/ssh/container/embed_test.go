@@ -16,11 +16,6 @@ import (
 // Placeholder embeds are much smaller than this.
 const minValidBinarySize = 1024 * 1024
 
-func TestHasEmbeddedBinaries(t *testing.T) {
-	got := dcxembed.HasBinaries()
-	assert.True(t, got, "HasBinaries should return true")
-}
-
 func TestGetEmbeddedBinaryAmd64(t *testing.T) {
 	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil {

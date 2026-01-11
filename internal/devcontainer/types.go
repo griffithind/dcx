@@ -368,30 +368,6 @@ type FeatureConfig struct {
 	Options map[string]interface{}
 }
 
-// ParseFeatures converts a map[string]interface{} to a slice of FeatureConfig.
-// This preserves the feature ID as a field rather than a map key.
-func ParseFeatures(features map[string]interface{}) []FeatureConfig {
-	if features == nil {
-		return nil
-	}
-	result := make([]FeatureConfig, 0, len(features))
-	for id, opts := range features {
-		cfg := FeatureConfig{ID: id}
-		switch v := opts.(type) {
-		case bool:
-			cfg.Enabled = v
-		case map[string]interface{}:
-			cfg.Enabled = true
-			cfg.Options = v
-		default:
-			cfg.Enabled = true
-			cfg.Options = map[string]interface{}{"value": opts}
-		}
-		result = append(result, cfg)
-	}
-	return result
-}
-
 // PortSpecs is a slice of PortSpec with custom JSON handling.
 type PortSpecs []PortSpec
 

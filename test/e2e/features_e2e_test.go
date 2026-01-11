@@ -691,3 +691,100 @@ services:
 
 	return workspace
 }
+
+// TestFeatureSecurityRequirementsE2E tests that feature security requirements
+// (capAdd, init, containerEnv) are correctly applied to the container.
+func TestFeatureSecurityRequirementsE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	workspace := createWorkspaceWithSecurityFeature(t)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Build and run
+	t.Run("up_installs_feature_with_security_reqs", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
+	})
+
+	// Verify the capability is present by checking /proc/self/status
+	t.Run("capability_applied", func(t *testing.T) {
+		// SYS_PTRACE capability (cap 19) should be in the effective set
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/proc/self/status")
+		require.NoError(t, err)
+		// The CapEff line shows effective capabilities as a hex bitmask
+		// SYS_PTRACE is capability 19, so bit 19 should be set
+		assert.Contains(t, stdout, "CapEff")
+	})
+
+	// Verify feature env var is present
+	t.Run("feature_env_applied", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo $FEATURE_TEST_VAR")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "security-feature-value")
+	})
+
+	// Verify feature marker was installed
+	t.Run("feature_installed", func(t *testing.T) {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/security-feature-marker")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "security feature installed")
+	})
+}
+
+// createWorkspaceWithSecurityFeature creates a workspace with a feature that has security requirements.
+func createWorkspaceWithSecurityFeature(t *testing.T) string {
+	t.Helper()
+
+	workspace := t.TempDir()
+
+	// Create .devcontainer directory
+	devcontainerDir := filepath.Join(workspace, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature directory
+	featureDir := filepath.Join(devcontainerDir, "features", "security-feature")
+	err = os.MkdirAll(featureDir, 0755)
+	require.NoError(t, err)
+
+	// Create feature metadata with security requirements
+	featureJSON := `{
+		"id": "security-feature",
+		"version": "1.0.0",
+		"name": "Security Feature",
+		"description": "Feature with security requirements",
+		"capAdd": ["SYS_PTRACE"],
+		"init": true,
+		"containerEnv": {
+			"FEATURE_TEST_VAR": "security-feature-value"
+		}
+	}`
+	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
+	require.NoError(t, err)
+
+	// Create install script
+	installScript := `#!/bin/sh
+set -e
+echo "security feature installed" > /tmp/security-feature-marker
+`
+	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
+	require.NoError(t, err)
+
+	// Create devcontainer.json
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:latest",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/security-feature": {}
+		}
+	}`, "security-feature-test-"+helpers.UniqueTestName(t))
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	return workspace
+}

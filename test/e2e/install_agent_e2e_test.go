@@ -39,10 +39,6 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	if !dcxembed.HasBinaries() {
-		t.Skip("Skipping: no embedded binaries available")
-	}
-
 	// Check if embeds are valid (not placeholders)
 	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
@@ -95,10 +91,6 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	if !dcxembed.HasBinaries() {
-		t.Skip("Skipping: no embedded binaries available")
-	}
-
 	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
@@ -141,10 +133,6 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	if !dcxembed.HasBinaries() {
-		t.Skip("Skipping: no embedded binaries available")
-	}
-
 	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
@@ -182,10 +170,6 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 func TestInstallAgentArchitectureE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
-
-	if !dcxembed.HasBinaries() {
-		t.Skip("Skipping: no embedded binaries available")
-	}
 
 	binary, err := dcxembed.GetBinary("amd64")
 	if err != nil || len(binary) < 1024*1024 {

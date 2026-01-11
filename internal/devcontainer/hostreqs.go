@@ -2,10 +2,8 @@ package devcontainer
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/parse"
@@ -98,81 +96,6 @@ func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *Docke
 	return result
 }
 
-// ValidateHostRequirements checks if the host meets the specified requirements.
-// Deprecated: Use ValidateHostRequirementsWithDocker for accurate Docker resource checking.
-// This function checks host resources directly, which may not reflect Docker's limits.
-func ValidateHostRequirements(reqs *HostRequirements) *HostRequirementsResult {
-	result := &HostRequirementsResult{Satisfied: true}
-
-	if reqs == nil {
-		return result
-	}
-
-	// Check CPU cores
-	if reqs.CPUs > 0 {
-		hostCPUs := runtime.NumCPU()
-		if hostCPUs < reqs.CPUs {
-			result.Satisfied = false
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("CPU requirement not met: need %d cores, have %d", reqs.CPUs, hostCPUs))
-		}
-	}
-
-	// Check memory
-	if reqs.Memory != "" {
-		reqBytes, err := parseMemoryString(reqs.Memory)
-		if err != nil {
-			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("Could not parse memory requirement '%s': %v", reqs.Memory, err))
-		} else {
-			hostMemory := getHostMemory()
-			if hostMemory > 0 && hostMemory < reqBytes {
-				result.Satisfied = false
-				result.Errors = append(result.Errors,
-					fmt.Sprintf("Memory requirement not met: need %s, have %s",
-						reqs.Memory, formatBytes(hostMemory)))
-			}
-		}
-	}
-
-	// Check GPU
-	if reqs.GPU != nil {
-		needsGPU := false
-		switch v := reqs.GPU.(type) {
-		case bool:
-			needsGPU = v
-		case string:
-			needsGPU = v == "true" || v == "optional"
-		case map[string]interface{}:
-			// GPU requirement object - any non-empty object means GPU is needed
-			needsGPU = len(v) > 0
-		}
-
-		if needsGPU && !hasGPU() {
-			// Only error if GPU is required (not optional)
-			optional := false
-			if s, ok := reqs.GPU.(string); ok && s == "optional" {
-				optional = true
-			}
-			if optional {
-				result.Warnings = append(result.Warnings, "No GPU detected (optional requirement)")
-			} else {
-				result.Satisfied = false
-				result.Errors = append(result.Errors, "GPU requirement not met: no GPU detected")
-			}
-		}
-	}
-
-	// Storage is harder to validate meaningfully without knowing where Docker stores data
-	// Just warn if specified
-	if reqs.Storage != "" {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("Storage requirement (%s) cannot be validated automatically", reqs.Storage))
-	}
-
-	return result
-}
-
 // parseMemoryString parses a memory string like "4gb", "4096mb", "4g" into bytes.
 func parseMemoryString(s string) (uint64, error) {
 	result, err := parse.ParseMemorySizeWithError(s)
@@ -194,52 +117,6 @@ func formatBytes(b uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-// getHostMemory returns the total system memory in bytes.
-func getHostMemory() uint64 {
-	// Try platform-specific methods
-	if runtime.GOOS == "darwin" {
-		return getDarwinMemory()
-	}
-	if runtime.GOOS == "linux" {
-		return getLinuxMemory()
-	}
-	return 0
-}
-
-// getDarwinMemory gets total memory on macOS.
-func getDarwinMemory() uint64 {
-	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
-	if err != nil {
-		return 0
-	}
-	mem, err := strconv.ParseUint(strings.TrimSpace(string(out)), 10, 64)
-	if err != nil {
-		return 0
-	}
-	return mem
-}
-
-// getLinuxMemory gets total memory on Linux from /proc/meminfo.
-func getLinuxMemory() uint64 {
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "MemTotal:") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				kb, err := strconv.ParseUint(fields[1], 10, 64)
-				if err == nil {
-					return kb * 1024 // Convert KB to bytes
-				}
-			}
-		}
-	}
-	return 0
 }
 
 // hasGPU checks if a GPU is available.

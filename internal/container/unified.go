@@ -13,7 +13,9 @@ import (
 	composecli "github.com/compose-spec/compose-go/v2/cli"
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/ui"
 )
 
 // UnifiedRuntime implements ContainerRuntime for all plan types.
@@ -56,19 +58,6 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 		builder:       builder,
 		containerName: resolved.ServiceName,
 	}, nil
-}
-
-// NewUnifiedRuntimeForExisting creates a lightweight runtime for existing containers.
-// Use this when you only need to interact with an existing container and don't
-// have the full resolved configuration.
-// For compose environments, pass isCompose=true and projectName should be the compose project name.
-// For single containers, pass isCompose=false and projectName should be the container name/ID.
-func NewUnifiedRuntimeForExisting(workspacePath, projectName, workspaceID string, dockerClient *DockerClient) *UnifiedRuntime {
-	return &UnifiedRuntime{
-		dockerClient:  dockerClient,
-		containerName: projectName,
-		workspacePath: workspacePath,
-	}
 }
 
 // NewUnifiedRuntimeForExistingCompose creates a lightweight runtime for existing compose environments.
@@ -396,6 +385,37 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		User:            r.resolved.ContainerUser,
 	}
 
+	// Apply feature security requirements (capabilities, security options, privileged mode)
+	if len(r.resolved.Features) > 0 {
+		reqs := features.GetSecurityRequirements(r.resolved.Features)
+
+		// Warn user about elevated permissions
+		if reqs.Privileged || len(reqs.Capabilities) > 0 {
+			ui.Warning("Features require elevated permissions:")
+			for _, name := range reqs.FeatureNames {
+				ui.Warning("  - %s", name)
+			}
+		}
+
+		// Apply feature requirements to container
+		createOpts.CapAdd = append(createOpts.CapAdd, reqs.Capabilities...)
+		createOpts.SecurityOpt = append(createOpts.SecurityOpt, reqs.SecurityOpts...)
+		if reqs.Privileged {
+			createOpts.Privileged = true
+		}
+
+		// Check if any feature needs init
+		if features.NeedsInit(r.resolved.Features) {
+			createOpts.Init = true
+		}
+
+		// Collect feature environment variables
+		featureEnv := features.CollectContainerEnv(r.resolved.Features)
+		for k, v := range featureEnv {
+			createOpts.Env = append(createOpts.Env, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
 	// Pass GPU requirements to container creation
 	if r.resolved.GPURequirements != nil && r.resolved.GPURequirements.Enabled {
 		if r.resolved.GPURequirements.Count > 0 {
@@ -601,46 +621,6 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 	upOpts := UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull}
 	_, err := r.resolveBaseImage(ctx, upOpts)
 	return err
-}
-
-// Exec implements ContainerRuntime.Exec.
-func (r *UnifiedRuntime) Exec(ctx context.Context, cmd []string, opts ExecOptions) (int, error) {
-	workingDir := opts.WorkingDir
-	if workingDir == "" && r.resolved != nil {
-		workingDir = r.resolved.WorkspaceFolder
-	}
-
-	user := opts.User
-	if user == "" && r.resolved != nil {
-		user = r.resolved.RemoteUser
-	}
-
-	execCfg := ExecConfig{
-		ContainerID: r.containerName,
-		Cmd:         cmd,
-		WorkingDir:  workingDir,
-		User:        user,
-		Env:         opts.Env,
-		Stdin:       opts.Stdin,
-		Stdout:      opts.Stdout,
-		Stderr:      opts.Stderr,
-		TTY:         opts.TTY,
-	}
-
-	return Exec(ctx, r.dockerClient.APIClient(), execCfg)
-}
-
-// WorkspaceFolder implements ContainerRuntime.WorkspaceFolder.
-func (r *UnifiedRuntime) WorkspaceFolder() string {
-	if r.resolved != nil {
-		return r.resolved.WorkspaceFolder
-	}
-	return ""
-}
-
-// ContainerName implements ContainerRuntime.ContainerName.
-func (r *UnifiedRuntime) ContainerName() string {
-	return r.containerName
 }
 
 // Compose helper methods

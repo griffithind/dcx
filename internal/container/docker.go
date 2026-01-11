@@ -156,44 +156,6 @@ func (c *DockerClient) InspectContainer(ctx context.Context, containerID string)
 // Ensure DockerClient implements state.ContainerClient.
 var _ state.ContainerClient = (*DockerClient)(nil)
 
-// SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// Deprecated: Use common.SanitizeProjectName instead.
-// This function is kept for backward compatibility and will be removed.
-func SanitizeProjectName(name string) string {
-	// Delegate to the canonical implementation in the common package
-	// to avoid code duplication while maintaining backward compatibility.
-	// This will be removed when all consumers are updated.
-	if name == "" {
-		return ""
-	}
-
-	// Convert to lowercase
-	name = strings.ToLower(name)
-
-	// Replace spaces with underscores and filter invalid characters
-	var result strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			result.WriteRune(r)
-		} else if r == ' ' {
-			result.WriteRune('_')
-		}
-		// Skip other characters
-	}
-
-	sanitized := result.String()
-	if sanitized == "" {
-		return ""
-	}
-
-	// Ensure starts with a letter (Docker requirement)
-	if sanitized[0] >= '0' && sanitized[0] <= '9' {
-		sanitized = "dcx_" + sanitized
-	}
-
-	return sanitized
-}
-
 // ImageExists checks if an image exists locally.
 func (c *DockerClient) ImageExists(ctx context.Context, imageRef string) (bool, error) {
 	_, err := c.cli.ImageInspect(ctx, imageRef)
@@ -479,69 +441,6 @@ type ImageBuildOptions struct {
 
 // BuildImage builds a Docker image from a Dockerfile.
 func (c *DockerClient) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
-	configDir := opts.ConfigDir
-	if configDir == "" {
-		configDir = "."
-	}
-
-	contextPath := opts.Context
-	if contextPath == "" {
-		contextPath = configDir
-	} else if !filepath.IsAbs(contextPath) {
-		contextPath = filepath.Join(configDir, contextPath)
-	}
-
-	args := []string{"build"}
-
-	if opts.Tag != "" {
-		args = append(args, "-t", opts.Tag)
-	}
-
-	if opts.Dockerfile != "" {
-		dockerfilePath := opts.Dockerfile
-		if !filepath.IsAbs(dockerfilePath) {
-			dockerfilePath = filepath.Join(configDir, dockerfilePath)
-		}
-		args = append(args, "-f", dockerfilePath)
-	}
-
-	if opts.Target != "" {
-		args = append(args, "--target", opts.Target)
-	}
-
-	for key, value := range opts.Args {
-		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", key, value))
-	}
-
-	for _, cache := range opts.CacheFrom {
-		args = append(args, "--cache-from", cache)
-	}
-
-	if common.IsSSHAgentAvailable() {
-		args = append(args, "--ssh", "default")
-	}
-
-	args = append(args, contextPath)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if opts.Stdout != nil {
-		cmd.Stdout = opts.Stdout
-	} else {
-		cmd.Stdout = io.Discard
-	}
-	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
-	} else {
-		cmd.Stderr = io.Discard
-	}
-
-	return cmd.Run()
-}
-
-// BuildImageCLI builds a Docker image using the CLI.
-// This is the canonical function for all docker build operations.
-// It can be called without a DockerClient instance.
-func BuildImageCLI(ctx context.Context, opts ImageBuildOptions) error {
 	configDir := opts.ConfigDir
 	if configDir == "" {
 		configDir = "."

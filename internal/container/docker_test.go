@@ -6,67 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSanitizeProjectName(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "empty string",
-			input:    "",
-			expected: "",
-		},
-		{
-			name:     "simple lowercase",
-			input:    "myproject",
-			expected: "myproject",
-		},
-		{
-			name:     "uppercase conversion",
-			input:    "MyProject",
-			expected: "myproject",
-		},
-		{
-			name:     "spaces to underscores",
-			input:    "my project",
-			expected: "my_project",
-		},
-		{
-			name:     "special characters removed",
-			input:    "my@project!name",
-			expected: "myprojectname",
-		},
-		{
-			name:     "hyphens preserved",
-			input:    "my-project-name",
-			expected: "my-project-name",
-		},
-		{
-			name:     "underscores preserved",
-			input:    "my_project_name",
-			expected: "my_project_name",
-		},
-		{
-			name:     "starts with number - prefix added",
-			input:    "123project",
-			expected: "dcx_123project",
-		},
-		{
-			name:     "mixed case and special chars",
-			input:    "My Project @ 2024!",
-			expected: "my_project__2024",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := SanitizeProjectName(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestParseMountSpec(t *testing.T) {
 	tests := []struct {
 		name     string

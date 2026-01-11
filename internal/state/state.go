@@ -252,36 +252,3 @@ func NewStateError(state ContainerState, message string, err error) *StateError 
 	}
 }
 
-// ErrNotRunning indicates the container is not running when it should be.
-var ErrNotRunning = NewStateError(StateCreated, "container is not running", nil)
-
-// ErrAlreadyRunning indicates the container is already running.
-var ErrAlreadyRunning = NewStateError(StateRunning, "container is already running", nil)
-
-// ErrNoContainer indicates no container exists.
-var ErrNoContainer = NewStateError(StateAbsent, "no container found for this environment", nil)
-
-// ErrStaleConfig indicates the configuration has changed.
-var ErrStaleConfig = NewStateError(StateStale, "configuration has changed, rebuild required", nil)
-
-// ErrBrokenState indicates the environment is in an inconsistent state.
-var ErrBrokenState = NewStateError(StateBroken, "environment is in an inconsistent state", nil)
-
-// Operation represents a dcx operation.
-type Operation string
-
-const (
-	OpStart Operation = "start"
-	OpStop  Operation = "stop"
-	OpExec  Operation = "exec"
-	OpDown  Operation = "down"
-	OpUp    Operation = "up"
-)
-
-// Diagnostics contains diagnostic information about an environment.
-type Diagnostics struct {
-	State            ContainerState
-	Recovery         Recovery
-	PrimaryContainer *ContainerInfo
-	Containers       []ContainerInfo
-}
