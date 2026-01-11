@@ -3,7 +3,6 @@ package container
 import (
 	"testing"
 
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/stretchr/testify/assert"
@@ -256,7 +255,7 @@ func TestBuildMounts(t *testing.T) {
 	tests := []struct {
 		name       string
 		resolved   *devcontainer.ResolvedDevContainer
-		wantMounts []mount.Mount
+		wantMounts []devcontainer.Mount
 		wantTmpfs  map[string]string
 	}{
 		{
@@ -270,32 +269,32 @@ func TestBuildMounts(t *testing.T) {
 		{
 			name: "single bind mount",
 			resolved: &devcontainer.ResolvedDevContainer{
-				Mounts: []mount.Mount{
-					{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind},
+				Mounts: []devcontainer.Mount{
+					{Source: "/host/path", Target: "/container/path", Type: "bind"},
 				},
 			},
-			wantMounts: []mount.Mount{
-				{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind},
+			wantMounts: []devcontainer.Mount{
+				{Source: "/host/path", Target: "/container/path", Type: "bind"},
 			},
 			wantTmpfs: map[string]string{},
 		},
 		{
 			name: "readonly bind mount",
 			resolved: &devcontainer.ResolvedDevContainer{
-				Mounts: []mount.Mount{
-					{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind, ReadOnly: true},
+				Mounts: []devcontainer.Mount{
+					{Source: "/host/path", Target: "/container/path", Type: "bind", ReadOnly: true},
 				},
 			},
-			wantMounts: []mount.Mount{
-				{Source: "/host/path", Target: "/container/path", Type: mount.TypeBind, ReadOnly: true},
+			wantMounts: []devcontainer.Mount{
+				{Source: "/host/path", Target: "/container/path", Type: "bind", ReadOnly: true},
 			},
 			wantTmpfs: map[string]string{},
 		},
 		{
 			name: "tmpfs mount",
 			resolved: &devcontainer.ResolvedDevContainer{
-				Mounts: []mount.Mount{
-					{Target: "/tmp/test", Type: mount.TypeTmpfs},
+				Mounts: []devcontainer.Mount{
+					{Target: "/tmp/test", Type: "tmpfs"},
 				},
 			},
 			wantMounts: nil,
@@ -304,15 +303,15 @@ func TestBuildMounts(t *testing.T) {
 		{
 			name: "mixed mounts",
 			resolved: &devcontainer.ResolvedDevContainer{
-				Mounts: []mount.Mount{
-					{Source: "/path1", Target: "/target1", Type: mount.TypeBind},
-					{Target: "/run", Type: mount.TypeTmpfs},
-					{Source: "/path2", Target: "/target2", Type: mount.TypeBind, ReadOnly: true},
+				Mounts: []devcontainer.Mount{
+					{Source: "/path1", Target: "/target1", Type: "bind"},
+					{Target: "/run", Type: "tmpfs"},
+					{Source: "/path2", Target: "/target2", Type: "bind", ReadOnly: true},
 				},
 			},
-			wantMounts: []mount.Mount{
-				{Source: "/path1", Target: "/target1", Type: mount.TypeBind},
-				{Source: "/path2", Target: "/target2", Type: mount.TypeBind, ReadOnly: true},
+			wantMounts: []devcontainer.Mount{
+				{Source: "/path1", Target: "/target1", Type: "bind"},
+				{Source: "/path2", Target: "/target2", Type: "bind", ReadOnly: true},
 			},
 			wantTmpfs: map[string]string{"/run": ""},
 		},

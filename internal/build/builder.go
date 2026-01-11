@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 )
@@ -67,6 +66,15 @@ type DockerfileBuildOptions struct {
 	// Used for BuildKit builds to pass feature content without copying to main context.
 	// Map of context name to filesystem path.
 	BuildContexts map[string]string
+
+	// Secrets are BuildKit secrets to make available during the build.
+	// Map of secret ID to temp file path containing the secret value.
+	// These are passed as --secret id=<id>,src=<path> flags.
+	Secrets map[string]string
+
+	// Options are additional docker build CLI options from devcontainer.json build.options.
+	// These are passed directly to the docker build command.
+	Options []string
 }
 
 // FeatureBuildOptions contains options for building with features.
@@ -131,26 +139,18 @@ type UIDBuildOptions struct {
 	Metadata string
 }
 
-// CLIBuilder implements ImageBuilder using Docker CLI for builds and SDK for inspection.
-// The name reflects that all build operations use the Docker CLI (docker buildx build)
-// while the SDK is only used for image inspection operations.
-type CLIBuilder struct {
-	client *client.Client
-}
+// CLIBuilder implements ImageBuilder using Docker CLI for all operations.
+// All build and inspection operations use the Docker CLI.
+type CLIBuilder struct{}
 
 // NewCLIBuilder creates a new image builder.
-func NewCLIBuilder(cli *client.Client) *CLIBuilder {
-	return &CLIBuilder{client: cli}
+func NewCLIBuilder() *CLIBuilder {
+	return &CLIBuilder{}
 }
 
-// Client returns the underlying Docker client.
-func (b *CLIBuilder) Client() *client.Client {
-	return b.client
-}
-
-// Close closes the Docker client.
+// Close is a no-op for CLI-based builder.
 func (b *CLIBuilder) Close() error {
-	return b.client.Close()
+	return nil
 }
 
 // Ensure CLIBuilder implements ImageBuilder.

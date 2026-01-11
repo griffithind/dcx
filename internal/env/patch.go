@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/container"
 )
 
@@ -21,15 +20,11 @@ const (
 )
 
 // Patcher handles patching container system files for proper environment setup.
-type Patcher struct {
-	dockerClient *client.Client
-}
+type Patcher struct{}
 
 // NewPatcher creates a new Patcher.
-func NewPatcher(dockerClient *client.Client) *Patcher {
-	return &Patcher{
-		dockerClient: dockerClient,
-	}
+func NewPatcher() *Patcher {
+	return &Patcher{}
 }
 
 // PatchEtcEnvironment appends environment variables to /etc/environment.
@@ -42,7 +37,7 @@ func (p *Patcher) PatchEtcEnvironment(ctx context.Context, containerID string, e
 
 	// Check if already patched
 	checkCmd := []string{"sh", "-c", fmt.Sprintf("test -f %s && echo exists || echo missing", MarkerEtcEnvironment)}
-	output, exitCode, err := container.ExecOutput(ctx, p.dockerClient, containerID, checkCmd, "root")
+	output, exitCode, err := container.ExecOutput(ctx, containerID, checkCmd, "root")
 	if err != nil {
 		return fmt.Errorf("failed to check patch marker: %w", err)
 	}
@@ -69,7 +64,7 @@ DCXEOF
 touch %s
 `, MarkerDir, envContent, MarkerEtcEnvironment)}
 
-	_, exitCode, err = container.ExecOutput(ctx, p.dockerClient, containerID, patchCmd, "root")
+	_, exitCode, err = container.ExecOutput(ctx, containerID, patchCmd, "root")
 	if err != nil {
 		return fmt.Errorf("failed to patch /etc/environment: %w", err)
 	}
@@ -86,7 +81,7 @@ touch %s
 func (p *Patcher) PatchEtcProfile(ctx context.Context, containerID string) error {
 	// Check if already patched
 	checkCmd := []string{"sh", "-c", fmt.Sprintf("test -f %s && echo exists || echo missing", MarkerEtcProfile)}
-	output, exitCode, err := container.ExecOutput(ctx, p.dockerClient, containerID, checkCmd, "root")
+	output, exitCode, err := container.ExecOutput(ctx, containerID, checkCmd, "root")
 	if err != nil {
 		return fmt.Errorf("failed to check patch marker: %w", err)
 	}
@@ -104,7 +99,7 @@ sed -i -E 's/((^|[[:space:]])PATH=)([^$]*)$/\1\${PATH:-\3}/g' /etc/profile 2>/de
 touch %s
 `, MarkerDir, MarkerEtcProfile)}
 
-	_, exitCode, err = container.ExecOutput(ctx, p.dockerClient, containerID, patchCmd, "root")
+	_, exitCode, err = container.ExecOutput(ctx, containerID, patchCmd, "root")
 	if err != nil {
 		return fmt.Errorf("failed to patch /etc/profile: %w", err)
 	}

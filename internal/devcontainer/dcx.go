@@ -10,6 +10,22 @@ import (
 type DcxCustomizations struct {
 	// Shortcuts defines command aliases for the 'run' command.
 	Shortcuts map[string]Shortcut `json:"shortcuts,omitempty"`
+
+	// Secrets defines runtime secrets to be mounted at /run/secrets/<name>.
+	// Commands are executed on the host to fetch secret values.
+	Secrets map[string]SecretConfig `json:"secrets,omitempty"`
+
+	// BuildSecrets defines build-time secrets for Docker BuildKit.
+	// These are only available during docker build via --mount=type=secret.
+	BuildSecrets map[string]SecretConfig `json:"buildSecrets,omitempty"`
+}
+
+// SecretConfig defines how to fetch a secret value.
+type SecretConfig struct {
+	// Command is the shell command to execute on the host to fetch the secret value.
+	// The command's stdout is captured as the secret value.
+	// Example: "op read op://vault/item/field"
+	Command string `json:"command"`
 }
 
 // Shortcut represents a command shortcut configuration.

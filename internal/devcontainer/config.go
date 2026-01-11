@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/docker/docker/api/types/mount"
 )
 
 // PlanType identifies the execution plan type for a devcontainer.
@@ -259,10 +257,11 @@ type PortAttribute struct {
 
 // Mount represents a mount specification that can be either a string or an object.
 type Mount struct {
-	Source   string `json:"source,omitempty"`
-	Target   string `json:"target,omitempty"`
-	Type     string `json:"type,omitempty"`
-	ReadOnly bool   `json:"readonly,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Type        string `json:"type,omitempty"` // bind, volume, tmpfs
+	ReadOnly    bool   `json:"readonly,omitempty"`
+	Consistency string `json:"consistency,omitempty"` // cached, delegated, consistent (macOS)
 	// Raw holds the original string if mount was specified as a string
 	Raw string `json:"-"`
 }
@@ -280,6 +279,7 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 			m.Target = parsed.Target
 			m.Type = parsed.Type
 			m.ReadOnly = parsed.ReadOnly
+			m.Consistency = parsed.Consistency
 		}
 		return nil
 	}
@@ -408,43 +408,27 @@ func parseDevcontainerMount(mount string) *ParsedMount {
 	return m
 }
 
-// ParseWorkspaceMount parses a workspace mount string into a Docker mount.Mount.
+// ParseWorkspaceMount parses a workspace mount string into a Mount.
 // This is used by the container package to convert workspace mount configuration
-// into the structured type expected by the Docker API.
-func ParseWorkspaceMount(spec string) *mount.Mount {
+// into the structured type for container creation.
+func ParseWorkspaceMount(spec string) *Mount {
 	parsed := parseMount(spec)
 	if parsed == nil {
 		return nil
 	}
 
-	// Convert string type to mount.Type
-	var mountType mount.Type
-	switch parsed.Type {
-	case "bind":
-		mountType = mount.TypeBind
-	case "volume":
-		mountType = mount.TypeVolume
-	case "tmpfs":
-		mountType = mount.TypeTmpfs
-	default:
-		mountType = mount.TypeBind
+	mountType := parsed.Type
+	if mountType == "" {
+		mountType = "bind"
 	}
 
-	m := &mount.Mount{
-		Type:     mountType,
-		Source:   parsed.Source,
-		Target:   parsed.Target,
-		ReadOnly: parsed.ReadOnly,
+	return &Mount{
+		Source:      parsed.Source,
+		Target:      parsed.Target,
+		Type:        mountType,
+		ReadOnly:    parsed.ReadOnly,
+		Consistency: parsed.Consistency,
 	}
-
-	// Set bind options for consistency if specified
-	if parsed.Consistency != "" && mountType == mount.TypeBind {
-		m.BindOptions = &mount.BindOptions{
-			Propagation: mount.Propagation(parsed.Consistency),
-		}
-	}
-
-	return m
 }
 
 // GetPortAttribute returns the attributes for a specific port.

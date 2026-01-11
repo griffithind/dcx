@@ -1,9 +1,6 @@
 package devcontainer
 
 import (
-	"time"
-
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -13,6 +10,13 @@ import (
 //
 // This struct replaces the previous Workspace + ResolvedConfig nested structure,
 // flattening all fields into a single coherent type aligned with devcontainer terminology.
+//
+// ACCESS PATTERN:
+// - Use resolved fields (e.g., RemoteUser, ContainerEnv) for values that have been
+//   processed with variable substitution and feature merging.
+// - Use RawConfig only for fields NOT copied to resolved (e.g., HostRequirements,
+//   OverrideCommand, lifecycle hooks) where you need the original config value.
+// - Resolved fields take precedence over RawConfig for any field that exists in both.
 type ResolvedDevContainer struct {
 	// === Identity ===
 
@@ -45,10 +49,10 @@ type ResolvedDevContainer struct {
 	// === Resolved Runtime Configuration ===
 	// These are the final values after variable substitution and feature merging.
 
-	// Image is the final image to use (after feature derivation).
-	Image string
-
 	// BaseImage is the original base image (before features).
+	// For ImagePlan: the image specified in config
+	// For DockerfilePlan: determined after building
+	// For ComposePlan: extracted from service config
 	BaseImage string
 
 	// ServiceName is the container/service name (sanitized for Docker).
@@ -91,7 +95,7 @@ type ResolvedDevContainer struct {
 	// === Runtime Options ===
 
 	// Mounts are the volume mounts for the container.
-	Mounts []mount.Mount
+	Mounts []Mount
 
 	// CapAdd are Linux capabilities to add.
 	CapAdd []string
@@ -105,8 +109,8 @@ type ResolvedDevContainer struct {
 	// Init indicates if an init process should be used.
 	Init bool
 
-	// RunArgs are additional docker run arguments.
-	RunArgs []string
+	// RunArgs contains parsed docker run arguments from devcontainer.json.
+	RunArgs *ParsedRunArgs
 
 	// === Ports ===
 
@@ -120,11 +124,6 @@ type ResolvedDevContainer struct {
 
 	// Features are the resolved and ordered features for installation.
 	Features []*features.Feature
-
-	// === Lifecycle ===
-
-	// Lifecycle contains all lifecycle hook commands.
-	Lifecycle *LifecycleHooks
 
 	// === Hashes ===
 
@@ -141,15 +140,20 @@ type ResolvedDevContainer struct {
 	// GPURequirements specifies GPU requirements.
 	GPURequirements *GPURequirements
 
-	// === Build Plan ===
+	// === Secrets ===
 
-	// NeedsBuild indicates whether any build is required.
-	NeedsBuild bool
+	// RuntimeSecrets are secrets to mount at /run/secrets/<name> at runtime.
+	// Map of secret name to config (command to fetch value).
+	RuntimeSecrets map[string]SecretConfig
 
-	// BuildReason explains why build is needed (new, stale, forced).
-	BuildReason string
+	// BuildSecrets are secrets for Docker BuildKit during builds.
+	// Map of secret name to config (command to fetch value).
+	BuildSecrets map[string]SecretConfig
+
+	// === Build State ===
 
 	// DerivedImage is the derived image name with features.
+	// Computed as: dcx/{ID}:{hash}-features
 	DerivedImage string
 
 	// ShouldUpdateUID indicates whether UID update layer is needed.
@@ -165,6 +169,7 @@ type ResolvedDevContainer struct {
 type PortForward struct {
 	HostPort      int
 	ContainerPort int
+	Host          string // Host to bind to (e.g., "localhost" for localhost-only)
 	Label         string
 	Protocol      string
 	OnAutoForward string
@@ -204,15 +209,19 @@ type GPURequirements struct {
 	Cores   int
 }
 
-// BuildPlan represents what needs to be built.
-type BuildPlan struct {
-	NeedsBuild      bool      // Whether any build is required
-	BuildReason     string    // Why build is needed (new, stale, forced)
-	ImageToBuild    string    // Image name to build
-	DerivedImage    string    // Derived image with features
-	BaseImage       string    // Original base image
-	BuildTimestamp  time.Time // When build was last performed
-	ShouldUpdateUID bool      // Whether UID update layer is needed
+// ParsedRunArgs contains parsed values from devcontainer.json runArgs.
+// This allows runArgs like "--network=host" or "--device /dev/foo" to be
+// properly applied to container creation.
+type ParsedRunArgs struct {
+	User        string
+	NetworkMode string
+	IpcMode     string
+	PidMode     string
+	ShmSize     int64
+	CapDrop     []string
+	Devices     []string
+	ExtraHosts  []string
+	Sysctls     map[string]string
 }
 
 // NewResolvedDevContainer creates a new ResolvedDevContainer with initialized maps.
@@ -223,5 +232,7 @@ func NewResolvedDevContainer() *ResolvedDevContainer {
 		Customizations: make(map[string]interface{}),
 		Hashes:         NewContentHashes(),
 		Labels:         state.NewContainerLabels(),
+		RuntimeSecrets: make(map[string]SecretConfig),
+		BuildSecrets:   make(map[string]SecretConfig),
 	}
 }

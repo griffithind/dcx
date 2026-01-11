@@ -169,7 +169,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		}
 	}
 
-	exitCode, err := containerPkg.Exec(ctx, dockerClient.APIClient(), containerPkg.ExecConfig{
+	exitCode, err := containerPkg.Exec(ctx, containerPkg.ExecConfig{
 		ContainerID: containerInfo.ID,
 		Cmd:         cmd,
 		User:        user,

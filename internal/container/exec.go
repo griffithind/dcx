@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"os/exec"
 )
 
 // ExecConfig contains configuration for executing a command in a container.
@@ -24,87 +21,63 @@ type ExecConfig struct {
 	Detach      bool
 }
 
-// Exec executes a command in a running container.
-func Exec(ctx context.Context, cli *client.Client, cfg ExecConfig) (int, error) {
-	// Create exec instance
-	execConfig := container.ExecOptions{
-		AttachStdin:  cfg.Stdin != nil && !cfg.Detach,
-		AttachStdout: cfg.Stdout != nil && !cfg.Detach,
-		AttachStderr: cfg.Stderr != nil && !cfg.Detach,
-		Detach:       cfg.Detach,
-		Tty:          cfg.TTY,
-		Cmd:          cfg.Cmd,
-		WorkingDir:   cfg.WorkingDir,
-		User:         cfg.User,
-		Env:          cfg.Env,
-	}
+// Exec executes a command in a running container using Docker CLI.
+func Exec(ctx context.Context, cfg ExecConfig) (int, error) {
+	args := []string{"exec"}
 
-	execID, err := cli.ContainerExecCreate(ctx, cfg.ContainerID, execConfig)
-	if err != nil {
-		return -1, err
-	}
-
-	// For detached execution, just start and return
-	if cfg.Detach {
-		err = cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{
-			Detach: true,
-		})
-		if err != nil {
-			return -1, err
-		}
-		return 0, nil
-	}
-
-	// Attach to exec instance
-	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{
-		Tty: cfg.TTY,
-	})
-	if err != nil {
-		return -1, err
-	}
-	defer resp.Close()
-
-	// Handle I/O
-	if cfg.Stdin != nil {
-		go func() {
-			_, _ = io.Copy(resp.Conn, cfg.Stdin)
-			_ = resp.CloseWrite()
-		}()
-	}
-
+	// TTY mode
 	if cfg.TTY {
-		// In TTY mode, stdout and stderr are combined
-		if cfg.Stdout != nil {
-			_, _ = io.Copy(cfg.Stdout, resp.Reader)
-		}
-	} else {
-		// In non-TTY mode, demux the streams using Docker's stdcopy
-		if cfg.Stdout != nil || cfg.Stderr != nil {
-			stdout := cfg.Stdout
-			stderr := cfg.Stderr
-			if stdout == nil {
-				stdout = io.Discard
-			}
-			if stderr == nil {
-				stderr = io.Discard
-			}
-			_, _ = stdcopy.StdCopy(stdout, stderr, resp.Reader)
-		}
+		args = append(args, "-t")
 	}
 
-	// Get exit code
-	inspect, err := cli.ContainerExecInspect(ctx, execID.ID)
+	// Interactive mode (stdin attached)
+	if cfg.Stdin != nil && !cfg.Detach {
+		args = append(args, "-i")
+	}
+
+	// Detached mode
+	if cfg.Detach {
+		args = append(args, "-d")
+	}
+
+	// User
+	if cfg.User != "" {
+		args = append(args, "-u", cfg.User)
+	}
+
+	// Working directory
+	if cfg.WorkingDir != "" {
+		args = append(args, "-w", cfg.WorkingDir)
+	}
+
+	// Environment variables
+	for _, e := range cfg.Env {
+		args = append(args, "-e", e)
+	}
+
+	// Container ID and command
+	args = append(args, cfg.ContainerID)
+	args = append(args, cfg.Cmd...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin = cfg.Stdin
+	cmd.Stdout = cfg.Stdout
+	cmd.Stderr = cfg.Stderr
+
+	err := cmd.Run()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), nil
+		}
 		return -1, err
 	}
-
-	return inspect.ExitCode, nil
+	return 0, nil
 }
 
 // ExecSimple executes a command in a container and returns the exit code.
 // This is a convenience function for simple command execution without output capture.
-func ExecSimple(ctx context.Context, cli *client.Client, containerID string, cmd []string, user string) (int, error) {
-	return Exec(ctx, cli, ExecConfig{
+func ExecSimple(ctx context.Context, containerID string, cmd []string, user string) (int, error) {
+	return Exec(ctx, ExecConfig{
 		ContainerID: containerID,
 		Cmd:         cmd,
 		User:        user,
@@ -113,8 +86,8 @@ func ExecSimple(ctx context.Context, cli *client.Client, containerID string, cmd
 
 // ExecDetached executes a command in a container in the background.
 // The command runs detached and this function returns immediately.
-func ExecDetached(ctx context.Context, cli *client.Client, containerID string, cmd []string, user string) error {
-	_, err := Exec(ctx, cli, ExecConfig{
+func ExecDetached(ctx context.Context, containerID string, cmd []string, user string) error {
+	_, err := Exec(ctx, ExecConfig{
 		ContainerID: containerID,
 		Cmd:         cmd,
 		User:        user,
@@ -124,9 +97,9 @@ func ExecDetached(ctx context.Context, cli *client.Client, containerID string, c
 }
 
 // ExecOutput executes a command in a container and returns the combined output.
-func ExecOutput(ctx context.Context, cli *client.Client, containerID string, cmd []string, user string) (string, int, error) {
+func ExecOutput(ctx context.Context, containerID string, cmd []string, user string) (string, int, error) {
 	var buf bytes.Buffer
-	exitCode, err := Exec(ctx, cli, ExecConfig{
+	exitCode, err := Exec(ctx, ExecConfig{
 		ContainerID: containerID,
 		Cmd:         cmd,
 		User:        user,

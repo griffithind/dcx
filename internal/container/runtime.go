@@ -27,6 +27,11 @@ type ContainerRuntime interface {
 }
 
 // UpOptions configures the Up operation.
+//
+// Note: Runtime secrets (mounted at /run/secrets) are handled by the service
+// layer after Up() returns, because the service layer has access to the
+// container name via stateManager. Build secrets are passed here because
+// they're needed during the docker build phase.
 type UpOptions struct {
 	// Build builds images before starting containers.
 	Build bool
@@ -34,6 +39,9 @@ type UpOptions struct {
 	Rebuild bool
 	// Pull forces re-fetch of remote resources (images, features).
 	Pull bool
+	// BuildSecrets are secrets to pass to docker build (BuildKit secrets).
+	// Map of secret ID to temp file path containing the secret value.
+	BuildSecrets map[string]string
 }
 
 // DownOptions configures the Down operation.

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/spf13/cobra"
 )
@@ -51,11 +50,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	// Set up prober for userEnvProbe support if configured
 	if cfg != nil && cfg.UserEnvProbe != "" {
-		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-		if err == nil {
-			defer dockerClient.Close() //nolint:errcheck // best-effort cleanup
-			builder = builder.WithProber(dockerClient)
-		}
+		builder = builder.WithProber()
 	}
 
 	return builder.Execute(cliCtx.Ctx, ExecFlags{

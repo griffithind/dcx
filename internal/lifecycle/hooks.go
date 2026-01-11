@@ -516,7 +516,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		}
 	}()
 
-	exitCode, err := container.Exec(ctx, r.dockerClient.APIClient(), execConfig)
+	exitCode, err := container.Exec(ctx, execConfig)
 	if err != nil {
 		return err
 	}

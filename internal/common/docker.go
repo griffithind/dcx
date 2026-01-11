@@ -1,13 +1,11 @@
 package common
 
 import (
-	"context"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
-
-	"github.com/docker/docker/client"
 )
 
 // IsDockerDesktop detects if we're running on Docker Desktop (Mac/Windows).
@@ -19,20 +17,14 @@ func IsDockerDesktop() bool {
 		return false
 	}
 
-	// Use Docker SDK to get system info
-	ctx := context.Background()
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return false
-	}
-	defer func() { _ = cli.Close() }()
-
-	info, err := cli.Info(ctx)
+	// Use Docker CLI to get system info
+	cmd := exec.Command("docker", "info", "--format", "{{.OperatingSystem}}")
+	output, err := cmd.Output()
 	if err != nil {
 		return false
 	}
 
-	return strings.Contains(info.OperatingSystem, "Docker Desktop")
+	return strings.Contains(string(output), "Docker Desktop")
 }
 
 // IsSSHAgentAvailable checks if an SSH agent is available on the host.

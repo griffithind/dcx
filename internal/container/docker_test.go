@@ -3,7 +3,6 @@ package container
 import (
 	"testing"
 
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/assert"
 )
@@ -50,8 +49,8 @@ func TestCreateContainerOptions(t *testing.T) {
 			opts: CreateContainerOptions{
 				Name:  "test-container",
 				Image: "alpine:latest",
-				Mounts: []mount.Mount{
-					{Type: mount.TypeBind, Source: "/host", Target: "/container"},
+				Mounts: []devcontainer.Mount{
+					{Type: "bind", Source: "/host", Target: "/container"},
 				},
 			},
 		},

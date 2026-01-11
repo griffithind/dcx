@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -60,15 +60,13 @@ func ParseProbeType(s string) ProbeType {
 
 // Prober probes container environments.
 type Prober struct {
-	dockerClient *client.Client
-	timeout      time.Duration
+	timeout time.Duration
 }
 
 // NewProber creates a new environment prober.
-func NewProber(dockerClient *client.Client) *Prober {
+func NewProber() *Prober {
 	return &Prober{
-		dockerClient: dockerClient,
-		timeout:      10 * time.Second,
+		timeout: 10 * time.Second,
 	}
 }
 
@@ -87,7 +85,7 @@ func (p *Prober) Probe(ctx context.Context, containerID string, probeType ProbeT
 	probeCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	output, exitCode, err := container.ExecOutput(probeCtx, p.dockerClient, containerID, cmd, user)
+	output, exitCode, err := container.ExecOutput(probeCtx, containerID, cmd, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to probe environment: %w", err)
 	}
@@ -153,12 +151,27 @@ func (p *Prober) ProbeWithCache(ctx context.Context, containerID string, probeTy
 
 // readCache reads the cached probed environment from container labels.
 func (p *Prober) readCache(ctx context.Context, containerID string) (map[string]string, string, error) {
-	inspect, err := p.dockerClient.ContainerInspect(ctx, containerID)
+	// Use docker inspect CLI
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "json", containerID)
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, "", err
 	}
 
-	labels := inspect.Config.Labels
+	var results []struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, "", err
+	}
+
+	if len(results) == 0 {
+		return nil, "", fmt.Errorf("container not found")
+	}
+
+	labels := results[0].Config.Labels
 	if labels == nil {
 		return nil, "", fmt.Errorf("no labels found")
 	}
@@ -194,7 +207,7 @@ echo '%s' > /var/lib/dcx/probed-env.json && \
 echo '%s' > /var/lib/dcx/probed-env-hash
 `, string(envData), imageHash)}
 
-	_, exitCode, err := container.ExecOutput(ctx, p.dockerClient, containerID, cmd, "root")
+	_, exitCode, err := container.ExecOutput(ctx, containerID, cmd, "root")
 	if err != nil {
 		return err
 	}

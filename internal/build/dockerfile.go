@@ -2,13 +2,14 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"github.com/containerd/errdefs"
 	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
@@ -74,6 +75,14 @@ func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 		args = append(args, "--build-context", fmt.Sprintf("%s=%s", name, path))
 	}
 
+	// Add BuildKit secrets
+	for id, path := range opts.Secrets {
+		args = append(args, "--secret", fmt.Sprintf("id=%s,src=%s", id, path))
+	}
+
+	// Add additional build options from devcontainer.json build.options
+	args = append(args, opts.Options...)
+
 	// Load the image into Docker (default for single-platform builds)
 	args = append(args, "--load")
 
@@ -102,9 +111,10 @@ func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 
 // ImageExists checks if an image exists locally.
 func (b *CLIBuilder) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	_, err := b.client.ImageInspect(ctx, imageRef)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef)
+	if err := cmd.Run(); err != nil {
+		// Exit code 1 means image not found
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, err
@@ -135,23 +145,34 @@ func (b *CLIBuilder) PullImage(ctx context.Context, imageRef string, progress io
 
 // GetImageID returns the ID of an image.
 func (b *CLIBuilder) GetImageID(ctx context.Context, imageRef string) (string, error) {
-	info, err := b.client.ImageInspect(ctx, imageRef)
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
+	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
 	}
-	return info.ID, nil
+	return strings.TrimSpace(string(output)), nil
 }
 
 // GetImageLabels returns the labels for an image.
 func (b *CLIBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	info, err := b.client.ImageInspect(ctx, imageRef)
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
 	}
-	if info.Config == nil {
+
+	var results []struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, fmt.Errorf("failed to parse image inspect output: %w", err)
+	}
+	if len(results) == 0 {
 		return nil, nil
 	}
-	return info.Config.Labels, nil
+	return results[0].Config.Labels, nil
 }
 
 // ResolveImage ensures an image is available locally, pulling if necessary.

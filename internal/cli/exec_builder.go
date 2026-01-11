@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
@@ -52,9 +51,9 @@ func NewExecBuilder(containerInfo *state.ContainerInfo, cfg *devcontainer.DevCon
 	}
 }
 
-// WithProber sets the environment prober for userEnvProbe support.
-func (b *ExecBuilder) WithProber(dockerClient *client.Client) *ExecBuilder {
-	b.prober = env.NewProber(dockerClient)
+// WithProber enables userEnvProbe support.
+func (b *ExecBuilder) WithProber() *ExecBuilder {
+	b.prober = env.NewProber()
 	return b
 }
 

@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	composecli "github.com/compose-spec/compose-go/v2/cli"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
@@ -50,8 +49,8 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer, dockerClient
 		return nil, fmt.Errorf("docker client is required")
 	}
 
-	// Create CLI-based image builder using the same Docker client
-	builder := build.NewCLIBuilder(dockerClient.APIClient())
+	// Create CLI-based image builder
+	builder := build.NewCLIBuilder()
 
 	return &UnifiedRuntime{
 		resolved:      resolved,
@@ -227,7 +226,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 		imageTag := fmt.Sprintf("dcx/%s:%s", r.resolved.ID, r.resolved.Hashes.Overall[:12])
 		fmt.Printf("Building image: %s\n", imageTag)
 
-		if err := r.buildDockerfile(ctx, imageTag, plan); err != nil {
+		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
 			return "", fmt.Errorf("failed to build image: %w", err)
 		}
 
@@ -238,7 +237,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 }
 
 // buildDockerfile builds an image from a Dockerfile using the CLI.
-func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan) error {
+func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan, buildSecrets map[string]string) error {
 	buildCtx := plan.Context
 	if buildCtx == "" {
 		buildCtx = r.resolved.ConfigDir
@@ -270,6 +269,8 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 		Target:     plan.Target,
 		Progress:   os.Stdout,
 		Metadata:   metadata,
+		Secrets:    buildSecrets,
+		Options:    plan.Options,
 	})
 	return err
 }
@@ -363,7 +364,7 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 	env := r.buildEnvironment()
 
 	// Build workspace mount as structured type
-	var workspaceMount *mount.Mount
+	var workspaceMount *devcontainer.Mount
 	if r.resolved.WorkspaceMount != "" {
 		// Parse the workspace mount string
 		parsed := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount)
@@ -373,8 +374,8 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 	}
 	if workspaceMount == nil && r.resolved.LocalRoot != "" && workspaceFolder != "" {
 		// Default workspace mount
-		workspaceMount = &mount.Mount{
-			Type:   mount.TypeBind,
+		workspaceMount = &devcontainer.Mount{
+			Type:   "bind",
 			Source: r.resolved.LocalRoot,
 			Target: workspaceFolder,
 		}
@@ -440,6 +441,37 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		}
 	}
 
+	// Apply parsed runArgs from devcontainer.json
+	if r.resolved.RunArgs != nil {
+		runArgs := r.resolved.RunArgs
+
+		// Apply parsed values (runArgs override defaults)
+		if runArgs.NetworkMode != "" {
+			createOpts.NetworkMode = runArgs.NetworkMode
+		}
+		if runArgs.IpcMode != "" {
+			createOpts.IpcMode = runArgs.IpcMode
+		}
+		if runArgs.PidMode != "" {
+			createOpts.PidMode = runArgs.PidMode
+		}
+		if runArgs.ShmSize > 0 {
+			createOpts.ShmSize = runArgs.ShmSize
+		}
+		if runArgs.User != "" {
+			createOpts.User = runArgs.User
+		}
+		createOpts.CapDrop = append(createOpts.CapDrop, runArgs.CapDrop...)
+		createOpts.Devices = append(createOpts.Devices, runArgs.Devices...)
+		createOpts.ExtraHosts = append(createOpts.ExtraHosts, runArgs.ExtraHosts...)
+		for k, v := range runArgs.Sysctls {
+			if createOpts.Sysctls == nil {
+				createOpts.Sysctls = make(map[string]string)
+			}
+			createOpts.Sysctls[k] = v
+		}
+	}
+
 	// Handle overrideCommand
 	// Per spec: default true for image/dockerfile, false for compose
 	shouldOverride := false
@@ -499,10 +531,10 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
-// mountCollections holds separated mount types for Docker API.
+// mountCollections holds separated mount types for container creation.
 type mountCollections struct {
-	Mounts []mount.Mount     // Structured mounts for HostConfig.Mounts
-	Tmpfs  map[string]string // For HostConfig.Tmpfs (tmpfs mounts)
+	Mounts []devcontainer.Mount // Structured mounts
+	Tmpfs  map[string]string    // For tmpfs mounts
 }
 
 // buildMounts builds the container mounts, separating tmpfs from other mounts.
@@ -511,7 +543,7 @@ func (r *UnifiedRuntime) buildMounts() mountCollections {
 		Tmpfs: make(map[string]string),
 	}
 	for _, m := range r.resolved.Mounts {
-		if m.Type == mount.TypeTmpfs {
+		if m.Type == "tmpfs" {
 			// Tmpfs handled separately via HostConfig.Tmpfs
 			result.Tmpfs[m.Target] = ""
 		} else {
@@ -531,9 +563,21 @@ func (r *UnifiedRuntime) buildEnvironment() []string {
 	return env
 }
 
-// buildPortBindings returns the forward ports directly as structured types.
+// buildPortBindings combines forwardPorts and appPorts into a single slice.
+// AppPorts are bound to localhost for security per the devcontainer spec.
 func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
-	return r.resolved.ForwardPorts
+	var ports []devcontainer.PortForward
+
+	// Add forward ports (bind to all interfaces by default)
+	ports = append(ports, r.resolved.ForwardPorts...)
+
+	// Add app ports (bound to localhost for security)
+	for _, ap := range r.resolved.AppPorts {
+		ap.Host = "localhost"
+		ports = append(ports, ap)
+	}
+
+	return ports
 }
 
 // Start implements ContainerRuntime.Start.
@@ -771,8 +815,8 @@ func (r *UnifiedRuntime) applyUIDUpdateForCompose(ctx context.Context, opts UpOp
 }
 
 func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
-	if r.resolved.Image != "" {
-		return r.resolved.Image, nil
+	if r.resolved.BaseImage != "" {
+		return r.resolved.BaseImage, nil
 	}
 
 	if plan == nil {
@@ -784,25 +828,29 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 		return "", fmt.Errorf("no compose files specified")
 	}
 
-	workDir := filepath.Dir(paths[0])
+	// Use docker compose config to get fully resolved configuration
+	args := []string{"compose"}
+	for _, f := range paths {
+		args = append(args, "-f", f)
+	}
+	args = append(args, "config", "--format", "json")
 
-	options, err := composecli.NewProjectOptions(
-		paths,
-		composecli.WithWorkingDirectory(workDir),
-		composecli.WithOsEnv,
-		composecli.WithDotEnv,
-		composecli.WithInterpolation(true),
-		composecli.WithResolvedPaths(true),
-		composecli.WithProfiles([]string{}),
-		composecli.WithDiscardEnvFile,
-	)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = filepath.Dir(paths[0])
+	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to create project options: %w", err)
+		return "", fmt.Errorf("failed to get compose config: %w", err)
 	}
 
-	project, err := options.LoadProject(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to load compose project: %w", err)
+	var config struct {
+		Services map[string]struct {
+			Image string `json:"image"`
+		} `json:"services"`
+		Name string `json:"name"`
+	}
+
+	if err := json.Unmarshal(output, &config); err != nil {
+		return "", fmt.Errorf("failed to parse compose config: %w", err)
 	}
 
 	serviceName := plan.Service
@@ -810,20 +858,24 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 		return "", fmt.Errorf("no primary service specified")
 	}
 
-	for _, svc := range project.Services {
-		if svc.Name == serviceName {
-			if svc.Image != "" {
-				return svc.Image, nil
-			}
-			projectName := plan.ProjectName
-			if projectName == "" {
-				projectName = r.resolved.ServiceName
-			}
-			return fmt.Sprintf("%s-%s", projectName, serviceName), nil
-		}
+	svc, ok := config.Services[serviceName]
+	if !ok {
+		return "", fmt.Errorf("service %q not found in compose file", serviceName)
 	}
 
-	return "", fmt.Errorf("service %q not found in compose file", serviceName)
+	if svc.Image != "" {
+		return svc.Image, nil
+	}
+
+	// Service uses build - compute built image name
+	projectName := plan.ProjectName
+	if projectName == "" {
+		projectName = config.Name
+	}
+	if projectName == "" {
+		projectName = r.resolved.ServiceName
+	}
+	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
 }
 
 // getDerivedImageTag returns the expected tag for the derived image.

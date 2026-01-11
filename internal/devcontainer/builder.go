@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/api/types/mount"
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/compose"
 	"github.com/griffithind/dcx/internal/features"
@@ -101,7 +100,6 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	switch planType {
 	case PlanTypeImage:
 		resolved.Plan = NewImagePlan(opts.Config.Image)
-		resolved.Image = opts.Config.Image
 		resolved.BaseImage = opts.Config.Image
 
 	case PlanTypeDockerfile:
@@ -183,10 +181,17 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	if opts.Config.Init != nil {
 		resolved.Init = *opts.Config.Init
 	}
-	resolved.RunArgs = opts.Config.RunArgs
+
+	// Parse runArgs into structured form
+	if len(opts.Config.RunArgs) > 0 {
+		resolved.RunArgs = ParseRunArgs(opts.Config.RunArgs)
+	}
 
 	// Forward ports
 	resolved.ForwardPorts = parseForwardPorts(opts.Config.ForwardPorts)
+
+	// App ports (bound to localhost for security)
+	resolved.AppPorts = parseAppPorts(opts.Config.GetAppPorts())
 
 	// Mounts
 	resolved.Mounts = parseMounts(opts.Config.Mounts)
@@ -200,6 +205,16 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	// GPU requirements
 	if opts.Config.HostRequirements != nil {
 		resolved.GPURequirements = parseGPURequirements(opts.Config.HostRequirements)
+	}
+
+	// Extract secrets from DCX customizations
+	if dcxConfig := GetDcxCustomizations(opts.Config); dcxConfig != nil {
+		if len(dcxConfig.Secrets) > 0 {
+			resolved.RuntimeSecrets = dcxConfig.Secrets
+		}
+		if len(dcxConfig.BuildSecrets) > 0 {
+			resolved.BuildSecrets = dcxConfig.BuildSecrets
+		}
 	}
 
 	// Resolve features if any exist
@@ -264,22 +279,16 @@ func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feat
 				continue
 			}
 
-			dm := mount.Mount{
+			mountType := fm.Type
+			if mountType == "" {
+				mountType = "bind"
+			}
+
+			resolved.Mounts = append(resolved.Mounts, Mount{
 				Source: fm.Source,
 				Target: fm.Target,
-			}
-
-			// Set mount type (default to bind)
-			switch fm.Type {
-			case "volume":
-				dm.Type = mount.TypeVolume
-			case "tmpfs":
-				dm.Type = mount.TypeTmpfs
-			default:
-				dm.Type = mount.TypeBind
-			}
-
-			resolved.Mounts = append(resolved.Mounts, dm)
+				Type:   mountType,
+			})
 		}
 
 		// Merge capAdd
@@ -401,69 +410,73 @@ func parseForwardPorts(ports []interface{}) []PortForward {
 
 	result := make([]PortForward, 0, len(ports))
 	for _, port := range ports {
-		var pf PortForward
 		switch v := port.(type) {
 		case float64:
-			pf.ContainerPort = int(v)
-			pf.HostPort = int(v)
+			result = append(result, PortForward{ContainerPort: int(v), HostPort: int(v)})
 		case int:
-			pf.ContainerPort = v
-			pf.HostPort = v
+			result = append(result, PortForward{ContainerPort: v, HostPort: v})
 		case string:
-			// Parse "hostPort:containerPort" or just "port"
-			parts := strings.Split(v, ":")
-			if len(parts) == 2 {
-				if hp, err := strconv.Atoi(parts[0]); err == nil {
-					pf.HostPort = hp
-				}
-				if cp, err := strconv.Atoi(parts[1]); err == nil {
-					pf.ContainerPort = cp
-				}
-			} else if len(parts) == 1 {
-				if p, err := strconv.Atoi(parts[0]); err == nil {
-					pf.ContainerPort = p
-					pf.HostPort = p
-				}
+			if pf := parsePortString(v); pf.ContainerPort > 0 {
+				result = append(result, pf)
 			}
 		}
-		if pf.ContainerPort > 0 {
+	}
+	return result
+}
+
+// parseAppPorts converts config appPorts to resolved PortForward slice.
+func parseAppPorts(ports []string) []PortForward {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	result := make([]PortForward, 0, len(ports))
+	for _, port := range ports {
+		if pf := parsePortString(port); pf.ContainerPort > 0 {
 			result = append(result, pf)
 		}
 	}
 	return result
 }
 
-// parseMounts converts config mounts to Docker API mount.Mount slice.
-func parseMounts(mounts []Mount) []mount.Mount {
+// parsePortString parses a port string like "8080" or "8080:9000" into a PortForward.
+func parsePortString(s string) PortForward {
+	var pf PortForward
+	parts := strings.Split(s, ":")
+	if len(parts) == 2 {
+		if hp, err := strconv.Atoi(parts[0]); err == nil {
+			pf.HostPort = hp
+		}
+		if cp, err := strconv.Atoi(parts[1]); err == nil {
+			pf.ContainerPort = cp
+		}
+	} else if len(parts) == 1 {
+		if p, err := strconv.Atoi(parts[0]); err == nil {
+			pf.ContainerPort = p
+			pf.HostPort = p
+		}
+	}
+	return pf
+}
+
+// parseMounts validates config mounts and defaults the Type field.
+func parseMounts(mounts []Mount) []Mount {
 	if len(mounts) == 0 {
 		return nil
 	}
 
-	result := make([]mount.Mount, 0, len(mounts))
+	result := make([]Mount, 0, len(mounts))
 	for _, m := range mounts {
 		if m.Target == "" {
 			continue
 		}
 
-		dm := mount.Mount{
-			Source: m.Source,
-			Target: m.Target,
+		// Default type to bind if not specified
+		if m.Type == "" {
+			m.Type = "bind"
 		}
 
-		// Set mount type (default to bind)
-		switch m.Type {
-		case "volume":
-			dm.Type = mount.TypeVolume
-		case "tmpfs":
-			dm.Type = mount.TypeTmpfs
-		default:
-			dm.Type = mount.TypeBind
-		}
-
-		// Set read-only
-		dm.ReadOnly = m.ReadOnly
-
-		result = append(result, dm)
+		result = append(result, m)
 	}
 	return result
 }

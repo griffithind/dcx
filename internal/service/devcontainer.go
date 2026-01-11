@@ -13,6 +13,7 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/secrets"
 	sshcontainer "github.com/griffithind/dcx/internal/ssh/container"
 	"github.com/griffithind/dcx/internal/ssh/host"
 	"github.com/griffithind/dcx/internal/state"
@@ -281,7 +282,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 
-	// Check current state
+	// Check current state first to determine what actions are needed
 	currentState, _, err := s.stateManager.GetStateWithProjectAndHash(
 		ctx, ids.ProjectName, resolved.ID, resolved.Hashes.Config)
 	if err != nil {
@@ -292,16 +293,58 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		ui.Printf("Current state: %s", currentState)
 	}
 
+	// Early return if already running and no rebuild/recreate requested
+	if currentState == state.StateRunning && !opts.Recreate && !opts.Rebuild {
+		ui.Println("Devcontainer is already running")
+		return nil
+	}
+
+	// Determine if we're creating a new container (affects whether we fetch secrets)
+	// Secrets are only needed when creating new containers, not when starting existing ones
+	isCreatingNew := currentState == state.StateAbsent ||
+		currentState == state.StateStale ||
+		currentState == state.StateBroken ||
+		opts.Rebuild || opts.Recreate
+
+	// Fetch secrets only when creating new containers
+	var runtimeSecrets []secrets.Secret
+	var buildSecretPaths map[string]string
+	var secretsCleanup func()
+
+	if isCreatingNew {
+		fetcher := secrets.NewFetcher(s.logger)
+
+		// Fetch runtime secrets (mounted after container starts)
+		if len(resolved.RuntimeSecrets) > 0 {
+			ui.Println("Fetching runtime secrets...")
+			runtimeSecrets, err = fetcher.FetchSecrets(ctx, resolved.RuntimeSecrets)
+			if err != nil {
+				return fmt.Errorf("failed to fetch secrets: %w", err)
+			}
+		}
+
+		// Fetch build secrets (passed to docker build)
+		if len(resolved.BuildSecrets) > 0 {
+			ui.Println("Fetching build secrets...")
+			buildSecrets, err := fetcher.FetchSecrets(ctx, resolved.BuildSecrets)
+			if err != nil {
+				return fmt.Errorf("failed to fetch build secrets: %w", err)
+			}
+			buildSecretPaths, secretsCleanup, err = secrets.WriteToTempFiles(buildSecrets, "dcx-build-secret")
+			if err != nil {
+				return fmt.Errorf("failed to write build secrets: %w", err)
+			}
+			defer secretsCleanup()
+		}
+	}
+
 	// Handle state transitions
 	var isNewEnvironment bool
 	var needsRebuild bool
 
 	switch currentState {
 	case state.StateRunning:
-		if !opts.Recreate && !opts.Rebuild {
-			ui.Println("Devcontainer is already running")
-			return nil
-		}
+		// Already handled early return above, this is rebuild/recreate case
 		fallthrough
 	case state.StateStale, state.StateBroken:
 		if s.verbose {
@@ -313,7 +356,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		needsRebuild = true
 		fallthrough
 	case state.StateAbsent:
-		if err := s.create(ctx, resolved, opts.Rebuild || needsRebuild, opts.Pull); err != nil {
+		if err := s.create(ctx, resolved, opts.Rebuild || needsRebuild, opts.Pull, buildSecretPaths); err != nil {
 			return err
 		}
 		isNewEnvironment = true
@@ -334,6 +377,14 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		ui.Println("Installing dcx agent...")
 		if err := sshcontainer.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
+		}
+	}
+
+	// Mount runtime secrets before lifecycle hooks
+	if len(runtimeSecrets) > 0 && containerInfo != nil {
+		ui.Println("Mounting secrets...")
+		if err := container.MountSecretsToContainer(ctx, containerInfo.Name, runtimeSecrets); err != nil {
+			return fmt.Errorf("failed to mount secrets: %w", err)
 		}
 	}
 
@@ -380,7 +431,7 @@ func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *sta
 }
 
 // create creates a new environment.
-func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, forceRebuild, forcePull bool) error {
+func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, forceRebuild, forcePull bool, buildSecrets map[string]string) error {
 	runtime, err := container.NewUnifiedRuntime(resolved, s.dockerClient)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
@@ -393,9 +444,10 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 	}
 
 	return runtime.Up(ctx, container.UpOptions{
-		Build:   forceRebuild,
-		Rebuild: forceRebuild,
-		Pull:    forcePull,
+		Build:        forceRebuild,
+		Rebuild:      forceRebuild,
+		Pull:         forcePull,
+		BuildSecrets: buildSecrets,
 	})
 }
 
@@ -472,8 +524,8 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		return nil, nil
 	}
 
-	patcher := env.NewPatcher(s.dockerClient.APIClient())
-	prober := env.NewProber(s.dockerClient.APIClient())
+	patcher := env.NewPatcher()
+	prober := env.NewProber()
 
 	// Collect environment variables to patch into /etc/environment
 	envToPatch := make(map[string]string)
@@ -556,17 +608,10 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		return fmt.Errorf("failed to deploy SSH server: %w", err)
 	}
 
-	// Determine user
-	user := "root"
-	if resolved.RawConfig != nil {
-		if resolved.RawConfig.RemoteUser != "" {
-			user = resolved.RawConfig.RemoteUser
-		} else if resolved.RawConfig.ContainerUser != "" {
-			user = resolved.RawConfig.ContainerUser
-		}
-		user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
-			LocalWorkspaceFolder: s.workspacePath,
-		})
+	// Determine user - use EffectiveUser which is already resolved and substituted
+	user := resolved.EffectiveUser
+	if user == "" {
+		user = "root"
 	}
 
 	// Use project name as SSH host if available

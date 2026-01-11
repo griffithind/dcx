@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/docker/docker/api/types/mount"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,7 +53,7 @@ func TestBuilderBuild(t *testing.T) {
 		assert.Equal(t, 9000, resolved.ForwardPorts[1].HostPort)
 	})
 
-	t.Run("converts Mounts to mount.Mount type", func(t *testing.T) {
+	t.Run("parses Mounts correctly", func(t *testing.T) {
 		cfg := &DevContainerConfig{
 			Image: "alpine:latest",
 			Mounts: []Mount{
@@ -72,10 +71,10 @@ func TestBuilderBuild(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, resolved.Mounts, 2)
-		assert.Equal(t, mount.TypeBind, resolved.Mounts[0].Type)
+		assert.Equal(t, "bind", resolved.Mounts[0].Type)
 		assert.Equal(t, "/host/path", resolved.Mounts[0].Source)
 		assert.Equal(t, "/container/path", resolved.Mounts[0].Target)
-		assert.Equal(t, mount.TypeVolume, resolved.Mounts[1].Type)
+		assert.Equal(t, "volume", resolved.Mounts[1].Type)
 	})
 
 	t.Run("creates correct plan type", func(t *testing.T) {
