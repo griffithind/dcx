@@ -86,8 +86,8 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
-# Run linter
-lint:
+# Run linter (requires agent binaries for go:embed)
+lint: build-agent
 	golangci-lint run ./...
 
 # Generate documentation
