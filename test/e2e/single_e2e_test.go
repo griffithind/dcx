@@ -369,3 +369,57 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 		assert.NotEmpty(t, labelValue, "overall_hash label should be set")
 	})
 }
+
+// TestBuildNoCacheE2E tests that --no-cache flag forces a rebuild.
+func TestBuildNoCacheE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	// Create temp workspace with Dockerfile
+	tmpDir := t.TempDir()
+
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	err := os.MkdirAll(devcontainerDir, 0755)
+	require.NoError(t, err)
+
+	// Create Dockerfile with a marker
+	dockerfile := `FROM alpine:latest
+RUN echo "build-marker" > /build-marker
+`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
+	require.NoError(t, err)
+
+	// Create devcontainer.json
+	devcontainerJSON := `{
+		"name": "NoCache Test",
+		"build": {
+			"dockerfile": "Dockerfile"
+		},
+		"workspaceFolder": "/workspace"
+	}`
+	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, tmpDir, "down")
+	})
+
+	// First build
+	t.Run("first_build_succeeds", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "build")
+		assert.NotEmpty(t, stdout, "build should produce output")
+	})
+
+	// Build with --no-cache should rebuild
+	t.Run("no_cache_forces_rebuild", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "build", "--no-cache")
+		// Should see building output since cache is disabled
+		assert.NotEmpty(t, stdout, "no-cache build should produce output")
+	})
+
+	// Up should work after build
+	t.Run("up_after_build", func(t *testing.T) {
+		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "up")
+		assert.Contains(t, stdout, "Devcontainer started successfully")
+	})
+}

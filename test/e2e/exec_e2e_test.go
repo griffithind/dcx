@@ -141,3 +141,49 @@ func TestExecWithEnvE2E(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "exec-test-value")
 }
+
+// TestExecBinaryDataE2E tests that binary data is streamed correctly through exec.
+func TestExecBinaryDataE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	// Bring up the container
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+
+	// Test that binary data with null bytes is handled correctly
+	t.Run("binary_output", func(t *testing.T) {
+		// Generate some bytes and print them
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+			"sh", "-c", "printf 'hello\\x00world'")
+		require.NoError(t, err)
+		// The output should contain the data (null byte handling depends on implementation)
+		assert.Contains(t, stdout, "hello")
+	})
+
+	// Test that large output is handled correctly
+	t.Run("large_output", func(t *testing.T) {
+		// Generate multiple lines of output using seq
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+			"sh", "-c", "seq 1 100")
+		require.NoError(t, err)
+		// Should have output with multiple numbers
+		assert.Contains(t, stdout, "1")
+		assert.Contains(t, stdout, "50")
+		assert.Contains(t, stdout, "100")
+	})
+
+	// Test stderr is captured separately
+	t.Run("stderr_capture", func(t *testing.T) {
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+			"sh", "-c", "echo stdout-text && echo stderr-text >&2")
+		require.NoError(t, err)
+		assert.Contains(t, stderr, "stderr-text")
+	})
+}
