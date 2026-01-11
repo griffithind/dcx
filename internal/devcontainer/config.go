@@ -9,8 +9,9 @@ package devcontainer
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/griffithind/dcx/internal/parse"
+	"github.com/docker/docker/api/types/mount"
 )
 
 // PlanType identifies the execution plan type for a devcontainer.
@@ -272,8 +273,8 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		m.Raw = s
-		// Use parse package to parse the mount string
-		parsed := parse.ParseMount(s)
+		// Parse the mount string
+		parsed := parseMount(s)
 		if parsed != nil {
 			m.Source = parsed.Source
 			m.Target = parsed.Target
@@ -306,6 +307,144 @@ func (m Mount) String() string {
 		result += ",readonly"
 	}
 	return result
+}
+
+// ParsedMount represents a parsed mount specification.
+type ParsedMount struct {
+	Source      string
+	Target      string
+	Type        string // bind, volume, tmpfs
+	ReadOnly    bool
+	Consistency string // cached, delegated, consistent (macOS)
+}
+
+// parseMount parses a devcontainer mount string into a ParsedMount.
+// Devcontainer format: "source=/path,target=/path,type=bind,consistency=cached,readonly=true"
+// Also accepts Docker short format: "source:target" or "source:target:ro"
+func parseMount(mount string) *ParsedMount {
+	// Check for Docker short format (contains colon but no source= pattern)
+	if strings.Contains(mount, ":") && !strings.Contains(mount, "source=") {
+		return parseDockerShortMount(mount)
+	}
+
+	return parseDevcontainerMount(mount)
+}
+
+// parseDockerShortMount parses Docker short format: "source:target" or "source:target:ro"
+func parseDockerShortMount(mount string) *ParsedMount {
+	parts := strings.SplitN(mount, ":", 3)
+	if len(parts) < 2 {
+		return nil
+	}
+
+	m := &ParsedMount{
+		Source: parts[0],
+		Target: parts[1],
+		Type:   "bind",
+	}
+
+	if len(parts) >= 3 {
+		// Check for options (readonly, consistency)
+		opts := strings.Split(parts[2], ",")
+		for _, opt := range opts {
+			switch opt {
+			case "ro", "readonly":
+				m.ReadOnly = true
+			case "cached", "delegated", "consistent":
+				m.Consistency = opt
+			}
+		}
+	}
+
+	return m
+}
+
+// parseDevcontainerMount parses devcontainer key=value format.
+func parseDevcontainerMount(mount string) *ParsedMount {
+	parts := strings.Split(mount, ",")
+
+	m := &ParsedMount{
+		Type: "bind", // Default type
+	}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+
+		// Handle standalone options without a value
+		if part == "readonly" || part == "ro" {
+			m.ReadOnly = true
+			continue
+		}
+
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+
+		switch key {
+		case "source", "src":
+			m.Source = value
+		case "target", "dst", "destination":
+			m.Target = value
+		case "type":
+			m.Type = value
+		case "readonly", "ro":
+			m.ReadOnly = value == "true" || value == "1"
+		case "consistency":
+			m.Consistency = value
+		}
+	}
+
+	// Validate required fields
+	if m.Target == "" {
+		return nil
+	}
+	if m.Type != "tmpfs" && m.Source == "" {
+		return nil
+	}
+
+	return m
+}
+
+// ParseWorkspaceMount parses a workspace mount string into a Docker mount.Mount.
+// This is used by the container package to convert workspace mount configuration
+// into the structured type expected by the Docker API.
+func ParseWorkspaceMount(spec string) *mount.Mount {
+	parsed := parseMount(spec)
+	if parsed == nil {
+		return nil
+	}
+
+	// Convert string type to mount.Type
+	var mountType mount.Type
+	switch parsed.Type {
+	case "bind":
+		mountType = mount.TypeBind
+	case "volume":
+		mountType = mount.TypeVolume
+	case "tmpfs":
+		mountType = mount.TypeTmpfs
+	default:
+		mountType = mount.TypeBind
+	}
+
+	m := &mount.Mount{
+		Type:     mountType,
+		Source:   parsed.Source,
+		Target:   parsed.Target,
+		ReadOnly: parsed.ReadOnly,
+	}
+
+	// Set bind options for consistency if specified
+	if parsed.Consistency != "" && mountType == mount.TypeBind {
+		m.BindOptions = &mount.BindOptions{
+			Propagation: mount.Propagation(parsed.Consistency),
+		}
+	}
+
+	return m
 }
 
 // GetPortAttribute returns the attributes for a specific port.

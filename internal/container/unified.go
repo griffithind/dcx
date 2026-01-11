@@ -359,12 +359,25 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 	workspaceFolder := r.resolved.WorkspaceFolder
 
 	containerLabels := r.buildLabels()
-	mounts := r.buildMounts()
+	mountColl := r.buildMounts()
 	env := r.buildEnvironment()
 
-	workspaceMount := r.resolved.WorkspaceMount
-	if workspaceMount == "" {
-		workspaceMount = fmt.Sprintf("type=bind,source=%s,target=%s", r.resolved.LocalRoot, workspaceFolder)
+	// Build workspace mount as structured type
+	var workspaceMount *mount.Mount
+	if r.resolved.WorkspaceMount != "" {
+		// Parse the workspace mount string
+		parsed := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount)
+		if parsed != nil {
+			workspaceMount = parsed
+		}
+	}
+	if workspaceMount == nil && r.resolved.LocalRoot != "" && workspaceFolder != "" {
+		// Default workspace mount
+		workspaceMount = &mount.Mount{
+			Type:   mount.TypeBind,
+			Source: r.resolved.LocalRoot,
+			Target: workspaceFolder,
+		}
 	}
 
 	ports := r.buildPortBindings()
@@ -377,8 +390,8 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		WorkspacePath:   r.resolved.LocalRoot,
 		WorkspaceFolder: workspaceFolder,
 		WorkspaceMount:  workspaceMount,
-		Mounts:          mounts.Binds,
-		Tmpfs:           mounts.Tmpfs,
+		Mounts:          mountColl.Mounts,
+		Tmpfs:           mountColl.Tmpfs,
 		Ports:           ports,
 		CapAdd:          r.resolved.CapAdd,
 		SecurityOpt:     r.resolved.SecurityOpt,
@@ -488,27 +501,22 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 
 // mountCollections holds separated mount types for Docker API.
 type mountCollections struct {
-	Binds []string          // For HostConfig.Binds (bind and volume mounts)
-	Tmpfs map[string]string // For HostConfig.Tmpfs (tmpfs mounts)
+	Mounts []mount.Mount     // Structured mounts for HostConfig.Mounts
+	Tmpfs  map[string]string // For HostConfig.Tmpfs (tmpfs mounts)
 }
 
-// buildMounts builds the container mounts, separating tmpfs from bind mounts.
+// buildMounts builds the container mounts, separating tmpfs from other mounts.
 func (r *UnifiedRuntime) buildMounts() mountCollections {
 	result := mountCollections{
 		Tmpfs: make(map[string]string),
 	}
 	for _, m := range r.resolved.Mounts {
-		switch m.Type {
-		case mount.TypeTmpfs:
-			// Tmpfs format: target -> options (empty string for defaults)
+		if m.Type == mount.TypeTmpfs {
+			// Tmpfs handled separately via HostConfig.Tmpfs
 			result.Tmpfs[m.Target] = ""
-		default:
-			// Bind and volume mounts use the same format
-			mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
-			if m.ReadOnly {
-				mountStr += ":ro"
-			}
-			result.Binds = append(result.Binds, mountStr)
+		} else {
+			// Pass structured mount directly
+			result.Mounts = append(result.Mounts, m)
 		}
 	}
 	return result
@@ -523,21 +531,9 @@ func (r *UnifiedRuntime) buildEnvironment() []string {
 	return env
 }
 
-// buildPortBindings builds port bindings from forward ports.
-func (r *UnifiedRuntime) buildPortBindings() []string {
-	if len(r.resolved.ForwardPorts) == 0 {
-		return nil
-	}
-
-	ports := make([]string, 0, len(r.resolved.ForwardPorts))
-	for _, p := range r.resolved.ForwardPorts {
-		if p.HostPort == p.ContainerPort || p.HostPort == 0 {
-			ports = append(ports, fmt.Sprintf("%d", p.ContainerPort))
-		} else {
-			ports = append(ports, fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
-		}
-	}
-	return ports
+// buildPortBindings returns the forward ports directly as structured types.
+func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
+	return r.resolved.ForwardPorts
 }
 
 // Start implements ContainerRuntime.Start.
@@ -707,18 +703,23 @@ func (r *UnifiedRuntime) generateComposeOverride(plan *devcontainer.ComposePlan)
 	}
 
 	// Add mounts
-	mounts := r.buildMounts()
-	if len(mounts.Binds) > 0 {
+	mountColl := r.buildMounts()
+	if len(mountColl.Mounts) > 0 {
 		sb.WriteString("    volumes:\n")
-		for _, m := range mounts.Binds {
-			sb.WriteString(fmt.Sprintf("      - %q\n", m))
+		for _, m := range mountColl.Mounts {
+			// Convert structured mount back to compose volume string
+			mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
+			if m.ReadOnly {
+				mountStr += ":ro"
+			}
+			sb.WriteString(fmt.Sprintf("      - %q\n", mountStr))
 		}
 	}
 
 	// Add tmpfs mounts
-	if len(mounts.Tmpfs) > 0 {
+	if len(mountColl.Tmpfs) > 0 {
 		sb.WriteString("    tmpfs:\n")
-		for path := range mounts.Tmpfs {
+		for path := range mountColl.Tmpfs {
 			sb.WriteString(fmt.Sprintf("      - %q\n", path))
 		}
 	}

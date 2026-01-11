@@ -3,97 +3,10 @@ package container
 import (
 	"testing"
 
+	"github.com/docker/docker/api/types/mount"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestParseMountSpec(t *testing.T) {
-	tests := []struct {
-		name     string
-		spec     string
-		expected string
-	}{
-		{
-			name:     "empty spec",
-			spec:     "",
-			expected: "",
-		},
-		{
-			name:     "simple bind mount",
-			spec:     "type=bind,source=/host/path,target=/container/path",
-			expected: "/host/path:/container/path",
-		},
-		{
-			name:     "bind mount with readonly",
-			spec:     "type=bind,source=/host/path,target=/container/path,readonly",
-			expected: "/host/path:/container/path:ro",
-		},
-		{
-			name:     "source and destination aliases",
-			spec:     "type=bind,src=/host/path,dst=/container/path",
-			expected: "/host/path:/container/path",
-		},
-		{
-			name:     "with consistency option",
-			spec:     "type=bind,source=/host/path,target=/container/path,consistency=cached",
-			expected: "/host/path:/container/path:cached",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseMountSpec(tt.spec)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestParsePortBindings(t *testing.T) {
-	tests := []struct {
-		name             string
-		ports            []string
-		wantExposedLen   int
-		wantBindingsLen  int
-	}{
-		{
-			name:            "empty ports",
-			ports:           nil,
-			wantExposedLen:  0,
-			wantBindingsLen: 0,
-		},
-		{
-			name:            "single port",
-			ports:           []string{"8080"},
-			wantExposedLen:  1,
-			wantBindingsLen: 1,
-		},
-		{
-			name:            "host:container port",
-			ports:           []string{"3000:8080"},
-			wantExposedLen:  1,
-			wantBindingsLen: 1,
-		},
-		{
-			name:            "multiple ports",
-			ports:           []string{"8080", "5432"},
-			wantExposedLen:  2,
-			wantBindingsLen: 2,
-		},
-		{
-			name:            "port with protocol",
-			ports:           []string{"8080/tcp"},
-			wantExposedLen:  1,
-			wantBindingsLen: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exposed, bindings := parsePortBindings(tt.ports)
-			assert.Len(t, exposed, tt.wantExposedLen)
-			assert.Len(t, bindings, tt.wantBindingsLen)
-		})
-	}
-}
 
 func TestCreateContainerOptions(t *testing.T) {
 	tests := []struct {
@@ -135,9 +48,11 @@ func TestCreateContainerOptions(t *testing.T) {
 		{
 			name: "with mounts",
 			opts: CreateContainerOptions{
-				Name:   "test-container",
-				Image:  "alpine:latest",
-				Mounts: []string{"/host:/container"},
+				Name:  "test-container",
+				Image: "alpine:latest",
+				Mounts: []mount.Mount{
+					{Type: mount.TypeBind, Source: "/host", Target: "/container"},
+				},
 			},
 		},
 		{
@@ -177,7 +92,10 @@ func TestCreateContainerOptions(t *testing.T) {
 			opts: CreateContainerOptions{
 				Name:  "test-container",
 				Image: "alpine:latest",
-				Ports: []string{"8080", "3000:8080"},
+				Ports: []devcontainer.PortForward{
+					{ContainerPort: 8080, HostPort: 8080},
+					{ContainerPort: 8080, HostPort: 3000},
+				},
 			},
 		},
 		{

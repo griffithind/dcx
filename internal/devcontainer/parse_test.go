@@ -1,4 +1,4 @@
-package parse
+package devcontainer
 
 import (
 	"testing"
@@ -92,7 +92,7 @@ func TestParseMount_DevcontainerFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseMount(tt.input)
+			result := parseMount(tt.input)
 			require.NotNil(t, result)
 			assert.Equal(t, tt.expected.Source, result.Source)
 			assert.Equal(t, tt.expected.Target, result.Target)
@@ -162,11 +162,38 @@ func TestParseMount_DockerShortFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseMount(tt.input)
+			result := parseMount(tt.input)
 			require.NotNil(t, result)
 			assert.Equal(t, tt.expected.Source, result.Source)
 			assert.Equal(t, tt.expected.Target, result.Target)
 			assert.Equal(t, tt.expected.ReadOnly, result.ReadOnly)
+		})
+	}
+}
+
+func TestParseMount_Invalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "missing target",
+			input: "source=/host",
+		},
+		{
+			name:  "missing source for bind",
+			input: "target=/container,type=bind",
+		},
+		{
+			name:  "short format missing target",
+			input: "/host",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseMount(tt.input)
+			assert.Nil(t, result)
 		})
 	}
 }

@@ -18,10 +18,11 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/griffithind/dcx/internal/common"
-	"github.com/griffithind/dcx/internal/parse"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -294,10 +295,10 @@ type CreateContainerOptions struct {
 	Image           string
 	WorkspacePath   string
 	WorkspaceFolder string
-	WorkspaceMount  string
+	WorkspaceMount  *mount.Mount // Structured workspace mount (nil means use WorkspacePath/WorkspaceFolder)
 	Labels          map[string]string
 	Env             []string
-	Mounts          []string
+	Mounts          []mount.Mount // Structured mount specifications
 	RunArgs         []string
 	User            string
 	Privileged      bool
@@ -315,7 +316,7 @@ type CreateContainerOptions struct {
 	ExtraHosts      []string
 	Tmpfs           map[string]string
 	Sysctls         map[string]string
-	Ports           []string
+	Ports           []devcontainer.PortForward // Structured port bindings
 	Entrypoint      []string
 	Cmd             []string
 	GPURequest      string // GPU request: "all" or count like "1", "2"
@@ -373,11 +374,8 @@ func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainer
 		hostConfig.Tmpfs = opts.Tmpfs
 	}
 
-	if opts.WorkspaceMount != "" {
-		bind := parseMountSpec(opts.WorkspaceMount)
-		if bind != "" {
-			hostConfig.Binds = append(hostConfig.Binds, bind)
-		}
+	if opts.WorkspaceMount != nil {
+		hostConfig.Mounts = append(hostConfig.Mounts, *opts.WorkspaceMount)
 	} else if opts.WorkspacePath != "" && opts.WorkspaceFolder != "" {
 		hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s", opts.WorkspacePath, opts.WorkspaceFolder))
 	}
@@ -390,9 +388,27 @@ func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainer
 		}
 	}
 
-	hostConfig.Binds = append(hostConfig.Binds, opts.Mounts...)
+	// Add structured mounts directly
+	hostConfig.Mounts = append(hostConfig.Mounts, opts.Mounts...)
 
-	exposedPorts, portBindings := parsePortBindings(opts.Ports)
+	// Convert structured port bindings to Docker nat types
+	exposedPorts := make(nat.PortSet)
+	portBindings := make(nat.PortMap)
+	for _, p := range opts.Ports {
+		proto := p.Protocol
+		if proto == "" {
+			proto = "tcp"
+		}
+		containerPort := strconv.Itoa(p.ContainerPort)
+		natPort := nat.Port(fmt.Sprintf("%s/%s", containerPort, proto))
+		exposedPorts[natPort] = struct{}{}
+
+		hostPort := strconv.Itoa(p.HostPort)
+		if p.HostPort == 0 {
+			hostPort = containerPort
+		}
+		portBindings[natPort] = []nat.PortBinding{{HostPort: hostPort}}
+	}
 	if len(portBindings) > 0 {
 		hostConfig.PortBindings = portBindings
 	}
@@ -498,48 +514,6 @@ func (c *DockerClient) BuildImage(ctx context.Context, opts ImageBuildOptions) e
 	}
 
 	return cmd.Run()
-}
-
-// parsePortBindings parses port specifications into exposed ports and port bindings.
-func parsePortBindings(ports []string) (nat.PortSet, nat.PortMap) {
-	bindings := parse.ParsePortBindings(ports)
-
-	exposedPorts := make(nat.PortSet)
-	portBindings := make(nat.PortMap)
-
-	for _, pb := range bindings {
-		natPort := nat.Port(fmt.Sprintf("%s/%s", pb.ContainerPort, pb.Protocol))
-		exposedPorts[natPort] = struct{}{}
-		portBindings[natPort] = []nat.PortBinding{
-			{
-				HostIP:   pb.HostIP,
-				HostPort: pb.HostPort,
-			},
-		}
-	}
-
-	return exposedPorts, portBindings
-}
-
-// parseMountSpec parses a Docker --mount format string into a bind mount string.
-func parseMountSpec(spec string) string {
-	m := parse.ParseMount(spec)
-	if m == nil {
-		return ""
-	}
-
-	result := m.Source + ":" + m.Target
-	var opts []string
-	if m.ReadOnly {
-		opts = append(opts, "ro")
-	}
-	if m.Consistency != "" {
-		opts = append(opts, m.Consistency)
-	}
-	if len(opts) > 0 {
-		result += ":" + strings.Join(opts, ",")
-	}
-	return result
 }
 
 // CleanupResult contains statistics about cleaned up resources.
