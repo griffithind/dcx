@@ -6,7 +6,7 @@ AGENT_NAME=dcx-agent
 BUILD_DIR=bin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
-RELEASE_LDFLAGS=-ldflags "-s -w -trimpath -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
+RELEASE_LDFLAGS=-trimpath -ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
 
 # Number of CPU cores for parallel test execution (works on macOS and Linux)
 NCPU ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
