@@ -884,3 +884,31 @@ func (d *Docker) MkdirInContainer(ctx context.Context, containerName, path, user
 	}
 	return nil
 }
+
+// ChownInContainer changes file ownership inside a container.
+func (d *Docker) ChownInContainer(ctx context.Context, containerName, path, owner string) error {
+	args := []string{"exec", "--user", "root", containerName, "chown", owner, path}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("chown failed: %w, output: %s", err, output)
+	}
+	return nil
+}
+
+// WriteFileInContainer writes content to a file inside a container using docker exec.
+// This is useful for writing to tmpfs mounts where docker cp doesn't work.
+func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path string, content []byte, user string) error {
+	if user == "" {
+		user = "root"
+	}
+	args := []string{"exec", "-i", "--user", user, containerName, "sh", "-c", fmt.Sprintf("cat > %q", path)}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin = strings.NewReader(string(content))
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("write file failed: %w, output: %s", err, output)
+	}
+	return nil
+}

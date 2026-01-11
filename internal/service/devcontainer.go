@@ -381,7 +381,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	// Mount runtime secrets before lifecycle hooks
 	if len(runtimeSecrets) > 0 && containerInfo != nil {
 		ui.Println("Mounting secrets...")
-		if err := container.MountSecretsToContainer(ctx, containerInfo.Name, runtimeSecrets); err != nil {
+		if err := container.MountSecretsToContainer(ctx, containerInfo.Name, runtimeSecrets, resolved.EffectiveUser); err != nil {
 			return fmt.Errorf("failed to mount secrets: %w", err)
 		}
 	}

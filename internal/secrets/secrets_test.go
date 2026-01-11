@@ -25,7 +25,7 @@ func TestFetchSecrets(t *testing.T) {
 		{
 			name: "single secret with echo",
 			configs: map[string]devcontainer.SecretConfig{
-				"TEST_SECRET": {Command: "echo secret_value"},
+				"TEST_SECRET": "echo secret_value",
 			},
 			wantErr: false,
 			wantLen: 1,
@@ -33,8 +33,8 @@ func TestFetchSecrets(t *testing.T) {
 		{
 			name: "multiple secrets",
 			configs: map[string]devcontainer.SecretConfig{
-				"SECRET1": {Command: "echo value1"},
-				"SECRET2": {Command: "echo value2"},
+				"SECRET1": "echo value1",
+				"SECRET2": "echo value2",
 			},
 			wantErr: false,
 			wantLen: 2,
@@ -42,14 +42,14 @@ func TestFetchSecrets(t *testing.T) {
 		{
 			name: "command fails",
 			configs: map[string]devcontainer.SecretConfig{
-				"FAIL": {Command: "exit 1"},
+				"FAIL": "exit 1",
 			},
 			wantErr: true,
 		},
 		{
 			name: "command not found",
 			configs: map[string]devcontainer.SecretConfig{
-				"NOTFOUND": {Command: "nonexistent_command_xyz"},
+				"NOTFOUND": "nonexistent_command_xyz",
 			},
 			wantErr: true,
 		},
@@ -76,7 +76,7 @@ func TestFetchSecrets_Value(t *testing.T) {
 	fetcher := NewFetcher(nil)
 	configs := map[string]devcontainer.SecretConfig{
 		// Use printf which is more portable than echo -n
-		"TEST": {Command: "printf 'hello_world'"},
+		"TEST": "printf 'hello_world'",
 	}
 
 	secrets, err := fetcher.FetchSecrets(context.Background(), configs)
@@ -100,7 +100,7 @@ func TestFetchSecrets_Value(t *testing.T) {
 func TestFetchSecrets_TrimsNewline(t *testing.T) {
 	fetcher := NewFetcher(nil)
 	configs := map[string]devcontainer.SecretConfig{
-		"TEST": {Command: "echo value_with_newline"},
+		"TEST": "echo value_with_newline",
 	}
 
 	secrets, err := fetcher.FetchSecrets(context.Background(), configs)

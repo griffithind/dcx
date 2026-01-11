@@ -20,13 +20,13 @@ type DcxCustomizations struct {
 	BuildSecrets map[string]SecretConfig `json:"buildSecrets,omitempty"`
 }
 
-// SecretConfig defines how to fetch a secret value.
-type SecretConfig struct {
-	// Command is the shell command to execute on the host to fetch the secret value.
-	// The command's stdout is captured as the secret value.
-	// Example: "op read op://vault/item/field"
-	Command string `json:"command"`
-}
+// SecretConfig is a shell command to execute on the host to fetch a secret value.
+// The command's stdout is captured as the secret value.
+// Examples:
+//   - "op read op://vault/item"
+//   - "echo $MY_ENV_VAR"
+//   - "cat /path/to/secret"
+type SecretConfig string
 
 // Shortcut represents a command shortcut configuration.
 // Can be either a simple string (the command) or a complex object.

@@ -3,7 +3,6 @@ package container
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/common"
@@ -12,14 +11,20 @@ import (
 
 // MountSecretsToContainer copies secrets to /run/secrets in the specified container.
 // Secrets are written as files with mode 0400 (read-only by owner).
+// The owner parameter specifies the user who should own the secrets (e.g., "node", "root").
 // This is a standalone function that can be called without a runtime instance.
-func MountSecretsToContainer(ctx context.Context, containerName string, secretList []secrets.Secret) error {
+func MountSecretsToContainer(ctx context.Context, containerName string, secretList []secrets.Secret, owner string) error {
 	if len(secretList) == 0 {
 		return nil
 	}
 
 	if containerName == "" {
 		return fmt.Errorf("container name not set")
+	}
+
+	// Default to root if no owner specified
+	if owner == "" {
+		owner = "root"
 	}
 
 	docker := MustDocker()
@@ -36,7 +41,7 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 
 	// Write each secret to the container
 	for _, secret := range secretList {
-		if err := writeSecretToContainer(ctx, docker, containerName, secret); err != nil {
+		if err := writeSecretToContainer(ctx, docker, containerName, secret, owner); err != nil {
 			return fmt.Errorf("failed to write secret %q: %w", secret.Name, err)
 		}
 	}
@@ -46,30 +51,23 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 
 // MountSecrets copies secrets to /run/secrets in the container.
 // Secrets are written as files with mode 0400 (read-only by owner).
-func (r *UnifiedRuntime) MountSecrets(ctx context.Context, secretList []secrets.Secret) error {
-	return MountSecretsToContainer(ctx, r.containerName, secretList)
+func (r *UnifiedRuntime) MountSecrets(ctx context.Context, secretList []secrets.Secret, owner string) error {
+	return MountSecretsToContainer(ctx, r.containerName, secretList, owner)
 }
 
 // writeSecretToContainer writes a secret to the container's /run/secrets.
-func writeSecretToContainer(ctx context.Context, docker *Docker, containerName string, secret secrets.Secret) error {
-	// Write secret to temp file
-	tmpFile, err := os.CreateTemp("", "dcx-secret-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
-
-	if _, err := tmpFile.Write(secret.Value); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	// Copy to container
+// Uses docker exec to write directly (docker cp doesn't work with tmpfs mounts).
+func writeSecretToContainer(ctx context.Context, docker *Docker, containerName string, secret secrets.Secret, owner string) error {
 	destPath := filepath.Join(common.SecretsDir, secret.Name)
-	if err := docker.CopyToContainer(ctx, tmpFile.Name(), containerName, destPath); err != nil {
+
+	// Write secret content directly to container using docker exec
+	// (docker cp doesn't work with tmpfs mounts)
+	if err := docker.WriteFileInContainer(ctx, containerName, destPath, secret.Value, "root"); err != nil {
+		return err
+	}
+
+	// Set ownership to the specified user
+	if err := docker.ChownInContainer(ctx, containerName, destPath, owner); err != nil {
 		return err
 	}
 

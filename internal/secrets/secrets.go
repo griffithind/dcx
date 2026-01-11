@@ -46,7 +46,7 @@ func (f *Fetcher) FetchSecrets(ctx context.Context, configs map[string]devcontai
 	for name, config := range configs {
 		f.logger.Debug("Fetching secret", "name", name)
 
-		value, err := f.executeCommand(ctx, config.Command)
+		value, err := f.executeCommand(ctx, string(config))
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch secret %q: %w", name, err)
 		}
