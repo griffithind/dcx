@@ -540,9 +540,11 @@ func (r *UnifiedRuntime) buildMounts() mountCollections {
 		Tmpfs: make(map[string]string),
 	}
 
-	// Always add tmpfs for /run/secrets to ensure secrets are stored in memory
-	// and not persisted to the container's writable layer
-	result.Tmpfs[common.SecretsDir] = "rw,noexec,nosuid,size=1m"
+	// Add tmpfs for /run/secrets only when runtime secrets are configured.
+	// This ensures secrets are stored in memory and not persisted to the container's writable layer.
+	if len(r.resolved.RuntimeSecrets) > 0 {
+		result.Tmpfs[common.SecretsDir] = "rw,noexec,nosuid,size=1m"
+	}
 
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {

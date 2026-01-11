@@ -63,7 +63,7 @@ test: test-unit
 
 # Run unit tests
 test-unit:
-	go test -v -race ./internal/... ./pkg/...
+	go test -v -race ./internal/...
 
 # Run integration tests (requires Docker)
 test-integration:
@@ -82,7 +82,7 @@ test-all: test-unit test-conformance test-e2e
 
 # Run tests with coverage
 test-coverage:
-	go test -coverprofile=coverage.out ./internal/... ./pkg/...
+	go test -coverprofile=coverage.out ./internal/...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 

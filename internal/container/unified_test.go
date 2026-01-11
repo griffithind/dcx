@@ -311,6 +311,16 @@ func TestBuildMounts(t *testing.T) {
 			},
 			wantTmpfs: map[string]string{"/run": ""},
 		},
+		{
+			name: "with runtime secrets adds /run/secrets tmpfs",
+			resolved: &devcontainer.ResolvedDevContainer{
+				RuntimeSecrets: map[string]devcontainer.SecretConfig{
+					"MY_SECRET": "echo secret-value",
+				},
+			},
+			wantMounts: nil,
+			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
+		},
 	}
 
 	for _, tt := range tests {
