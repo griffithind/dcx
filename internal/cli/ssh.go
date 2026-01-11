@@ -144,11 +144,8 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 		workDir = "/workspace"
 	}
 
-	// Deploy dcx-agent binary to container if needed
+	// Get path to dcx-agent binary (deployed during 'dcx up')
 	binaryPath := sshContainer.GetContainerBinaryPath()
-	if err := sshContainer.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
-		return fmt.Errorf("failed to deploy SSH server: %w", err)
-	}
 
 	// Run exec with SSH server (stdio mode) using Docker SDK
 	// Run as the target user so the SSH server process has the correct identity

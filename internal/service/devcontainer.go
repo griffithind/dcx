@@ -587,12 +587,6 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		return fmt.Errorf("no primary container found")
 	}
 
-	// Deploy dcx binary to container
-	binaryPath := sshcontainer.GetContainerBinaryPath()
-	if err := sshcontainer.DeployToContainer(ctx, containerInfo.Name, binaryPath); err != nil {
-		return fmt.Errorf("failed to deploy SSH server: %w", err)
-	}
-
 	// Determine user - use EffectiveUser which is already resolved and substituted
 	user := resolved.EffectiveUser
 	if user == "" {
