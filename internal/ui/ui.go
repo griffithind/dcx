@@ -204,6 +204,6 @@ func (s *Spinner) UpdateText(message string) {
 // Stop stops the spinner without a message.
 func (s *Spinner) Stop() {
 	if s.printer != nil {
-		s.printer.Stop()
+		_ = s.printer.Stop()
 	}
 }

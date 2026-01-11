@@ -42,7 +42,7 @@ func NewCLIContext() (*CLIContext, error) {
 	// Get identifiers
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
-		dockerClient.Close()
+		_ = dockerClient.Close()
 		svc.Close()
 		return nil, fmt.Errorf("failed to get identifiers: %w", err)
 	}
@@ -62,7 +62,7 @@ func (c *CLIContext) Close() {
 		c.Service.Close()
 	}
 	if c.DockerClient != nil {
-		c.DockerClient.Close()
+		_ = c.DockerClient.Close()
 	}
 }
 

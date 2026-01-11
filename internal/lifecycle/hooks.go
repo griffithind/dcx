@@ -72,6 +72,9 @@ type HookRunner struct {
 	cfg           *devcontainer.DevContainerConfig
 	workspaceID   string
 
+	// Probed environment from userEnvProbe (optional, set via SetProbedEnv)
+	probedEnv map[string]string
+
 	// Feature hooks (optional, set via SetFeatureHooks)
 	featureOnCreateHooks      []features.FeatureHook
 	featureUpdateContentHooks []features.FeatureHook
@@ -99,6 +102,12 @@ func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postSt
 	r.featurePostCreateHooks = postCreate
 	r.featurePostStartHooks = postStart
 	r.featurePostAttachHooks = postAttach
+}
+
+// SetProbedEnv sets the probed environment from userEnvProbe.
+// These environment variables will be injected into all container commands.
+func (r *HookRunner) SetProbedEnv(env map[string]string) {
+	r.probedEnv = env
 }
 
 // getWaitFor returns the WaitFor value from config, defaulting to updateContentCommand per spec.
@@ -184,99 +193,69 @@ func (r *HookRunner) RunPostAttach(ctx context.Context) error {
 }
 
 // RunAllCreateHooks runs all hooks needed when a container is first created.
-// Commands are run in order, but commands after the waitFor point run in the background.
+// All hooks run sequentially to ensure they complete before the CLI exits.
+// The waitFor setting determines when the "container ready" message is shown,
+// but all hooks still run to completion.
 func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 	waitFor := r.getWaitFor()
-	var backgroundWg sync.WaitGroup
-	var backgroundErrs []error
-	var backgroundMu sync.Mutex
+	readyPrinted := false
 
-	// Helper to run a hook either blocking or in background based on waitFor
-	runHook := func(hookType WaitFor, name string, fn func() error) error {
-		if r.shouldBlock(hookType) {
-			// Run synchronously and return error immediately
-			return fn()
+	// Helper to print ready message once we pass the waitFor threshold
+	printReadyIfNeeded := func(hookType WaitFor) {
+		if !readyPrinted && !r.shouldBlock(hookType) {
+			ui.Println("Container is ready (remaining hooks running...)")
+			readyPrinted = true
 		}
-		// Run in background
-		backgroundWg.Add(1)
-		go func() {
-			defer backgroundWg.Done()
-			if err := fn(); err != nil {
-				backgroundMu.Lock()
-				backgroundErrs = append(backgroundErrs, fmt.Errorf("%s: %w", name, err))
-				backgroundMu.Unlock()
-				ui.Warning("Background %s failed: %v", name, err)
-			}
-		}()
-		return nil
-	}
-
-	// Log waitFor setting if not default
-	if waitFor != WaitForPostStartCommand {
-		ui.Printf("Container will be ready after %s (remaining hooks run in background)", waitFor)
 	}
 
 	// initializeCommand runs on host before anything else
-	if err := runHook(WaitForInitializeCommand, "initializeCommand", func() error {
-		return r.RunInitialize(ctx)
-	}); err != nil {
+	if err := r.RunInitialize(ctx); err != nil {
 		return fmt.Errorf("initializeCommand failed: %w", err)
 	}
 
 	// onCreateCommand runs after container creation
 	// Per spec: feature hooks run BEFORE devcontainer hooks
-	if err := runHook(WaitForOnCreateCommand, "onCreateCommand", func() error {
-		if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
-			return err
-		}
-		return r.RunOnCreate(ctx)
-	}); err != nil {
+	printReadyIfNeeded(WaitForOnCreateCommand)
+	if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
+		return err
+	}
+	if err := r.RunOnCreate(ctx); err != nil {
 		return fmt.Errorf("onCreateCommand failed: %w", err)
 	}
 
 	// updateContentCommand runs after onCreateCommand
 	// Per spec: feature hooks run BEFORE devcontainer hooks
-	if err := runHook(WaitForUpdateContentCommand, "updateContentCommand", func() error {
-		if err := r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand"); err != nil {
-			return err
-		}
-		return r.RunUpdateContent(ctx)
-	}); err != nil {
+	printReadyIfNeeded(WaitForUpdateContentCommand)
+	if err := r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand"); err != nil {
+		return err
+	}
+	if err := r.RunUpdateContent(ctx); err != nil {
 		return fmt.Errorf("updateContentCommand failed: %w", err)
 	}
 
 	// postCreateCommand runs after updateContentCommand
 	// Per spec: feature hooks run BEFORE devcontainer hooks
-	if err := runHook(WaitForPostCreateCommand, "postCreateCommand", func() error {
-		if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
-			return err
-		}
-		return r.RunPostCreate(ctx)
-	}); err != nil {
+	printReadyIfNeeded(WaitForPostCreateCommand)
+	if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
+		return err
+	}
+	if err := r.RunPostCreate(ctx); err != nil {
 		return fmt.Errorf("postCreateCommand failed: %w", err)
 	}
 
 	// postStartCommand runs after postCreateCommand (on first start)
 	// Per spec: feature hooks run BEFORE devcontainer hooks
-	if err := runHook(WaitForPostStartCommand, "postStartCommand", func() error {
-		if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
-			return err
-		}
-		return r.RunPostStart(ctx)
-	}); err != nil {
+	printReadyIfNeeded(WaitForPostStartCommand)
+	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
+		return err
+	}
+	if err := r.RunPostStart(ctx); err != nil {
 		return fmt.Errorf("postStartCommand failed: %w", err)
 	}
 
-	// If we have background tasks, wait for them but don't block the user
-	if waitFor != WaitForPostStartCommand {
-		go func() {
-			backgroundWg.Wait()
-			if len(backgroundErrs) > 0 {
-				ui.Warning("%d background lifecycle hook(s) failed", len(backgroundErrs))
-			} else {
-				ui.Println("Background lifecycle hooks completed successfully")
-			}
-		}()
+	// Log if we had post-ready hooks
+	if readyPrinted && waitFor != WaitForPostStartCommand {
+		ui.Println("All lifecycle hooks completed")
 	}
 
 	return nil
@@ -521,7 +500,13 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=%s", common.GetDefaultHomeDir(user)))
 	}
 
+	// Add probed environment from userEnvProbe (captures shell-initialized env)
+	for k, v := range r.probedEnv {
+		execConfig.Env = append(execConfig.Env, fmt.Sprintf("%s=%s", k, v))
+	}
+
 	// Add remoteEnv from config (per spec, applies to all exec operations)
+	// remoteEnv takes precedence over probed env
 	if r.cfg != nil {
 		for k, v := range r.cfg.RemoteEnv {
 			execConfig.Env = append(execConfig.Env, fmt.Sprintf("%s=%s", k, v))

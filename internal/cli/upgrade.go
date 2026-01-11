@@ -92,7 +92,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		spinner.Fail("Download failed")
 		return fmt.Errorf("failed to download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if resp.StatusCode != http.StatusOK {
 		spinner.Fail("Download failed")
@@ -120,7 +120,7 @@ func getLatestRelease() (*githubRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)

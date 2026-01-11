@@ -162,12 +162,8 @@ func TestLockfileEquals(t *testing.T) {
 }
 
 func TestLockfileSaveLoad(t *testing.T) {
-	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "lockfile-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	// Create temp directory (automatically cleaned up)
+	tmpDir := t.TempDir()
 
 	configPath := filepath.Join(tmpDir, "devcontainer.json")
 
@@ -223,12 +219,8 @@ func TestLockfileLoadNonExistent(t *testing.T) {
 }
 
 func TestLockfileLoadEmptyFile(t *testing.T) {
-	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "lockfile-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	// Create temp directory (automatically cleaned up)
+	tmpDir := t.TempDir()
 
 	// Create empty lockfile (init marker per spec)
 	configPath := filepath.Join(tmpDir, "devcontainer.json")

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -345,23 +344,9 @@ func TestExecBuilderTTYEnvironment(t *testing.T) {
 		Name: "test-container",
 	}
 
-	// Set test environment variables
-	originalTerm := os.Getenv("TERM")
-	originalLang := os.Getenv("LANG")
-	os.Setenv("TERM", "xterm-256color")
-	os.Setenv("LANG", "en_US.UTF-8")
-	defer func() {
-		if originalTerm != "" {
-			os.Setenv("TERM", originalTerm)
-		} else {
-			os.Unsetenv("TERM")
-		}
-		if originalLang != "" {
-			os.Setenv("LANG", originalLang)
-		} else {
-			os.Unsetenv("LANG")
-		}
-	}()
+	// Set test environment variables (t.Setenv automatically restores on test completion)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
 
 	builder := NewExecBuilder(containerInfo, nil, "/workspace")
 

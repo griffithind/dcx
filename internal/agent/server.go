@@ -61,12 +61,16 @@ func NewServer(username, shell, workDir, hostKeyPath string) (*Server, error) {
 	}
 
 	// No authentication required (localhost trusted via docker exec)
-	server.SetOption(ssh.PublicKeyAuth(func(ctx ssh.Context, key ssh.PublicKey) bool {
+	if err := server.SetOption(ssh.PublicKeyAuth(func(ctx ssh.Context, key ssh.PublicKey) bool {
 		return true // Accept any key
-	}))
-	server.SetOption(ssh.PasswordAuth(func(ctx ssh.Context, pass string) bool {
+	})); err != nil {
+		return nil, fmt.Errorf("failed to set public key auth: %w", err)
+	}
+	if err := server.SetOption(ssh.PasswordAuth(func(ctx ssh.Context, pass string) bool {
 		return true // Accept any password
-	}))
+	})); err != nil {
+		return nil, fmt.Errorf("failed to set password auth: %w", err)
+	}
 
 	// Load or generate host key
 	if err := s.setupHostKey(server); err != nil {
@@ -97,7 +101,7 @@ func (s *Server) sessionHandler(sess ssh.Session) {
 	if ssh.AgentRequested(sess) {
 		ln, err := ssh.NewAgentListener()
 		if err == nil {
-			defer ln.Close()
+			defer func() { _ = ln.Close() }()
 			go ssh.ForwardAgentConnections(ln, sess)
 			agentSock = ln.Addr().String()
 		}
@@ -171,10 +175,10 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start PTY: %v\n", err)
-		sess.Exit(1)
+		_ = sess.Exit(1)
 		return
 	}
-	defer ptmx.Close()
+	defer func() { _ = ptmx.Close() }()
 
 	// Set initial window size
 	if err := pty.Setsize(ptmx, &pty.Winsize{
@@ -187,7 +191,7 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 	// Handle window resize
 	go func() {
 		for win := range winCh {
-			pty.Setsize(ptmx, &pty.Winsize{
+			_ = pty.Setsize(ptmx, &pty.Winsize{
 				Rows: uint16(win.Height),
 				Cols: uint16(win.Width),
 			})
@@ -196,22 +200,22 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 
 	// Bidirectional copy
 	go func() {
-		io.Copy(ptmx, sess)
+		_, _ = io.Copy(ptmx, sess)
 	}()
-	io.Copy(sess, ptmx)
+	_, _ = io.Copy(sess, ptmx)
 
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				sess.Exit(status.ExitStatus())
+				_ = sess.Exit(status.ExitStatus())
 				return
 			}
 		}
-		sess.Exit(1)
+		_ = sess.Exit(1)
 		return
 	}
-	sess.Exit(0)
+	_ = sess.Exit(0)
 }
 
 // runWithoutPTY runs a command without a pseudo-terminal.
@@ -220,7 +224,7 @@ func (s *Server) runWithoutPTY(sess ssh.Session, cmd *exec.Cmd) {
 	// when the session's stdin is closed, preventing commands from hanging.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		sess.Exit(1)
+		_ = sess.Exit(1)
 		return
 	}
 
@@ -228,27 +232,27 @@ func (s *Server) runWithoutPTY(sess ssh.Session, cmd *exec.Cmd) {
 	cmd.Stderr = sess.Stderr()
 
 	if err := cmd.Start(); err != nil {
-		sess.Exit(1)
+		_ = sess.Exit(1)
 		return
 	}
 
 	// Copy stdin in a goroutine and close when done
 	go func() {
-		io.Copy(stdin, sess)
-		stdin.Close()
+		_, _ = io.Copy(stdin, sess)
+		_ = stdin.Close()
 	}()
 
 	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				sess.Exit(status.ExitStatus())
+				_ = sess.Exit(status.ExitStatus())
 				return
 			}
 		}
-		sess.Exit(1)
+		_ = sess.Exit(1)
 		return
 	}
-	sess.Exit(0)
+	_ = sess.Exit(0)
 }
 
 // sftpHandler handles SFTP subsystem requests.

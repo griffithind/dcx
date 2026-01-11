@@ -37,7 +37,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	// Create service and get identifiers
 	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)

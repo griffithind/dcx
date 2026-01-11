@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"runtime"
@@ -16,6 +15,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/proxy"
 )
 
 // AgentProxy manages SSH agent forwarding between host and container.
@@ -123,7 +123,7 @@ func (p *AgentProxy) Stop() {
 
 	// Close listener
 	if p.listener != nil {
-		p.listener.Close()
+		_ = p.listener.Close()
 	}
 
 	ctx := context.Background()
@@ -132,14 +132,14 @@ func (p *AgentProxy) Stop() {
 	// This is more reliable than capturing PIDs as it handles multiple processes
 	// Run as root since the client was started as root
 	pkillPattern := fmt.Sprintf("ssh-agent-proxy client.*%s", p.socketPath)
-	container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"pkill", "-f", pkillPattern}, "root")
+	_, _ = container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"pkill", "-f", pkillPattern}, "root")
 
 	// Clean up socket and ready file in container
-	container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"rm", "-f", p.socketPath, p.socketPath + ".ready"}, "")
+	_, _ = container.ExecSimple(ctx, p.dockerClient, p.containerID, []string{"rm", "-f", p.socketPath, p.socketPath + ".ready"}, "")
 
 	// Close Docker client
 	if p.dockerClient != nil {
-		p.dockerClient.Close()
+		_ = p.dockerClient.Close()
 	}
 
 	// Wait for goroutines
@@ -159,7 +159,7 @@ func (p *AgentProxy) acceptLoop() {
 
 		// Set accept deadline to allow checking done channel
 		if tcpListener, ok := p.listener.(*net.TCPListener); ok {
-			tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond))
+			_ = tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond))
 		}
 
 		conn, err := p.listener.Accept()
@@ -183,25 +183,15 @@ func (p *AgentProxy) acceptLoop() {
 // handleConnection proxies a TCP connection to the SSH agent.
 func (p *AgentProxy) handleConnection(tcpConn net.Conn) {
 	defer p.wg.Done()
-	defer tcpConn.Close()
+	defer tcpConn.Close() //nolint:errcheck // best-effort cleanup
 
 	agentConn, err := net.Dial("unix", p.agentSock)
 	if err != nil {
 		return
 	}
-	defer agentConn.Close()
+	defer agentConn.Close() //nolint:errcheck // best-effort cleanup
 
-	// Bidirectional copy
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(agentConn, tcpConn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(tcpConn, agentConn)
-		done <- struct{}{}
-	}()
-	<-done
+	proxy.BidirectionalCopy(tcpConn, agentConn)
 }
 
 // startClient starts the agent proxy client in the container.
@@ -272,7 +262,7 @@ func GetContainerUserIDs(containerID, user string) (int, int) {
 	if err != nil {
 		return 1000, 1000
 	}
-	defer dockerClient.Close()
+	defer dockerClient.Close() //nolint:errcheck // best-effort cleanup
 
 	// Run id command to get UID
 	uidOut, exitCode, err := container.ExecOutput(ctx, dockerClient, containerID, []string{"id", "-u", user}, "")
@@ -288,8 +278,12 @@ func GetContainerUserIDs(containerID, user string) (int, int) {
 
 	uid := 1000
 	gid := 1000
-	fmt.Sscanf(strings.TrimSpace(uidOut), "%d", &uid)
-	fmt.Sscanf(strings.TrimSpace(gidOut), "%d", &gid)
+	if _, err := fmt.Sscanf(strings.TrimSpace(uidOut), "%d", &uid); err != nil {
+		return 1000, 1000
+	}
+	if _, err := fmt.Sscanf(strings.TrimSpace(gidOut), "%d", &gid); err != nil {
+		return 1000, 1000
+	}
 
 	return uid, gid
 }
@@ -308,7 +302,7 @@ func getDockerBridgeIP() string {
 	if err != nil {
 		return "127.0.0.1"
 	}
-	defer cli.Close()
+	defer cli.Close() //nolint:errcheck // best-effort cleanup
 
 	nw, err := cli.NetworkInspect(ctx, "bridge", network.InspectOptions{})
 	if err != nil {

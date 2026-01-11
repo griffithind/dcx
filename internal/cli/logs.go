@@ -56,7 +56,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get logs: %w", err)
 	}
-	defer reader.Close()
+	defer reader.Close() //nolint:errcheck // Close error irrelevant after read
 
 	// Stream logs to stdout
 	_, err = io.Copy(os.Stdout, reader)

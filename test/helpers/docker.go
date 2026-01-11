@@ -151,7 +151,7 @@ func DockerClient(t *testing.T) *container.DockerClient {
 	require.NoError(t, err, "failed to create Docker client")
 
 	t.Cleanup(func() {
-		client.Close()
+		_ = client.Close()
 	})
 
 	return client

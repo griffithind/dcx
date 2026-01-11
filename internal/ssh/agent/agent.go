@@ -46,7 +46,7 @@ func ValidateSocket(path string) error {
 	if err != nil {
 		return fmt.Errorf("cannot connect to socket: %w", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	return nil
 }

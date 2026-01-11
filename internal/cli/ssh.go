@@ -47,7 +47,7 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	svc := service.NewDevContainerService(dockerClient, workspacePath, configPath, verbose)
 	defer svc.Close()
@@ -94,7 +94,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	// Initialize state manager
 	stateMgr := state.NewStateManager(dockerClient)

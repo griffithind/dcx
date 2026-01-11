@@ -44,7 +44,7 @@ func (b *CLIBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	buildContextDir := filepath.Join(tempDir, "context")
 	featureSourceDir := filepath.Join(tempDir, "features")

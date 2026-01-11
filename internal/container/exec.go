@@ -67,15 +67,15 @@ func Exec(ctx context.Context, cli *client.Client, cfg ExecConfig) (int, error) 
 	// Handle I/O
 	if cfg.Stdin != nil {
 		go func() {
-			io.Copy(resp.Conn, cfg.Stdin)
-			resp.CloseWrite()
+			_, _ = io.Copy(resp.Conn, cfg.Stdin)
+			_ = resp.CloseWrite()
 		}()
 	}
 
 	if cfg.TTY {
 		// In TTY mode, stdout and stderr are combined
 		if cfg.Stdout != nil {
-			io.Copy(cfg.Stdout, resp.Reader)
+			_, _ = io.Copy(cfg.Stdout, resp.Reader)
 		}
 	} else {
 		// In non-TTY mode, demux the streams using Docker's stdcopy
@@ -88,7 +88,7 @@ func Exec(ctx context.Context, cli *client.Client, cfg ExecConfig) (int, error) 
 			if stderr == nil {
 				stderr = io.Discard
 			}
-			stdcopy.StdCopy(stdout, stderr, resp.Reader)
+			_, _ = stdcopy.StdCopy(stdout, stderr, resp.Reader)
 		}
 	}
 

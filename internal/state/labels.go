@@ -130,6 +130,13 @@ const (
 
 	// LabelCacheFeatureDigests is JSON map of feature ID to OCI digest.
 	LabelCacheFeatureDigests = Prefix + ".cache.feature.digests"
+
+	// LabelCacheProbedEnv is JSON-encoded probed environment variables.
+	// Keyed by derived image hash for automatic invalidation on rebuild.
+	LabelCacheProbedEnv = Prefix + ".cache.probed.env"
+
+	// LabelCacheProbedEnvHash is the derived image hash used for the cached probe.
+	LabelCacheProbedEnvHash = Prefix + ".cache.probed.env.hash"
 )
 
 // ContainerLabels represents all dcx labels for a container.
@@ -175,6 +182,8 @@ type ContainerLabels struct {
 	// Cache
 	CacheData           *CacheData
 	CacheFeatureDigests map[string]string
+	CacheProbedEnv      map[string]string
+	CacheProbedEnvHash  string
 }
 
 // CacheData holds cached information for staleness detection.
@@ -196,6 +205,7 @@ func NewContainerLabels() *ContainerLabels {
 		FeaturesInstalled:   []string{},
 		FeaturesConfig:      make(map[string]map[string]interface{}),
 		CacheFeatureDigests: make(map[string]string),
+		CacheProbedEnv:      make(map[string]string),
 	}
 }
 
@@ -264,6 +274,12 @@ func (l *ContainerLabels) ToMap() map[string]string {
 			m[LabelCacheFeatureDigests] = string(data)
 		}
 	}
+	if len(l.CacheProbedEnv) > 0 {
+		if data, err := json.Marshal(l.CacheProbedEnv); err == nil {
+			m[LabelCacheProbedEnv] = string(data)
+		}
+	}
+	setIfNotEmpty(m, LabelCacheProbedEnvHash, l.CacheProbedEnvHash)
 
 	return m
 }
@@ -325,6 +341,10 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	if data := m[LabelCacheFeatureDigests]; data != "" {
 		_ = json.Unmarshal([]byte(data), &l.CacheFeatureDigests)
 	}
+	if data := m[LabelCacheProbedEnv]; data != "" {
+		_ = json.Unmarshal([]byte(data), &l.CacheProbedEnv)
+	}
+	l.CacheProbedEnvHash = m[LabelCacheProbedEnvHash]
 
 	return l
 }

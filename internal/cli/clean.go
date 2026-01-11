@@ -46,7 +46,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	if dryRun {
 		return showCleanStats(ctx, dockerClient)

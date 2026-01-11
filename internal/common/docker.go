@@ -25,7 +25,7 @@ func IsDockerDesktop() bool {
 	if err != nil {
 		return false
 	}
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 
 	info, err := cli.Info(ctx)
 	if err != nil {
@@ -58,7 +58,7 @@ func IsSSHAgentAvailable() bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	return true
 }

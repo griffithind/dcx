@@ -1,4 +1,4 @@
-.PHONY: build build-agent build-linux release release-agent test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs
+.PHONY: build build-agent build-linux release release-agent test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs deadcode
 
 # Build variables
 BINARY_NAME=dcx
@@ -116,6 +116,10 @@ fmt:
 vet:
 	go vet ./...
 
+# Find dead (unused) code
+deadcode:
+	go run golang.org/x/tools/cmd/deadcode@latest ./...
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -137,3 +141,4 @@ help:
 	@echo "  deps               - Download and tidy dependencies"
 	@echo "  fmt                - Format source code"
 	@echo "  vet                - Run go vet"
+	@echo "  deadcode           - Find unused code"

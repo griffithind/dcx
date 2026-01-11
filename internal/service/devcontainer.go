@@ -9,6 +9,7 @@ import (
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/lockfile"
@@ -426,6 +427,13 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 		return fmt.Errorf("no primary container found")
 	}
 
+	// Apply environment patches and probing before lifecycle hooks
+	probedEnv, err := s.setupContainerEnvironment(ctx, resolved, containerInfo)
+	if err != nil {
+		ui.Warning("Environment setup failed: %v", err)
+		// Continue with hooks even if env setup fails
+	}
+
 	hookRunner := lifecycle.NewHookRunner(
 		s.dockerClient,
 		containerInfo.ID,
@@ -433,6 +441,11 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 		resolved.RawConfig,
 		resolved.ID,
 	)
+
+	// Set probed environment for hook execution
+	if probedEnv != nil {
+		hookRunner.SetProbedEnv(probedEnv)
+	}
 
 	// Use pre-resolved features
 	if len(resolved.Features) > 0 {
@@ -459,6 +472,82 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 		ui.Println("  [hooks] Running start hooks...")
 	}
 	return hookRunner.RunStartHooks(ctx)
+}
+
+// setupContainerEnvironment applies patches and probes the user environment.
+// Returns the probed environment variables to be injected into lifecycle hooks.
+func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) (map[string]string, error) {
+	cfg := resolved.RawConfig
+	if cfg == nil {
+		return nil, nil
+	}
+
+	patcher := env.NewPatcher(s.dockerClient.APIClient())
+	prober := env.NewProber(s.dockerClient.APIClient())
+
+	// Collect environment variables to patch into /etc/environment
+	envToPatch := make(map[string]string)
+	for k, v := range cfg.ContainerEnv {
+		envToPatch[k] = v
+	}
+	for k, v := range cfg.RemoteEnv {
+		envToPatch[k] = v
+	}
+
+	// Patch /etc/environment if there are env vars to write
+	if len(envToPatch) > 0 {
+		if s.verbose {
+			ui.Printf("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
+		}
+		if err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
+			ui.Warning("Failed to patch /etc/environment: %v", err)
+		}
+	}
+
+	// Patch /etc/profile to preserve PATH from features
+	if s.verbose {
+		ui.Println("  [env] Patching /etc/profile for PATH preservation...")
+	}
+	if err := patcher.PatchEtcProfile(ctx, containerInfo.ID); err != nil {
+		ui.Warning("Failed to patch /etc/profile: %v", err)
+	}
+
+	// Probe user environment if configured
+	if cfg.UserEnvProbe == "" || cfg.UserEnvProbe == "none" {
+		return nil, nil
+	}
+
+	probeType := env.ParseProbeType(cfg.UserEnvProbe)
+	if probeType == env.ProbeNone {
+		return nil, nil
+	}
+
+	// Determine user for probing
+	user := cfg.RemoteUser
+	if user == "" {
+		user = cfg.ContainerUser
+	}
+
+	// Use derived image hash for caching
+	imageHash := ""
+	if resolved.Hashes != nil {
+		imageHash = resolved.Hashes.Config
+	}
+
+	if s.verbose {
+		ui.Printf("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)
+	}
+
+	probedEnv, err := prober.ProbeWithCache(ctx, containerInfo.ID, probeType, user, imageHash)
+	if err != nil {
+		return nil, fmt.Errorf("environment probe failed: %w", err)
+	}
+
+	if s.verbose && probedEnv != nil {
+		ui.Printf("  [env] Captured %d environment variables", len(probedEnv))
+	}
+
+	return probedEnv, nil
 }
 
 // setupSSHAccess configures SSH access to the container.
@@ -615,7 +704,7 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 
 	// Clean up SSH config entry
 	if containerInfo != nil {
-		host.RemoveSSHConfig(containerInfo.Name)
+		_ = host.RemoveSSHConfig(containerInfo.Name)
 	}
 
 	ui.Println("Devcontainer removed")

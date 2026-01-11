@@ -4,11 +4,11 @@ package agent
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"syscall"
 
+	"github.com/griffithind/dcx/internal/proxy"
 	"github.com/spf13/cobra"
 )
 
@@ -102,7 +102,9 @@ func init() {
 	sshProxyClientCmd.Flags().StringVar(&sshProxyClientSocket, "socket", "/tmp/ssh-agent.sock", "Unix socket to create")
 	sshProxyClientCmd.Flags().IntVar(&sshProxyClientUID, "uid", 1000, "Socket owner UID")
 	sshProxyClientCmd.Flags().IntVar(&sshProxyClientGID, "gid", 1000, "Socket owner GID")
-	sshProxyClientCmd.MarkFlagRequired("host")
+	if err := sshProxyClientCmd.MarkFlagRequired("host"); err != nil {
+		panic(err) // programmer error: flag must exist
+	}
 
 	sshAgentProxyCmd.AddCommand(sshProxyServerCmd)
 	sshAgentProxyCmd.AddCommand(sshProxyClientCmd)
@@ -118,11 +120,11 @@ func runSSHProxyServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	port := listener.Addr().(*net.TCPAddr).Port
 	fmt.Println(port)
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 
 	for {
 		conn, err := listener.Accept()
@@ -134,14 +136,14 @@ func runSSHProxyServer(cmd *cobra.Command, args []string) error {
 }
 
 func runSSHProxyClient(cmd *cobra.Command, args []string) error {
-	os.Remove(sshProxyClientSocket)
+	_ = os.Remove(sshProxyClientSocket)
 
 	listener, err := net.Listen("unix", sshProxyClientSocket)
 	if err != nil {
 		return fmt.Errorf("failed to create socket: %w", err)
 	}
-	defer listener.Close()
-	defer os.Remove(sshProxyClientSocket)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(sshProxyClientSocket) }()
 
 	if err := syscall.Chown(sshProxyClientSocket, sshProxyClientUID, sshProxyClientGID); err != nil {
 		return fmt.Errorf("failed to chown socket: %w", err)
@@ -151,7 +153,7 @@ func runSSHProxyClient(cmd *cobra.Command, args []string) error {
 	if err := os.WriteFile(readyFile, []byte("ready"), 0644); err != nil {
 		return fmt.Errorf("failed to create ready file: %w", err)
 	}
-	defer os.Remove(readyFile)
+	defer func() { _ = os.Remove(readyFile) }()
 
 	for {
 		conn, err := listener.Accept()
@@ -163,44 +165,28 @@ func runSSHProxyClient(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// proxyToSSHAgent proxies a TCP connection to the SSH agent socket.
 func proxyToSSHAgent(tcpConn net.Conn, agentPath string) {
-	defer tcpConn.Close()
+	defer tcpConn.Close() //nolint:errcheck // best-effort cleanup
 
 	agentConn, err := net.Dial("unix", agentPath)
 	if err != nil {
 		return
 	}
-	defer agentConn.Close()
+	defer agentConn.Close() //nolint:errcheck // best-effort cleanup
 
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(agentConn, tcpConn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(tcpConn, agentConn)
-		done <- struct{}{}
-	}()
-	<-done
+	proxy.BidirectionalCopy(tcpConn, agentConn)
 }
 
+// proxyToHost proxies a Unix socket connection to a TCP host.
 func proxyToHost(unixConn net.Conn, hostAddr string) {
-	defer unixConn.Close()
+	defer unixConn.Close() //nolint:errcheck // best-effort cleanup
 
 	tcpConn, err := net.Dial("tcp", hostAddr)
 	if err != nil {
 		return
 	}
-	defer tcpConn.Close()
+	defer tcpConn.Close() //nolint:errcheck // best-effort cleanup
 
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(tcpConn, unixConn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(unixConn, tcpConn)
-		done <- struct{}{}
-	}()
-	<-done
+	proxy.BidirectionalCopy(unixConn, tcpConn)
 }

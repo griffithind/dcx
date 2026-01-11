@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/docker/docker/client"
+	"github.com/containerd/errdefs"
 	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
@@ -102,9 +102,9 @@ func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 
 // ImageExists checks if an image exists locally.
 func (b *CLIBuilder) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	_, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
+	_, err := b.client.ImageInspect(ctx, imageRef)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if errdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
@@ -135,7 +135,7 @@ func (b *CLIBuilder) PullImage(ctx context.Context, imageRef string, progress io
 
 // GetImageID returns the ID of an image.
 func (b *CLIBuilder) GetImageID(ctx context.Context, imageRef string) (string, error) {
-	info, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
+	info, err := b.client.ImageInspect(ctx, imageRef)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -144,7 +144,7 @@ func (b *CLIBuilder) GetImageID(ctx context.Context, imageRef string) (string, e
 
 // GetImageLabels returns the labels for an image.
 func (b *CLIBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	info, _, err := b.client.ImageInspectWithRaw(ctx, imageRef)
+	info, err := b.client.ImageInspect(ctx, imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -163,7 +163,7 @@ func (b *CLIBuilder) ResolveImage(ctx context.Context, imageRef string, pull boo
 
 	if !exists || pull {
 		if progress != nil {
-			fmt.Fprintf(progress, "Pulling image: %s\n", imageRef)
+			_, _ = fmt.Fprintf(progress, "Pulling image: %s\n", imageRef)
 		}
 		if err := b.PullImage(ctx, imageRef, progress); err != nil {
 			// If pull fails and image exists locally, that's ok

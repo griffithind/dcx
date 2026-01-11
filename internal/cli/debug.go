@@ -158,7 +158,7 @@ func getDockerInfo(ctx context.Context) DockerInfo {
 		info.Error = err.Error()
 		return info
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	version, err := client.ServerVersion(ctx)
 	if err != nil {
@@ -244,7 +244,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	if err != nil {
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	svc := service.NewDevContainerService(client, workspacePath, configPath, verbose)
 	defer svc.Close()

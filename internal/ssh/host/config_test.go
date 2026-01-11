@@ -96,19 +96,15 @@ Host container2.dcx
 }
 
 func TestAddSSHConfig(t *testing.T) {
-	// Create a temporary directory for the test
-	tmpDir, err := os.MkdirTemp("", "ssh-config-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	// Create a temporary directory for the test (automatically cleaned up)
+	tmpDir := t.TempDir()
 
-	// Override the home directory for testing
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	// Override the home directory for testing (automatically restored)
+	t.Setenv("HOME", tmpDir)
 
 	// Create .ssh directory
 	sshDir := filepath.Join(tmpDir, ".ssh")
-	err = os.MkdirAll(sshDir, 0700)
+	err := os.MkdirAll(sshDir, 0700)
 	require.NoError(t, err)
 
 	t.Run("create new config", func(t *testing.T) {
@@ -140,19 +136,15 @@ func TestAddSSHConfig(t *testing.T) {
 }
 
 func TestRemoveSSHConfig(t *testing.T) {
-	// Create a temporary directory for the test
-	tmpDir, err := os.MkdirTemp("", "ssh-config-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	// Create a temporary directory for the test (automatically cleaned up)
+	tmpDir := t.TempDir()
 
-	// Override the home directory for testing
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	// Override the home directory for testing (automatically restored)
+	t.Setenv("HOME", tmpDir)
 
 	// Create .ssh directory and config
 	sshDir := filepath.Join(tmpDir, ".ssh")
-	err = os.MkdirAll(sshDir, 0700)
+	err := os.MkdirAll(sshDir, 0700)
 	require.NoError(t, err)
 
 	t.Run("remove non-existent config file", func(t *testing.T) {
@@ -181,19 +173,15 @@ func TestRemoveSSHConfig(t *testing.T) {
 }
 
 func TestHasSSHConfig(t *testing.T) {
-	// Create a temporary directory for the test
-	tmpDir, err := os.MkdirTemp("", "ssh-config-test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	// Create a temporary directory for the test (automatically cleaned up)
+	tmpDir := t.TempDir()
 
-	// Override the home directory for testing
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	// Override the home directory for testing (automatically restored)
+	t.Setenv("HOME", tmpDir)
 
 	// Create .ssh directory
 	sshDir := filepath.Join(tmpDir, ".ssh")
-	err = os.MkdirAll(sshDir, 0700)
+	err := os.MkdirAll(sshDir, 0700)
 	require.NoError(t, err)
 
 	t.Run("no config file", func(t *testing.T) {

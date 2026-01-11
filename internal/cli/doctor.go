@@ -396,7 +396,7 @@ func checkDocker(ctx context.Context) CheckResult {
 			Hint:    "Start Docker Desktop or the Docker daemon",
 		}
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := client.Ping(ctx); err != nil {
 		return CheckResult{

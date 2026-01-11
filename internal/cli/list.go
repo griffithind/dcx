@@ -58,7 +58,7 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	// List all dcx-managed containers
 	containers, err := dockerClient.ListContainersWithLabels(ctx, map[string]string{

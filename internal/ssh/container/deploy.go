@@ -35,7 +35,7 @@ func copyBinaryToContainer(ctx context.Context, containerName, binaryPath string
 	}
 
 	if needsCleanup {
-		defer os.Remove(agentPath)
+		defer func() { _ = os.Remove(agentPath) }()
 	}
 
 	copyCmd := exec.CommandContext(ctx, "docker", "cp", agentPath, containerName+":"+binaryPath)
@@ -62,11 +62,11 @@ func getAgentBinaryPath(arch string) string {
 		return ""
 	}
 	if _, err := tmpFile.Write(embeddedBinary); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
 		return ""
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	return tmpFile.Name()
 }
 

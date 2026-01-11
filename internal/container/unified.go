@@ -137,7 +137,7 @@ func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatu
 	if err != nil {
 		return err
 	}
-	defer os.Remove(r.overridePath)
+	defer func() { _ = os.Remove(r.overridePath) }()
 
 	// Build compose args
 	args := r.composeBaseArgs(plan)
@@ -852,12 +852,12 @@ func (r *UnifiedRuntime) writeToTempFile(content, pattern string) (string, error
 	}
 
 	if _, err := tmpFile.WriteString(content); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	tmpFile.Close()
+	_ = tmpFile.Close()
 	return tmpFile.Name(), nil
 }
 

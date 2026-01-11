@@ -49,7 +49,7 @@ enabling offline-safe operations for start/stop/exec commands.`,
 func Execute() error {
 	// Parse flags early to configure UI before command execution.
 	// This ensures --no-color and --quiet affect output even for invalid commands.
-	rootCmd.ParseFlags(os.Args[1:])
+	_ = rootCmd.ParseFlags(os.Args[1:])
 	initUI()
 
 	err := rootCmd.Execute()

@@ -99,7 +99,7 @@ func (f *ErrorFormatter) Write(err error) {
 	if err == nil {
 		return
 	}
-	fmt.Fprint(f.writer, f.Format(err))
+	_, _ = fmt.Fprint(f.writer, f.Format(err))
 }
 
 // PrintError prints a formatted error using the global configuration.

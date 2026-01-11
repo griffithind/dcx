@@ -95,7 +95,7 @@ func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp build directory: %w", err)
 	}
-	defer os.RemoveAll(tempBuildDir)
+	defer func() { _ = os.RemoveAll(tempBuildDir) }()
 
 	// Write the Dockerfile
 	dockerfilePath := filepath.Join(tempBuildDir, "Dockerfile.updateuid")

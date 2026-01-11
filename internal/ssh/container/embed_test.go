@@ -93,18 +93,14 @@ func TestEmbeddedBinaryExecutable(t *testing.T) {
 		binary, err := dcxembed.GetBinary(arch)
 		require.NoError(t, err)
 
-		tmpFile, err := os.CreateTemp("", "dcx-agent-test-*")
-		require.NoError(t, err)
-		defer os.Remove(tmpFile.Name())
+		// Use t.TempDir() for automatic cleanup
+		tmpDir := t.TempDir()
+		tmpPath := tmpDir + "/dcx-agent-test"
 
-		_, err = tmpFile.Write(binary)
-		require.NoError(t, err)
-		tmpFile.Close()
-
-		err = os.Chmod(tmpFile.Name(), 0755)
+		err = os.WriteFile(tmpPath, binary, 0755)
 		require.NoError(t, err)
 
-		cmd := exec.Command(tmpFile.Name(), "--help")
+		cmd := exec.Command(tmpPath, "--help")
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "binary --help failed: %s", string(output))
 
@@ -116,19 +112,15 @@ func TestEmbeddedBinaryExecutable(t *testing.T) {
 		t.Skip("Skipping execution test: Docker not available")
 	}
 
-	tmpFile, err := os.CreateTemp("", "dcx-agent-test-*")
-	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	// Use t.TempDir() for automatic cleanup
+	tmpDir := t.TempDir()
+	tmpPath := tmpDir + "/dcx-agent-test"
 
-	_, err = tmpFile.Write(binary)
-	require.NoError(t, err)
-	tmpFile.Close()
-
-	err = os.Chmod(tmpFile.Name(), 0755)
+	err = os.WriteFile(tmpPath, binary, 0755)
 	require.NoError(t, err)
 
 	cmd := exec.Command("docker", "run", "--rm", "--platform=linux/amd64",
-		"-v", tmpFile.Name()+":/dcx-agent:ro",
+		"-v", tmpPath+":/dcx-agent:ro",
 		"alpine:latest", "/dcx-agent", "--help")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "binary --help in Docker failed: %s", string(output))

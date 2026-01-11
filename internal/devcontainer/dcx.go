@@ -16,16 +16,16 @@ type DcxCustomizations struct {
 // Can be either a simple string (the command) or a complex object.
 type Shortcut struct {
 	// Command is the simple command string (mutually exclusive with Prefix)
-	Command string
+	Command string `json:"command,omitempty"`
 
 	// Prefix is the command prefix for passthrough mode
-	Prefix string
+	Prefix string `json:"prefix,omitempty"`
 
 	// PassArgs indicates whether to pass remaining args to the command
-	PassArgs bool
+	PassArgs bool `json:"passArgs,omitempty"`
 
 	// Description provides help text for the shortcut
-	Description string
+	Description string `json:"description,omitempty"`
 }
 
 // UnmarshalJSON handles both simple string and object shortcut formats.
@@ -66,19 +66,9 @@ func (s Shortcut) MarshalJSON() ([]byte, error) {
 		return json.Marshal(s.Command)
 	}
 
-	// Otherwise marshal as object
-	type shortcutAlias struct {
-		Command     string `json:"command,omitempty"`
-		Prefix      string `json:"prefix,omitempty"`
-		PassArgs    bool   `json:"passArgs,omitempty"`
-		Description string `json:"description,omitempty"`
-	}
-	return json.Marshal(shortcutAlias{
-		Command:     s.Command,
-		Prefix:      s.Prefix,
-		PassArgs:    s.PassArgs,
-		Description: s.Description,
-	})
+	// Otherwise marshal as object using type alias to avoid recursion
+	type Alias Shortcut
+	return json.Marshal((*Alias)(&s))
 }
 
 // GetDcxCustomizations extracts DCX customizations from a DevContainerConfig.

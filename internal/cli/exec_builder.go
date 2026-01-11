@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/docker/docker/client"
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
@@ -38,6 +40,7 @@ type ExecBuilder struct {
 	containerInfo *state.ContainerInfo
 	cfg           *devcontainer.DevContainerConfig
 	workspacePath string
+	prober        *env.Prober
 }
 
 // NewExecBuilder creates a new exec builder.
@@ -47,6 +50,12 @@ func NewExecBuilder(containerInfo *state.ContainerInfo, cfg *devcontainer.DevCon
 		cfg:           cfg,
 		workspacePath: workspacePath,
 	}
+}
+
+// WithProber sets the environment prober for userEnvProbe support.
+func (b *ExecBuilder) WithProber(dockerClient *client.Client) *ExecBuilder {
+	b.prober = env.NewProber(dockerClient)
+	return b
 }
 
 // BuildArgs constructs docker exec arguments based on options.
@@ -131,6 +140,22 @@ func (b *ExecBuilder) BuildArgs(opts ExecFlags) ([]string, string) {
 // This handles the full execution lifecycle including SSH proxy setup and cleanup.
 func (b *ExecBuilder) Execute(ctx context.Context, opts ExecFlags) error {
 	dockerArgs, user := b.BuildArgs(opts)
+
+	// Probe user environment if configured (userEnvProbe)
+	if b.prober != nil && b.cfg != nil && b.cfg.UserEnvProbe != "" {
+		probeType := env.ParseProbeType(b.cfg.UserEnvProbe)
+		if probeType != env.ProbeNone {
+			probedEnv, err := b.prober.Probe(ctx, b.containerInfo.ID, probeType, user)
+			if err != nil {
+				ui.Warning("userEnvProbe failed: %v", err)
+			} else {
+				// Add probed environment variables (range over nil map is no-op)
+				for k, v := range probedEnv {
+					dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", k, v))
+				}
+			}
+		}
+	}
 
 	// Setup SSH agent forwarding when available
 	var agentProxy *agent.AgentProxy

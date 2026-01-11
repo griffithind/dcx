@@ -243,7 +243,7 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
 					// Cache integrity doesn't match lockfile, need to re-fetch
 					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.CanonicalID())
-					os.RemoveAll(cachePath)
+					_ = os.RemoveAll(cachePath)
 				} else {
 					return nil
 				}
@@ -256,7 +256,7 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 		}
 	} else {
 		// Force-pull: remove existing cache to re-fetch
-		os.RemoveAll(cachePath)
+		_ = os.RemoveAll(cachePath)
 	}
 
 	// Fetch from OCI registry
@@ -318,7 +318,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
 					// Cache integrity doesn't match lockfile, need to re-fetch
 					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.URL)
-					os.RemoveAll(cachePath)
+					_ = os.RemoveAll(cachePath)
 				} else {
 					return nil
 				}
@@ -330,7 +330,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 		}
 	} else {
 		// Force-pull: remove existing cache to re-fetch
-		os.RemoveAll(cachePath)
+		_ = os.RemoveAll(cachePath)
 	}
 
 	// Fetch from HTTP
@@ -390,7 +390,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -459,7 +459,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch blob: %w", err)
 	}
-	defer blobResp.Body.Close()
+	defer blobResp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if blobResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch blob: status %d", blobResp.StatusCode)
@@ -515,7 +515,7 @@ func (r *Resolver) fetchHTTPWithDigest(ctx context.Context, url, destPath string
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP request failed with status %d", resp.StatusCode)
@@ -597,7 +597,7 @@ func extractTarGz(r io.Reader, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzr.Close()
+	defer gzr.Close() //nolint:errcheck // Close error irrelevant after read
 
 	return extractTarReader(tar.NewReader(gzr), destPath)
 }
@@ -647,10 +647,10 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 			}
 
 			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
+				_ = f.Close()
 				return fmt.Errorf("failed to write file: %w", err)
 			}
-			f.Close()
+			_ = f.Close()
 		case tar.TypeSymlink:
 			if err := os.Symlink(header.Linkname, target); err != nil {
 				return fmt.Errorf("failed to create symlink: %w", err)
@@ -679,7 +679,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	// If we got 200, no auth needed
 	if resp.StatusCode == http.StatusOK {
@@ -713,7 +713,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	if err != nil {
 		return "", fmt.Errorf("failed to request token: %w", err)
 	}
-	defer tokenResp.Body.Close()
+	defer tokenResp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if tokenResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(tokenResp.Body)

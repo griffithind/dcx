@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -195,9 +196,9 @@ func SanitizeProjectName(name string) string {
 
 // ImageExists checks if an image exists locally.
 func (c *DockerClient) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageRef)
+	_, err := c.cli.ImageInspect(ctx, imageRef)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if errdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
@@ -207,7 +208,7 @@ func (c *DockerClient) ImageExists(ctx context.Context, imageRef string) (bool, 
 
 // GetImageLabels returns the labels for an image.
 func (c *DockerClient) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	info, _, err := c.cli.ImageInspectWithRaw(ctx, imageRef)
+	info, err := c.cli.ImageInspect(ctx, imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -219,7 +220,7 @@ func (c *DockerClient) GetImageLabels(ctx context.Context, imageRef string) (map
 
 // GetImageID returns the ID of an image.
 func (c *DockerClient) GetImageID(ctx context.Context, imageRef string) (string, error) {
-	info, _, err := c.cli.ImageInspectWithRaw(ctx, imageRef)
+	info, err := c.cli.ImageInspect(ctx, imageRef)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -232,7 +233,7 @@ func (c *DockerClient) PullImageWithProgress(ctx context.Context, imageRef strin
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	if progressOut == nil {
 		_, err = io.Copy(io.Discard, reader)
@@ -289,7 +290,7 @@ func processPullOutput(reader io.Reader, out io.Writer) error {
 		}
 
 		if status != "" && status != lastStatus {
-			fmt.Fprintf(out, "%s\n", status)
+			_, _ = fmt.Fprintf(out, "%s\n", status)
 			lastStatus = status
 		}
 	}
@@ -427,9 +428,7 @@ func (c *DockerClient) CreateContainer(ctx context.Context, opts CreateContainer
 		}
 	}
 
-	for _, mount := range opts.Mounts {
-		hostConfig.Binds = append(hostConfig.Binds, mount)
-	}
+	hostConfig.Binds = append(hostConfig.Binds, opts.Mounts...)
 
 	exposedPorts, portBindings := parsePortBindings(opts.Ports)
 	if len(portBindings) > 0 {

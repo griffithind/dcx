@@ -70,6 +70,6 @@ func decompress(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gzip reader: %w", err)
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck // Close error irrelevant after read
 	return io.ReadAll(r)
 }
