@@ -9,7 +9,9 @@ make build          # Build dcx with embedded agent binaries (builds agent first
 make build-agent    # Build only the dcx-agent Linux binaries (amd64/arm64)
 make test           # Run unit tests (alias for test-unit)
 make test-e2e       # Run end-to-end tests (requires Docker)
+make test-all       # Run unit + conformance + e2e tests
 make lint           # Run golangci-lint
+make deadcode       # Find unused code
 ```
 
 Run a single test:

@@ -3,7 +3,6 @@ package helpers
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,17 +11,10 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/state"
-	"github.com/stretchr/testify/require"
 )
 
 // ansiRegex matches ANSI escape sequences.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// TestPrefix is used to identify test containers for cleanup.
-const TestPrefix = "dcx-e2e-test-"
 
 var (
 	dcxBinaryPath string
@@ -141,90 +133,6 @@ func GetProjectRoot(t *testing.T) string {
 	}
 
 	return strings.TrimSpace(string(output))
-}
-
-// DockerClient returns a Docker client for test operations.
-func DockerClient(t *testing.T) *container.DockerClient {
-	t.Helper()
-
-	client, err := container.NewDockerClient()
-	require.NoError(t, err, "failed to create Docker client")
-
-	t.Cleanup(func() {
-		_ = client.Close()
-	})
-
-	return client
-}
-
-// CleanupTestContainers removes all test containers with the given workspace ID prefix.
-func CleanupTestContainers(t *testing.T, workspaceID string) {
-	t.Helper()
-
-	ctx := context.Background()
-	client := DockerClient(t)
-
-	// Find containers with our label
-	containers, err := client.ListContainersWithLabels(ctx, map[string]string{
-		state.LabelWorkspaceID: workspaceID,
-	})
-	if err != nil {
-		t.Logf("Warning: failed to list containers for cleanup: %v", err)
-		return
-	}
-
-	for _, c := range containers {
-		// Stop if running
-		if c.Running {
-			if err := client.StopContainer(ctx, c.ID, nil); err != nil {
-				t.Logf("Warning: failed to stop container %s: %v", c.ID[:12], err)
-			}
-		}
-
-		// Remove container and volumes
-		if err := client.RemoveContainer(ctx, c.ID, true, true); err != nil {
-			t.Logf("Warning: failed to remove container %s: %v", c.ID[:12], err)
-		}
-	}
-}
-
-// WaitForState waits for the devcontainer to reach a specific state.
-func WaitForState(t *testing.T, dir string, expectedState string, timeout time.Duration) {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-
-	for time.Now().Before(deadline) {
-		stdout := RunDCXInDirSuccess(t, dir, "status")
-
-		if strings.Contains(stdout, fmt.Sprintf("State:      %s", expectedState)) {
-			return
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	t.Fatalf("timeout waiting for state %s", expectedState)
-}
-
-// ContainerIsRunning checks if a container with the given workspace ID is running.
-func ContainerIsRunning(t *testing.T, workspaceID string) bool {
-	t.Helper()
-
-	ctx := context.Background()
-	client := DockerClient(t)
-
-	containers, err := client.ListContainersWithLabels(ctx, map[string]string{
-		state.LabelWorkspaceID: workspaceID,
-		state.LabelIsPrimary:   "true",
-	})
-	require.NoError(t, err)
-
-	if len(containers) == 0 {
-		return false
-	}
-
-	return containers[0].Running
 }
 
 // GetContainerState returns the current state string from dcx status.

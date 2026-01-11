@@ -118,7 +118,7 @@ vet:
 
 # Find dead (unused) code
 deadcode:
-	go run golang.org/x/tools/cmd/deadcode@latest ./...
+	go run golang.org/x/tools/cmd/deadcode@latest -test -tags=e2e ./...
 
 # Help target
 help:
