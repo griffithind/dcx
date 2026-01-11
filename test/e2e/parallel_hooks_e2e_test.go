@@ -19,7 +19,7 @@ func TestParallelPostCreateCommandE2E(t *testing.T) {
 	// Use object syntax for postCreateCommand - commands should run in parallel
 	devcontainerJSON := `{
 		"name": "Parallel Hooks Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"postCreateCommand": {
 			"task1": "echo task1-start && sleep 0.5 && echo task1 > /tmp/task1.txt && echo task1-done",
@@ -60,7 +60,7 @@ func TestParallelPostCreateCommandTimingE2E(t *testing.T) {
 	// We use timestamps to verify parallel execution.
 	devcontainerJSON := `{
 		"name": "Parallel Timing Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"postCreateCommand": {
 			"cmd1": "date +%s > /tmp/start1.txt && sleep 1 && date +%s > /tmp/end1.txt",
@@ -113,7 +113,7 @@ func TestParallelOnCreateCommandE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Parallel OnCreate Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"onCreateCommand": {
 			"setup1": "echo oncreate1 > /tmp/oncreate1.txt",
@@ -176,7 +176,7 @@ func TestMixedCommandFormatsE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Mixed Commands Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"onCreateCommand": "echo string-format > /tmp/oncreate.txt",
 		"postCreateCommand": {

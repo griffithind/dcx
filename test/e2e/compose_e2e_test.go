@@ -455,7 +455,7 @@ func createComposeWorkspaceWithRemoteFeature(t *testing.T) string {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: ubuntu:22.04
+    image: debian:bookworm-slim
     command: sleep infinity
     volumes:
       - ..:/workspace:cached

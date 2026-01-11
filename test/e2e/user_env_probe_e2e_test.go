@@ -21,7 +21,7 @@ func TestUserEnvProbeE2E(t *testing.T) {
 	// We test that the probed environment (from login shell) is available
 	devcontainerJSON := `{
 		"name": "UserEnvProbe Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"userEnvProbe": "loginInteractiveShell",
 		"postCreateCommand": "printenv > /tmp/probe-result.txt"
@@ -52,7 +52,7 @@ func TestEtcEnvironmentPatchingE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Etc Environment Patch Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {
 			"MY_CONTAINER_VAR": "container-value"
@@ -87,7 +87,7 @@ func TestEtcProfilePatchingE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Etc Profile Patch Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
@@ -114,7 +114,7 @@ func TestUserEnvProbeWithFeatureE2E(t *testing.T) {
 	// Use a feature that sets environment variables
 	devcontainerJSON := `{
 		"name": "UserEnvProbe Feature Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"ghcr.io/devcontainers/features/common-utils:2": {
@@ -174,7 +174,7 @@ func TestEnvProbeCachingE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Env Probe Cache Test",
-		"image": "ubuntu:22.04",
+		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
 		"userEnvProbe": "loginShell"
 	}`
