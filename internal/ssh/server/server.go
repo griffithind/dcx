@@ -1,4 +1,4 @@
-package agent
+package server
 
 import (
 	"crypto/ed25519"
@@ -27,6 +27,7 @@ type Server struct {
 	shell       string
 	workDir     string
 	hostKeyPath string
+	shellConfig ShellConfig // Cached shell integration config
 }
 
 // NewServer creates a new SSH server.
@@ -36,6 +37,7 @@ func NewServer(username, shell, workDir, hostKeyPath string) (*Server, error) {
 		shell:       shell,
 		workDir:     workDir,
 		hostKeyPath: hostKeyPath,
+		shellConfig: SetupShellIntegration(shell), // Setup once at server start
 	}
 
 	server := &ssh.Server{
@@ -135,11 +137,16 @@ func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
 	if rawCmd != "" {
 		cmd = exec.Command(s.shell, "-c", rawCmd)
 	} else {
-		// Start a login shell
+		// Start an interactive shell with integration
 		cmd = exec.Command(s.shell)
 		if isPty {
-			// Add -l flag for login shell
-			cmd.Args = append(cmd.Args, "-l")
+			// Use cached shell integration config
+			if len(s.shellConfig.Args) > 0 {
+				cmd.Args = append(cmd.Args, s.shellConfig.Args...)
+			} else {
+				// Default: login shell
+				cmd.Args = append(cmd.Args, "-l")
+			}
 		}
 	}
 
@@ -166,6 +173,9 @@ func (s *Server) buildEnvironment() []string {
 
 	// Set shell
 	env = append(env, "SHELL="+s.shell)
+
+	// Add shell integration env vars for terminal titles (from cached config)
+	env = append(env, s.shellConfig.Env...)
 
 	return env
 }

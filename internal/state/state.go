@@ -228,11 +228,6 @@ func (c *ContainerInfo) IsSingleContainer() bool {
 	return c != nil && (c.Plan == BuildMethodImage || c.Plan == BuildMethodDockerfile)
 }
 
-// IsCompose returns true if this is a compose-based devcontainer.
-func (c *ContainerInfo) IsCompose() bool {
-	return c != nil && c.Plan == BuildMethodCompose
-}
-
 // GetComposeProject returns the compose project name, falling back to the provided default.
 func (c *ContainerInfo) GetComposeProject(defaultProject string) string {
 	if c != nil && c.ComposeProject != "" {

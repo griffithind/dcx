@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"os"
+
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/ssh/client"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +15,7 @@ var shellCmd = &cobra.Command{
 
 SSH agent forwarding is automatically enabled when available.
 
-The shell used is /bin/bash if available, otherwise /bin/sh.`,
+The shell used is the container's default login shell.`,
 	RunE: runShell,
 }
 
@@ -38,7 +41,20 @@ func runShell(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
-	// Open shell using ExecBuilder
-	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
-	return builder.Shell(cliCtx.Ctx, "/bin/bash")
+	// Open interactive shell via unified SSH path
+	tty := true
+	exitCode, err := client.ExecInContainer(cliCtx.Ctx, client.ContainerExecOptions{
+		ContainerName: containerInfo.Name,
+		Config:        cfg,
+		WorkspacePath: cliCtx.WorkspacePath(),
+		Command:       nil, // nil = interactive shell
+		TTY:           &tty,
+	})
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	return nil
 }

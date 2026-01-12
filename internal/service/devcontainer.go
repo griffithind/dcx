@@ -14,8 +14,8 @@ import (
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/secrets"
-	sshcontainer "github.com/griffithind/dcx/internal/ssh/container"
-	"github.com/griffithind/dcx/internal/ssh/host"
+	"github.com/griffithind/dcx/internal/ssh/deploy"
+	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 )
@@ -373,7 +373,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	// Pre-deploy agent binary before lifecycle hooks
 	if containerInfo != nil {
 		ui.Println("Installing dcx agent...")
-		if err := sshcontainer.PreDeployAgent(ctx, containerInfo.Name); err != nil {
+		if err := deploy.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
 		}
 	}
@@ -596,7 +596,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 	// Use project name as SSH host if available
 	ids, _ := s.GetIdentifiers()
 	hostName := ids.SSHHost
-	if err := host.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
+	if err := hostconfig.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 
@@ -646,7 +646,7 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 
 	// Clean up SSH config entry
 	if containerInfo != nil {
-		_ = host.RemoveSSHConfig(containerInfo.Name)
+		_ = hostconfig.RemoveSSHConfig(containerInfo.Name)
 	}
 
 	ui.Println("Devcontainer removed")

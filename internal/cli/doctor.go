@@ -11,7 +11,6 @@ import (
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/selinux"
-	"github.com/griffithind/dcx/internal/ssh/agent"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +30,6 @@ By default checks both system and configuration. Use flags to check only one:
 System checks:
 - Docker daemon connectivity
 - Docker Compose availability
-- SSH agent availability
 - SELinux status (Linux only)
 
 Configuration checks (with --config or by default if devcontainer.json exists):
@@ -78,7 +76,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if checkSystemReqs {
 		systemResults = append(systemResults, checkDocker(ctx))
 		systemResults = append(systemResults, checkCompose())
-		systemResults = append(systemResults, checkSSHAgent())
 		if runtime.GOOS == "linux" {
 			systemResults = append(systemResults, checkSELinux())
 		}
@@ -450,41 +447,6 @@ func checkCompose() CheckResult {
 		OK:      false,
 		Message: "not found",
 		Hint:    "Install docker compose plugin or docker-compose",
-	}
-}
-
-func checkSSHAgent() CheckResult {
-	sock := os.Getenv("SSH_AUTH_SOCK")
-	if sock == "" {
-		return CheckResult{
-			Name:    "SSH Agent",
-			OK:      false,
-			Message: "SSH_AUTH_SOCK not set",
-			Hint:    "Start an SSH agent or set SSH_AUTH_SOCK",
-		}
-	}
-
-	if _, err := os.Stat(sock); err != nil {
-		return CheckResult{
-			Name:    "SSH Agent",
-			OK:      false,
-			Message: fmt.Sprintf("socket not accessible: %v", err),
-		}
-	}
-
-	// Validate it's actually a socket
-	if err := agent.ValidateSocket(sock); err != nil {
-		return CheckResult{
-			Name:    "SSH Agent",
-			OK:      false,
-			Message: fmt.Sprintf("invalid socket: %v", err),
-		}
-	}
-
-	return CheckResult{
-		Name:    "SSH Agent",
-		OK:      true,
-		Message: fmt.Sprintf("available at %s", sock),
 	}
 }
 

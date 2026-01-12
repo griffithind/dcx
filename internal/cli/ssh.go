@@ -10,7 +10,7 @@ import (
 	containerPkg "github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/service"
-	sshContainer "github.com/griffithind/dcx/internal/ssh/container"
+	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -145,7 +145,7 @@ func runSSHStdio(ctx context.Context, containerName string) error {
 	}
 
 	// Get path to dcx-agent binary (deployed during 'dcx up')
-	binaryPath := sshContainer.GetContainerBinaryPath()
+	binaryPath := deploy.GetContainerBinaryPath()
 
 	// Run exec with SSH server (stdio mode) using Docker SDK
 	// Run as the target user so the SSH server process has the correct identity

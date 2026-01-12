@@ -118,7 +118,7 @@ vet:
 
 # Find dead (unused) code
 deadcode:
-	go run golang.org/x/tools/cmd/deadcode@latest -test -tags=e2e ./...
+	go run golang.org/x/tools/cmd/deadcode@latest -filter='github.com/griffithind/dcx/(cmd|internal)' ./...
 
 # Help target
 help:

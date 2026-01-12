@@ -1,4 +1,4 @@
-package container
+package deploy
 
 import (
 	"os"

@@ -1,4 +1,5 @@
-package container
+// Package deploy provides dcx-agent binary deployment to containers.
+package deploy
 
 import (
 	"context"

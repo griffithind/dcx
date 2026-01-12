@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/ssh/client"
 	"github.com/spf13/cobra"
 )
 
@@ -45,17 +47,21 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
-	// Execute command using ExecBuilder
-	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
-
-	// Set up prober for userEnvProbe support if configured
-	if cfg != nil && cfg.UserEnvProbe != "" {
-		builder = builder.WithProber()
-	}
-
-	return builder.Execute(cliCtx.Ctx, ExecFlags{
-		Command: args,
+	// Execute via unified SSH path
+	exitCode, err := client.ExecInContainer(cliCtx.Ctx, client.ContainerExecOptions{
+		ContainerName: containerInfo.Name,
+		Config:        cfg,
+		WorkspacePath: cliCtx.WorkspacePath(),
+		Command:       args,
 	})
+
+	if err != nil {
+		return fmt.Errorf("exec failed: %w", err)
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	return nil
 }
 
 func init() {

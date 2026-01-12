@@ -49,12 +49,6 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 	return nil
 }
 
-// MountSecrets copies secrets to /run/secrets in the container.
-// Secrets are written as files with mode 0400 (read-only by owner).
-func (r *UnifiedRuntime) MountSecrets(ctx context.Context, secretList []secrets.Secret, owner string) error {
-	return MountSecretsToContainer(ctx, r.containerName, secretList, owner)
-}
-
 // writeSecretToContainer writes a secret to the container's /run/secrets.
 // Uses docker exec to write directly (docker cp doesn't work with tmpfs mounts).
 func writeSecretToContainer(ctx context.Context, docker *Docker, containerName string, secret secrets.Secret, owner string) error {

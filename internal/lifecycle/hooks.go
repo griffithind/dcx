@@ -9,11 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/griffithind/dcx/internal/common"
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
-	"github.com/griffithind/dcx/internal/ssh/agent"
+	"github.com/griffithind/dcx/internal/ssh/client"
 	"github.com/griffithind/dcx/internal/ui"
 )
 
@@ -441,19 +439,9 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 	return cmd.Run()
 }
 
-// executeContainerCommand runs a single command in the container.
+// executeContainerCommand runs a single command in the container via SSH.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
 	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
-
-	workspaceFolder := devcontainer.DetermineContainerWorkspaceFolder(r.cfg, r.workspacePath)
-
-	// Apply variable substitution to remoteUser
-	user := r.cfg.RemoteUser
-	if user != "" {
-		user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
-			LocalWorkspaceFolder: r.workspacePath,
-		})
-	}
 
 	// Build the command to execute
 	var execCmd []string
@@ -465,56 +453,25 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		execCmd = cmdSpec.Args
 	}
 
-	execConfig := container.ExecConfig{
-		ContainerID: r.containerID,
-		Cmd:         execCmd,
-		WorkingDir:  workspaceFolder,
-		User:        user,
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-	}
-
-	// Set USER environment variable if we have a user
-	if user != "" {
-		execConfig.Env = append(execConfig.Env, fmt.Sprintf("USER=%s", user))
-		execConfig.Env = append(execConfig.Env, fmt.Sprintf("HOME=%s", common.GetDefaultHomeDir(user)))
-	}
-
-	// Add probed environment from userEnvProbe (captures shell-initialized env)
+	// Build additional env from probedEnv
+	var env []string
 	for k, v := range r.probedEnv {
-		execConfig.Env = append(execConfig.Env, fmt.Sprintf("%s=%s", k, v))
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add remoteEnv from config (per spec, applies to all exec operations)
-	// remoteEnv takes precedence over probed env
-	if r.cfg != nil {
-		for k, v := range r.cfg.RemoteEnv {
-			execConfig.Env = append(execConfig.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-	}
+	// Execute via unified SSH path (handles user, workdir, base env, agent forwarding)
+	tty := false
+	exitCode, err := client.ExecInContainer(ctx, client.ContainerExecOptions{
+		ContainerName: r.containerID,
+		Config:        r.cfg,
+		WorkspacePath: r.workspacePath,
+		Command:       execCmd,
+		Env:           env,
+		TTY:           &tty,
+		Stdout:        os.Stdout,
+		Stderr:        os.Stderr,
+	})
 
-	// Setup SSH agent forwarding when available
-	var agentProxy *agent.AgentProxy
-	if agent.IsAvailable() {
-		// Get UID/GID for the container user (use containerID for both ID and name, docker accepts either)
-		uid, gid := agent.GetContainerUserIDs(r.containerID, user)
-
-		var proxyErr error
-		agentProxy, proxyErr = agent.NewAgentProxy(r.containerID, r.containerID, uid, gid)
-		if proxyErr == nil {
-			socketPath, startErr := agentProxy.Start()
-			if startErr == nil {
-				execConfig.Env = append(execConfig.Env, fmt.Sprintf("SSH_AUTH_SOCK=%s", socketPath))
-			}
-		}
-	}
-	defer func() {
-		if agentProxy != nil {
-			agentProxy.Stop()
-		}
-	}()
-
-	exitCode, err := container.Exec(ctx, execConfig)
 	if err != nil {
 		return err
 	}

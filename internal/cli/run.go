@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/shortcuts"
+	"github.com/griffithind/dcx/internal/ssh/client"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -124,9 +126,19 @@ func executeInContainer(execArgs []string) error {
 	// Load config
 	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
-	// Execute command using ExecBuilder
-	builder := NewExecBuilder(containerInfo, cfg, cliCtx.WorkspacePath())
-	return builder.Execute(cliCtx.Ctx, ExecFlags{
-		Command: execArgs,
+	// Execute via unified SSH path
+	exitCode, err := client.ExecInContainer(cliCtx.Ctx, client.ContainerExecOptions{
+		ContainerName: containerInfo.Name,
+		Config:        cfg,
+		WorkspacePath: cliCtx.WorkspacePath(),
+		Command:       execArgs,
 	})
+
+	if err != nil {
+		return fmt.Errorf("exec failed: %w", err)
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	return nil
 }

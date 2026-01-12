@@ -10,7 +10,7 @@ import (
 	"time"
 
 	dcxembed "github.com/griffithind/dcx"
-	"github.com/griffithind/dcx/internal/ssh/container"
+	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,8 +65,8 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	defer cancel()
 
 	// Deploy the agent binary
-	binaryPath := container.GetContainerBinaryPath()
-	err = container.DeployToContainer(ctx, containerName, binaryPath)
+	binaryPath := deploy.GetContainerBinaryPath()
+	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "DeployToContainer should succeed")
 
 	// Verify binary exists in container
@@ -112,15 +112,15 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	binaryPath := container.GetContainerBinaryPath()
+	binaryPath := deploy.GetContainerBinaryPath()
 
 	// First deploy
-	err = container.DeployToContainer(ctx, containerName, binaryPath)
+	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "first deploy should succeed")
 
 	// Second deploy should also succeed (and be fast since binary exists)
 	start := time.Now()
-	err = container.DeployToContainer(ctx, containerName, binaryPath)
+	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "second deploy should succeed")
 	elapsed := time.Since(start)
 
@@ -155,11 +155,11 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 	defer cancel()
 
 	// Use PreDeployAgent which is the main entry point
-	err = container.PreDeployAgent(ctx, containerName)
+	err = deploy.PreDeployAgent(ctx, containerName)
 	require.NoError(t, err, "PreDeployAgent should succeed")
 
 	// Verify binary exists and runs
-	binaryPath := container.GetContainerBinaryPath()
+	binaryPath := deploy.GetContainerBinaryPath()
 	helpCmd := exec.CommandContext(ctx, "docker", "exec", containerName, binaryPath, "--help")
 	output, err := helpCmd.CombinedOutput()
 	require.NoError(t, err, "deployed binary should run: %s", string(output))
@@ -200,8 +200,8 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 	t.Logf("Container architecture: %s", containerArch)
 
 	// Deploy
-	binaryPath := container.GetContainerBinaryPath()
-	err = container.DeployToContainer(ctx, containerName, binaryPath)
+	binaryPath := deploy.GetContainerBinaryPath()
+	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err)
 
 	// Verify binary can run (which confirms correct architecture)

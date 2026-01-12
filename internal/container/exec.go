@@ -74,28 +74,6 @@ func Exec(ctx context.Context, cfg ExecConfig) (int, error) {
 	return 0, nil
 }
 
-// ExecSimple executes a command in a container and returns the exit code.
-// This is a convenience function for simple command execution without output capture.
-func ExecSimple(ctx context.Context, containerID string, cmd []string, user string) (int, error) {
-	return Exec(ctx, ExecConfig{
-		ContainerID: containerID,
-		Cmd:         cmd,
-		User:        user,
-	})
-}
-
-// ExecDetached executes a command in a container in the background.
-// The command runs detached and this function returns immediately.
-func ExecDetached(ctx context.Context, containerID string, cmd []string, user string) error {
-	_, err := Exec(ctx, ExecConfig{
-		ContainerID: containerID,
-		Cmd:         cmd,
-		User:        user,
-		Detach:      true,
-	})
-	return err
-}
-
 // ExecOutput executes a command in a container and returns the combined output.
 func ExecOutput(ctx context.Context, containerID string, cmd []string, user string) (string, int, error) {
 	var buf bytes.Buffer

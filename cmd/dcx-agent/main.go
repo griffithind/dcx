@@ -6,11 +6,11 @@ package main
 import (
 	"os"
 
-	"github.com/griffithind/dcx/internal/agent"
+	"github.com/griffithind/dcx/internal/ssh/server"
 )
 
 func main() {
-	if err := agent.Execute(); err != nil {
+	if err := server.Execute(); err != nil {
 		os.Exit(1)
 	}
 }

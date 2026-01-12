@@ -564,6 +564,12 @@ func (r *UnifiedRuntime) buildEnvironment() []string {
 	for k, v := range r.resolved.ContainerEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
+
+	// Add DCX_PROJECT_NAME for terminal titles and user scripts
+	if r.resolved.Name != "" {
+		env = append(env, fmt.Sprintf("DCX_PROJECT_NAME=%s", r.resolved.Name))
+	}
+
 	return env
 }
 
@@ -719,6 +725,15 @@ func (r *UnifiedRuntime) generateComposeOverride(plan *devcontainer.ComposePlan,
 	sb.WriteString("    labels:\n")
 	for k, v := range r.buildLabels() {
 		sb.WriteString(fmt.Sprintf("      %s: %q\n", k, v))
+	}
+
+	// Add environment variables (containerEnv + DCX_PROJECT_NAME)
+	env := r.buildEnvironment()
+	if len(env) > 0 {
+		sb.WriteString("    environment:\n")
+		for _, e := range env {
+			sb.WriteString(fmt.Sprintf("      - %q\n", e))
+		}
 	}
 
 	// Add derived image if features were installed

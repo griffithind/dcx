@@ -1,5 +1,5 @@
-// Package host provides SSH configuration management for the host system.
-package host
+// Package hostconfig provides SSH configuration management for the host system.
+package hostconfig
 
 import (
 	"fmt"
