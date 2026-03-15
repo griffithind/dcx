@@ -4,12 +4,12 @@
 if [[ -n "$DCX_PROJECT_NAME" ]]; then
     # Function to set title to directory (called before prompt)
     __dcx_precmd() {
-        printf '\e]2;%s@%s:%s\a' "$USER" "$DCX_PROJECT_NAME" "${PWD/#$HOME/\~}"
+        printf '\e]2;%s:%s\a' "$DCX_PROJECT_NAME" "${PWD/#$HOME/\~}"
     }
 
     # Function to set title to command (called before command execution)
     __dcx_preexec() {
-        printf '\e]2;%s@%s: %s\a' "$USER" "$DCX_PROJECT_NAME" "$1"
+        printf '\e]2;%s: %s\a' "$DCX_PROJECT_NAME" "$1"
     }
 
     # Install precmd via PROMPT_COMMAND
