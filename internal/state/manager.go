@@ -176,7 +176,6 @@ func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectNa
 		return state, info, err
 	}
 
-	// Check if config has changed
 	if info.ConfigHash != "" && info.ConfigHash != currentConfigHash {
 		return StateStale, info, nil
 	}

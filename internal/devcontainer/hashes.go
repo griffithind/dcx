@@ -6,149 +6,190 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/features"
+	"gopkg.in/yaml.v3"
 )
 
-// ContentHashes contains hashes for staleness detection.
-// These hashes are stored in container labels to detect when
-// configuration has changed and a rebuild is needed.
-type ContentHashes struct {
-	// Config is the hash of the devcontainer.json content.
-	Config string
+// ComputeConfigHash computes a single hash of all build inputs for a devcontainer:
+// devcontainer.json content, Dockerfile content, compose files (including referenced
+// Dockerfiles from service build directives), and feature configuration.
+//
+// This hash is used for both staleness detection and image cache tagging.
+// Any change to any input produces a different hash.
+func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
+	h := sha256.New()
 
-	// Dockerfile is the hash of the Dockerfile content (if applicable).
-	Dockerfile string
-
-	// Compose is the hash of the docker-compose.yml content (if applicable).
-	Compose string
-
-	// Features is the combined hash of all resolved features.
-	Features string
-
-	// Overall is the combined hash of all above hashes.
-	Overall string
-}
-
-// NewContentHashes creates a new empty ContentHashes.
-func NewContentHashes() *ContentHashes {
-	return &ContentHashes{}
-}
-
-// ComputeConfigHash computes the hash of a DevContainerConfig.
-// Uses the raw JSON if available, otherwise marshals the config.
-func ComputeConfigHash(cfg *DevContainerConfig) (string, error) {
+	// 1. devcontainer.json content
 	if raw := cfg.GetRawJSON(); len(raw) > 0 {
-		return hashBytes(raw), nil
+		h.Write(raw)
+	} else {
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			return "", fmt.Errorf("marshal config for hash: %w", err)
+		}
+		h.Write(data)
 	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return "", fmt.Errorf("marshal config for hash: %w", err)
+
+	// 2. Dockerfile content (for DockerfilePlan)
+	if dockerfilePath != "" {
+		if content, err := os.ReadFile(dockerfilePath); err == nil {
+			h.Write([]byte("\x00dockerfile\x00"))
+			h.Write(content)
+		}
 	}
-	return hashBytes(data), nil
+
+	// 3. Compose files and their referenced Dockerfiles
+	if len(composeFiles) > 0 {
+		for _, f := range composeFiles {
+			content, err := os.ReadFile(f)
+			if err != nil {
+				return "", fmt.Errorf("read compose file %s: %w", f, err)
+			}
+			h.Write([]byte("\x00compose:" + f + "\x00"))
+			h.Write(content)
+		}
+
+		// Include Dockerfiles referenced by compose service build directives.
+		// Sort paths for deterministic hashing.
+		dockerfilePaths := collectComposeDockerfiles(composeFiles)
+		sort.Strings(dockerfilePaths)
+
+		for _, df := range dockerfilePaths {
+			content, err := os.ReadFile(df)
+			if err != nil {
+				// Skip Dockerfiles that don't exist (may be generated later)
+				continue
+			}
+			h.Write([]byte("\x00compose-dockerfile:" + df + "\x00"))
+			h.Write(content)
+		}
+	}
+
+	// 4. Features configuration
+	if len(resolvedFeatures) > 0 {
+		var featureData []string
+		for _, f := range resolvedFeatures {
+			optData, _ := json.Marshal(f.Options)
+			version := ""
+			if f.Metadata != nil {
+				version = f.Metadata.Version
+			}
+			featureData = append(featureData, fmt.Sprintf("%s:%s:%s", f.ID, version, string(optData)))
+		}
+		sort.Strings(featureData)
+		h.Write([]byte("\x00features\x00"))
+		h.Write([]byte(strings.Join(featureData, "|")))
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // ComputeSimpleHash computes a simple SHA256 hash of raw JSON bytes.
 // This is useful for quick hash computation without full config parsing.
 func ComputeSimpleHash(data []byte) string {
-	return hashBytes(data)
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
-// ComputeDockerfileHash computes the hash of a Dockerfile.
-func ComputeDockerfileHash(dockerfilePath string) (string, error) {
-	content, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return "", err
-	}
-	return hashBytes(content), nil
-}
+// collectComposeDockerfiles parses compose files and returns absolute paths
+// to all Dockerfiles referenced by service build directives.
+func collectComposeDockerfiles(composeFiles []string) []string {
+	seen := make(map[string]bool)
+	var result []string
 
-// ComputeComposeHash computes the combined hash of compose files.
-func ComputeComposeHash(composeFiles []string) (string, error) {
-	var combined []byte
 	for _, f := range composeFiles {
 		content, err := os.ReadFile(f)
 		if err != nil {
-			return "", fmt.Errorf("read compose file %s: %w", f, err)
+			continue
 		}
-		combined = append(combined, content...)
-	}
-	if len(combined) == 0 {
-		return "", nil
-	}
-	return hashBytes(combined), nil
-}
 
-// ComputeFeaturesHash computes the combined hash of resolved features.
-// The hash includes feature IDs, versions, and options for accurate staleness detection.
-func ComputeFeaturesHash(resolvedFeatures []*features.Feature) string {
-	if len(resolvedFeatures) == 0 {
-		return ""
-	}
-
-	var featureData []string
-	for _, f := range resolvedFeatures {
-		// Include ID, version, and options in hash
-		optData, _ := json.Marshal(f.Options)
-		version := ""
-		if f.Metadata != nil {
-			version = f.Metadata.Version
-		}
-		featureData = append(featureData, fmt.Sprintf("%s:%s:%s", f.ID, version, string(optData)))
-	}
-	sort.Strings(featureData)
-	return hashBytes([]byte(strings.Join(featureData, "|")))
-}
-
-// ComputeOverallHash computes the combined hash of all configuration.
-func ComputeOverallHash(hashes *ContentHashes) string {
-	overall := fmt.Sprintf("%s|%s|%s|%s",
-		hashes.Config,
-		hashes.Dockerfile,
-		hashes.Compose,
-		hashes.Features)
-	return hashBytes([]byte(overall))
-}
-
-// ComputeAllHashes computes all hashes for a resolved devcontainer.
-// This is a convenience function that populates a ContentHashes struct.
-func ComputeAllHashes(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (*ContentHashes, error) {
-	hashes := NewContentHashes()
-
-	// Config hash
-	configHash, err := ComputeConfigHash(cfg)
-	if err != nil {
-		return nil, err
-	}
-	hashes.Config = configHash
-
-	// Dockerfile hash
-	if dockerfilePath != "" {
-		if hash, err := ComputeDockerfileHash(dockerfilePath); err == nil {
-			hashes.Dockerfile = hash
+		paths := parseComposeDockerfilePaths(content, filepath.Dir(f))
+		for _, p := range paths {
+			if !seen[p] {
+				seen[p] = true
+				result = append(result, p)
+			}
 		}
 	}
 
-	// Compose hash
-	if len(composeFiles) > 0 {
-		if hash, err := ComputeComposeHash(composeFiles); err == nil {
-			hashes.Compose = hash
-		}
-	}
-
-	// Features hash
-	hashes.Features = ComputeFeaturesHash(resolvedFeatures)
-
-	// Overall hash
-	hashes.Overall = ComputeOverallHash(hashes)
-
-	return hashes, nil
+	return result
 }
 
-// hashBytes computes a SHA256 hash of the given data and returns it as a hex string.
-func hashBytes(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
+// composeFile is a minimal representation of a docker-compose.yml for
+// extracting build Dockerfile references.
+type composeFile struct {
+	Services map[string]composeService `yaml:"services"`
+}
+
+// composeService represents a single service in a compose file.
+type composeService struct {
+	Build composeBuild `yaml:"build"`
+}
+
+// composeBuild handles both string and object forms of the build directive.
+// String form: build: ./path (context only, Dockerfile defaults to "Dockerfile")
+// Object form: build: { context: ./path, dockerfile: Dockerfile.dev }
+type composeBuild struct {
+	Context    string `yaml:"context"`
+	Dockerfile string `yaml:"dockerfile"`
+}
+
+// UnmarshalYAML handles both string and object forms of the build directive.
+func (b *composeBuild) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		// String form: build: ./path
+		b.Context = value.Value
+		return nil
+	}
+	// Object form - decode fields
+	type plain composeBuild
+	return value.Decode((*plain)(b))
+}
+
+// parseComposeDockerfilePaths extracts Dockerfile paths from compose YAML content.
+// baseDir is the directory of the compose file, used to resolve relative paths.
+func parseComposeDockerfilePaths(content []byte, baseDir string) []string {
+	var cf composeFile
+	if err := yaml.Unmarshal(content, &cf); err != nil {
+		return nil
+	}
+
+	var paths []string
+	for _, svc := range cf.Services {
+		if svc.Build.Context == "" && svc.Build.Dockerfile == "" {
+			// No build directive (image-only service)
+			continue
+		}
+
+		context := svc.Build.Context
+		if context == "" {
+			context = "."
+		}
+
+		// Resolve context relative to compose file directory
+		if !filepath.IsAbs(context) {
+			context = filepath.Join(baseDir, context)
+		}
+
+		dockerfile := svc.Build.Dockerfile
+		if dockerfile == "" {
+			dockerfile = "Dockerfile"
+		}
+
+		// Resolve dockerfile relative to context directory
+		var absPath string
+		if filepath.IsAbs(dockerfile) {
+			absPath = dockerfile
+		} else {
+			absPath = filepath.Join(context, dockerfile)
+		}
+
+		paths = append(paths, absPath)
+	}
+
+	return paths
 }

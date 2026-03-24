@@ -42,20 +42,9 @@ const (
 
 // Hash labels for staleness detection.
 const (
-	// LabelHashConfig is the hash of devcontainer.json content.
+	// LabelHashConfig is the combined hash of all build inputs
+	// (devcontainer.json, Dockerfiles, compose files, features).
 	LabelHashConfig = Prefix + ".hash.config"
-
-	// LabelHashDockerfile is the hash of Dockerfile content (if applicable).
-	LabelHashDockerfile = Prefix + ".hash.dockerfile"
-
-	// LabelHashCompose is the hash of docker-compose.yml content (if applicable).
-	LabelHashCompose = Prefix + ".hash.compose"
-
-	// LabelHashFeatures is the combined hash of all resolved features.
-	LabelHashFeatures = Prefix + ".hash.features"
-
-	// LabelHashOverall is the combined hash of all configuration.
-	LabelHashOverall = Prefix + ".hash.overall"
 )
 
 // State labels.
@@ -151,12 +140,8 @@ type ContainerLabels struct {
 	WorkspacePath string
 	ConfigPath    string
 
-	// Hashes
-	HashConfig     string
-	HashDockerfile string
-	HashCompose    string
-	HashFeatures   string
-	HashOverall    string
+	// Hash
+	HashConfig string
 
 	// State
 	CreatedAt      time.Time
@@ -221,12 +206,8 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	setIfNotEmpty(m, LabelWorkspacePath, l.WorkspacePath)
 	setIfNotEmpty(m, LabelConfigPath, l.ConfigPath)
 
-	// Hashes
+	// Hash
 	setIfNotEmpty(m, LabelHashConfig, l.HashConfig)
-	setIfNotEmpty(m, LabelHashDockerfile, l.HashDockerfile)
-	setIfNotEmpty(m, LabelHashCompose, l.HashCompose)
-	setIfNotEmpty(m, LabelHashFeatures, l.HashFeatures)
-	setIfNotEmpty(m, LabelHashOverall, l.HashOverall)
 
 	// State
 	if !l.CreatedAt.IsZero() {
@@ -297,12 +278,8 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	l.WorkspacePath = m[LabelWorkspacePath]
 	l.ConfigPath = m[LabelConfigPath]
 
-	// Hashes
+	// Hash
 	l.HashConfig = m[LabelHashConfig]
-	l.HashDockerfile = m[LabelHashDockerfile]
-	l.HashCompose = m[LabelHashCompose]
-	l.HashFeatures = m[LabelHashFeatures]
-	l.HashOverall = m[LabelHashOverall]
 
 	// State
 	if t, err := time.Parse(time.RFC3339, m[LabelCreatedAt]); err == nil {

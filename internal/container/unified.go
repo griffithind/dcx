@@ -220,7 +220,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
-		imageTag := fmt.Sprintf("%s%s:%s", common.ImageTagPrefix, r.resolved.ID, r.resolved.Hashes.Overall[:common.HashTruncationLength])
+		imageTag := fmt.Sprintf("%s%s:%s", common.ImageTagPrefix, r.resolved.ID, r.resolved.ConfigHash[:common.HashTruncationLength])
 		fmt.Printf("Building image: %s\n", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
@@ -495,11 +495,7 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	l.WorkspaceName = r.resolved.Name
 	l.WorkspacePath = r.resolved.LocalRoot
 	l.ConfigPath = r.resolved.ConfigPath
-	l.HashConfig = r.resolved.Hashes.Config
-	l.HashDockerfile = r.resolved.Hashes.Dockerfile
-	l.HashCompose = r.resolved.Hashes.Compose
-	l.HashFeatures = r.resolved.Hashes.Features
-	l.HashOverall = r.resolved.Hashes.Overall
+	l.HashConfig = r.resolved.ConfigHash
 	l.BuildMethod = string(r.resolved.Plan.Type())
 	l.IsPrimary = true
 
@@ -945,8 +941,8 @@ func (r *UnifiedRuntime) getDerivedImageTag() string {
 	if r.resolved.DerivedImage != "" {
 		return r.resolved.DerivedImage
 	}
-	if r.resolved.ID != "" && r.resolved.Hashes != nil && r.resolved.Hashes.Config != "" && len(r.resolved.Hashes.Config) >= common.HashTruncationLength {
-		return fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, r.resolved.ID, r.resolved.Hashes.Config[:common.HashTruncationLength])
+	if r.resolved.ID != "" && len(r.resolved.ConfigHash) >= common.HashTruncationLength {
+		return fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, r.resolved.ID, r.resolved.ConfigHash[:common.HashTruncationLength])
 	}
 	if r.resolved.ID != "" {
 		return fmt.Sprintf("dcx-derived-%s:latest", r.resolved.ID)

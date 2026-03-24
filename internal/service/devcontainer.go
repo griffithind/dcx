@@ -123,7 +123,7 @@ func (s *DevContainerService) Plan(ctx context.Context, opts PlanOptions) (*Plan
 
 	ids, _ := s.GetIdentifiers()
 	currentState, containerInfo, err := s.stateManager.GetStateWithProjectAndHash(
-		ctx, ids.ProjectName, resolved.ID, resolved.Hashes.Config)
+		ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
@@ -282,7 +282,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Check current state first to determine what actions are needed
 	currentState, _, err := s.stateManager.GetStateWithProjectAndHash(
-		ctx, ids.ProjectName, resolved.ID, resolved.Hashes.Config)
+		ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -555,11 +555,8 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		user = cfg.ContainerUser
 	}
 
-	// Use derived image hash for caching
-	imageHash := ""
-	if resolved.Hashes != nil {
-		imageHash = resolved.Hashes.Config
-	}
+	// Use config hash for caching (invalidates when any build input changes)
+	imageHash := resolved.ConfigHash
 
 	if s.verbose {
 		ui.Printf("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)

@@ -226,11 +226,11 @@ func displayPlan(plan *service.PlanResult) {
 		}
 	}
 
-	// Hashes (verbose only)
-	if ui.IsVerbose() && resolved.Hashes != nil {
+	// Hash (verbose only)
+	if ui.IsVerbose() && resolved.ConfigHash != "" {
 		ui.Println("")
 		ui.Println(ui.Bold("Configuration Hash"))
-		ui.Printf("  %s", ui.FormatLabel("Config", resolved.Hashes.Config))
+		ui.Printf("  %s", ui.FormatLabel("Config", resolved.ConfigHash))
 	}
 
 	ui.Println("")

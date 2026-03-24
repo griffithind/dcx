@@ -94,11 +94,7 @@ type ConfigDebug struct {
 }
 
 type HashesDebug struct {
-	Config     string `json:"config"`
-	Dockerfile string `json:"dockerfile,omitempty"`
-	Compose    string `json:"compose,omitempty"`
-	Features   string `json:"features,omitempty"`
-	Overall    string `json:"overall"`
+	Config string `json:"config"`
 }
 
 type ContainerDebug struct {
@@ -222,11 +218,7 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 		HasDockerfile: cfg.Build != nil,
 		HasCompose:    cfg.IsComposePlan(),
 		Hashes: HashesDebug{
-			Config:     resolved.Hashes.Config,
-			Dockerfile: resolved.Hashes.Dockerfile,
-			Compose:    resolved.Hashes.Compose,
-			Features:   resolved.Hashes.Features,
-			Overall:    resolved.Hashes.Overall,
+			Config: resolved.ConfigHash,
 		},
 	}
 
@@ -275,14 +267,12 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 		debug.Container.LegacyLabels = info.Labels.SchemaVersion == "" || info.Labels.SchemaVersion == "1"
 
 		// Check staleness
-		if debug.Config.Hashes.Overall != "" {
-			if info.Labels.HashConfig != debug.Config.Hashes.Config {
+		if debug.Config.Hashes.Config != "" {
+			if info.Labels.HashConfig != "" && info.Labels.HashConfig != debug.Config.Hashes.Config {
 				debug.Staleness.IsStale = true
 				debug.Staleness.Reason = "Configuration changed"
-				if info.Labels.HashConfig != "" {
-					debug.Staleness.Changes = append(debug.Staleness.Changes,
-						fmt.Sprintf("config hash: %s -> %s", info.Labels.HashConfig, debug.Config.Hashes.Config))
-				}
+				debug.Staleness.Changes = append(debug.Staleness.Changes,
+					fmt.Sprintf("config hash: %s -> %s", info.Labels.HashConfig, debug.Config.Hashes.Config))
 			}
 		}
 	} else {
@@ -351,18 +341,8 @@ func outputDebugTable(debug *DebugInfo) error {
 		}
 		ui.Println("")
 
-		ui.Println("Hashes:")
-		ui.Printf("  Config:     %s", debug.Config.Hashes.Config)
-		if debug.Config.Hashes.Dockerfile != "" {
-			ui.Printf("  Dockerfile: %s", debug.Config.Hashes.Dockerfile)
-		}
-		if debug.Config.Hashes.Compose != "" {
-			ui.Printf("  Compose:    %s", debug.Config.Hashes.Compose)
-		}
-		if debug.Config.Hashes.Features != "" {
-			ui.Printf("  Features:   %s", debug.Config.Hashes.Features)
-		}
-		ui.Printf("  Overall:    %s", debug.Config.Hashes.Overall)
+		ui.Println("Hash:")
+		ui.Printf("  Config: %s", debug.Config.Hashes.Config)
 		ui.Println("")
 	}
 

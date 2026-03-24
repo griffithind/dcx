@@ -184,7 +184,7 @@ func DeterminePlanAction(state ContainerState, rebuild, recreate bool) PlanActio
 		return PlanActionResult{
 			Action:  PlanActionRecreate,
 			Reason:  "configuration changed",
-			Changes: []string{"devcontainer.json modified"},
+			Changes: []string{"configuration or build inputs modified"},
 		}
 	case StateBroken:
 		return PlanActionResult{
@@ -215,7 +215,7 @@ type ContainerInfo struct {
 	Name           string
 	Status         string
 	Running        bool
-	ConfigHash     string
+	ConfigHash     string // Combined hash of all build inputs, used for staleness detection and image tagging
 	WorkspaceID    string // Stable identifier
 	Plan           string
 	ComposeProject string

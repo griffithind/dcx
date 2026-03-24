@@ -125,10 +125,12 @@ type ResolvedDevContainer struct {
 	// Features are the resolved and ordered features for installation.
 	Features []*features.Feature
 
-	// === Hashes ===
+	// === Hash ===
 
-	// Hashes are computed hashes for staleness detection.
-	Hashes *ContentHashes
+	// ConfigHash is the combined hash of all build inputs (devcontainer.json,
+	// Dockerfiles, compose files, features). Used for staleness detection
+	// and image cache tagging.
+	ConfigHash string
 
 	// === Customizations ===
 
@@ -230,7 +232,6 @@ func NewResolvedDevContainer() *ResolvedDevContainer {
 		ContainerEnv:   make(map[string]string),
 		RemoteEnv:      make(map[string]string),
 		Customizations: make(map[string]interface{}),
-		Hashes:         NewContentHashes(),
 		Labels:         state.NewContainerLabels(),
 		RuntimeSecrets: make(map[string]SecretConfig),
 		BuildSecrets:   make(map[string]SecretConfig),

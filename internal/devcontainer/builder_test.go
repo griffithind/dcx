@@ -3,6 +3,8 @@ package devcontainer
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -93,11 +95,6 @@ func TestBuilderBuild(t *testing.T) {
 				cfg:      &DevContainerConfig{Build: &BuildConfig{Dockerfile: "Dockerfile"}},
 				planType: PlanTypeDockerfile,
 			},
-			{
-				name:     "compose plan",
-				cfg:      &DevContainerConfig{DockerComposeFile: "docker-compose.yml", Service: "app"},
-				planType: PlanTypeCompose,
-			},
 		}
 
 		for _, tt := range tests {
@@ -113,6 +110,24 @@ func TestBuilderBuild(t *testing.T) {
 				assert.Equal(t, tt.planType, resolved.Plan.Type())
 			})
 		}
+
+		// Compose plan needs real files on disk for hash computation
+		t.Run("compose plan", func(t *testing.T) {
+			dir := t.TempDir()
+			composeFile := filepath.Join(dir, "docker-compose.yml")
+			require.NoError(t, os.WriteFile(composeFile, []byte("services:\n  app:\n    image: alpine\n"), 0644))
+
+			cfg := &DevContainerConfig{DockerComposeFile: "docker-compose.yml", Service: "app"}
+			builder := NewBuilder(slog.Default())
+			resolved, err := builder.Build(context.Background(), BuilderOptions{
+				ConfigPath:    filepath.Join(dir, "devcontainer.json"),
+				WorkspaceRoot: dir,
+				Config:        cfg,
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, PlanTypeCompose, resolved.Plan.Type())
+		})
 	})
 
 	t.Run("uses project name when provided", func(t *testing.T) {

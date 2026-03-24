@@ -334,7 +334,7 @@ func contains(slice []string, val string) bool {
 	return false
 }
 
-// computeHashes computes all configuration hashes.
+// computeHashes computes the configuration hash from all build inputs.
 func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContainerConfig) error {
 	var dockerfilePath string
 	var composeFiles []string
@@ -346,16 +346,17 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 		composeFiles = cp.Files
 	}
 
-	hashes, err := ComputeAllHashes(cfg, dockerfilePath, composeFiles, resolved.Features)
+	configHash, err := ComputeConfigHash(cfg, dockerfilePath, composeFiles, resolved.Features)
 	if err != nil {
 		return err
 	}
 
-	resolved.Hashes = hashes
+	resolved.ConfigHash = configHash
 
-	// Set derived image tag based on hash
-	if hashes.Config != "" && len(hashes.Config) >= common.HashTruncationLength {
-		resolved.DerivedImage = fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, resolved.ID, hashes.Config[:common.HashTruncationLength])
+	// Set derived image tag based on config hash so that any change
+	// (devcontainer.json, Dockerfiles, compose files, features) invalidates the cache.
+	if len(configHash) >= common.HashTruncationLength {
+		resolved.DerivedImage = fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, resolved.ID, configHash[:common.HashTruncationLength])
 	}
 
 	return nil
