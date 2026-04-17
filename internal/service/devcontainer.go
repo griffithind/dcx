@@ -774,15 +774,24 @@ func readFile(path string) ([]byte, error) {
 }
 
 // collectAuthorizedKeys builds the authorized_keys list the agent installs
-// as /run/secrets/dcx/authorized_keys. Sources, in order:
+// as /run/secrets/dcx/authorized_keys. All of the following sources are
+// merged unconditionally so clients have multiple paths to authenticate:
 //
 //  1. Every *.pub file under ~/.ssh/ (covers id_ed25519, id_ecdsa, id_rsa,
-//     and the "I have multiple" case some users have)
+//     and the "I have multiple" case some users have).
 //  2. Identities exposed by the SSH agent at $SSH_AUTH_SOCK (handles
-//     yubikey / 1Password SSH / Secretive users who keep no key on disk)
-//  3. Fallback: a dcx-owned key at ~/.dcx/id_ed25519, generated on first
-//     use when nothing else is available. Lets a brand-new machine run
-//     `dcx up` without any prior SSH setup.
+//     yubikey / 1Password / Secretive users who keep no key on disk).
+//  3. The dcx fallback key at ~/.dcx/id_ed25519, auto-generated on first
+//     use. This is ALWAYS included — some clients (Claude Desktop's ssh2,
+//     JetBrains Gateway with a manual private-key field) can only point
+//     at a file path and cannot reach the local SSH agent. Without the
+//     fallback in authorized_keys, those clients get "All configured
+//     authentication methods failed" even though OpenSSH succeeds via
+//     the agent.
+//
+// Duplicate pubkeys across sources (e.g. the same key on disk and in the
+// agent) are fine — `ssh.ParseAuthorizedKey` processes them one at a time
+// and `ssh.KeysEqual` is cheap.
 func collectAuthorizedKeys() ([]byte, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -790,6 +799,16 @@ func collectAuthorizedKeys() ([]byte, error) {
 	}
 
 	var keys []byte
+	appendBlock := func(block []byte) {
+		if len(block) == 0 {
+			return
+		}
+		keys = append(keys, block...)
+		if block[len(block)-1] != '\n' {
+			keys = append(keys, '\n')
+		}
+	}
+
 	sshDir := filepath.Join(home, ".ssh")
 	entries, _ := os.ReadDir(sshDir)
 	for _, e := range entries {
@@ -798,32 +817,24 @@ func collectAuthorizedKeys() ([]byte, error) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(sshDir, name))
-		if err != nil || len(data) == 0 {
+		if err != nil {
 			continue
 		}
-		keys = append(keys, data...)
-		if data[len(data)-1] != '\n' {
-			keys = append(keys, '\n')
-		}
+		appendBlock(data)
 	}
 
-	// Supplement (or replace, when no *.pub files exist) with SSH agent
-	// identities.
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		if agentKeys, err := readAgentPubkeys(sock); err == nil {
-			keys = append(keys, agentKeys...)
+			appendBlock(agentKeys)
 		}
 	}
 
-	if len(keys) == 0 {
-		// No user keys anywhere — generate a dcx-owned fallback so the
-		// brand-new-machine case works. The client path (ssh/exec) reads
-		// the same file for authentication.
-		fallback, err := ensureFallbackClientKey(home)
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, fallback...)
+	// Always include the dcx fallback. Generated on first call, then re-read
+	// from disk on subsequent invocations.
+	if fallback, err := ensureFallbackClientKey(home); err == nil {
+		appendBlock(fallback)
+	} else if len(keys) == 0 {
+		return nil, fmt.Errorf("no SSH public keys found and fallback generation failed: %w", err)
 	}
 	return keys, nil
 }
