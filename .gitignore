@@ -48,3 +48,6 @@ dist/
 
 # Test artifacts
 test/fixtures/tmp/
+
+# Claude Code worktrees and session state
+.claude/
