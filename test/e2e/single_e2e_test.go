@@ -357,17 +357,6 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 		assert.NotEmpty(t, labelValue, "config_hash label should be set")
 	})
 
-	// Test overall_hash label is set
-	t.Run("overall_hash_label", func(t *testing.T) {
-		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.hash.overall"}}`,
-			containerName)
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to inspect container: %s", output)
-
-		labelValue := strings.TrimSpace(string(output))
-		assert.NotEmpty(t, labelValue, "overall_hash label should be set")
-	})
 }
 
 // TestBuildNoCacheE2E tests that --no-cache flag forces a rebuild.

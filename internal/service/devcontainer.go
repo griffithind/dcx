@@ -2,9 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"net"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
@@ -14,10 +20,13 @@ import (
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/secrets"
+	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
+	gossh "golang.org/x/crypto/ssh"
+	sshagent "golang.org/x/crypto/ssh/agent"
 )
 
 // DevContainerService provides high-level operations for devcontainer environments.
@@ -96,6 +105,15 @@ type UpOptions struct {
 
 	// Pull forces pulling base images
 	Pull bool
+
+	// SSHBindHost is the host interface the agent SSH port is published on.
+	// "" means 127.0.0.1 (loopback-only, the default). "0.0.0.0" exposes the
+	// port on all interfaces, gated by SSHAllowedCIDRs at the agent level.
+	SSHBindHost string
+
+	// SSHAllowedCIDRs lists CIDRs the agent's ConnCallback accepts in
+	// addition to loopback. Empty means loopback-only.
+	SSHAllowedCIDRs []string
 }
 
 // PlanOptions configures the Plan operation.
@@ -354,7 +372,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		needsRebuild = true
 		fallthrough
 	case state.StateAbsent:
-		if err := s.create(ctx, resolved, opts.Rebuild || needsRebuild, opts.Pull, buildSecretPaths); err != nil {
+		createOpts := opts
+		createOpts.Rebuild = opts.Rebuild || needsRebuild
+		if err := s.create(ctx, resolved, createOpts, buildSecretPaths); err != nil {
 			return err
 		}
 		isNewEnvironment = true
@@ -375,6 +395,18 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		ui.Println("Installing dcx agent...")
 		if err := deploy.PreDeployAgent(ctx, containerInfo.Name); err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
+		}
+	}
+
+	// Mount dcx-managed SSH secrets (host key + authorized_keys). This runs
+	// before lifecycle hooks so dcx exec paths used by hooks have SSH
+	// available immediately.
+	if containerInfo != nil {
+		if err := s.mountSSHSecrets(ctx, resolved, containerInfo); err != nil {
+			return fmt.Errorf("failed to mount SSH secrets: %w", err)
+		}
+		if err := s.launchSSHAgent(ctx, resolved, containerInfo, opts.SSHAllowedCIDRs); err != nil {
+			return fmt.Errorf("failed to launch SSH agent: %w", err)
 		}
 	}
 
@@ -399,6 +431,109 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	return nil
 }
 
+// mountSSHSecrets writes the persistent host key and the user's authorized
+// public key into /run/secrets/dcx/.
+//
+// The host key is loaded (or generated) via dcxssh.EnsureHostKey; the
+// authorized_keys list is sourced from ~/.ssh/id_ed25519.pub (or the other
+// default identities), falling back to a lookup via SSH agent identities.
+func (s *DevContainerService) mountSSHSecrets(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
+	ids, err := s.GetIdentifiers()
+	if err != nil {
+		return err
+	}
+
+	keyPath, _, err := dcxssh.EnsureHostKey(ids.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("ensure host key: %w", err)
+	}
+	keyBytes, err := readFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("read host key: %w", err)
+	}
+
+	authKeys, err := collectAuthorizedKeys()
+	if err != nil {
+		return fmt.Errorf("collect authorized keys: %w", err)
+	}
+
+	// Hash the authorized_keys content so subsequent Up() calls can detect
+	// pubkey drift (user regenerated ~/.ssh/id_ed25519) vs. what's currently
+	// mounted. When the hashes differ we emit a single user-visible line
+	// and proceed to re-mount. Labels are immutable post-create, so the
+	// tracker lives on the ContainerInfo we just refreshed.
+	newHash := container.SHA256Hex(authKeys)
+	if stored := containerInfo.Labels.SSHAuthorizedKeysSHA256; stored != "" && stored != newHash {
+		ui.Printf("SSH: authorized_keys content changed — re-synced")
+	}
+
+	// Owner for the host key must be the user the agent runs as, since the
+	// key is mode 0400 (readable only by owner). The agent inherits the
+	// container's default user (typically resolved.EffectiveUser after UID
+	// remap), so chown the file to match. authorized_keys is world-readable
+	// (public data) but we still set the owner consistently.
+	owner := resolved.EffectiveUser
+	if owner == "" {
+		owner = "root"
+	}
+
+	return container.MountDCXSecrets(ctx, containerInfo.Name, []container.DCXSecret{
+		{
+			Name:  "authorized_keys",
+			Value: authKeys,
+			// Public data — readable by all.
+			Mode:  "0444",
+			Owner: owner,
+		},
+		{
+			Name:  "ssh_host_ed25519_key",
+			Value: keyBytes,
+			Mode:  "0400",
+			Owner: owner,
+		},
+	})
+}
+
+// launchSSHAgent starts the dcx-agent SSH listener in the container.
+//
+// The agent runs as a detached background process; it is re-spawned
+// idempotently on subsequent Up() invocations by the ping+launch cycle.
+// allowedCIDRs widens the ConnCallback allowlist beyond loopback (driven by
+// `dcx up --hosts`).
+func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo, allowedCIDRs []string) error {
+	// Idempotent: skip if a listener is already answering.
+	if err := container.MustDocker().ExecInContainer(ctx, containerInfo.Name, []string{
+		common.AgentBinaryPath, "ping", "--addr", "127.0.0.1:48022",
+	}); err == nil {
+		return nil
+	}
+
+	workDir := resolved.WorkspaceFolder
+	if workDir == "" {
+		workDir = "/workspace"
+	}
+	user := resolved.EffectiveUser
+	if user == "" {
+		user = "root"
+	}
+
+	argv := []string{
+		common.AgentBinaryPath, "listen",
+		"--addr", "0.0.0.0:48022",
+		"--host-key", "/run/secrets/dcx/ssh_host_ed25519_key",
+		"--authorized-keys", "/run/secrets/dcx/authorized_keys",
+		"--user", user,
+		"--workdir", workDir,
+	}
+	if len(allowedCIDRs) > 0 {
+		argv = append(argv, "--allow-cidrs", strings.Join(allowedCIDRs, ","))
+	}
+	// The agent inherits the container's default user (typically the image's
+	// USER or remoteUser after UID remap). mountSSHSecrets chowns the host
+	// key and authorized_keys to that same user so the agent can read them.
+	return container.MustDocker().ExecDetached(ctx, containerInfo.Name, argv)
+}
+
 // QuickStart attempts to start an existing container without full up sequence.
 func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *state.ContainerInfo, projectName, workspaceID string) error {
 	if containerInfo.IsSingleContainer() {
@@ -417,7 +552,7 @@ func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *sta
 }
 
 // create creates a new environment.
-func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, forceRebuild, forcePull bool, buildSecrets map[string]string) error {
+func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
 	runtime, err := container.NewUnifiedRuntime(resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
@@ -430,10 +565,11 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 	}
 
 	return runtime.Up(ctx, container.UpOptions{
-		Build:        forceRebuild,
-		Rebuild:      forceRebuild,
-		Pull:         forcePull,
+		Build:        opts.Rebuild,
+		Rebuild:      opts.Rebuild,
+		Pull:         opts.Pull,
 		BuildSecrets: buildSecrets,
+		SSHBindHost:  opts.SSHBindHost,
 	})
 }
 
@@ -575,6 +711,10 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 }
 
 // setupSSHAccess configures SSH access to the container.
+//
+// Looks up the ephemeral host port Docker assigned to the agent's 48022
+// listener, pins the workspace's host key into ~/.dcx/known_hosts, and
+// writes the ~/.ssh/config block pointing at 127.0.0.1:<port>.
 func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
 	if containerInfo == nil {
 		ids, _ := s.GetIdentifiers()
@@ -590,15 +730,168 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		user = "root"
 	}
 
-	// Use project name as SSH host if available
 	ids, _ := s.GetIdentifiers()
-	hostName := ids.SSHHost
-	if err := hostconfig.AddSSHConfig(hostName, containerInfo.Name, user); err != nil {
+
+	// Discover the host-side ephemeral port Docker picked for our listener.
+	port, err := container.MustDocker().PortMapping(ctx, containerInfo.Name, 48022, "tcp")
+	if err != nil {
+		return fmt.Errorf("resolve ssh port: %w", err)
+	}
+
+	// Pin the workspace's host key into ~/.dcx/known_hosts so plain `ssh`
+	// clients can verify it via HostKeyAlias without TOFU.
+	_, signer, err := dcxssh.EnsureHostKey(ids.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("load host key: %w", err)
+	}
+	if err := dcxssh.PinHostKey(ids.WorkspaceID, signer.PublicKey()); err != nil {
+		return fmt.Errorf("pin host key: %w", err)
+	}
+
+	knownHosts, _ := dcxssh.KnownHostsPath()
+
+	if err := hostconfig.AddSSHConfig(hostconfig.Entry{
+		HostName:       ids.SSHHost,
+		ContainerName:  containerInfo.Name,
+		WorkspaceID:    ids.WorkspaceID,
+		User:           user,
+		BindHost:       "127.0.0.1",
+		Port:           port,
+		KnownHostsPath: knownHosts,
+	}); err != nil {
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 
-	ui.Printf("SSH configured: ssh %s", hostName)
+	ui.Printf("SSH configured: ssh %s  (127.0.0.1:%d)", ids.SSHHost, port)
 	return nil
+}
+
+// readFile is a tiny wrapper that ferries a filesystem read into the
+// SSH-secrets flow without pulling os into every helper. Kept here because
+// no other service helper needs it.
+func readFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+// collectAuthorizedKeys builds the authorized_keys list the agent installs
+// as /run/secrets/dcx/authorized_keys. Sources, in order:
+//
+//  1. Every *.pub file under ~/.ssh/ (covers id_ed25519, id_ecdsa, id_rsa,
+//     and the "I have multiple" case some users have)
+//  2. Identities exposed by the SSH agent at $SSH_AUTH_SOCK (handles
+//     yubikey / 1Password SSH / Secretive users who keep no key on disk)
+//  3. Fallback: a dcx-owned key at ~/.dcx/id_ed25519, generated on first
+//     use when nothing else is available. Lets a brand-new machine run
+//     `dcx up` without any prior SSH setup.
+func collectAuthorizedKeys() ([]byte, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []byte
+	sshDir := filepath.Join(home, ".ssh")
+	entries, _ := os.ReadDir(sshDir)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".pub") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(sshDir, name))
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		keys = append(keys, data...)
+		if data[len(data)-1] != '\n' {
+			keys = append(keys, '\n')
+		}
+	}
+
+	// Supplement (or replace, when no *.pub files exist) with SSH agent
+	// identities.
+	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
+		if agentKeys, err := readAgentPubkeys(sock); err == nil {
+			keys = append(keys, agentKeys...)
+		}
+	}
+
+	if len(keys) == 0 {
+		// No user keys anywhere — generate a dcx-owned fallback so the
+		// brand-new-machine case works. The client path (ssh/exec) reads
+		// the same file for authentication.
+		fallback, err := ensureFallbackClientKey(home)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, fallback...)
+	}
+	return keys, nil
+}
+
+// ensureFallbackClientKey returns the public key half of ~/.dcx/id_ed25519,
+// generating the key pair on first call.
+func ensureFallbackClientKey(home string) ([]byte, error) {
+	dir := filepath.Join(home, ".dcx")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("create ~/.dcx: %w", err)
+	}
+
+	privPath := filepath.Join(dir, "id_ed25519")
+	pubPath := privPath + ".pub"
+
+	// Fast path: both already exist.
+	if pub, err := os.ReadFile(pubPath); err == nil {
+		if _, err := os.Stat(privPath); err == nil {
+			return pub, nil
+		}
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate fallback key: %w", err)
+	}
+
+	// Write the private key in OpenSSH format.
+	pemBlock, err := gossh.MarshalPrivateKey(priv, "dcx fallback client key")
+	if err != nil {
+		return nil, fmt.Errorf("marshal fallback private key: %w", err)
+	}
+	pemBytes := pem.EncodeToMemory(pemBlock)
+	if err := os.WriteFile(privPath, pemBytes, 0600); err != nil {
+		return nil, fmt.Errorf("write fallback private key: %w", err)
+	}
+
+	sshPub, err := gossh.NewPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("public key from fallback: %w", err)
+	}
+	authLine := gossh.MarshalAuthorizedKey(sshPub)
+	if err := os.WriteFile(pubPath, authLine, 0644); err != nil {
+		return nil, fmt.Errorf("write fallback public key: %w", err)
+	}
+	return authLine, nil
+}
+
+// readAgentPubkeys connects to the SSH agent and returns its identities
+// marshalled as authorized_keys lines.
+func readAgentPubkeys(sock string) ([]byte, error) {
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	client := sshagent.NewClient(conn)
+	list, err := client.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var out []byte
+	for _, k := range list {
+		out = append(out, gossh.MarshalAuthorizedKey(k)...)
+	}
+	return out, nil
 }
 
 // DownOptions contains options for tearing down a devcontainer.
@@ -641,9 +934,14 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 		}
 	}
 
-	// Clean up SSH config entry
+	// Clean up SSH config entry and the per-workspace known_hosts pin so a
+	// subsequent `dcx up` with a different host key doesn't produce a
+	// "REMOTE HOST IDENTIFICATION HAS CHANGED" scare.
 	if containerInfo != nil {
 		_ = hostconfig.RemoveSSHConfig(containerInfo.Name)
+	}
+	if workspaceID != "" {
+		_ = dcxssh.RemoveHost(workspaceID)
 	}
 
 	ui.Println("Devcontainer removed")

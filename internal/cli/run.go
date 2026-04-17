@@ -6,7 +6,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/shortcuts"
-	"github.com/griffithind/dcx/internal/ssh/client"
+	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -127,8 +127,9 @@ func executeInContainer(execArgs []string) error {
 	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
 	// Execute via unified SSH path
-	exitCode, err := client.ExecInContainer(cliCtx.Ctx, client.ContainerExecOptions{
+	exitCode, err := sshexec.ExecInContainer(cliCtx.Ctx, sshexec.ContainerExecOptions{
 		ContainerName: containerInfo.Name,
+		WorkspaceID:   containerInfo.Labels.WorkspaceID,
 		Config:        cfg,
 		WorkspacePath: cliCtx.WorkspacePath(),
 		Command:       execArgs,

@@ -11,7 +11,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
-	"github.com/griffithind/dcx/internal/ssh/client"
+	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
 	"github.com/griffithind/dcx/internal/ui"
 )
 
@@ -461,8 +461,9 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 
 	// Execute via unified SSH path (handles user, workdir, base env, agent forwarding)
 	tty := false
-	exitCode, err := client.ExecInContainer(ctx, client.ContainerExecOptions{
+	exitCode, err := sshexec.ExecInContainer(ctx, sshexec.ContainerExecOptions{
 		ContainerName: r.containerID,
+		WorkspaceID:   r.workspaceID,
 		Config:        r.cfg,
 		WorkspacePath: r.workspacePath,
 		Command:       execCmd,

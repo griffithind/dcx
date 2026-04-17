@@ -183,22 +183,3 @@ func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectNa
 	return state, info, nil
 }
 
-// FindContainerByName returns a container by its name.
-// This is used by the SSH command to find a specific container.
-func (m *StateManager) FindContainerByName(ctx context.Context, containerName string) (*ContainerInfo, error) {
-	containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
-		LabelManaged: "true",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	for i := range containers {
-		if containers[i].Name == containerName {
-			return containerInfoFromSummary(&containers[i]), nil
-		}
-	}
-
-	return nil, nil
-}
-

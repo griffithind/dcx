@@ -127,6 +127,33 @@ const (
 	LabelCacheProbedEnvHash = Prefix + ".cache.probed.env.hash"
 )
 
+// SSH-related labels.
+//
+// Labels are immutable after container creation (Docker has no label-update
+// API), so these are stamped once at create time and read by all subsequent
+// dcx invocations. The port is chosen by Docker (-p 127.0.0.1::48022) and
+// read back via `docker port`, so the value here is authoritative after the
+// container exists.
+const (
+	// LabelSSHHostPort is the ephemeral host port Docker mapped to the
+	// agent's :48022 listener, written as a decimal string.
+	LabelSSHHostPort = Prefix + ".ssh.host.port"
+
+	// LabelSSHBindAddress is the host interface the port is bound to,
+	// typically "127.0.0.1" or (with --hosts) "0.0.0.0".
+	LabelSSHBindAddress = Prefix + ".ssh.bind.address"
+
+	// LabelSSHAllowedClientIPs is a comma-separated list of CIDR strings
+	// (plus bare IPs) the agent's ConnCallback will accept in addition to
+	// loopback. Empty means loopback-only.
+	LabelSSHAllowedClientIPs = Prefix + ".ssh.allowed.client.ips"
+
+	// LabelSSHAuthorizedKeysSHA256 is the hex-encoded SHA256 of the content
+	// that was written to /run/secrets/dcx/authorized_keys at create time.
+	// A mismatch on subsequent Up() triggers silent re-sync.
+	LabelSSHAuthorizedKeysSHA256 = Prefix + ".ssh.authorized.keys.sha256"
+)
+
 // ContainerLabels represents all dcx labels for a container.
 // Renamed from Labels for clarity.
 type ContainerLabels struct {
@@ -168,6 +195,12 @@ type ContainerLabels struct {
 	CacheFeatureDigests map[string]string
 	CacheProbedEnv      map[string]string
 	CacheProbedEnvHash  string
+
+	// SSH
+	SSHHostPort              int
+	SSHBindAddress           string
+	SSHAllowedClientIPs      string
+	SSHAuthorizedKeysSHA256  string
 }
 
 // CacheData holds cached information for staleness detection.
@@ -261,6 +294,14 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	}
 	setIfNotEmpty(m, LabelCacheProbedEnvHash, l.CacheProbedEnvHash)
 
+	// SSH
+	if l.SSHHostPort > 0 {
+		m[LabelSSHHostPort] = util.IntToString(l.SSHHostPort)
+	}
+	setIfNotEmpty(m, LabelSSHBindAddress, l.SSHBindAddress)
+	setIfNotEmpty(m, LabelSSHAllowedClientIPs, l.SSHAllowedClientIPs)
+	setIfNotEmpty(m, LabelSSHAuthorizedKeysSHA256, l.SSHAuthorizedKeysSHA256)
+
 	return m
 }
 
@@ -321,6 +362,14 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 		_ = json.Unmarshal([]byte(data), &l.CacheProbedEnv)
 	}
 	l.CacheProbedEnvHash = m[LabelCacheProbedEnvHash]
+
+	// SSH
+	if s := m[LabelSSHHostPort]; s != "" {
+		l.SSHHostPort = util.StringToInt(s)
+	}
+	l.SSHBindAddress = m[LabelSSHBindAddress]
+	l.SSHAllowedClientIPs = m[LabelSSHAllowedClientIPs]
+	l.SSHAuthorizedKeysSHA256 = m[LabelSSHAuthorizedKeysSHA256]
 
 	return l
 }

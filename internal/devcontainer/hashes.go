@@ -88,13 +88,6 @@ func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFi
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ComputeSimpleHash computes a simple SHA256 hash of raw JSON bytes.
-// This is useful for quick hash computation without full config parsing.
-func ComputeSimpleHash(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
 // collectComposeDockerfiles parses compose files and returns absolute paths
 // to all Dockerfiles referenced by service build directives.
 func collectComposeDockerfiles(composeFiles []string) []string {

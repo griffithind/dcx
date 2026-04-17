@@ -375,17 +375,20 @@ func TestBuildEnvironment(t *testing.T) {
 }
 
 func TestBuildPortBindings(t *testing.T) {
+	// buildPortBindings always appends the dcx SSH listener in addition to
+	// any user-configured forwardPorts. Expected lengths account for that
+	// extra entry.
 	tests := []struct {
 		name     string
 		resolved *devcontainer.ResolvedDevContainer
-		wantLen  int
+		wantLen  int // includes the trailing dcx SSH port
 	}{
 		{
-			name: "no ports",
+			name: "no user ports (SSH only)",
 			resolved: &devcontainer.ResolvedDevContainer{
 				ForwardPorts: nil,
 			},
-			wantLen: 0,
+			wantLen: 1,
 		},
 		{
 			name: "single port",
@@ -394,7 +397,7 @@ func TestBuildPortBindings(t *testing.T) {
 					{ContainerPort: 8080, HostPort: 8080},
 				},
 			},
-			wantLen: 1,
+			wantLen: 2,
 		},
 		{
 			name: "different host port",
@@ -403,7 +406,7 @@ func TestBuildPortBindings(t *testing.T) {
 					{ContainerPort: 8080, HostPort: 3000},
 				},
 			},
-			wantLen: 1,
+			wantLen: 2,
 		},
 		{
 			name: "multiple ports",
@@ -413,7 +416,7 @@ func TestBuildPortBindings(t *testing.T) {
 					{ContainerPort: 5432, HostPort: 5432},
 				},
 			},
-			wantLen: 2,
+			wantLen: 3,
 		},
 	}
 
@@ -421,11 +424,13 @@ func TestBuildPortBindings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runtime := &UnifiedRuntime{resolved: tt.resolved}
 			got := runtime.buildPortBindings()
-			if tt.wantLen == 0 {
-				assert.Nil(t, got)
-			} else {
-				assert.Len(t, got, tt.wantLen)
-			}
+			assert.Len(t, got, tt.wantLen)
+
+			// The last entry must be the dcx SSH listener.
+			ssh := got[len(got)-1]
+			assert.Equal(t, sshAgentContainerPort, ssh.ContainerPort)
+			assert.Equal(t, "127.0.0.1", ssh.Host)
+			assert.True(t, ssh.EphemeralHostPort)
 		})
 	}
 }

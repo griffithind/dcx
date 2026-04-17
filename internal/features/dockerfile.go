@@ -65,16 +65,16 @@ func (g *DockerfileGenerator) Generate() string {
 	sb.WriteString("# This Dockerfile installs devcontainer features using BuildKit build contexts\n\n")
 
 	// Start from base image
-	sb.WriteString(fmt.Sprintf("FROM %s\n\n", g.baseImage))
+	fmt.Fprintf(&sb, "FROM %s\n\n", g.baseImage)
 
 	// Set build-time arguments for feature installation per devcontainer spec
 	// The default home directories are provided as ARG defaults, but we use
 	// dynamic resolution via getent to handle non-standard home directories.
 	sb.WriteString("# Feature installation environment\n")
-	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER=%s\n", g.remoteUser))
-	sb.WriteString(fmt.Sprintf("ARG _REMOTE_USER_HOME=%s\n", g.remoteUserHome))
-	sb.WriteString(fmt.Sprintf("ARG _CONTAINER_USER=%s\n", g.containerUser))
-	sb.WriteString(fmt.Sprintf("ARG _CONTAINER_USER_HOME=%s\n\n", g.containerUserHome))
+	fmt.Fprintf(&sb, "ARG _REMOTE_USER=%s\n", g.remoteUser)
+	fmt.Fprintf(&sb, "ARG _REMOTE_USER_HOME=%s\n", g.remoteUserHome)
+	fmt.Fprintf(&sb, "ARG _CONTAINER_USER=%s\n", g.containerUser)
+	fmt.Fprintf(&sb, "ARG _CONTAINER_USER_HOME=%s\n\n", g.containerUserHome)
 
 	// Create features temp directory and copy builtin.env from build context
 	sb.WriteString("# Setup features directory and copy environment file\n")
@@ -91,7 +91,7 @@ func (g *DockerfileGenerator) Generate() string {
 	if len(envVars) > 0 {
 		sb.WriteString("# Container environment from features\n")
 		for key, value := range envVars {
-			sb.WriteString(fmt.Sprintf("ENV %s=%s\n", key, common.ShellQuote(value)))
+			fmt.Fprintf(&sb, "ENV %s=%s\n", key, common.ShellQuote(value))
 		}
 		sb.WriteString("\n")
 	}
@@ -99,7 +99,7 @@ func (g *DockerfileGenerator) Generate() string {
 	// Add devcontainer.metadata label per spec
 	if g.metadata != "" {
 		sb.WriteString("# Devcontainer metadata (per spec)\n")
-		sb.WriteString(fmt.Sprintf("LABEL devcontainer.metadata=%s\n\n", common.LabelQuote(g.metadata)))
+		fmt.Fprintf(&sb, "LABEL devcontainer.metadata=%s\n\n", common.LabelQuote(g.metadata))
 	}
 
 	return sb.String()

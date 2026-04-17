@@ -222,6 +222,44 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 // Ensure Docker implements state.ContainerClient.
 var _ state.ContainerClient = (*Docker)(nil)
 
+// PortMapping returns the ephemeral host port Docker mapped to the given
+// container port/proto (e.g. (48022, "tcp") → 32769).
+//
+// Returns an error if the port is not published or the container is gone.
+func (d *Docker) PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error) {
+	target := fmt.Sprintf("%d/%s", containerPort, proto)
+	cmd := exec.CommandContext(ctx, "docker", "port", containerName, target)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("docker port %s %s: %w", containerName, target, err)
+	}
+	// Output looks like one of:
+	//   127.0.0.1:32769
+	//   0.0.0.0:32769\n[::]:32769
+	// Take the first line's last colon-separated component.
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return 0, fmt.Errorf("no port mapping for %s in %s", target, containerName)
+	}
+	line := strings.TrimSpace(lines[0])
+	idx := strings.LastIndex(line, ":")
+	if idx < 0 {
+		return 0, fmt.Errorf("unexpected docker port output: %q", line)
+	}
+	portStr := line[idx+1:]
+	var port int
+	for _, r := range portStr {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("unexpected docker port output: %q", line)
+		}
+		port = port*10 + int(r-'0')
+	}
+	if port == 0 {
+		return 0, fmt.Errorf("no host port bound to %s in %s", target, containerName)
+	}
+	return port, nil
+}
+
 // ImageExists checks if an image exists locally.
 func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef)
@@ -468,8 +506,23 @@ func (d *Docker) CreateContainer(ctx context.Context, opts CreateContainerOption
 		}
 	}
 
-	// Port bindings - now much simpler!
+	// Port bindings.
+	//
+	// Three shapes, driven by fields on each PortForward:
+	//
+	//   EphemeralHostPort=true + Host set  -> -p <host>::<container>    (Docker picks host port, binds only to <host>)
+	//   EphemeralHostPort=true + no Host   -> -p ::<container>          (Docker picks host port, binds to 0.0.0.0)
+	//   HostPort set (or default to container) + Host -> -p <host>:<hostPort>:<container>
+	//   HostPort set (or default to container) + no Host -> -p <hostPort>:<container>
 	for _, p := range opts.Ports {
+		if p.EphemeralHostPort {
+			if p.Host != "" {
+				args = append(args, "-p", fmt.Sprintf("%s::%d", p.Host, p.ContainerPort))
+			} else {
+				args = append(args, "-p", fmt.Sprintf("::%d", p.ContainerPort))
+			}
+			continue
+		}
 		hostPort := p.HostPort
 		if hostPort == 0 {
 			hostPort = p.ContainerPort
@@ -844,6 +897,30 @@ func (d *Docker) SimpleExecInContainer(ctx context.Context, containerName string
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	return cmd.CombinedOutput()
+}
+
+// ExecInContainer runs a command in a container and returns non-nil error
+// if it exits non-zero. Used by host-side callers that only care about
+// exit status (e.g. liveness probes).
+func (d *Docker) ExecInContainer(ctx context.Context, containerName string, argv []string) error {
+	args := append([]string{"exec", containerName}, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	return cmd.Run()
+}
+
+// ExecDetached starts a command in a container as a background process via
+// `docker exec -d`. Docker returns once the command has been spawned; its
+// lifecycle is owned by the container. The process inherits the
+// container's default user — callers that need a specific user should
+// mount any required files with that user as owner, rather than bouncing
+// to root.
+func (d *Docker) ExecDetached(ctx context.Context, containerName string, argv []string) error {
+	args := append([]string{"exec", "-d", containerName}, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker exec -d failed: %w, output: %s", err, output)
+	}
+	return nil
 }
 
 // CopyToContainer copies a file to a container.

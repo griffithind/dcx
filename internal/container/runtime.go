@@ -42,6 +42,11 @@ type UpOptions struct {
 	// BuildSecrets are secrets to pass to docker build (BuildKit secrets).
 	// Map of secret ID to temp file path containing the secret value.
 	BuildSecrets map[string]string
+
+	// SSHBindHost is the host interface the dcx-agent SSH port is published
+	// on. Empty means 127.0.0.1 (loopback-only); "0.0.0.0" exposes it on
+	// every host interface, gated by the agent's ConnCallback.
+	SSHBindHost string
 }
 
 // DownOptions configures the Down operation.

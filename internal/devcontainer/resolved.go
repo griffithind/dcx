@@ -175,6 +175,12 @@ type PortForward struct {
 	Label         string
 	Protocol      string
 	OnAutoForward string
+
+	// EphemeralHostPort, if true, asks Docker to assign the host port itself
+	// (via the `host::container` syntax). Used for the dcx-agent SSH port so
+	// the mapping is unique per container and discovered post-create via
+	// `docker port`.
+	EphemeralHostPort bool
 }
 
 // LifecycleHooks contains all lifecycle hook commands.

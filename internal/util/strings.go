@@ -1,6 +1,9 @@
 package util
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // BoolToString converts a boolean to its string representation.
 func BoolToString(b bool) string {
@@ -8,6 +11,25 @@ func BoolToString(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// IntToString converts an int to its decimal string representation.
+func IntToString(n int) string {
+	return strconv.Itoa(n)
+}
+
+// StringToInt parses a decimal string to int, returning 0 on failure.
+// The zero-on-failure contract is intended for label parsing where an
+// absent/malformed value should be treated as "unset."
+func StringToInt(s string) int {
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // UnionStrings returns a union of two string slices without duplicates.

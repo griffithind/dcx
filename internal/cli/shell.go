@@ -4,7 +4,7 @@ import (
 	"os"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/ssh/client"
+	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
 	"github.com/spf13/cobra"
 )
 
@@ -43,8 +43,9 @@ func runShell(cmd *cobra.Command, args []string) error {
 
 	// Open interactive shell via unified SSH path
 	tty := true
-	exitCode, err := client.ExecInContainer(cliCtx.Ctx, client.ContainerExecOptions{
+	exitCode, err := sshexec.ExecInContainer(cliCtx.Ctx, sshexec.ContainerExecOptions{
 		ContainerName: containerInfo.Name,
+		WorkspaceID:   containerInfo.Labels.WorkspaceID,
 		Config:        cfg,
 		WorkspacePath: cliCtx.WorkspacePath(),
 		Command:       nil, // nil = interactive shell

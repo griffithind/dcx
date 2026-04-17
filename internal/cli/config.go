@@ -82,10 +82,18 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
-	// Use simple hash of raw JSON to match workspace builder
+	// Resolve the configuration so the reported ConfigHash matches what
+	// `dcx up` stamps into the container label — ComputeConfigHash covers
+	// devcontainer.json + Dockerfile + compose files + features, not just
+	// the raw devcontainer.json.
+	//
+	// If the resolve fails (unresolvable features offline, invalid plan),
+	// we fall back to leaving the hash empty — matching the previous
+	// behavior of silently omitting it on error rather than breaking
+	// `dcx config` output for users who just want to inspect their config.
 	var configHash string
-	if raw := cfg.GetRawJSON(); len(raw) > 0 {
-		configHash = devcontainer.ComputeSimpleHash(raw)
+	if resolved, rerr := svc.Load(cmd.Context()); rerr == nil {
+		configHash = resolved.ConfigHash
 	}
 
 	// Determine plan type

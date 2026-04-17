@@ -76,24 +76,24 @@ func (e *DCXError) Unwrap() error {
 // UserFriendly returns a user-friendly error message with hints.
 func (e *DCXError) UserFriendly() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Error: %s\n", e.Message))
+	fmt.Fprintf(&sb, "Error: %s\n", e.Message)
 
 	if e.Cause != nil {
-		sb.WriteString(fmt.Sprintf("Cause: %s\n", e.Cause.Error()))
+		fmt.Fprintf(&sb, "Cause: %s\n", e.Cause.Error())
 	}
 
 	if e.Hint != "" {
-		sb.WriteString(fmt.Sprintf("\nHint: %s\n", e.Hint))
+		fmt.Fprintf(&sb, "\nHint: %s\n", e.Hint)
 	}
 
 	if e.DocURL != "" {
-		sb.WriteString(fmt.Sprintf("\nDocumentation: %s\n", e.DocURL))
+		fmt.Fprintf(&sb, "\nDocumentation: %s\n", e.DocURL)
 	}
 
 	if len(e.Context) > 0 {
 		sb.WriteString("\nContext:\n")
 		for k, v := range e.Context {
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, v))
+			fmt.Fprintf(&sb, "  %s: %s\n", k, v)
 		}
 	}
 

@@ -65,7 +65,7 @@ func (f *ErrorFormatter) formatDCXError(err *dcxerrors.DCXError) string {
 		sb.WriteString(pterm.FgBlue.Sprint("Context"))
 		sb.WriteString(":\n")
 		for k, v := range err.Context {
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", pterm.FgGray.Sprint(k), v))
+			fmt.Fprintf(&sb, "  %s: %s\n", pterm.FgGray.Sprint(k), v)
 		}
 	}
 

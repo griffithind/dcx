@@ -3,10 +3,11 @@
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -79,8 +80,12 @@ func TestSSHServerE2E(t *testing.T) {
 		configStr := string(content)
 		assert.Contains(t, configStr, "# DCX managed - "+containerName)
 		assert.Contains(t, configStr, "Host "+hostname)
-		assert.Contains(t, configStr, "ProxyCommand")
-		assert.Contains(t, configStr, "ssh --stdio "+containerName)
+		// TCP transport: config points at 127.0.0.1:<ephemeral port>, never
+		// a ProxyCommand stdio tunnel.
+		assert.Contains(t, configStr, "HostName 127.0.0.1")
+		assert.Regexp(t, `Port \d+`, configStr)
+		assert.NotContains(t, configStr, "ProxyCommand")
+		assert.NotContains(t, configStr, "--stdio")
 	})
 
 	// Test SSH connection works
@@ -186,6 +191,44 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	})
 }
 
+// TestSSHPortStableAcrossDownUpE2E verifies the SSH host port does not
+// change when a workspace is torn down and brought back up. Stability is
+// load-bearing: IDE clients (VS Code Remote-SSH, JetBrains Gateway,
+// Claude Desktop) key `known_hosts` entries and persistent connection
+// caches by (host, port) — a rotating port shows up as "connection
+// refused" or a host-key-changed warning even though dcx is healthy.
+func TestSSHPortStableAcrossDownUpE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, workspace, "down")
+	})
+
+	stdout1 := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	port1 := extractSSHPort(t, stdout1)
+
+	// Tear down completely — removes the container, freeing the port.
+	helpers.RunDCXInDirSuccess(t, workspace, "down")
+
+	// Up again. The port must be the same as before.
+	stdout2 := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	port2 := extractSSHPort(t, stdout2)
+
+	assert.Equal(t, port1, port2,
+		"SSH port changed across down+up: first=%d second=%d — IDE known_hosts entries break when this is not stable",
+		port1, port2)
+
+	// A third cycle for good measure.
+	helpers.RunDCXInDirSuccess(t, workspace, "down")
+	stdout3 := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	port3 := extractSSHPort(t, stdout3)
+	assert.Equal(t, port1, port3, "SSH port drifted after three cycles")
+}
+
 // TestSSHServerAlwaysEnabledE2E verifies that SSH is always configured when running dcx up.
 func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 	t.Parallel()
@@ -204,13 +247,13 @@ func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 }
 
 // TestSSHFromDifferentDirectoryE2E tests that SSH works from any directory.
-// This simulates VS Code Remote SSH behavior where the ProxyCommand is executed
-// from an arbitrary working directory.
+// With the TCP transport the generated ~/.ssh/config is self-contained
+// (HostName/Port/IdentityFile), so cwd has no bearing on whether the
+// connection succeeds or on the resolved remote working directory.
 func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Create workspace with a specific remoteUser to verify config is loaded correctly
 	devcontainerJSON := `{
 		"name": "ssh-dir-test",
 		"image": "alpine:latest",
@@ -223,7 +266,6 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// Start container with SSH
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	hostname := extractSSHHostname(t, stdout)
 
@@ -253,56 +295,30 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 			"workspace_path label should be set to the workspace directory")
 	})
 
-	// Test SSH from /tmp (different directory than workspace)
+	// Test `ssh <host>` from /tmp. With TCP transport, cwd is irrelevant —
+	// the generated block has HostName/Port baked in.
 	t.Run("ssh_from_different_directory", func(t *testing.T) {
-		dcxBinary := helpers.GetDCXBinary(t)
-
-		// Run SSH with ProxyCommand explicitly from /tmp
-		// The ProxyCommand uses the container name (dcx_<workspaceID>)
-		sshArgs := []string{
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "UserKnownHostsFile=/dev/null",
-			"-o", "LogLevel=ERROR",
+		cmd := exec.Command("ssh",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
-			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, containerName),
-			hostname,
-			"pwd",
-		}
-
-		cmd := exec.Command("ssh", sshArgs...)
-		cmd.Dir = "/tmp" // Run from different directory
+			hostname, "pwd")
+		cmd.Dir = "/tmp"
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "SSH from /tmp failed: %s", output)
-
-		// Verify working directory is correct (from devcontainer.json)
 		assert.Contains(t, string(output), "/test-workspace",
 			"SSH should use correct working directory from config even when run from different directory")
 	})
 
-	// Test that correct user is used when running from different directory
 	t.Run("ssh_user_from_different_directory", func(t *testing.T) {
-		dcxBinary := helpers.GetDCXBinary(t)
-
-		sshArgs := []string{
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "UserKnownHostsFile=/dev/null",
-			"-o", "LogLevel=ERROR",
+		cmd := exec.Command("ssh",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
-			"-o", fmt.Sprintf("ProxyCommand=%s ssh --stdio %s", dcxBinary, containerName),
-			hostname,
-			"whoami",
-		}
-
-		cmd := exec.Command("ssh", sshArgs...)
+			hostname, "whoami")
 		cmd.Dir = "/tmp"
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "SSH whoami from /tmp failed: %s", output)
-
-		// Verify user is correct (from devcontainer.json remoteUser)
 		assert.Contains(t, string(output), "root",
 			"SSH should use correct user from config even when run from different directory")
 	})
@@ -602,4 +618,22 @@ func extractSSHHostname(t *testing.T, output string) string {
 
 	t.Fatal("Could not extract SSH hostname from output")
 	return ""
+}
+
+// extractSSHPort scrapes the "(127.0.0.1:NNNNN)" fragment dcx prints in
+// its `SSH configured: …` success line.
+func extractSSHPort(t *testing.T, output string) int {
+	t.Helper()
+
+	re := regexp.MustCompile(`127\.0\.0\.1:(\d+)`)
+	for _, line := range strings.Split(output, "\n") {
+		if m := re.FindStringSubmatch(line); len(m) == 2 {
+			n, err := strconv.Atoi(m[1])
+			if err == nil {
+				return n
+			}
+		}
+	}
+	t.Fatalf("Could not extract SSH port from output:\n%s", output)
+	return 0
 }

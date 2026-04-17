@@ -44,27 +44,34 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// DCX customizations will be loaded later with cfg
 	var dcxCustom *devcontainer.DcxCustomizations
 
-	// Try to load config and compute hash for staleness detection
+	// Try to load config and compute hash for staleness detection.
+	//
+	// Staleness detection MUST use the same hash as `dcx up` produces at
+	// container creation time (devcontainer.ComputeConfigHash covers the
+	// full set of build inputs: devcontainer.json, Dockerfile, compose
+	// files, features). The resolved config carries that hash after
+	// Service.Load, so routing status through the same Load path keeps
+	// `dcx status` and `dcx up` in lockstep.
+	//
+	// Load can fail (features unreachable offline, invalid json, etc.). We
+	// degrade gracefully to a container-state-only view in that case rather
+	// than returning an incorrect "stale" verdict.
 	var currentState state.ContainerState
 	var containerInfo *state.ContainerInfo
 	var cfg *devcontainer.DevContainerConfig
-	var configHash string
 
-	cfg, _, err = devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
-	if err == nil {
-		// Get DCX customizations for shortcuts display
+	// Attempt a resolve to pick up the full config hash + dcx customizations.
+	resolved, resolveErr := cliCtx.Service.Load(cliCtx.Ctx)
+	if resolveErr == nil {
+		cfg = resolved.RawConfig
 		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
-		// Config exists, check for staleness
-		if raw := cfg.GetRawJSON(); len(raw) > 0 {
-			configHash = devcontainer.ComputeSimpleHash(raw)
-		}
-		if configHash != "" {
-			currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithProjectAndHash(cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, configHash)
-		} else {
-			currentState, containerInfo, err = cliCtx.GetState()
-		}
+		currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithProjectAndHash(
+			cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, resolved.ConfigHash)
+	} else if loaded, _, lerr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath()); lerr == nil {
+		cfg = loaded
+		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
+		currentState, containerInfo, err = cliCtx.GetState()
 	} else {
-		// No config or error loading it, just get basic state
 		currentState, containerInfo, err = cliCtx.GetState()
 	}
 
@@ -153,8 +160,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			}
 			ui.Printf("  %s", ui.FormatLabel("Features", strings.Join(featureList, ", ")))
 		}
-		if configHash != "" {
-			ui.Printf("  %s", ui.FormatLabel("Config Hash", configHash[:12]))
+		if resolved != nil && resolved.ConfigHash != "" {
+			ui.Printf("  %s", ui.FormatLabel("Config Hash", resolved.ConfigHash[:12]))
 		}
 	}
 

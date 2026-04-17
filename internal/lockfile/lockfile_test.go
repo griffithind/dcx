@@ -48,9 +48,7 @@ func TestGetPath(t *testing.T) {
 
 func TestLockfileNew(t *testing.T) {
 	lf := New()
-	if lf == nil {
-		t.Fatal("New() returned nil")
-	}
+	// New always returns a non-nil *Lockfile with an initialized map.
 	if lf.Features == nil {
 		t.Error("Features map is nil")
 	}
