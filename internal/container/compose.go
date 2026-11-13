@@ -3,16 +3,15 @@ package container
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/griffithind/dcx/internal/state"
 )
 
 // ComposeProject is a docker compose project together with the files that
-// describe it. Every compose command dcx runs goes through it, always with
-// explicit -f files, so compose never picks up a default-named file from
-// whatever directory it happens to run in.
+// describe it. Every compose command dcx runs is built from one (and run
+// by Engine.Compose), always with explicit -f files, so compose never picks
+// up a default-named file from whatever directory it happens to run in.
 type ComposeProject struct {
 	Name  string
 	Dir   string   // working directory; relative -f paths resolve against it
@@ -53,7 +52,7 @@ func ExistingComposeProject(info *state.ContainerInfo, defaultProject, defaultDi
 	return p
 }
 
-// args returns the global compose arguments followed by extra.
+// args returns the docker compose arguments for p followed by extra.
 func (p ComposeProject) args(extra ...string) []string {
 	args := []string{"compose"}
 	if p.Name != "" {
@@ -65,34 +64,19 @@ func (p ComposeProject) args(extra ...string) []string {
 	return append(args, extra...)
 }
 
-// command returns the docker compose command for extra, run from p.Dir.
-func (p ComposeProject) command(ctx context.Context, extra ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "docker", p.args(extra...)...)
-	cmd.Dir = p.Dir
-	return cmd
-}
-
-// run runs a compose command, streaming its output.
-func (p ComposeProject) run(ctx context.Context, extra ...string) error {
-	cmd := p.command(ctx, extra...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // Start starts the project's existing, stopped services.
-func (p ComposeProject) Start(ctx context.Context) error {
-	return p.run(ctx, "start")
+func (p ComposeProject) Start(ctx context.Context, e Engine) error {
+	return e.Compose(ctx, p, "start")
 }
 
 // Stop stops the project's services without removing them.
-func (p ComposeProject) Stop(ctx context.Context) error {
-	return p.run(ctx, "stop")
+func (p ComposeProject) Stop(ctx context.Context, e Engine) error {
+	return e.Compose(ctx, p, "stop")
 }
 
 // Down removes the project's containers and networks (and, if requested,
 // its volumes and orphan containers).
-func (p ComposeProject) Down(ctx context.Context, opts DownOptions) error {
+func (p ComposeProject) Down(ctx context.Context, e Engine, opts DownOptions) error {
 	args := []string{"down"}
 	if opts.RemoveVolumes {
 		args = append(args, "-v")
@@ -100,7 +84,7 @@ func (p ComposeProject) Down(ctx context.Context, opts DownOptions) error {
 	if opts.RemoveOrphans {
 		args = append(args, "--remove-orphans")
 	}
-	return p.run(ctx, args...)
+	return e.Compose(ctx, p, args...)
 }
 
 // with returns a copy of p with extra files appended.

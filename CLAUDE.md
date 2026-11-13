@@ -110,7 +110,6 @@ Load config → Check state (running + setup complete → done)
 | `spec.go` | `ContainerSpec` - every runtime setting of the primary container |
 | `compose.go` | `ComposeProject` - the only docker compose executor (always explicit `-f` files) |
 | `compose_override.go` | `composeOverride` - renders a `ContainerSpec` as compose override YAML (yaml.v3) |
-| `exec.go` | Command execution in containers |
 | `secrets.go` | Secret mounting after container start |
 
 **UnifiedRuntime Plan Dispatch:**
@@ -393,7 +392,7 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 
 - Users connect with OpenSSH (`dcx ssh`, `ssh <alias>`); dcx's own SSH client (`internal/ssh/client`) is for lifecycle hooks only.
 - Only `internal/cli` (and `internal/ui`) print. Everything else takes a `report.Reporter`; commands with `--json` output pass `report.Discard`.
-- Library code never constructs a Docker client; it receives a `container.Engine`. Use `containertest.Fake` in unit tests.
+- Library code never constructs a Docker client; it receives a `container.Engine` (`build` uses the narrower `build.Engine`). Only `container/docker.go` runs `docker` (depguard enforces it); add an Engine method rather than calling `os/exec`. Use `containertest.Fake` in unit tests.
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
 - Variable substitution happens once, in `devcontainer.Load` (`NewSubstitutionContext` + `SubstituteConfig`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.

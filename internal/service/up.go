@@ -228,12 +228,12 @@ func (s *DevContainerService) fetchBuildSecrets(ctx context.Context, resolved *d
 // one), mounts its SSH secrets and makes sure it is listening.
 func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
 	s.report.Infof("Installing dcx agent...")
-	updated, err := deploy.PreDeployAgent(ctx, r.info.Name)
+	updated, err := deploy.Deploy(ctx, s.engine, r.info.Name)
 	if err != nil {
 		return fmt.Errorf("failed to install dcx agent: %w", err)
 	}
 	if updated {
-		if err := deploy.StopOutdatedAgent(ctx, r.info.Name, agentproto.BinaryPath, agentproto.LoopbackAddr); err != nil {
+		if err := deploy.StopOutdated(ctx, s.engine, r.info.Name); err != nil {
 			return err
 		}
 	}

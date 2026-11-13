@@ -2,21 +2,14 @@ package build
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-
-	"github.com/griffithind/dcx/internal/devcontainer"
 )
 
-// BuildFromDockerfile builds an image from a Dockerfile using Docker CLI.
-// This uses `docker buildx build` to get BuildKit-style progress output.
-func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBuildOptions) (string, error) {
-	// Resolve context path
+// BuildFromDockerfile builds an image from a Dockerfile through the
+// engine. Relative context and Dockerfile paths are resolved first (the
+// Dockerfile relative to the context), so the engine gets absolute paths.
+func (b *Builder) BuildFromDockerfile(ctx context.Context, opts DockerfileBuildOptions) (string, error) {
 	contextPath := opts.Context
 	if contextPath == "" {
 		contextPath = "."
@@ -25,153 +18,12 @@ func (b *CLIBuilder) BuildFromDockerfile(ctx context.Context, opts DockerfileBui
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve context path: %w", err)
 	}
-
-	// Build command arguments
-	args := []string{"buildx", "build"}
-
-	// Tag
-	if opts.Tag != "" {
-		args = append(args, "-t", opts.Tag)
+	opts.Context = contextPath
+	if opts.Dockerfile != "" && !filepath.IsAbs(opts.Dockerfile) {
+		opts.Dockerfile = filepath.Join(contextPath, opts.Dockerfile)
 	}
-
-	// Dockerfile - resolve to absolute path if relative
-	if opts.Dockerfile != "" {
-		dockerfilePath := opts.Dockerfile
-		if !filepath.IsAbs(dockerfilePath) {
-			// If relative, make it relative to the context
-			dockerfilePath = filepath.Join(contextPath, dockerfilePath)
-		}
-		args = append(args, "-f", dockerfilePath)
-	}
-
-	// Build args
-	for k, v := range opts.Args {
-		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Add metadata label if provided
-	if opts.Metadata != "" {
-		args = append(args, "--label", fmt.Sprintf("%s=%s", devcontainer.DevcontainerMetadataLabel, opts.Metadata))
-	}
-
-	// Cache from
-	for _, cache := range opts.CacheFrom {
-		args = append(args, "--cache-from", cache)
-	}
-
-	// Other flags
-	if opts.NoCache {
-		args = append(args, "--no-cache")
-	}
-	if opts.Pull {
-		args = append(args, "--pull")
-	}
-	if opts.Target != "" {
-		args = append(args, "--target", opts.Target)
-	}
-
-	// Add build contexts (for BuildKit builds with --build-context flag)
-	for name, path := range opts.BuildContexts {
-		args = append(args, "--build-context", fmt.Sprintf("%s=%s", name, path))
-	}
-
-	// Add BuildKit secrets
-	for id, path := range opts.Secrets {
-		args = append(args, "--secret", fmt.Sprintf("id=%s,src=%s", id, path))
-	}
-
-	// Add additional build options from devcontainer.json build.options
-	args = append(args, opts.Options...)
-
-	// Load the image into Docker (default for single-platform builds)
-	args = append(args, "--load")
-
-	// Context path
-	args = append(args, contextPath)
-
-	// Create and configure command
-	cmd := exec.CommandContext(ctx, "docker", args...)
-
-	// Set output - use provided progress writer or stdout/stderr
-	if opts.Progress != nil {
-		cmd.Stdout = opts.Progress
-		cmd.Stderr = opts.Progress
-	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-
-	// Run the build
-	if err := cmd.Run(); err != nil {
+	if err := b.engine.BuildImage(ctx, opts); err != nil {
 		return "", fmt.Errorf("docker build failed: %w", err)
 	}
-
 	return opts.Tag, nil
 }
-
-// ImageExists checks if an image exists locally.
-func (b *CLIBuilder) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef)
-	if err := cmd.Run(); err != nil {
-		// Exit code 1 means image not found
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-// PullImage pulls an image from a registry using Docker CLI.
-func (b *CLIBuilder) PullImage(ctx context.Context, imageRef string, progress io.Writer) error {
-	args := []string{"pull", imageRef}
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-
-	if progress != nil {
-		cmd.Stdout = progress
-		cmd.Stderr = progress
-	} else {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to pull image: %w", err)
-	}
-
-	return nil
-}
-
-// GetImageID returns the ID of an image.
-func (b *CLIBuilder) GetImageID(ctx context.Context, imageRef string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to inspect image: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-// GetImageLabels returns the labels for an image.
-func (b *CLIBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect image: %w", err)
-	}
-
-	var results []struct {
-		Config struct {
-			Labels map[string]string `json:"Labels"`
-		} `json:"Config"`
-	}
-	if err := json.Unmarshal(output, &results); err != nil {
-		return nil, fmt.Errorf("failed to parse image inspect output: %w", err)
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-	return results[0].Config.Labels, nil
-}
-

@@ -505,7 +505,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	}
 
 	patcher := env.NewPatcher(s.engine)
-	prober := env.NewProber()
+	prober := env.NewProber(s.engine)
 
 	// Collect environment variables to patch into /etc/environment
 	envToPatch := make(map[string]string)
@@ -795,7 +795,7 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 		}
 	} else {
 		project := container.ExistingComposeProject(containerInfo, projectName, s.workspacePath)
-		if err := project.Down(ctx, opts); err != nil {
+		if err := project.Down(ctx, s.engine, opts); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}
 		if path, err := container.ComposeOverridePath(containerInfo.WorkspaceID); err == nil && containerInfo.WorkspaceID != "" {

@@ -55,7 +55,7 @@ USER $IMAGE_USER
 `
 
 // BuildUIDUpdate builds an image with updated UID/GID for the remote user.
-func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (string, error) {
+func (b *Builder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (string, error) {
 	// Validate inputs
 	if opts.BaseImage == "" {
 		return "", fmt.Errorf("baseImage is required for UID update")
@@ -71,7 +71,7 @@ func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 
 	// Check if image already exists
 	if !opts.Rebuild {
-		exists, err := b.ImageExists(ctx, opts.Tag)
+		exists, err := b.engine.ImageExists(ctx, opts.Tag)
 		if err == nil && exists {
 			b.report.Infof("[+] Using cached UID image")
 			return opts.Tag, nil
@@ -84,7 +84,7 @@ func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 	// Get metadata from base image if not provided
 	metadata := opts.Metadata
 	if metadata == "" {
-		labels, err := b.GetImageLabels(ctx, opts.BaseImage)
+		labels, err := b.engine.GetImageLabels(ctx, opts.BaseImage)
 		if err == nil && labels != nil {
 			metadata = labels[devcontainer.DevcontainerMetadataLabel]
 		}

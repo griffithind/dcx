@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/report"
@@ -298,4 +299,23 @@ func TestExistingComposeProject(t *testing.T) {
 	assert.Empty(t, p.Files)
 	assert.Equal(t, os.TempDir(), p.Dir)
 	assert.True(t, strings.HasPrefix(strings.Join(p.args("stop"), " "), "compose -p proj stop"))
+}
+
+func TestBuildArgsAreDeterministic(t *testing.T) {
+	opts := build.DockerfileBuildOptions{
+		Tag:           "dcx/ws:base",
+		Dockerfile:    "/w/Dockerfile",
+		Context:       "/w",
+		Args:          map[string]string{"B": "2", "A": "1"},
+		Secrets:       map[string]string{"tok": "/tmp/tok"},
+		BuildContexts: map[string]string{"features": "/tmp/f"},
+		Options:       []string{"--network=host"},
+	}
+	assert.Equal(t, []string{
+		"buildx", "build", "-t", "dcx/ws:base", "-f", "/w/Dockerfile",
+		"--build-arg", "A=1", "--build-arg", "B=2",
+		"--build-context", "features=/tmp/f",
+		"--secret", "id=tok,src=/tmp/tok",
+		"--network=host", "--load", "/w",
+	}, buildArgs(opts))
 }

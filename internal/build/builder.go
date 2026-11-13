@@ -1,5 +1,7 @@
-// Package build provides build-time operations for devcontainer images.
-// This package uses Docker CLI commands for builds to get native BuildKit output.
+// Package build prepares and runs the image builds dcx adds on top of a
+// base image: the features layer and the UID update layer. It generates
+// Dockerfiles and build contexts; the builds themselves run through an
+// Engine (the container engine), so this package never shells out.
 package build
 
 import (
@@ -11,23 +13,13 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 )
 
-// ImageBuilder defines the interface for building container images.
-// This abstraction allows for testing and alternative implementations.
-type ImageBuilder interface {
-	// BuildFromDockerfile builds an image from a Dockerfile.
-	BuildFromDockerfile(ctx context.Context, opts DockerfileBuildOptions) (string, error)
-
-	// BuildWithFeatures builds a derived image with features installed.
-	BuildWithFeatures(ctx context.Context, opts FeatureBuildOptions) (string, error)
-
-	// BuildUIDUpdate builds an image with updated UID/GID for the remote user.
-	BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (string, error)
-
-	// ImageExists checks if an image exists locally.
+// Engine is what builds need from the container engine. container.Engine
+// satisfies it (this package cannot import container, which imports it).
+type Engine interface {
+	// BuildImage builds opts (paths already absolute) and tags it opts.Tag.
+	BuildImage(ctx context.Context, opts DockerfileBuildOptions) error
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
-
-	// PullImage pulls an image from a registry.
-	PullImage(ctx context.Context, imageRef string, progress io.Writer) error
+	GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
 }
 
 // DockerfileBuildOptions contains options for building from a Dockerfile.
@@ -140,21 +132,14 @@ type UIDBuildOptions struct {
 	Metadata string
 }
 
-// CLIBuilder implements ImageBuilder using Docker CLI for all operations.
-// All build and inspection operations use the Docker CLI.
-type CLIBuilder struct {
+// Builder runs dcx's image builds through an Engine.
+type Builder struct {
+	engine Engine
 	report report.Reporter
 }
 
-// NewCLIBuilder creates a new image builder reporting progress to rep.
-func NewCLIBuilder(rep report.Reporter) *CLIBuilder {
-	return &CLIBuilder{report: report.OrDiscard(rep)}
+// NewBuilder creates a builder that runs builds on engine and reports
+// progress to rep.
+func NewBuilder(engine Engine, rep report.Reporter) *Builder {
+	return &Builder{engine: engine, report: report.OrDiscard(rep)}
 }
-
-// Close is a no-op for CLI-based builder.
-func (b *CLIBuilder) Close() error {
-	return nil
-}
-
-// Ensure CLIBuilder implements ImageBuilder.
-var _ ImageBuilder = (*CLIBuilder)(nil)

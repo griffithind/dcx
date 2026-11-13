@@ -214,6 +214,15 @@ Regression tests: env patch (unit), lock modes, feature cache, and two e2e tests
 - **Tests:** about 20 tautological tests deleted; added a real `parseImageSize` test.
 - **Text:** history comments rewritten to say what the code does. Help text, stale comments and `CLAUDE.md` fixed (agent entry point, state enum, label list).
 
+**Step 3 (complete the Engine): done.** Only `container/docker.go` runs `docker` now:
+- **Build:** `build` defines a `build.Engine` (BuildImage, ImageExists, GetImageLabels), which `container.Engine` satisfies; `build` can't import `container`, which imports it. `CLIBuilder` became `Builder`, with no `os/exec`, and its duplicate image-inspect methods are gone. `Docker.BuildImage` renders a deterministic `buildx` command line.
+- **Env:** `env.Prober` uses the new `Engine.ExecOutputAs(user)`. The package-level `container.Exec`/`ExecOutput` (`container/exec.go`) is deleted.
+- **Agent deploy:** `ssh/deploy` is now `Deploy`/`StopOutdated(ctx, engine, container)`, through `ExecAsRoot`, `ExecOutput`, `ExecInContainer` and the re-added `Engine.CopyToContainer`.
+- **Compose:** `ComposeProject` is data. Its Start/Stop/Down take an Engine, and every compose command runs through `Engine.Compose`/`ComposeOutput`.
+- **Doctor:** `doctor` checks `docker compose` through `Docker.ComposeVersion`. A standalone `docker-compose` no longer counts as OK, since dcx never uses it, and the empty-output panic is gone.
+- **Lint rule:** depguard denies `os/exec` everywhere except `container/docker.go` and packages that run other host programs (lifecycle, secrets, selinux, host-requirement probes, cli, the agent, tests).
+- **Coverage:** build 21% → 50%, env 18% → 93%, ssh/deploy 0% → 75%, container 28% → 35%.
+
 ## 5. Recommended plan
 
 Each step ships on its own, in this order:

@@ -6,7 +6,6 @@ import (
 	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/service"
 	"os"
-	"os/exec"
 	"runtime"
 
 	"github.com/griffithind/dcx/internal/container"
@@ -80,7 +79,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// System checks
 	if checkSystemReqs {
 		systemResults = append(systemResults, checkDocker(ctx))
-		systemResults = append(systemResults, checkCompose())
+		systemResults = append(systemResults, checkCompose(ctx))
 		if runtime.GOOS == "linux" {
 			systemResults = append(systemResults, checkSELinux())
 		}
@@ -392,35 +391,19 @@ func checkDocker(ctx context.Context) CheckResult {
 	}
 }
 
-func checkCompose() CheckResult {
-	// Check for docker compose (v2 plugin)
-	cmd := exec.Command("docker", "compose", "version", "--short")
-	cmdOutput, err := cmd.Output()
-	if err == nil {
+// checkCompose checks for the docker compose v2 plugin, the only compose
+// dcx uses (a standalone docker-compose binary is not enough).
+func checkCompose(ctx context.Context) CheckResult {
+	version, err := container.NewDockerCLI().ComposeVersion(ctx)
+	if err != nil {
 		return CheckResult{
 			Name:    "Docker Compose",
-			OK:      true,
-			Message: fmt.Sprintf("version %s", string(cmdOutput[:len(cmdOutput)-1])),
+			OK:      false,
+			Message: "docker compose plugin not found",
+			Hint:    "Install the docker compose v2 plugin (dcx runs `docker compose`)",
 		}
 	}
-
-	// Check for docker-compose (standalone)
-	cmd = exec.Command("docker-compose", "version", "--short")
-	cmdOutput, err = cmd.Output()
-	if err == nil {
-		return CheckResult{
-			Name:    "Docker Compose",
-			OK:      true,
-			Message: fmt.Sprintf("version %s (standalone)", string(cmdOutput[:len(cmdOutput)-1])),
-		}
-	}
-
-	return CheckResult{
-		Name:    "Docker Compose",
-		OK:      false,
-		Message: "not found",
-		Hint:    "Install docker compose plugin or docker-compose",
-	}
+	return CheckResult{Name: "Docker Compose", OK: true, Message: "version " + version}
 }
 
 func checkSELinux() CheckResult {

@@ -11,7 +11,7 @@ import (
 
 // BuildWithFeatures builds a derived image with features installed.
 // Uses BuildKit build contexts for efficient feature content delivery.
-func (b *CLIBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOptions) (string, error) {
+func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOptions) (string, error) {
 	if len(opts.Features) == 0 {
 		// No features to install, return base image
 		return opts.BaseImage, nil
@@ -19,7 +19,7 @@ func (b *CLIBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 
 	// Check if derived image already exists and is up-to-date
 	if !opts.Rebuild {
-		exists, err := b.ImageExists(ctx, opts.Tag)
+		exists, err := b.engine.ImageExists(ctx, opts.Tag)
 		if err == nil && exists {
 			b.report.Infof("Using cached derived image")
 			return opts.Tag, nil

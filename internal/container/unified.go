@@ -27,7 +27,7 @@ type UnifiedRuntime struct {
 	engine   Engine
 	report   report.Reporter
 	resolved *devcontainer.ResolvedDevContainer
-	builder  build.ImageBuilder // CLI-based image builder
+	builder  *build.Builder
 
 	containerID   string
 	containerName string
@@ -42,9 +42,8 @@ func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontaine
 		return nil, fmt.Errorf("resolved devcontainer is required")
 	}
 
-	// Create CLI-based image builder
 	rep = report.OrDiscard(rep)
-	builder := build.NewCLIBuilder(rep)
+	builder := build.NewBuilder(engine, rep)
 
 	return &UnifiedRuntime{
 		engine:        engine,
@@ -106,7 +105,7 @@ func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatu
 		args = append(args, "--build")
 	}
 	args = append(args, composeServices(plan)...)
-	return project.run(ctx, args...)
+	return r.engine.Compose(ctx, project, args...)
 }
 
 // composeServices returns the services `up` starts: all of them when
@@ -617,7 +616,7 @@ func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
 // Start implements ContainerRuntime.Start.
 func (r *UnifiedRuntime) Start(ctx context.Context) error {
 	if plan, ok := r.composePlan(); ok {
-		return r.composeProject(plan).Start(ctx)
+		return r.composeProject(plan).Start(ctx, r.engine)
 	}
 	return r.engine.StartContainer(ctx, r.containerName)
 }
@@ -636,7 +635,7 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 		if opts.Pull {
 			args = append(args, "--pull")
 		}
-		return r.userCompose(plan).run(ctx, args...)
+		return r.engine.Compose(ctx, r.userCompose(plan), args...)
 	}
 
 	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull})
@@ -744,7 +743,7 @@ func (r *UnifiedRuntime) ensureServicesBuilt(ctx context.Context, plan *devconta
 		defer func() { _ = os.Remove(path) }()
 		project = project.with(path)
 	}
-	return project.run(ctx, "build")
+	return r.engine.Compose(ctx, project, "build")
 }
 
 func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
@@ -761,8 +760,7 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 	}
 
 	// Use docker compose config to get fully resolved configuration
-	cmd := r.userCompose(plan).command(ctx, "config", "--format", "json")
-	output, err := cmd.Output()
+	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "config", "--format", "json")
 	if err != nil {
 		return "", fmt.Errorf("failed to get compose config: %w", err)
 	}
@@ -802,4 +800,3 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 	}
 	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
 }
-

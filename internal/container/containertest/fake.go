@@ -4,7 +4,9 @@ package containertest
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/build"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +44,11 @@ type Fake struct {
 	Outputs map[string]string
 	// Files records WriteFileInContainer content by "<container>:<path>".
 	Files map[string][]byte
+	// ComposeOutputs maps space-joined compose arguments (after the
+	// project flags) to ComposeOutput's result.
+	ComposeOutputs map[string]string
+	// Builds records every BuildImage request.
+	Builds []build.DockerfileBuildOptions
 	// Specs records every CreateContainer request.
 	Specs []container.ContainerSpec
 	// Env holds each container's environment (KEY=VALUE) by ID or name.
@@ -231,6 +238,50 @@ func (f *Fake) PullImageWithProgress(_ context.Context, ref string, _ io.Writer)
 	return nil
 }
 
+func (f *Fake) BuildImage(_ context.Context, opts build.DockerfileBuildOptions) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("BuildImage", opts.Tag)
+	f.Builds = append(f.Builds, opts)
+	if f.Images == nil {
+		f.Images = map[string]bool{}
+	}
+	f.Images[opts.Tag] = true
+	return nil
+}
+
+func (f *Fake) CopyToContainer(_ context.Context, src, name, dest string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("CopyToContainer", src, name, dest)
+	if f.Files == nil {
+		f.Files = map[string][]byte{}
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	f.Files[name+":"+dest] = data
+	return nil
+}
+
+func (f *Fake) Compose(_ context.Context, p container.ComposeProject, args ...string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("Compose", append([]string{p.Name}, args...)...)
+	return nil
+}
+
+func (f *Fake) ComposeOutput(_ context.Context, p container.ComposeProject, args ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ComposeOutput", append([]string{p.Name}, args...)...)
+	if out, ok := f.ComposeOutputs[strings.Join(args, " ")]; ok {
+		return []byte(out), nil
+	}
+	return nil, fmt.Errorf("compose failed")
+}
+
 func (f *Fake) ExecInContainer(_ context.Context, name string, argv []string) error {
 	f.mu.Lock()
 	f.record("ExecInContainer", append([]string{name}, argv...)...)
@@ -246,6 +297,16 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("ExecOutput", append([]string{name}, argv...)...)
+	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
+		return []byte(out), nil
+	}
+	return nil, fmt.Errorf("exec failed")
+}
+
+func (f *Fake) ExecOutputAs(_ context.Context, name, user string, argv []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ExecOutputAs", append([]string{name, user}, argv...)...)
 	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
 		return []byte(out), nil
 	}

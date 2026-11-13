@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/build"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -725,6 +727,17 @@ func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []st
 	return exec.CommandContext(ctx, "docker", args...).Output()
 }
 
+// ExecOutputAs runs argv in the container as user ("" = the container's
+// default user) and returns its stdout. A non-zero exit is an error.
+func (d *Docker) ExecOutputAs(ctx context.Context, containerName, user string, argv []string) ([]byte, error) {
+	args := []string{"exec"}
+	if user != "" {
+		args = append(args, "--user", user)
+	}
+	args = append(append(args, containerName), argv...)
+	return exec.CommandContext(ctx, "docker", args...).Output()
+}
+
 // ChmodInContainer changes file permissions inside a container.
 func (d *Docker) ChmodInContainer(ctx context.Context, containerName, path, mode, user string) error {
 	args := []string{"exec"}
@@ -789,3 +802,94 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 	return nil
 }
 
+// BuildImage runs `docker buildx build --load` for opts. Paths in opts are
+// absolute (build.Builder resolves them). Output streams to opts.Progress,
+// or to dcx's stdout/stderr.
+func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error {
+	cmd := exec.CommandContext(ctx, "docker", buildArgs(opts)...)
+	if opts.Progress != nil {
+		cmd.Stdout = opts.Progress
+		cmd.Stderr = opts.Progress
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
+// buildArgs renders build options as `docker buildx build` arguments, with
+// map-valued options sorted so the command line is deterministic.
+func buildArgs(opts build.DockerfileBuildOptions) []string {
+	args := []string{"buildx", "build"}
+	add := func(flag string, values ...string) {
+		for _, v := range values {
+			args = append(args, flag, v)
+		}
+	}
+	if opts.Tag != "" {
+		add("-t", opts.Tag)
+	}
+	if opts.Dockerfile != "" {
+		add("-f", opts.Dockerfile)
+	}
+	for _, k := range sortedKeys(opts.Args) {
+		add("--build-arg", k+"="+opts.Args[k])
+	}
+	if opts.Metadata != "" {
+		add("--label", devcontainer.DevcontainerMetadataLabel+"="+opts.Metadata)
+	}
+	add("--cache-from", opts.CacheFrom...)
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	if opts.Pull {
+		args = append(args, "--pull")
+	}
+	if opts.Target != "" {
+		add("--target", opts.Target)
+	}
+	for _, name := range sortedKeys(opts.BuildContexts) {
+		add("--build-context", name+"="+opts.BuildContexts[name])
+	}
+	for _, id := range sortedKeys(opts.Secrets) {
+		add("--secret", "id="+id+",src="+opts.Secrets[id])
+	}
+	// build.options from devcontainer.json, verbatim.
+	args = append(args, opts.Options...)
+	args = append(args, "--load", opts.Context)
+	return args
+}
+
+// CopyToContainer copies a host file into the container (`docker cp`).
+func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
+	out, err := exec.CommandContext(ctx, "docker", "cp", src, containerName+":"+dest).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker cp: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Compose runs `docker compose` for project p, streaming its output.
+func (d *Docker) Compose(ctx context.Context, p ComposeProject, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", p.args(args...)...)
+	cmd.Dir = p.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// ComposeOutput runs `docker compose` for project p and returns its stdout.
+func (d *Docker) ComposeOutput(ctx context.Context, p ComposeProject, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "docker", p.args(args...)...)
+	cmd.Dir = p.Dir
+	return cmd.Output()
+}
+
+// ComposeVersion returns the version of the docker compose plugin.
+func (d *Docker) ComposeVersion(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}

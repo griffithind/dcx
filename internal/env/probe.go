@@ -57,14 +57,13 @@ func ParseProbeType(s string) ProbeType {
 
 // Prober probes container environments.
 type Prober struct {
+	engine  container.Engine
 	timeout time.Duration
 }
 
-// NewProber creates a new environment prober.
-func NewProber() *Prober {
-	return &Prober{
-		timeout: 10 * time.Second,
-	}
+// NewProber creates an environment prober that runs through engine.
+func NewProber(engine container.Engine) *Prober {
+	return &Prober{engine: engine, timeout: 10 * time.Second}
 }
 
 // Probe executes the environment probe in the container and returns the environment variables.
@@ -82,17 +81,12 @@ func (p *Prober) Probe(ctx context.Context, containerID string, probeType ProbeT
 	probeCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	output, exitCode, err := container.ExecOutput(probeCtx, containerID, cmd, user)
+	output, err := p.engine.ExecOutputAs(probeCtx, containerID, user, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to probe environment: %w", err)
 	}
 
-	if exitCode != 0 {
-		return nil, fmt.Errorf("environment probe exited with code %d", exitCode)
-	}
-
-	// Parse environment output
-	env := parseEnvOutput(output)
+	env := parseEnvOutput(string(output))
 
 	// Remove PWD as it's not meaningful for exec context
 	delete(env, "PWD")

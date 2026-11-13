@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"github.com/griffithind/dcx/internal/build"
 	"io"
 	"time"
 
@@ -30,14 +31,20 @@ type Engine interface {
 	GetImageID(ctx context.Context, imageRef string) (string, error)
 	GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
 	PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error
+	BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error
+
+	Compose(ctx context.Context, project ComposeProject, args ...string) error
+	ComposeOutput(ctx context.Context, project ComposeProject, args ...string) ([]byte, error)
 
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
 	ExecDetached(ctx context.Context, containerName string, argv []string) error
 	ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error)
+	ExecOutputAs(ctx context.Context, containerName, user string, argv []string) ([]byte, error)
 	ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error)
 	MkdirInContainer(ctx context.Context, containerName, path, user string) error
 	ChmodInContainer(ctx context.Context, containerName, path, mode, user string) error
 	ChownInContainer(ctx context.Context, containerName, path, owner string) error
+	CopyToContainer(ctx context.Context, src, containerName, dest string) error
 	WriteFileInContainer(ctx context.Context, containerName, path string, content []byte, user string) error
 }
 

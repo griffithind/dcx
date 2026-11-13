@@ -38,6 +38,29 @@ linters:
             - pkg: github.com/griffithind/dcx/internal/devcontainer
               desc: host-side code; share constants through internal/agentproto
 
+        # Only the container engine runs docker. Library packages go through
+        # container.Engine (or build.Engine), so they can be tested against
+        # containertest.Fake. Packages that legitimately run other host
+        # programs are excluded: lifecycle (initializeCommand), secrets
+        # (secret commands), selinux, devcontainer host-requirement probes,
+        # the cli (OpenSSH hand-off) and the agent.
+        engine-runs-docker:
+          files:
+            - "$all"
+            - "!**/internal/container/docker.go"
+            - "!**/internal/cli/**"
+            - "!**/internal/lifecycle/**"
+            - "!**/internal/secrets/**"
+            - "!**/internal/selinux/**"
+            - "!**/internal/devcontainer/hostreqs.go"
+            - "!**/internal/ssh/server/**"
+            - "!**/cmd/**"
+            - "!$test"
+            - "!**/test/**"
+          deny:
+            - pkg: os/exec
+              desc: run docker through container.Engine (add a method there if one is missing)
+
         # The host/agent contract is compiled into both binaries.
         agentproto-stdlib-only:
           list-mode: strict
