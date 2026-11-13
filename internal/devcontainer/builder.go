@@ -124,11 +124,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 			projectName = ResourceName(resolved.Name, resolved.ID)
 		}
 
-		resolved.Plan = NewComposePlan(
-			absolutePaths,
-			opts.Config.Service,
-			projectName,
-		)
+		plan := NewComposePlan(absolutePaths, opts.Config.Service, projectName)
+		plan.RunServices = opts.Config.RunServices
+		resolved.Plan = plan
 	}
 
 	// Resolve workspace paths
@@ -221,6 +219,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	if keyConfig == nil {
 		keyConfig = opts.Config
 	}
+	resolved.LocalConfig = keyConfig
 	if err := b.computeHashes(resolved, keyConfig); err != nil {
 		return nil, err
 	}
@@ -389,8 +388,10 @@ func parseGPURequirements(hr *HostRequirements) *GPURequirements {
 		gpu.Enabled = v
 	case string:
 		gpu.Enabled = v == "true" || v == "optional"
+		gpu.Optional = v == "optional"
 	case map[string]interface{}:
-		gpu.Enabled = true
+		// An empty object states no requirement (as in hostreqs.go).
+		gpu.Enabled = len(v) > 0
 		if count, ok := v["count"].(float64); ok {
 			gpu.Count = int(count)
 		}

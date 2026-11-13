@@ -85,4 +85,3 @@ func (c *CLIContext) Close() {
 func (c *CLIContext) State() (state.ContainerState, *state.ContainerInfo, error) {
 	return c.Service.StateManager().State(c.Ctx, c.Identity.WorkspaceID)
 }
-

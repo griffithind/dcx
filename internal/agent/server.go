@@ -281,7 +281,13 @@ func (s *Server) buildEnvironment() []string {
 // credentials and pipes the session through it. Without a privilege drop the
 // server runs in-process.
 func (s *Server) sftpHandler(sess ssh.Session) {
-	if s.sessionCredential() == nil {
+	cred, err := s.sessionCredential()
+	if err != nil {
+		_, _ = fmt.Fprintf(sess.Stderr(), "dcx-agent: %v\n", err)
+		_ = sess.Exit(1)
+		return
+	}
+	if cred == nil {
 		serveSFTP(sess, s.resolveWorkDir())
 		return
 	}
@@ -296,7 +302,7 @@ func (s *Server) sftpHandler(sess ssh.Session) {
 	cmd := exec.Command(self, "sftp-server", "--workdir", workDir)
 	cmd.Dir = workDir
 	cmd.Env = s.buildEnvironment()
-	s.applyUserCredentials(cmd)
+	applyCredential(cmd, cred)
 	cmd.Stdin = sess
 	cmd.Stdout = sess
 	cmd.Stderr = sess.Stderr()

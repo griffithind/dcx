@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUpCommandFlags(t *testing.T) {
@@ -83,4 +86,21 @@ func TestRootCommandPersistentFlags(t *testing.T) {
 	verboseFlag := pFlags.Lookup("verbose")
 	assert.NotNil(t, verboseFlag, "verbose flag should exist")
 	assert.Equal(t, "v", verboseFlag.Shorthand)
+}
+
+func TestResolveWorkspacePathIsAbsolute(t *testing.T) {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	got, err := resolveWorkspacePath("")
+	require.NoError(t, err)
+	assert.Equal(t, wd, got)
+
+	got, err = resolveWorkspacePath("some/ws")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(wd, "some/ws"), got)
+
+	got, err = resolveWorkspacePath("/abs/ws")
+	require.NoError(t, err)
+	assert.Equal(t, "/abs/ws", got)
 }

@@ -30,7 +30,12 @@ const defaultHangupGrace = 5 * time.Second
 // client (dcx, OpenSSH, an editor), gets the same user, environment and
 // postAttachCommand.
 func (s *Server) sessionHandler(sess ssh.Session) {
-	cred := s.sessionCredential()
+	cred, err := s.sessionCredential()
+	if err != nil {
+		_, _ = fmt.Fprintf(sess.Stderr(), "dcx-agent: %v\n", err)
+		_ = sess.Exit(1)
+		return
+	}
 	cfg := loadSessionConfig(s.sessionConfigPath)
 
 	var agentSock string
@@ -129,27 +134,38 @@ func loadSessionConfig(path string) agentproto.SessionConfig {
 }
 
 // sessionCredential returns the credential sessions must run with, or nil
-// when no privilege change is needed (or possible). It carries the user's
-// supplementary groups: without them a session would silently lose
-// membership of groups such as docker or sudo.
-func (s *Server) sessionCredential() *syscall.Credential {
+// when no privilege change is needed. It carries the user's supplementary
+// groups: without them a session would silently lose membership of groups
+// such as docker or sudo.
+//
+// The user is looked up by name, then by numeric ID; a numeric ID with no
+// passwd entry runs as that UID (and GID), as `docker run --user 1000`
+// does. A configured user that cannot be resolved is an error: falling back
+// to the agent's own identity would run the session as root.
+func (s *Server) sessionCredential() (*syscall.Credential, error) {
 	if s.cfg.User == "" {
-		return nil
+		return nil, nil
 	}
-	u, err := user.Lookup(s.cfg.User)
+	u, err := lookupUser(s.cfg.User)
 	if err != nil {
-		return nil
+		if id, perr := parseUint32(s.cfg.User); perr == nil {
+			if id == uint32(os.Geteuid()) {
+				return nil, nil
+			}
+			return &syscall.Credential{Uid: id, Gid: id}, nil
+		}
+		return nil, fmt.Errorf("session user %q not found in the container", s.cfg.User)
 	}
 	uid, err := parseUint32(u.Uid)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("session user %q: %w", s.cfg.User, err)
 	}
 	gid, err := parseUint32(u.Gid)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("session user %q: %w", s.cfg.User, err)
 	}
 	if uid == uint32(os.Geteuid()) {
-		return nil
+		return nil, nil
 	}
 	cred := &syscall.Credential{Uid: uid, Gid: gid}
 	if ids, err := u.GroupIds(); err == nil {
@@ -159,12 +175,15 @@ func (s *Server) sessionCredential() *syscall.Credential {
 			}
 		}
 	}
-	return cred
+	return cred, nil
 }
 
-// applyUserCredentials configures cmd to run as the session user.
-func (s *Server) applyUserCredentials(cmd *exec.Cmd) {
-	applyCredential(cmd, s.sessionCredential())
+// lookupUser finds a user by name, then by numeric ID.
+func lookupUser(name string) (*user.User, error) {
+	if u, err := user.Lookup(name); err == nil {
+		return u, nil
+	}
+	return user.LookupId(name)
 }
 
 func applyCredential(cmd *exec.Cmd, cred *syscall.Credential) {

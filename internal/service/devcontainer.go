@@ -232,6 +232,21 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 }
 
 // create creates a new environment.
+// prebuild builds the images a create will use, before anything is removed.
+func (s *DevContainerService) prebuild(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
+	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
+	if err != nil {
+		return fmt.Errorf("failed to create provisioner: %w", err)
+	}
+	s.report.Infof("Building images...")
+	return prov.BuildImages(ctx, container.UpOptions{
+		Build:        opts.Rebuild,
+		Rebuild:      opts.Rebuild,
+		Pull:         opts.Pull,
+		BuildSecrets: buildSecrets,
+	})
+}
+
 func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
 	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {

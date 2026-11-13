@@ -98,3 +98,14 @@ func TestDecideUp(t *testing.T) {
 		assert.Equal(t, tt.want, decideUp(tt.state, tt.complete, tt.opts), "%s complete=%v opts=%+v", tt.state, tt.complete, tt.opts)
 	}
 }
+
+// "gpu": "optional" must not add --gpus on a host without a GPU runtime.
+func TestOptionalGPUDroppedWithoutRuntime(t *testing.T) {
+	svc, _ := newTestService(t, &containertest.Fake{}) // fake Info reports no GPU
+	resolved := &devcontainer.ResolvedDevContainer{
+		RawConfig:       &devcontainer.DevContainerConfig{HostRequirements: &devcontainer.HostRequirements{GPU: "optional"}},
+		GPURequirements: &devcontainer.GPURequirements{Enabled: true, Optional: true},
+	}
+	require.NoError(t, svc.checkHostRequirements(context.Background(), resolved))
+	assert.Nil(t, resolved.GPURequirements)
+}

@@ -6,6 +6,10 @@
       "<workspace>/.devcontainer/docker-compose.override.yml"
     ],
     "project": "compose_app-<id8>",
+    "runServices": [
+      "app",
+      "db"
+    ],
     "service": "app",
     "type": "compose"
   },

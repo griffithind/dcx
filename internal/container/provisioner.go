@@ -63,12 +63,10 @@ func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
 
 	r.sshBindHost = opts.SSHBindHost
 
-	hasFeatures := len(r.resolved.Features) > 0
-
 	// Determine the approach based on plan type
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ComposePlan:
-		return r.upCompose(ctx, opts, hasFeatures, plan)
+		return r.upCompose(ctx, opts, plan)
 	case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 		return r.upSingle(ctx, opts)
 	default:
@@ -77,7 +75,7 @@ func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
 }
 
 // upCompose handles compose-based configurations.
-func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
+func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, plan *devcontainer.ComposePlan) error {
 	image, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
@@ -101,8 +99,12 @@ func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, hasFeatures
 	}
 
 	args := []string{"up", "-d"}
-	// Add --build only if explicitly requested and we DON'T have features
-	if opts.Build && !hasFeatures {
+	// Let compose rebuild only when it runs the service image itself. When
+	// dcx layered the image (features or the UID update), the override
+	// points the service at dcx's tag, and `--build` would rebuild the
+	// user's Dockerfile straight onto that tag, dropping dcx's layers.
+	// buildImages has already rebuilt the services in that case.
+	if opts.Build && r.derivedImage == "" {
 		args = append(args, "--build")
 	}
 	args = append(args, composeServices(plan)...)
@@ -147,6 +149,25 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 	return nil
 }
 
+// BuildImages builds (or pulls) everything Up needs without creating
+// anything, so a recreate can prepare the new images while the old
+// environment still runs: a failing build then leaves it in place.
+func (r *Provisioner) BuildImages(ctx context.Context, opts UpOptions) error {
+	image, err := r.buildImages(ctx, opts)
+	if err != nil {
+		return err
+	}
+	// A compose plan without dcx layers builds nothing in buildImages
+	// (compose runs the service image itself); build its services here so
+	// the later `compose up` uses fresh images.
+	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && image == "" {
+		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
+			return fmt.Errorf("failed to build services: %w", err)
+		}
+	}
+	return nil
+}
+
 // buildImages builds the image the dev container runs and returns it.
 //
 // The base image is pulled or built (the Dockerfile / compose build always
@@ -165,9 +186,16 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
 			return "", fmt.Errorf("failed to build services: %w", err)
 		}
-		baseImage, err := r.getComposeBaseImage(ctx, plan)
+		baseImage, built, err := r.getComposeBaseImage(ctx, plan)
 		if err != nil {
 			return "", fmt.Errorf("failed to determine base image: %w", err)
+		}
+		// `compose build` skips image-only services, so their image may not
+		// be local yet; dcx layers on top of it and needs it present.
+		if !built {
+			if err := r.ensureImage(ctx, baseImage, opts.Pull); err != nil {
+				return "", err
+			}
 		}
 		finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
 		if err != nil {
@@ -193,24 +221,30 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 	return finalImage, nil
 }
 
+// ensureImage makes sure ref is present locally, pulling it when missing
+// (or always, with pull).
+func (r *Provisioner) ensureImage(ctx context.Context, ref string, pull bool) error {
+	exists, err := r.engine.ImageExists(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("failed to check image: %w", err)
+	}
+	if !exists || pull {
+		r.report.Infof("Pulling image: %s", ref)
+		if err := r.engine.PullImageWithProgress(ctx, ref, os.Stdout); err != nil {
+			return fmt.Errorf("failed to pull image: %w", err)
+		}
+	}
+	return nil
+}
+
 // resolveBaseImage determines the base image for single-container configs.
 func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (string, error) {
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ImagePlan:
 		r.report.Infof("Using image: %s", plan.Image)
-
-		exists, err := r.engine.ImageExists(ctx, plan.Image)
-		if err != nil {
-			return "", fmt.Errorf("failed to check image: %w", err)
+		if err := r.ensureImage(ctx, plan.Image, opts.Pull); err != nil {
+			return "", err
 		}
-
-		if !exists || opts.Pull {
-			r.report.Infof("Pulling image: %s", plan.Image)
-			if err := r.engine.PullImageWithProgress(ctx, plan.Image, os.Stdout); err != nil {
-				return "", fmt.Errorf("failed to pull image: %w", err)
-			}
-		}
-
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
@@ -225,6 +259,16 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 	}
 
 	return "", fmt.Errorf("no image or build configuration found")
+}
+
+// localConfig is devcontainer.json without the base image's metadata, the
+// "local" entry dcx adds to an image's devcontainer.metadata label. Using
+// the merged config there recorded the base image's metadata twice.
+func (r *Provisioner) localConfig() *devcontainer.DevContainerConfig {
+	if r.resolved.LocalConfig != nil {
+		return r.resolved.LocalConfig
+	}
+	return r.resolved.RawConfig
 }
 
 // buildDockerfile builds an image from a Dockerfile using the CLI.
@@ -250,7 +294,7 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 	}
 
 	// Generate metadata for the built image (local config only, no base or features yet)
-	metadata, _ := build.GenerateMetadataLabel("", nil, r.resolved.RawConfig)
+	metadata, _ := build.GenerateMetadataLabel("", nil, r.localConfig())
 
 	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
@@ -258,6 +302,7 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 		Context:    buildCtx,
 		Args:       buildArgs,
 		Target:     plan.Target,
+		CacheFrom:  plan.CacheFrom,
 		Progress:   os.Stdout,
 		Metadata:   metadata,
 		Secrets:    buildSecrets,
@@ -297,7 +342,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 			Rebuild:           rebuild,
 			Progress:          os.Stdout,
 			BaseImageMetadata: baseImageMetadata,
-			LocalConfig:       r.resolved.RawConfig,
+			LocalConfig:       r.localConfig(),
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to build derived image with features: %w", err)
@@ -747,48 +792,52 @@ func (r *Provisioner) ensureServicesBuilt(ctx context.Context, plan *devcontaine
 	return r.engine.Compose(ctx, project, "build")
 }
 
-func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
+// getComposeBaseImage returns the primary service's image and whether
+// compose builds it (a `build:` section) rather than pulling it.
+func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, bool, error) {
 	if r.resolved.BaseImage != "" {
-		return r.resolved.BaseImage, nil
+		return r.resolved.BaseImage, false, nil
 	}
 
 	if plan == nil {
-		return "", fmt.Errorf("no compose configuration found")
+		return "", false, fmt.Errorf("no compose configuration found")
 	}
 
 	if len(plan.Files) == 0 {
-		return "", fmt.Errorf("no compose files specified")
+		return "", false, fmt.Errorf("no compose files specified")
 	}
 
 	// Use docker compose config to get fully resolved configuration
 	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "config", "--format", "json")
 	if err != nil {
-		return "", fmt.Errorf("failed to get compose config: %w", err)
+		return "", false, fmt.Errorf("failed to get compose config: %w", err)
 	}
 
 	var config struct {
 		Services map[string]struct {
-			Image string `json:"image"`
+			Image string          `json:"image"`
+			Build json.RawMessage `json:"build"`
 		} `json:"services"`
 		Name string `json:"name"`
 	}
 
 	if err := json.Unmarshal(output, &config); err != nil {
-		return "", fmt.Errorf("failed to parse compose config: %w", err)
+		return "", false, fmt.Errorf("failed to parse compose config: %w", err)
 	}
 
 	serviceName := plan.Service
 	if serviceName == "" {
-		return "", fmt.Errorf("no primary service specified")
+		return "", false, fmt.Errorf("no primary service specified")
 	}
 
 	svc, ok := config.Services[serviceName]
 	if !ok {
-		return "", fmt.Errorf("service %q not found in compose file", serviceName)
+		return "", false, fmt.Errorf("service %q not found in compose file", serviceName)
 	}
+	built := len(svc.Build) > 0 && string(svc.Build) != "null"
 
 	if svc.Image != "" {
-		return svc.Image, nil
+		return svc.Image, built, nil
 	}
 
 	// Service uses build - compute built image name
@@ -799,5 +848,5 @@ func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontaine
 	if projectName == "" {
 		projectName = r.resolved.ServiceName
 	}
-	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
+	return fmt.Sprintf("%s-%s", projectName, serviceName), true, nil
 }

@@ -7,62 +7,55 @@ import (
 
 // OrderFeatures orders features based on their dependencies.
 // It performs a topological sort considering:
-// - dependsOn: hard dependencies (must be installed before)
-// - installsAfter: soft dependencies (prefer to install after)
-// - overrideOrder: explicit ordering from devcontainer.json
+//   - dependsOn: hard dependencies (must be installed before)
+//   - installsAfter: soft dependencies (prefer to install after)
+//   - overrideOrder: explicit ordering from devcontainer.json; features it
+//     does not list follow, in dependency order.
+//
+// Features are identified by one canonical key (featureKey) and every
+// reference (dependsOn, installsAfter, overrideOrder) is mapped to the same
+// key with normalizeFeatureRef, so "ghcr.io/devcontainers/features/node:1"
+// and the metadata ID "node" name the same feature.
 func OrderFeatures(features []*Feature, overrideOrder []string) ([]*Feature, error) {
 	if len(features) == 0 {
 		return features, nil
 	}
 
-	// Build a map for quick lookup
-	featureMap := make(map[string]*Feature)
+	featureMap := make(map[string]*Feature, len(features))
 	for _, f := range features {
-		// Use the feature's metadata ID if available, otherwise use the original ID
-		id := f.ID
-		if f.Metadata != nil && f.Metadata.ID != "" {
-			id = f.Metadata.ID
+		featureMap[featureKey(f)] = f
+	}
+
+	var first []*Feature
+	used := map[string]bool{}
+	for _, ref := range overrideOrder {
+		key := normalizeFeatureRef(ref)
+		if f, ok := featureMap[key]; ok && !used[key] {
+			first = append(first, f)
+			used[key] = true
 		}
-		featureMap[id] = f
+	}
+	var rest []*Feature
+	for _, f := range features {
+		if !used[featureKey(f)] {
+			rest = append(rest, f)
+		}
 	}
 
-	// If override order is specified, use it
-	if len(overrideOrder) > 0 {
-		return applyOverrideOrder(features, overrideOrder, featureMap)
+	sorted, err := topologicalSort(rest, buildDependencyGraph(rest, featureMap))
+	if err != nil {
+		return nil, err
 	}
-
-	// Build dependency graph
-	graph := buildDependencyGraph(features, featureMap)
-
-	// Topological sort
-	return topologicalSort(features, graph)
+	return append(first, sorted...), nil
 }
 
-// applyOverrideOrder reorders features based on the override order.
-func applyOverrideOrder(features []*Feature, overrideOrder []string, featureMap map[string]*Feature) ([]*Feature, error) {
-	result := make([]*Feature, 0, len(features))
-	used := make(map[string]bool)
-
-	// First, add features in the override order
-	for _, id := range overrideOrder {
-		if f, ok := featureMap[id]; ok {
-			result = append(result, f)
-			used[id] = true
-		}
+// featureKey is a feature's canonical identity for ordering: its metadata
+// ID, or its normalized reference when metadata has none.
+func featureKey(f *Feature) string {
+	if f.Metadata != nil && f.Metadata.ID != "" {
+		return f.Metadata.ID
 	}
-
-	// Then add remaining features not in the override order
-	for _, f := range features {
-		id := f.ID
-		if f.Metadata != nil && f.Metadata.ID != "" {
-			id = f.Metadata.ID
-		}
-		if !used[id] {
-			result = append(result, f)
-		}
-	}
-
-	return result, nil
+	return normalizeFeatureRef(f.ID)
 }
 
 // dependencyGraph represents the dependency relationships between features.
@@ -82,23 +75,17 @@ func buildDependencyGraph(features []*Feature, featureMap map[string]*Feature) *
 	}
 
 	for _, f := range features {
-		id := f.ID
-		if f.Metadata != nil && f.Metadata.ID != "" {
-			id = f.Metadata.ID
+		id := featureKey(f)
+		if f.Metadata == nil {
+			continue
 		}
-
-		if f.Metadata != nil {
-			// Add hard dependencies (iterate over map keys)
-			for dep := range f.Metadata.DependsOn {
-				graph.hardDeps[id] = append(graph.hardDeps[id], dep)
-			}
-
-			// Add soft dependencies
-			for _, dep := range f.Metadata.InstallsAfter {
-				// Only add soft dep if the dependency is actually in our feature list
-				if _, exists := featureMap[dep]; exists {
-					graph.softDeps[id] = append(graph.softDeps[id], dep)
-				}
+		for dep := range f.Metadata.DependsOn {
+			graph.hardDeps[id] = append(graph.hardDeps[id], normalizeFeatureRef(dep))
+		}
+		for _, dep := range f.Metadata.InstallsAfter {
+			// Soft dependencies only matter for features that are present.
+			if key := normalizeFeatureRef(dep); featureMap[key] != nil {
+				graph.softDeps[id] = append(graph.softDeps[id], key)
 			}
 		}
 	}
@@ -112,10 +99,7 @@ func topologicalSort(features []*Feature, graph *dependencyGraph) ([]*Feature, e
 	ids := make([]string, len(features))
 	idToFeature := make(map[string]*Feature)
 	for i, f := range features {
-		id := f.ID
-		if f.Metadata != nil && f.Metadata.ID != "" {
-			id = f.Metadata.ID
-		}
+		id := featureKey(f)
 		ids[i] = id
 		idToFeature[id] = f
 	}

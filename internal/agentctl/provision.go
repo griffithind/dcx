@@ -96,7 +96,7 @@ func writeSecrets(ctx context.Context, engine container.Engine, opts Options) er
 // waits until it does, so lifecycle hooks (which connect over SSH) don't
 // race its startup.
 func launch(ctx context.Context, engine container.Engine, opts Options) error {
-	if listening(ctx, engine, opts.ContainerName) {
+	if Listening(ctx, engine, opts.ContainerName) {
 		return nil
 	}
 
@@ -143,7 +143,7 @@ func launch(ctx context.Context, engine container.Engine, opts Options) error {
 
 	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
-		if listening(ctx, engine, opts.ContainerName) {
+		if Listening(ctx, engine, opts.ContainerName) {
 			return nil
 		}
 		select {
@@ -161,8 +161,8 @@ func launch(ctx context.Context, engine container.Engine, opts Options) error {
 	return errors.New(msg)
 }
 
-// listening reports whether the container's agent answers a ping.
-func listening(ctx context.Context, engine container.Engine, containerName string) bool {
+// Listening reports whether the container's agent answers a ping.
+func Listening(ctx context.Context, engine container.Engine, containerName string) bool {
 	return engine.ExecInContainer(ctx, containerName, []string{
 		agentproto.BinaryPath, "ping", "--addr", agentproto.LoopbackAddr,
 	}) == nil

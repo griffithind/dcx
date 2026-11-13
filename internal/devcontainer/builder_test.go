@@ -148,3 +148,17 @@ func TestBuilderBuild(t *testing.T) {
 		assert.Equal(t, "custom-project", resolved.Name)
 	})
 }
+
+func TestParseGPURequirementsOptional(t *testing.T) {
+	opt := parseGPURequirements(&HostRequirements{GPU: "optional"})
+	if opt == nil || !opt.Enabled || !opt.Optional {
+		t.Fatalf("optional: %+v", opt)
+	}
+	req := parseGPURequirements(&HostRequirements{GPU: true})
+	if req == nil || !req.Enabled || req.Optional {
+		t.Fatalf("required: %+v", req)
+	}
+	if empty := parseGPURequirements(&HostRequirements{GPU: map[string]interface{}{}}); empty == nil || empty.Enabled {
+		t.Fatalf("an empty object states no requirement: %+v", empty)
+	}
+}

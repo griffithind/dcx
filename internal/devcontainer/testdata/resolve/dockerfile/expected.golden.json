@@ -5,8 +5,10 @@
       "VERSION": "1.0",
       "WS": "proj"
     },
+    "cacheFrom": null,
     "context": "<workspace>",
     "dockerfile": "<workspace>/.devcontainer/Dockerfile",
+    "options": null,
     "target": "dev",
     "type": "dockerfile"
   },

@@ -44,9 +44,9 @@ func planView(p ExecutionPlan) any {
 	case *ImagePlan:
 		return map[string]any{"type": "image", "image": v.Image}
 	case *DockerfilePlan:
-		return map[string]any{"type": "dockerfile", "dockerfile": v.Dockerfile, "context": v.Context, "args": v.Args, "target": v.Target}
+		return map[string]any{"type": "dockerfile", "dockerfile": v.Dockerfile, "context": v.Context, "args": v.Args, "target": v.Target, "cacheFrom": v.CacheFrom, "options": v.Options}
 	case *ComposePlan:
-		return map[string]any{"type": "compose", "files": v.Files, "service": v.Service, "project": v.ProjectName}
+		return map[string]any{"type": "compose", "files": v.Files, "service": v.Service, "runServices": v.RunServices, "project": v.ProjectName}
 	}
 	return nil
 }

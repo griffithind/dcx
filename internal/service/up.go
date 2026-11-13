@@ -69,12 +69,23 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		s.report.Infof("Current state: %s", currentState)
 	}
 
-	action := decideUp(currentState, currentState == state.StateRunning && s.setupComplete(ctx, existing), opts)
-	switch action {
-	case actionNone:
+	// A running container counts as ready only when its setup finished and
+	// its agent answers: after a restart outside dcx (docker restart, a
+	// reboot with a restart policy) the markers survive but the agent and
+	// the /run/secrets tmpfs do not.
+	setupDone, agentUp := false, false
+	if currentState == state.StateRunning {
+		setupDone = s.setupComplete(ctx, existing)
+		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name)
+	}
+	action := decideUp(currentState, setupDone && agentUp, opts)
+	switch {
+	case action == actionNone:
 		s.report.Infof("Devcontainer is already running")
 		return nil
-	case actionResume:
+	case action == actionResume && setupDone:
+		s.report.Infof("The dcx agent is not running (was the container restarted outside dcx?); reconnecting...")
+	case action == actionResume:
 		s.report.Infof("The previous setup of this devcontainer did not finish; resuming...")
 	}
 	if action != actionResume && resolved.BaseImage != "" {
@@ -163,6 +174,12 @@ func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolve
 		s.report.Warnf("Could not get Docker info for resource validation: %v", err)
 		return nil
 	}
+	// "gpu": "optional" asks for GPUs only when the host has them;
+	// `--gpus` on a host without the NVIDIA runtime fails container start.
+	if gpu := resolved.GPURequirements; gpu != nil && gpu.Optional && !info.GPU {
+		s.report.Infof("No GPU runtime on the Docker host; starting without GPUs (optional requirement)")
+		resolved.GPURequirements = nil
+	}
 	result := devcontainer.ValidateHostRequirementsWithDocker(resolved.RawConfig.HostRequirements,
 		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal})
 	for _, w := range result.Warnings {
@@ -216,19 +233,26 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 		}
 		defer cleanup()
 
+		createOpts := r.opts
 		if r.action == actionRecreate {
-			if s.verbose {
-				s.report.Infof("Removing existing devcontainer...")
+			// Build the new images while the old environment still runs, so
+			// a failing build (Dockerfile error, registry outage, broken
+			// feature) leaves the user with a working container. The create
+			// below then reuses the freshly built layers.
+			prebuildOpts := r.opts
+			prebuildOpts.Rebuild = true
+			if err := s.prebuild(ctx, r.resolved, prebuildOpts, buildSecrets); err != nil {
+				return fmt.Errorf("build failed; the existing devcontainer was left running: %w", err)
 			}
+			s.report.Infof("Removing existing devcontainer...")
 			// Never remove named volumes when recreating: they hold user
 			// data that must survive a config change. Only an explicit
 			// `dcx down --volumes` removes them.
 			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.ID, DownOptions{}); err != nil {
 				return fmt.Errorf("failed to remove existing environment: %w", err)
 			}
+			createOpts.Rebuild = false
 		}
-		createOpts := r.opts
-		createOpts.Rebuild = r.opts.Rebuild || r.action == actionRecreate
 		if err := s.create(ctx, r.resolved, createOpts, buildSecrets); err != nil {
 			return err
 		}

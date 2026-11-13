@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -42,16 +43,32 @@ over SSH to a small agent inside the container: use 'dcx ssh' or plain
 		// (Flag and argument errors happen earlier and still show usage.)
 		cmd.SilenceUsage = true
 
-		// Initialize workspace path if not provided
-		if workspacePath == "" {
-			var err error
-			workspacePath, err = os.Getwd()
-			if err != nil {
-				return fmt.Errorf("failed to get current directory: %w", err)
-			}
+		path, err := resolveWorkspacePath(workspacePath)
+		if err != nil {
+			return err
 		}
+		workspacePath = path
 		return nil
 	},
+}
+
+// resolveWorkspacePath returns the absolute workspace path for the -w flag
+// (the current directory when empty). Everything derived from it (the
+// workspace ID, ${localWorkspaceFolder}, labels, bind sources) needs an
+// absolute path; a relative one leaked into all of them.
+func resolveWorkspacePath(path string) (string, error) {
+	if path == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		return wd, nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid workspace path %q: %w", path, err)
+	}
+	return abs, nil
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

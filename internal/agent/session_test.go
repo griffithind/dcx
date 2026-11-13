@@ -314,3 +314,22 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+// A configured session user that can't be resolved must refuse the session:
+// falling back to the agent's identity would run it as root.
+func TestSessionCredentialRefusesUnknownUser(t *testing.T) {
+	_, err := (&Server{cfg: Config{User: "no-such-user-dcx"}}).sessionCredential()
+	if err == nil {
+		t.Fatal("unknown user must be an error")
+	}
+
+	self := strconv.Itoa(os.Geteuid())
+	if cred, err := (&Server{cfg: Config{User: self}}).sessionCredential(); err != nil || cred != nil {
+		t.Fatalf("own numeric UID needs no change: cred=%v err=%v", cred, err)
+	}
+
+	cred, err := (&Server{cfg: Config{User: "4242424"}}).sessionCredential()
+	if err != nil || cred == nil || cred.Uid != 4242424 || cred.Gid != 4242424 {
+		t.Fatalf("numeric UID without a passwd entry runs as that UID: cred=%v err=%v", cred, err)
+	}
+}

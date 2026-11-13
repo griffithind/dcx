@@ -236,15 +236,8 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 			}
 		}
 
-		// Check soft dependencies (installsAfter) - these are also resolved if specified
-		for _, depID := range feature.Metadata.InstallsAfter {
-			if !isResolved(depID) {
-				// Soft dependencies don't have options specified
-				if _, alreadyQueued := unresolved[depID]; !alreadyQueued {
-					unresolved[depID] = make(map[string]interface{})
-				}
-			}
-		}
+		// installsAfter is only an ordering hint (spec): it never adds a
+		// feature the user did not ask for.
 	}
 
 	return unresolved

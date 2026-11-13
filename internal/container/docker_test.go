@@ -73,3 +73,9 @@ func TestParseImageSize(t *testing.T) {
 		assert.Equal(t, want, parseImageSize(in), "parseImageSize(%q)", in)
 	}
 }
+
+func TestLastLineTakesIDAfterWarnings(t *testing.T) {
+	assert.Equal(t, "abc123", lastLine("abc123\n"))
+	assert.Equal(t, "abc123", lastLine("WARNING: something\nabc123\n\n"))
+	assert.Equal(t, "", lastLine("  \n"))
+}

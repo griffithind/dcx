@@ -64,6 +64,9 @@ type SystemInfo struct {
 	MemTotal     uint64 // Total memory available to Docker in bytes
 	OSType       string // Operating system type (linux, windows)
 	Architecture string // Architecture (x86_64, arm64, etc.)
+	// GPU reports whether containers can be given GPUs (`--gpus`): the
+	// NVIDIA container runtime is registered with the daemon.
+	GPU bool
 }
 
 // Info returns system-wide information about Docker.
@@ -77,10 +80,11 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 	}
 
 	var info struct {
-		NCPU         int    `json:"NCPU"`
-		MemTotal     int64  `json:"MemTotal"`
-		OSType       string `json:"OSType"`
-		Architecture string `json:"Architecture"`
+		NCPU         int                        `json:"NCPU"`
+		MemTotal     int64                      `json:"MemTotal"`
+		OSType       string                     `json:"OSType"`
+		Architecture string                     `json:"Architecture"`
+		Runtimes     map[string]json.RawMessage `json:"Runtimes"`
 	}
 	if err := json.Unmarshal(output, &info); err != nil {
 		return nil, fmt.Errorf("failed to parse Docker info: %w", err)
@@ -91,6 +95,7 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 		MemTotal:     uint64(info.MemTotal),
 		OSType:       info.OSType,
 		Architecture: info.Architecture,
+		GPU:          info.Runtimes["nvidia"] != nil,
 	}, nil
 }
 
@@ -369,11 +374,26 @@ func (d *Docker) RemoveContainer(ctx context.Context, containerID string, force,
 // spec and returns its ID.
 func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", dockerRunArgs(spec)...)
-	output, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to create container: %s", strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("failed to create container: %s", strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(string(output)), nil
+	// Only stdout carries the ID. Docker prints warnings (platform
+	// mismatch, discarded published ports, ...) on stderr, which used to be
+	// read as part of the ID.
+	id := lastLine(string(stdout))
+	if id == "" {
+		return "", fmt.Errorf("failed to create container: docker printed no container ID: %s", strings.TrimSpace(stderr.String()))
+	}
+	return id, nil
+}
+
+// lastLine returns the last non-empty line of s, trimmed.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // dockerRunArgs renders a ContainerSpec as `docker create` arguments.

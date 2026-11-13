@@ -135,6 +135,12 @@ type ResolvedDevContainer struct {
 
 	// === GPU ===
 
+	// LocalConfig is devcontainer.json as written (substituted, before image
+	// metadata was merged in). It is what dcx records as the "local" entry
+	// of an image's devcontainer.metadata label; RawConfig already contains
+	// the base image's metadata.
+	LocalConfig *DevContainerConfig
+
 	// GPURequirements specifies GPU requirements.
 	GPURequirements *GPURequirements
 
@@ -173,9 +179,12 @@ type PortForward struct {
 // GPURequirements specifies GPU requirements for the container.
 type GPURequirements struct {
 	Enabled bool
-	Count   int
-	Memory  string
-	Cores   int
+	// Optional means the container should get GPUs only when the host has
+	// them ("gpu": "optional"); without one it starts without GPUs.
+	Optional bool
+	Count    int
+	Memory   string
+	Cores    int
 }
 
 // ParsedRunArgs contains parsed values from devcontainer.json runArgs.

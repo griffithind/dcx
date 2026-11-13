@@ -284,6 +284,7 @@ func ParseWorkspaceMount(spec string) *Mount {
 	}
 	return &m
 }
+
 // PortAttributeFor returns the attributes for a specific port.
 func (c *DevContainerConfig) PortAttributeFor(port string) *PortAttribute {
 	if c.PortsAttributes == nil {
