@@ -9,28 +9,28 @@ import (
 )
 
 func TestParseCommand_String(t *testing.T) {
-	result := parseCommand("echo hello")
+	result := ParseCommand("echo hello")
 	require.Len(t, result, 1)
 	assert.Equal(t, []string{"echo hello"}, result[0].Args)
 	assert.True(t, result[0].UseShell, "string commands should use shell")
 }
 
 func TestParseCommand_StringArray(t *testing.T) {
-	result := parseCommand([]string{"echo", "hello", "world"})
+	result := ParseCommand([]string{"echo", "hello", "world"})
 	require.Len(t, result, 1)
 	assert.Equal(t, []string{"echo", "hello", "world"}, result[0].Args)
 	assert.False(t, result[0].UseShell, "array commands should not use shell")
 }
 
 func TestParseCommand_InterfaceArray(t *testing.T) {
-	result := parseCommand([]interface{}{"echo", "hello"})
+	result := ParseCommand([]interface{}{"echo", "hello"})
 	require.Len(t, result, 1)
 	assert.Equal(t, []string{"echo", "hello"}, result[0].Args)
 	assert.False(t, result[0].UseShell, "array commands should not use shell")
 }
 
 func TestParseCommand_Map(t *testing.T) {
-	result := parseCommand(map[string]interface{}{
+	result := ParseCommand(map[string]interface{}{
 		"task1": "echo first",
 		"task2": "echo second",
 	})
@@ -44,7 +44,7 @@ func TestParseCommand_Map(t *testing.T) {
 }
 
 func TestParseCommand_MapWithArrayCommand(t *testing.T) {
-	result := parseCommand(map[string]interface{}{
+	result := ParseCommand(map[string]interface{}{
 		"task1": []interface{}{"npm", "install", "--save"},
 	})
 	require.Len(t, result, 1)
@@ -54,19 +54,19 @@ func TestParseCommand_MapWithArrayCommand(t *testing.T) {
 }
 
 func TestParseCommand_Nil(t *testing.T) {
-	result := parseCommand(nil)
+	result := ParseCommand(nil)
 	assert.Nil(t, result)
 }
 
 func TestParseCommand_EmptyArray(t *testing.T) {
-	result := parseCommand([]string{})
+	result := ParseCommand([]string{})
 	assert.Nil(t, result)
 }
 
 func TestParseCommand_ArrayWithSpaces(t *testing.T) {
 	// This is the key test case - array commands with spaces in arguments
 	// should preserve the arguments separately, not join them
-	result := parseCommand([]interface{}{"git", "clone", "https://example.com/repo with spaces.git"})
+	result := ParseCommand([]interface{}{"git", "clone", "https://example.com/repo with spaces.git"})
 	require.Len(t, result, 1)
 	assert.Equal(t, []string{"git", "clone", "https://example.com/repo with spaces.git"}, result[0].Args)
 	assert.False(t, result[0].UseShell, "array commands should use exec semantics")

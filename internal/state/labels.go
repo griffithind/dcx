@@ -50,6 +50,11 @@ const (
 	// Containers without it were created by a dcx version whose hashes are
 	// not comparable with the current ones.
 	LabelHashVersion = Prefix + ".hash.version"
+
+	// LabelLifecycleMarkers is set on containers whose lifecycle progress is
+	// tracked with marker files (see service markers). Containers without it
+	// predate markers and are treated as fully set up.
+	LabelLifecycleMarkers = Prefix + ".lifecycle.markers"
 )
 
 // State labels.
@@ -176,6 +181,10 @@ type ContainerLabels struct {
 	HashConfig  string
 	HashVersion string
 
+	// LifecycleMarkers reports whether lifecycle progress is tracked with
+	// marker files inside the container.
+	LifecycleMarkers bool
+
 	// State
 	CreatedAt      time.Time
 	CreatedBy      string
@@ -248,6 +257,9 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	// Hash
 	setIfNotEmpty(m, LabelHashConfig, l.HashConfig)
 	setIfNotEmpty(m, LabelHashVersion, l.HashVersion)
+	if l.LifecycleMarkers {
+		m[LabelLifecycleMarkers] = "1"
+	}
 
 	// State
 	if !l.CreatedAt.IsZero() {
@@ -329,6 +341,7 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	// Hash
 	l.HashConfig = m[LabelHashConfig]
 	l.HashVersion = m[LabelHashVersion]
+	l.LifecycleMarkers = m[LabelLifecycleMarkers] == "1"
 
 	// State
 	if t, err := time.Parse(time.RFC3339, m[LabelCreatedAt]); err == nil {

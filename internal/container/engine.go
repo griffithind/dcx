@@ -29,6 +29,7 @@ type Engine interface {
 
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
 	ExecDetached(ctx context.Context, containerName string, argv []string) error
+	ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error)
 	MkdirInContainer(ctx context.Context, containerName, path, user string) error
 	ChmodInContainer(ctx context.Context, containerName, path, mode, user string) error
 	ChownInContainer(ctx context.Context, containerName, path, owner string) error

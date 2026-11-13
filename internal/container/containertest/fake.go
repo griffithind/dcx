@@ -38,6 +38,8 @@ type Fake struct {
 	Registry map[string]map[string]string
 	// ExecFunc decides the result of ExecInContainer (nil = success).
 	ExecFunc func(containerName string, argv []string) error
+	// Outputs maps a space-joined argv to ExecOutput's result.
+	Outputs map[string]string
 	// Files records WriteFileInContainer content by "<container>:<path>".
 	Files map[string][]byte
 	// Env holds each container's environment (KEY=VALUE) by ID or name.
@@ -235,6 +237,16 @@ func (f *Fake) ExecInContainer(_ context.Context, name string, argv []string) er
 		return fn(name, argv)
 	}
 	return nil
+}
+
+func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ExecOutput", append([]string{name}, argv...)...)
+	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
+		return []byte(out), nil
+	}
+	return nil, fmt.Errorf("exec failed")
 }
 
 func (f *Fake) ExecDetached(_ context.Context, name string, argv []string) error {

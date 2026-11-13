@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -50,18 +49,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	defer cliCtx.Close()
 
-	// Fast path: nothing to do when the environment is already running and
-	// up to date. Every other case (including starting a stopped container)
-	// goes through Service.Up, which owns the complete start sequence: agent
-	// relaunch, secret re-mount, postStart hooks and SSH config.
-	if !rebuild && !recreate && !pull {
-		plan, err := cliCtx.Service.Plan(cliCtx.Ctx, service.PlanOptions{})
-		if err == nil && plan.Action == state.PlanActionNone {
-			ui.Success("Devcontainer is already running")
-			return nil
-		}
-	}
-
+	// Service.Up decides what to do (nothing, resume an unfinished setup,
+	// start, create or recreate) and owns the complete sequence.
 	// Full up sequence required
 	if err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{
 		Recreate:        recreate,

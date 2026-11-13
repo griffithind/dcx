@@ -102,24 +102,8 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 
 // upCompose handles compose-based configurations.
 func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
-	// Layer features and the UID update on top of the service's image.
-	if hasFeatures || r.resolved.ShouldUpdateUID {
-		// Build compose services first (Docker's cache makes this cheap) so
-		// the base image exists and reflects the current build context.
-		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
-			return fmt.Errorf("failed to build services: %w", err)
-		}
-		baseImage, err := r.getComposeBaseImage(ctx, plan)
-		if err != nil {
-			return fmt.Errorf("failed to determine base image: %w", err)
-		}
-		finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
-		if err != nil {
-			return err
-		}
-		if finalImage != baseImage {
-			r.derivedImage = finalImage
-		}
+	if _, err := r.buildImages(ctx, opts); err != nil {
+		return err
 	}
 
 	// Generate override file
@@ -154,19 +138,9 @@ func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatu
 
 // upSingle handles single-container configurations (image or Dockerfile).
 func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions) error {
-	// Base image: pulled, or built from the Dockerfile. The build always
-	// runs (Docker's layer cache makes it cheap), so changes to files the
-	// Dockerfile copies are picked up.
-	baseImage, err := r.resolveBaseImage(ctx, opts)
+	finalImage, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
-	}
-	finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
-	if err != nil {
-		return err
-	}
-	if finalImage != baseImage {
-		r.derivedImage = finalImage
 	}
 
 	// Create the container
@@ -182,6 +156,52 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions) error {
 
 	r.containerID = containerID
 	return nil
+}
+
+// buildImages builds the image the dev container runs and returns it.
+//
+// The base image is pulled or built (the Dockerfile / compose build always
+// runs; BuildKit's cache makes that cheap and picks up context changes),
+// then dcx's feature and UID layers are added (see layerImages). For a
+// compose plan without features or a UID update there is nothing to layer:
+// compose builds and runs the service image itself, and "" is returned.
+//
+// Up and Build both use this, so `dcx build` produces exactly the image
+// `dcx up` would run.
+func (r *UnifiedRuntime) buildImages(ctx context.Context, opts UpOptions) (string, error) {
+	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
+		if len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
+			return "", nil
+		}
+		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
+			return "", fmt.Errorf("failed to build services: %w", err)
+		}
+		baseImage, err := r.getComposeBaseImage(ctx, plan)
+		if err != nil {
+			return "", fmt.Errorf("failed to determine base image: %w", err)
+		}
+		finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+		if err != nil {
+			return "", err
+		}
+		if finalImage != baseImage {
+			r.derivedImage = finalImage
+		}
+		return finalImage, nil
+	}
+
+	baseImage, err := r.resolveBaseImage(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+	finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+	if err != nil {
+		return "", err
+	}
+	if finalImage != baseImage {
+		r.derivedImage = finalImage
+	}
+	return finalImage, nil
 }
 
 // resolveBaseImage determines the base image for single-container configs.
@@ -478,6 +498,7 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	l.ConfigPath = r.resolved.ConfigPath
 	l.HashConfig = r.resolved.ConfigHash
 	l.HashVersion = state.CurrentHashVersion
+	l.LifecycleMarkers = true
 	l.BuildMethod = string(r.resolved.Plan.Type())
 	l.IsPrimary = true
 
@@ -684,7 +705,7 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 		return fmt.Errorf("no resolved configuration - use NewUnifiedRuntime")
 	}
 
-	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
+	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
 		args := r.composeBaseArgs(plan)
 		args = append(args, "build")
 		if opts.NoCache {
@@ -696,10 +717,14 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 		return r.runCompose(ctx, args)
 	}
 
-	// Single container - build image
-	upOpts := UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull}
-	_, err := r.resolveBaseImage(ctx, upOpts)
-	return err
+	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull})
+	if err != nil {
+		return err
+	}
+	if image != "" {
+		r.report.Infof("Built image: %s", image)
+	}
+	return nil
 }
 
 // Compose helper methods

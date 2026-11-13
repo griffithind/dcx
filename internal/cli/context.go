@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/griffithind/dcx/internal/ui"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
@@ -24,16 +27,21 @@ type CLIContext struct {
 
 	// Identifiers contains the workspace identifiers (project name, workspace ID, etc.).
 	Identifiers *service.Identifiers
+
+	stop context.CancelFunc
 }
 
 // NewCLIContext creates and initializes a CLIContext with Docker client,
 // service, and identifiers. The caller must call Close() when done.
 func NewCLIContext() (*CLIContext, error) {
-	ctx := context.Background()
+	// Ctrl-C / SIGTERM cancel the operation: hooks and remote commands are
+	// stopped and Up returns early. Every step of Up is safe to run again.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
 	// Initialize Docker client (uses singleton)
 	docker, err := container.NewDocker()
 	if err != nil {
+		stop()
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
@@ -44,10 +52,12 @@ func NewCLIContext() (*CLIContext, error) {
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
 		svc.Close()
+		stop()
 		return nil, fmt.Errorf("failed to get identifiers: %w", err)
 	}
 
 	return &CLIContext{
+		stop:        stop,
 		Ctx:         ctx,
 		Docker:      docker,
 		Service:     svc,
@@ -60,6 +70,9 @@ func NewCLIContext() (*CLIContext, error) {
 func (c *CLIContext) Close() {
 	if c.Service != nil {
 		c.Service.Close()
+	}
+	if c.stop != nil {
+		c.stop()
 	}
 
 }

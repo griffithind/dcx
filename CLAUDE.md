@@ -85,11 +85,17 @@ return cliCtx.Service.Up(...)   // Delegate to service
 - `Build()` - Build images without starting
 - `Lock()` - Generate/verify lockfile
 
-**Up() Flow:**
+**Up() Flow** (`internal/service/up.go`, idempotent steps; a failed or interrupted Up resumes on the next run):
 ```
-Load config → Validate host → Check state → Fetch secrets
-    → Create/start container → Deploy agent → Mount secrets
-    → Run lifecycle hooks → Setup SSH
+Load config → Check state (running + setup complete → done)
+    → initialize (host initializeCommand)
+    → container (create / recreate / start / resume)
+    → agent (versioned deploy, SSH secrets, launch + readiness)
+    → secrets (runtime secrets on tmpfs)
+    → environment (/etc/environment, userEnvProbe)
+    → lifecycle hooks (onCreate/updateContent/postCreate once via markers in
+      /var/lib/dcx/lifecycle, postStart on each start)
+    → ssh config
 ```
 
 ### Runtime Layer (`internal/container/`)
@@ -151,7 +157,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `uid.go` | UID update layer for host/container user matching |
 
 ### Supporting Packages
-- `internal/lifecycle/` - Hook execution (onCreateCommand, postStartCommand, etc.)
+- `internal/lifecycle/` - Hook execution; `ParseCommand` is the only lifecycle command parser; `Markers` records completed once-per-container phases
 - `internal/ssh/` - SSH agent detection, host config management
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/report"
@@ -21,11 +22,8 @@ import (
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/features"
-	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/lockfile"
-	"github.com/griffithind/dcx/internal/secrets"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
-	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 	gossh "golang.org/x/crypto/ssh"
@@ -289,199 +287,6 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 	return merged
 }
 
-// Up brings up a devcontainer environment.
-func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
-	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
-		ForcePull:       opts.Pull,
-		UseLockfile:     true,
-		PullForMetadata: true,
-	})
-	if err != nil {
-		return err
-	}
-
-	ids, _ := s.GetIdentifiers()
-
-	// Validate host requirements
-	if resolved.RawConfig != nil && resolved.RawConfig.HostRequirements != nil {
-		dockerInfo, err := s.engine.Info(ctx)
-		if err != nil {
-			s.report.Warnf("Could not get Docker info for resource validation: %v", err)
-		} else {
-			dockerRes := &devcontainer.DockerResources{
-				CPUs:   dockerInfo.NCPU,
-				Memory: dockerInfo.MemTotal,
-			}
-			result := devcontainer.ValidateHostRequirementsWithDocker(resolved.RawConfig.HostRequirements, dockerRes)
-			for _, warning := range result.Warnings {
-				s.report.Warnf("%s", warning)
-			}
-			if !result.Satisfied {
-				for _, errMsg := range result.Errors {
-					s.report.Errorf("%s", errMsg)
-				}
-				return fmt.Errorf("host requirements not satisfied")
-			}
-		}
-	}
-
-	// Check current state first to determine what actions are needed
-	currentState, existing, err := s.stateManager.GetStateWithProjectAndHash(
-		ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
-	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
-	}
-
-	if s.verbose {
-		s.report.Infof("Current state: %s", currentState)
-	}
-	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
-		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
-	}
-
-	// Compose named volumes are scoped to the project name. Keep the project
-	// an existing environment was created with (older dcx versions derived
-	// it from "name" alone), so recreating it never orphans its volumes.
-	if existing != nil && existing.ComposeProject != "" {
-		if plan, ok := resolved.Plan.(*devcontainer.ComposePlan); ok && plan.ProjectName != existing.ComposeProject {
-			kept := *plan
-			kept.ProjectName = existing.ComposeProject
-			resolved.Plan = &kept
-		}
-	}
-
-	// Early return if already running and no rebuild/recreate requested
-	if currentState == state.StateRunning && !opts.Recreate && !opts.Rebuild {
-		s.report.Infof("Devcontainer is already running")
-		return nil
-	}
-
-	// Determine if we're creating a new container (affects whether we fetch build secrets)
-	isCreatingNew := currentState == state.StateAbsent ||
-		currentState == state.StateStale ||
-		currentState == state.StateBroken ||
-		opts.Rebuild || opts.Recreate
-
-	var runtimeSecrets []secrets.Secret
-	var buildSecretPaths map[string]string
-	var secretsCleanup func()
-	fetcher := secrets.NewFetcher(s.logger)
-
-	// Runtime secrets live on the /run/secrets tmpfs, which is emptied every
-	// time the container stops, so they are fetched and mounted on every
-	// start, not only on create.
-	if len(resolved.RuntimeSecrets) > 0 {
-		s.report.Infof("Fetching runtime secrets...")
-		runtimeSecrets, err = fetcher.FetchSecrets(ctx, resolved.RuntimeSecrets)
-		if err != nil {
-			return fmt.Errorf("failed to fetch secrets: %w", err)
-		}
-	}
-
-	if isCreatingNew {
-		// Fetch build secrets (passed to docker build)
-		if len(resolved.BuildSecrets) > 0 {
-			s.report.Infof("Fetching build secrets...")
-			buildSecrets, err := fetcher.FetchSecrets(ctx, resolved.BuildSecrets)
-			if err != nil {
-				return fmt.Errorf("failed to fetch build secrets: %w", err)
-			}
-			buildSecretPaths, secretsCleanup, err = secrets.WriteToTempFiles(buildSecrets, "dcx-build-secret")
-			if err != nil {
-				return fmt.Errorf("failed to write build secrets: %w", err)
-			}
-			defer secretsCleanup()
-		}
-	}
-
-	// Handle state transitions
-	var isNewEnvironment bool
-	var needsRebuild bool
-
-	switch currentState {
-	case state.StateRunning:
-		// Already handled early return above, this is rebuild/recreate case
-		fallthrough
-	case state.StateStale, state.StateBroken:
-		if s.verbose {
-			s.report.Infof("Removing existing devcontainer...")
-		}
-		// Never remove named volumes when recreating: they hold user data
-		// (databases, caches) that must survive a config change. Only an
-		// explicit `dcx down --volumes` removes them.
-		if err := s.DownWithIDs(ctx, ids.ProjectName, resolved.ID, DownOptions{}); err != nil {
-			return fmt.Errorf("failed to remove existing environment: %w", err)
-		}
-		needsRebuild = true
-		fallthrough
-	case state.StateAbsent:
-		createOpts := opts
-		createOpts.Rebuild = opts.Rebuild || needsRebuild
-		if err := s.create(ctx, resolved, createOpts, buildSecretPaths); err != nil {
-			return err
-		}
-		isNewEnvironment = true
-	case state.StateCreated:
-		if err := s.startExisting(ctx, resolved, existing); err != nil {
-			return err
-		}
-	}
-
-	// Get container info for subsequent operations
-	_, containerInfo, err := s.stateManager.GetStateWithProject(ctx, ids.ProjectName, resolved.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get container info: %w", err)
-	}
-
-	// Pre-deploy agent binary before lifecycle hooks
-	if containerInfo != nil {
-		s.report.Infof("Installing dcx agent...")
-		updated, err := deploy.PreDeployAgent(ctx, containerInfo.Name)
-		if err != nil {
-			return fmt.Errorf("failed to install dcx agent: %w", err)
-		}
-		// An agent from an older dcx may still be serving; replace it so
-		// fixes in the new binary actually take effect.
-		if updated {
-			if err := deploy.StopOutdatedAgent(ctx, containerInfo.Name, agentproto.BinaryPath, agentproto.LoopbackAddr); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Mount dcx-managed SSH secrets (host key + authorized_keys). This runs
-	// before lifecycle hooks so dcx exec paths used by hooks have SSH
-	// available immediately.
-	if containerInfo != nil {
-		if err := s.mountSSHSecrets(ctx, resolved, containerInfo); err != nil {
-			return fmt.Errorf("failed to mount SSH secrets: %w", err)
-		}
-		if err := s.launchSSHAgent(ctx, resolved, containerInfo, opts.SSHAllowedCIDRs); err != nil {
-			return fmt.Errorf("failed to launch SSH agent: %w", err)
-		}
-	}
-
-	// Mount runtime secrets before lifecycle hooks
-	if len(runtimeSecrets) > 0 && containerInfo != nil {
-		s.report.Infof("Mounting secrets...")
-		if err := container.MountSecretsToContainer(ctx, s.engine, containerInfo.Name, runtimeSecrets, resolved.EffectiveUser); err != nil {
-			return fmt.Errorf("failed to mount secrets: %w", err)
-		}
-	}
-
-	// Run lifecycle hooks
-	if err := s.runLifecycleHooks(ctx, resolved, containerInfo, isNewEnvironment); err != nil {
-		return fmt.Errorf("lifecycle hooks failed: %w", err)
-	}
-
-	// Setup SSH server access
-	if err := s.setupSSHAccess(ctx, resolved, containerInfo); err != nil {
-		s.report.Warnf("Failed to setup SSH access: %v", err)
-	}
-
-	return nil
-}
-
 // mountSSHSecrets writes the persistent host key and the user's authorized
 // public key into /run/secrets/dcx/.
 //
@@ -580,7 +385,11 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	// The agent inherits the container's default user (typically the image's
 	// USER or remoteUser after UID remap). mountSSHSecrets chowns the host
 	// key and authorized_keys to that same user so the agent can read them.
-	if err := s.engine.ExecDetached(ctx, containerInfo.Name, argv); err != nil {
+	// Keep the agent's output in a log so a failed start can be explained
+	// (`docker exec -d` discards it). argv is passed as positional
+	// arguments, never interpolated into the script.
+	wrapped := append([]string{"sh", "-c", `exec "$0" "$@" >` + agentLogPath + ` 2>&1`}, argv...)
+	if err := s.engine.ExecDetached(ctx, containerInfo.Name, wrapped); err != nil {
 		return err
 	}
 
@@ -598,8 +407,18 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("dcx agent did not start listening within %s", agentReadyTimeout)
+	msg := fmt.Sprintf("dcx agent did not start listening within %s", agentReadyTimeout)
+	if out, err := s.engine.ExecOutput(ctx, containerInfo.Name, []string{"tail", "-n", "20", agentLogPath}); err == nil {
+		if log := strings.TrimSpace(string(out)); log != "" {
+			msg += "; agent log:\n" + log
+		}
+	}
+	return errors.New(msg)
 }
+
+// agentLogPath receives the agent's stdout/stderr (world-writable /tmp so
+// it works whatever user the agent runs as).
+const agentLogPath = "/tmp/dcx-agent.log"
 
 // agentReadyTimeout bounds how long Up waits for a freshly launched agent.
 var agentReadyTimeout = 15 * time.Second
@@ -664,60 +483,6 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 	return runtime.Start(ctx)
-}
-
-// runLifecycleHooks runs appropriate lifecycle hooks.
-func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo, isNew bool) error {
-	if containerInfo == nil {
-		return fmt.Errorf("no primary container found")
-	}
-
-	// Apply environment patches and probing before lifecycle hooks
-	probedEnv, err := s.setupContainerEnvironment(ctx, resolved, containerInfo)
-	if err != nil {
-		s.report.Warnf("Environment setup failed: %v", err)
-		// Continue with hooks even if env setup fails
-	}
-
-	hookRunner := lifecycle.NewHookRunner(
-		s.engine,
-		s.report,
-		containerInfo.ID,
-		s.workspacePath,
-		resolved.RawConfig,
-		resolved.ID,
-	)
-
-	// Set probed environment for hook execution
-	if probedEnv != nil {
-		hookRunner.SetProbedEnv(probedEnv)
-	}
-
-	// Use pre-resolved features
-	if len(resolved.Features) > 0 {
-		if s.verbose {
-			s.report.Infof("  [hooks] Using %d pre-resolved features", len(resolved.Features))
-		}
-
-		hookRunner.SetFeatureHooks(
-			features.CollectOnCreateCommands(resolved.Features),
-			features.CollectUpdateContentCommands(resolved.Features),
-			features.CollectPostCreateCommands(resolved.Features),
-			features.CollectPostStartCommands(resolved.Features),
-			features.CollectPostAttachCommands(resolved.Features),
-		)
-	}
-
-	if isNew {
-		if s.verbose {
-			s.report.Infof("  [hooks] Running create hooks...")
-		}
-		return hookRunner.RunAllCreateHooks(ctx)
-	}
-	if s.verbose {
-		s.report.Infof("  [hooks] Running start hooks...")
-	}
-	return hookRunner.RunStartHooks(ctx)
 }
 
 // setupContainerEnvironment applies patches and probes the user environment.

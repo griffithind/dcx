@@ -216,3 +216,29 @@ func TestLoadSurvivesFailedMetadataPull(t *testing.T) {
 	}
 	assert.True(t, warned, "a failed pull should be reported, not fatal")
 }
+
+// When the agent never starts listening, the error must include its log so
+// the cause (bad host key permissions, port in use, ...) is visible.
+func TestLaunchSSHAgentTimeoutIncludesAgentLog(t *testing.T) {
+	old := agentReadyTimeout
+	agentReadyTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { agentReadyTimeout = old })
+
+	fake := &containertest.Fake{
+		ExecFunc: func(_ string, argv []string) error {
+			if isPing(argv) {
+				return errors.New("connection refused")
+			}
+			return nil
+		},
+		Outputs: map[string]string{"tail -n 20 " + agentLogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n"},
+	}
+	svc, _ := newTestService(t, fake)
+
+	err := svc.launchSSHAgent(context.Background(), agentResolved(), &state.ContainerInfo{Name: "c1"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "address already in use")
+
+	launch := strings.Join(fake.CallsTo("ExecDetached")[0].Args, " ")
+	assert.Contains(t, launch, agentLogPath, "agent output must be captured")
+}

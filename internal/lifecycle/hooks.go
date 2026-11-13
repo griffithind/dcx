@@ -4,11 +4,13 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
+
+	"github.com/griffithind/dcx/internal/report"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
@@ -80,12 +82,17 @@ type HookRunner struct {
 	featurePostCreateHooks    []features.FeatureHook
 	featurePostStartHooks     []features.FeatureHook
 	featurePostAttachHooks    []features.FeatureHook
+
+	// Command executors; default to the real host/container execution and
+	// are replaced in tests.
+	execHost      func(context.Context, CommandSpec) error
+	execContainer func(context.Context, CommandSpec) error
 }
 
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
 func NewHookRunner(ports sshexec.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
-	return &HookRunner{
+	r := &HookRunner{
 		ports:         ports,
 		report:        report.OrDiscard(rep),
 		containerID:   containerID,
@@ -93,6 +100,9 @@ func NewHookRunner(ports sshexec.PortResolver, rep report.Reporter, containerID 
 		cfg:           cfg,
 		workspaceID:   workspaceID,
 	}
+	r.execHost = r.executeHostCommand
+	r.execContainer = r.executeContainerCommand
+	return r
 }
 
 // SetFeatureHooks sets the feature lifecycle hooks to be executed.
@@ -129,290 +139,164 @@ func (r *HookRunner) shouldBlock(cmd WaitFor) bool {
 	return waitForOrder[cmd] <= waitForOrder[waitFor]
 }
 
-// RunInitialize runs initializeCommand on the host.
+// Markers records which once-per-container lifecycle phases have completed,
+// so an interrupted or failed setup resumes where it stopped instead of
+// re-running finished hooks (or never running the rest).
+type Markers interface {
+	Done(ctx context.Context, phase string) bool
+	Mark(ctx context.Context, phase string) error
+}
+
+// Phase names used with Markers.
+const (
+	PhaseOnCreate      = "onCreateCommand"
+	PhaseUpdateContent = "updateContentCommand"
+	PhasePostCreate    = "postCreateCommand"
+)
+
+// RunInitialize runs initializeCommand on the host. Per the spec it runs
+// before the container is created or started.
 func (r *HookRunner) RunInitialize(ctx context.Context) error {
-	if r.cfg.InitializeCommand == nil {
+	cmds := ParseCommand(r.cfg.InitializeCommand)
+	if len(cmds) == 0 {
 		return nil
 	}
 	r.report.Infof("Running initializeCommand...")
-	return r.runHostCommand(ctx, r.cfg.InitializeCommand)
-}
-
-// RunOnCreate runs onCreateCommand in the container.
-func (r *HookRunner) RunOnCreate(ctx context.Context) error {
-	if r.cfg.OnCreateCommand == nil {
-		return nil
+	if err := r.runCommands(ctx, cmds, r.execHost); err != nil {
+		return fmt.Errorf("initializeCommand failed: %w", err)
 	}
-	r.report.Infof("Running onCreateCommand...")
-	return r.runContainerCommand(ctx, r.cfg.OnCreateCommand)
+	return nil
 }
 
-// RunUpdateContent runs updateContentCommand in the container.
-func (r *HookRunner) RunUpdateContent(ctx context.Context) error {
-	if r.cfg.UpdateContentCommand == nil {
-		return nil
+// RunCreateHooks runs the once-per-container hooks (onCreateCommand,
+// updateContentCommand, postCreateCommand), feature hooks before the
+// devcontainer.json hook for each phase. Phases recorded as done in markers
+// are skipped, and each completed phase is recorded. markers may be nil.
+func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error {
+	phases := []struct {
+		name     string
+		waitFor  WaitFor
+		features []features.FeatureHook
+		command  interface{}
+	}{
+		{PhaseOnCreate, WaitForOnCreateCommand, r.featureOnCreateHooks, r.cfg.OnCreateCommand},
+		{PhaseUpdateContent, WaitForUpdateContentCommand, r.featureUpdateContentHooks, r.cfg.UpdateContentCommand},
+		{PhasePostCreate, WaitForPostCreateCommand, r.featurePostCreateHooks, r.cfg.PostCreateCommand},
 	}
-	r.report.Infof("Running updateContentCommand...")
-	return r.runContainerCommand(ctx, r.cfg.UpdateContentCommand)
-}
 
-// RunPostCreate runs postCreateCommand in the container.
-func (r *HookRunner) RunPostCreate(ctx context.Context) error {
-	if r.cfg.PostCreateCommand == nil {
-		return nil
-	}
-	r.report.Infof("Running postCreateCommand...")
-	return r.runContainerCommand(ctx, r.cfg.PostCreateCommand)
-}
-
-// RunPostStart runs postStartCommand in the container.
-func (r *HookRunner) RunPostStart(ctx context.Context) error {
-	if r.cfg.PostStartCommand == nil {
-		return nil
-	}
-	r.report.Infof("Running postStartCommand...")
-	return r.runContainerCommand(ctx, r.cfg.PostStartCommand)
-}
-
-// RunAllCreateHooks runs all hooks needed when a container is first created.
-// All hooks run sequentially to ensure they complete before the CLI exits.
-// The waitFor setting determines when the "container ready" message is shown,
-// but all hooks still run to completion.
-func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
-	waitFor := r.getWaitFor()
 	readyPrinted := false
-
-	// Helper to print ready message once we pass the waitFor threshold
-	printReadyIfNeeded := func(hookType WaitFor) {
-		if !readyPrinted && !r.shouldBlock(hookType) {
+	for _, p := range phases {
+		if !readyPrinted && !r.shouldBlock(p.waitFor) {
 			r.report.Infof("Container is ready (remaining hooks running...)")
 			readyPrinted = true
 		}
+		if markers != nil && markers.Done(ctx, p.name) {
+			if r.hasHooks(p.features, p.command) {
+				r.report.Infof("Skipping %s (already completed)", p.name)
+			}
+			continue
+		}
+		if err := r.runPhase(ctx, p.name, p.features, p.command); err != nil {
+			return err
+		}
+		if markers != nil {
+			if err := markers.Mark(ctx, p.name); err != nil {
+				return fmt.Errorf("record %s completion: %w", p.name, err)
+			}
+		}
 	}
-
-	// initializeCommand runs on host before anything else
-	if err := r.RunInitialize(ctx); err != nil {
-		return fmt.Errorf("initializeCommand failed: %w", err)
-	}
-
-	// onCreateCommand runs after container creation
-	// Per spec: feature hooks run BEFORE devcontainer hooks
-	printReadyIfNeeded(WaitForOnCreateCommand)
-	if err := r.runFeatureHooks(ctx, r.featureOnCreateHooks, "onCreateCommand"); err != nil {
-		return err
-	}
-	if err := r.RunOnCreate(ctx); err != nil {
-		return fmt.Errorf("onCreateCommand failed: %w", err)
-	}
-
-	// updateContentCommand runs after onCreateCommand
-	// Per spec: feature hooks run BEFORE devcontainer hooks
-	printReadyIfNeeded(WaitForUpdateContentCommand)
-	if err := r.runFeatureHooks(ctx, r.featureUpdateContentHooks, "updateContentCommand"); err != nil {
-		return err
-	}
-	if err := r.RunUpdateContent(ctx); err != nil {
-		return fmt.Errorf("updateContentCommand failed: %w", err)
-	}
-
-	// postCreateCommand runs after updateContentCommand
-	// Per spec: feature hooks run BEFORE devcontainer hooks
-	printReadyIfNeeded(WaitForPostCreateCommand)
-	if err := r.runFeatureHooks(ctx, r.featurePostCreateHooks, "postCreateCommand"); err != nil {
-		return err
-	}
-	if err := r.RunPostCreate(ctx); err != nil {
-		return fmt.Errorf("postCreateCommand failed: %w", err)
-	}
-
-	// postStartCommand runs after postCreateCommand (on first start)
-	// Per spec: feature hooks run BEFORE devcontainer hooks
-	printReadyIfNeeded(WaitForPostStartCommand)
-	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
-		return err
-	}
-	if err := r.RunPostStart(ctx); err != nil {
-		return fmt.Errorf("postStartCommand failed: %w", err)
-	}
-
-	// Log if we had post-ready hooks
-	if readyPrinted && waitFor != WaitForPostStartCommand {
-		r.report.Infof("All lifecycle hooks completed")
-	}
-
 	return nil
 }
 
-// RunStartHooks runs hooks needed when a container is started (not first time).
-// Per spec: feature hooks run BEFORE devcontainer hooks.
+// RunStartHooks runs postStartCommand (feature hooks first). It runs every
+// time the container starts.
 func (r *HookRunner) RunStartHooks(ctx context.Context) error {
-	// Feature postStartCommands run before devcontainer postStartCommand
-	if err := r.runFeatureHooks(ctx, r.featurePostStartHooks, "postStartCommand"); err != nil {
-		return err
-	}
-
-	if err := r.RunPostStart(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return r.runPhase(ctx, "postStartCommand", r.featurePostStartHooks, r.cfg.PostStartCommand)
 }
 
-// runFeatureHooks executes a list of feature hooks.
-func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []features.FeatureHook, hookType string) error {
-	for _, hook := range hooks {
-		r.report.Infof("Running %s from feature '%s'...", hookType, hook.FeatureName)
-		if err := r.runContainerCommand(ctx, hook.Command); err != nil {
-			return fmt.Errorf("feature '%s' %s failed: %w", hook.FeatureName, hookType, err)
+// RunAttachHooks runs postAttachCommand (feature hooks first). It runs each
+// time a user attaches an interactive session.
+func (r *HookRunner) RunAttachHooks(ctx context.Context) error {
+	return r.runPhase(ctx, "postAttachCommand", r.featurePostAttachHooks, r.cfg.PostAttachCommand)
+}
+
+func (r *HookRunner) hasHooks(featureHooks []features.FeatureHook, command interface{}) bool {
+	return len(featureHooks) > 0 || len(ParseCommand(command)) > 0
+}
+
+// runPhase runs one lifecycle phase in the container: feature hooks in
+// install order, then the devcontainer.json command.
+func (r *HookRunner) runPhase(ctx context.Context, phase string, featureHooks []features.FeatureHook, command interface{}) error {
+	for _, hook := range featureHooks {
+		cmds := ParseCommand(hook.Command)
+		if len(cmds) == 0 {
+			continue
+		}
+		r.report.Infof("Running %s from feature '%s'...", phase, hook.FeatureName)
+		if err := r.runCommands(ctx, cmds, r.execContainer); err != nil {
+			return fmt.Errorf("feature '%s' %s failed: %w", hook.FeatureName, phase, err)
 		}
 	}
-	return nil
-}
-
-// runHostCommand executes a command on the host machine.
-// Per spec, named commands (map format) run in parallel.
-func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) error {
-	cmds := parseCommand(command)
+	cmds := ParseCommand(command)
 	if len(cmds) == 0 {
 		return nil
 	}
+	r.report.Infof("Running %s...", phase)
+	if err := r.runCommands(ctx, cmds, r.execContainer); err != nil {
+		return fmt.Errorf("%s failed: %w", phase, err)
+	}
+	return nil
+}
 
-	// Check if any commands are parallel (map commands)
-	hasParallel := false
-	for _, cmd := range cmds {
-		if cmd.Parallel {
-			hasParallel = true
+// runCommands runs parsed commands with exec. Named (object-form) commands
+// run in parallel per the spec; when one fails the shared context is
+// cancelled so the others stop too. Other forms run sequentially.
+func (r *HookRunner) runCommands(ctx context.Context, cmds Command, exec func(context.Context, CommandSpec) error) error {
+	parallel := false
+	for _, c := range cmds {
+		if c.Parallel {
+			parallel = true
 			break
 		}
 	}
-
-	// Sequential execution for non-parallel commands
-	if !hasParallel {
-		for _, cmd := range cmds {
-			if err := r.executeHostCommand(ctx, cmd); err != nil {
+	if !parallel {
+		for _, c := range cmds {
+			if err := exec(ctx, c); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	// Parallel execution for map commands with context cancellation
-	// Per spec, if one parallel command fails, cancel the others
 	r.report.Infof("  Running %d parallel commands...", len(cmds))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(cmds))
-
-	for _, cmd := range cmds {
-		cmd := cmd // capture for goroutine
+	errs := make([]error, len(cmds))
+	for i, c := range cmds {
 		wg.Add(1)
-		go func() {
+		go func(i int, c CommandSpec) {
 			defer wg.Done()
-			select {
-			case <-ctx.Done():
-				return // Context cancelled, stop execution
-			default:
-				if err := r.executeHostCommand(ctx, cmd); err != nil {
-					errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
-					cancel() // Cancel other parallel commands
-				}
+			if err := exec(ctx, c); err != nil {
+				errs[i] = fmt.Errorf("[%s] %w", c.Name, err)
+				cancel()
 			}
-		}()
+		}(i, c)
 	}
-
 	wg.Wait()
-	close(errCh)
 
-	// Collect errors
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		// Return first error, but log all
-		for _, err := range errs {
-			r.report.Errorf("  %v", err)
+	var first error
+	for _, err := range errs {
+		if err == nil {
+			continue
 		}
-		return errs[0]
-	}
-
-	return nil
-}
-
-// runContainerCommand executes a command inside the container.
-// Per spec, named commands (map format) run in parallel.
-func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{}) error {
-	cmds := parseCommand(command)
-	if len(cmds) == 0 {
-		return nil
-	}
-
-	// Check if any commands are parallel (map commands)
-	hasParallel := false
-	for _, cmd := range cmds {
-		if cmd.Parallel {
-			hasParallel = true
-			break
+		r.report.Errorf("  %v", err)
+		if first == nil {
+			first = err
 		}
 	}
-
-	// Sequential execution for non-parallel commands
-	if !hasParallel {
-		for _, cmd := range cmds {
-			if err := r.executeContainerCommand(ctx, cmd); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	// Parallel execution for map commands with context cancellation
-	// Per spec, if one parallel command fails, cancel the others
-	r.report.Infof("  Running %d parallel commands...", len(cmds))
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(cmds))
-
-	for _, cmd := range cmds {
-		cmd := cmd // capture for goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case <-ctx.Done():
-				return // Context cancelled, stop execution
-			default:
-				if err := r.executeContainerCommand(ctx, cmd); err != nil {
-					errCh <- fmt.Errorf("[%s] %w", cmd.Name, err)
-					cancel() // Cancel other parallel commands
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	// Collect errors
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-
-	if len(errs) > 0 {
-		// Return first error, but log all
-		for _, err := range errs {
-			r.report.Errorf("  %v", err)
-		}
-		return errs[0]
-	}
-
-	return nil
+	return first
 }
 
 // formatCommandForDisplay returns a human-readable string for displaying the command.
@@ -429,17 +313,14 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 
 	var cmd *exec.Cmd
 	if cmdSpec.UseShell {
-		// Shell command: pass through sh -c
 		cmd = exec.CommandContext(ctx, "sh", "-c", cmdSpec.Args[0])
 	} else {
-		// Exec command: execute directly with args
 		cmd = exec.CommandContext(ctx, cmdSpec.Args[0], cmdSpec.Args[1:]...)
 	}
 	cmd.Dir = r.workspacePath
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
 	return cmd.Run()
 }
 
@@ -447,23 +328,16 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
 	r.report.Infof("  > %s", formatCommandForDisplay(cmdSpec))
 
-	// Build the command to execute
-	var execCmd []string
+	execCmd := cmdSpec.Args
 	if cmdSpec.UseShell {
-		// Shell command: wrap with sh -c
 		execCmd = []string{"sh", "-c", cmdSpec.Args[0]}
-	} else {
-		// Exec command: use args directly
-		execCmd = cmdSpec.Args
 	}
 
-	// Build additional env from probedEnv
 	var env []string
 	for k, v := range r.probedEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Execute via unified SSH path (handles user, workdir, base env, agent forwarding)
 	tty := false
 	exitCode, err := sshexec.ExecInContainer(ctx, sshexec.ContainerExecOptions{
 		ContainerName: r.containerID,
@@ -473,104 +347,90 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		Command:       execCmd,
 		Env:           env,
 		TTY:           &tty,
-		Stdout:        os.Stdout,
-		Stderr:        os.Stderr,
-		Ports:         r.ports,
+		// Hooks are non-interactive. Passing os.Stdin would leave a
+		// goroutine reading the user's terminal after the hook ends,
+		// swallowing input meant for whatever runs next (e.g. dcx shell).
+		Stdin:  strings.NewReader(""),
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Ports:  r.ports,
 	})
-
 	if err != nil {
 		return err
 	}
-
 	if exitCode != 0 {
 		return fmt.Errorf("command exited with code %d", exitCode)
 	}
-
 	return nil
 }
 
-// parseCommand parses a command specification into individual commands.
-// Commands can be:
-// - string: single shell command (executed via sh -c)
-// - []string: exec-style command with arguments (executed directly)
-// - []interface{}: exec-style command with arguments (executed directly)
-// - map[string]interface{}: named parallel commands (executed sequentially for now)
+// Command is a parsed lifecycle command: one entry for the string and array
+// forms, one entry per name (run in parallel) for the object form.
+type Command []CommandSpec
+
+// ParseCommand parses a lifecycle command from devcontainer.json or feature
+// metadata. It is the only lifecycle command parser:
 //
-// Per the devcontainer spec:
-// - String format: "npm install" -> executed as shell command
-// - Array format: ["npm", "install"] -> executed directly with exec semantics
-func parseCommand(command interface{}) []CommandSpec {
-	if command == nil {
-		return nil
-	}
-
+//	"npm install"                  shell command (sh -c)
+//	["npm", "install"]             exec form, arguments kept as-is
+//	{"a": "cmd", "b": ["x", "y"]}  named commands, run in parallel
+//
+// Named commands are returned sorted by name so output is deterministic.
+func ParseCommand(command interface{}) Command {
 	switch v := command.(type) {
+	case nil:
+		return nil
 	case string:
-		// String command: execute via shell
-		return []CommandSpec{{
-			Args:     []string{v},
-			UseShell: true,
-		}}
-
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return Command{{Args: []string{v}, UseShell: true}}
 	case []string:
-		// Array of strings: exec-style command with arguments
 		if len(v) == 0 {
 			return nil
 		}
-		return []CommandSpec{{
-			Args:     v,
-			UseShell: false,
-		}}
-
+		return Command{{Args: v}}
 	case []interface{}:
-		// Array of interface{}: exec-style command with arguments
-		var args []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				args = append(args, s)
-			}
-		}
+		args := stringItems(v)
 		if len(args) == 0 {
 			return nil
 		}
-		return []CommandSpec{{
-			Args:     args,
-			UseShell: false,
-		}}
-
+		return Command{{Args: args}}
 	case map[string]interface{}:
-		// Named commands - per spec, these run in parallel
-		var cmds []CommandSpec
-		for name, cmd := range v {
-			if cmdStr, ok := cmd.(string); ok {
-				// Named string command: shell execution
-				cmds = append(cmds, CommandSpec{
-					Args:     []string{cmdStr},
-					UseShell: true,
-					Name:     name,
-					Parallel: true, // Map commands run in parallel per spec
-				})
-			} else if cmdArr, ok := cmd.([]interface{}); ok {
-				// Named array command: exec-style
-				var args []string
-				for _, item := range cmdArr {
-					if s, ok := item.(string); ok {
-						args = append(args, s)
-					}
+		names := make([]string, 0, len(v))
+		for name := range v {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		var cmds Command
+		for _, name := range names {
+			switch c := v[name].(type) {
+			case string:
+				if strings.TrimSpace(c) != "" {
+					cmds = append(cmds, CommandSpec{Args: []string{c}, UseShell: true, Name: name, Parallel: true})
 				}
-				if len(args) > 0 {
-					cmds = append(cmds, CommandSpec{
-						Args:     args,
-						UseShell: false,
-						Name:     name,
-						Parallel: true, // Map commands run in parallel per spec
-					})
+			case []interface{}:
+				if args := stringItems(c); len(args) > 0 {
+					cmds = append(cmds, CommandSpec{Args: args, Name: name, Parallel: true})
+				}
+			case []string:
+				if len(c) > 0 {
+					cmds = append(cmds, CommandSpec{Args: c, Name: name, Parallel: true})
 				}
 			}
 		}
 		return cmds
-
 	default:
 		return nil
 	}
+}
+
+func stringItems(items []interface{}) []string {
+	var out []string
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

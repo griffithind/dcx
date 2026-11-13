@@ -901,6 +901,13 @@ func (d *Docker) ExecDetached(ctx context.Context, containerName string, argv []
 	return nil
 }
 
+// ExecOutput runs argv in the container (as its default user) and returns
+// its stdout.
+func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error) {
+	args := append([]string{"exec", containerName}, argv...)
+	return exec.CommandContext(ctx, "docker", args...).Output()
+}
+
 // CopyToContainer copies a file to a container.
 func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
 	cmd := exec.CommandContext(ctx, "docker", "cp", src, containerName+":"+dest)

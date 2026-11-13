@@ -275,10 +275,15 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 
 ### Phase 5: reconciler (1 week)
 
-- [ ] `app/reconcile` with the step list above, plus completion markers (a label set at the end of the create hooks, or `/var/lib/dcx/state.json` inside the container).
-- [ ] `up`, `start`, `restart` and `build` (build = the steps up to `EnsureImage`) all use it. Delete `QuickStart`, the `restart` docker calls, `UnifiedRuntime`, and the duplicate `DownOptions`.
-- [ ] `EnsureAgent`: atomic versioned deploy (cp to tmp, mv, compare `dcx-agent --version`), launch, poll the ReadyFile or ping with a timeout, and on failure print the agent's log.
-- [ ] Lifecycle: `initialize` before build on the host; `postAttach` on shell/exec attach; context cancellation kills remote processes.
+- [x] `Up` (`internal/service/up.go`) is an ordered list of idempotent steps: initialize, container, agent, secrets, environment, lifecycle hooks, ssh config. `up` on a stopped container and `restart` use it; the CLI's `up` fast path is gone, and Up itself decides between no-op, resume, start, create and recreate.
+- [x] Lifecycle markers: `/var/lib/dcx/lifecycle/<phase>.done` inside the container for onCreate, updateContent and postCreate, plus `ready` after the first postStart. A running container whose setup didn't finish is resumed (W2) instead of reported as running. Containers without the `lifecycle.markers` label (created by older dcx) are assumed complete, so upgrading never reruns create hooks.
+- [x] `initializeCommand` runs on the host before the container is created or started, on every up that does work (W15). `postAttachCommand` runs on `dcx shell` (W16).
+- [x] Typed lifecycle commands: `lifecycle.ParseCommand` is the single parser (config and feature hooks, names sorted); one execution path for parallel object-form commands; the unused `devcontainer.LifecycleCommand` is deleted.
+- [x] Cancellation: Ctrl-C/SIGTERM cancel the CLI context. A cancelled hook or exec signals and closes its SSH session; a failing parallel command cancels its siblings (B5).
+- [x] Agent: runs with output in `/tmp/dcx-agent.log`, and a failed start reports the log's tail. (Versioned atomic deploy and the readiness wait were done in Phase 1.)
+- [x] `dcx build` builds exactly what `up` would run, including features and the UID layer (`UnifiedRuntime.buildImages`, H5).
+- [x] Found while testing: lifecycle hooks inherited `os.Stdin`, and x/crypto/ssh keeps reading it after the session ends, so a hook swallowed the user's next keystrokes (e.g. the first input to `dcx shell`). Hooks now get an empty stdin.
+- [ ] Not done: `waitFor` still only affects the "ready" message (everything runs in the foreground); `postAttachCommand` is not run for plain `ssh` sessions; image-metadata lifecycle commands are not run; `UnifiedRuntime` and the duplicate `DownOptions` remain (they fold into Phase 6's ContainerSpec work).
 
 ### Phase 6: compose parity (3–4 days)
 

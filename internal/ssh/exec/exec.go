@@ -147,6 +147,20 @@ func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error
 	// but for ssh-session cd we rely on the shell picking up PWD).
 	_ = workDir // server uses its own workdir; preserved for future use
 
+	// Cancellation (Ctrl-C, a failed parallel hook) must stop the remote
+	// command: signal it, then close the session so we stop waiting.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = session.Signal(ssh.SIGTERM)
+			_ = session.Close()
+			_ = client.Close()
+		case <-stopWatch:
+		}
+	}()
+
 	var runErr error
 	if len(opts.Command) == 0 {
 		runErr = session.Shell()
@@ -155,6 +169,9 @@ func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error
 		}
 	} else {
 		runErr = session.Run(shell.Join(opts.Command))
+	}
+	if ctx.Err() != nil {
+		return -1, ctx.Err()
 	}
 
 	if runErr != nil {
