@@ -16,7 +16,6 @@ import (
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
-	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -34,7 +33,10 @@ type Provisioner struct {
 	containerName string
 
 	derivedImage string
-	sshBindHost  string // "" == 127.0.0.1 (the default)
+	// ssh is the agent endpoint of the container being created (planSSH).
+	ssh *sshEndpoint
+	// composeInfo caches composeService.
+	composeInfo *composeServiceInfo
 }
 
 // NewProvisioner creates a new runtime for a resolved devcontainer.
@@ -61,8 +63,6 @@ func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
 		return fmt.Errorf("no resolved configuration - use NewProvisioner")
 	}
 
-	r.sshBindHost = opts.SSHBindHost
-
 	// Determine the approach based on plan type
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ComposePlan:
@@ -78,6 +78,9 @@ func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
 func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, plan *devcontainer.ComposePlan) error {
 	image, err := r.buildImages(ctx, opts)
 	if err != nil {
+		return err
+	}
+	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
 		return err
 	}
 
@@ -133,6 +136,9 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
+		return err
+	}
 
 	// Create the container
 	containerID, err := r.createContainer(ctx, finalImage)
@@ -153,6 +159,11 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 // anything, so a recreate can prepare the new images while the old
 // environment still runs: a failing build then leaves it in place.
 func (r *Provisioner) BuildImages(ctx context.Context, opts UpOptions) error {
+	// An unreachable network mode fails here too, before a recreate
+	// removes the old environment.
+	if _, _, err := r.sshNetwork(ctx); err != nil {
+		return err
+	}
 	image, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
@@ -546,6 +557,9 @@ func (r *Provisioner) buildLabels() map[string]string {
 	if r.derivedImage != "" {
 		l.DerivedImage = r.derivedImage
 	}
+	if r.ssh != nil {
+		r.ssh.labels(l)
+	}
 
 	// Set compose-specific labels
 	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
@@ -597,8 +611,7 @@ func (r *Provisioner) buildEnvironment() map[string]string {
 
 // buildPortBindings combines forwardPorts, appPorts, and the dcx-agent SSH
 // listener into a single slice. AppPorts are bound to localhost for
-// security per the devcontainer spec. The SSH port is always published on
-// 127.0.0.1 with a Docker-assigned ephemeral host port.
+// security per the devcontainer spec.
 func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 	var ports []devcontainer.PortForward
 
@@ -613,50 +626,13 @@ func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 		ports = append(ports, ap)
 	}
 
-	// Always publish the dcx-agent SSH port. Single-transport: there is no
-	// opt-out. The in-agent ConnCallback is what enforces "loopback-only by
-	// default" — even when we bind 0.0.0.0 (e.g. via --hosts), the callback
-	// stays the primary gate.
-	ports = append(ports, r.sshPortBinding())
+	// The dcx-agent's port, when it is published on this container (see
+	// planSSH for the other network modes).
+	if r.ssh != nil && r.ssh.publish && r.ssh.owner == "" {
+		ports = append(ports, r.ssh.portForward())
+	}
 
 	return ports
-}
-
-// sshPortBinding returns the PortForward that publishes the dcx-agent's
-// SSH listener.
-//
-// The host port is derived deterministically from the workspace ID so
-// `dcx down` + `dcx up` returns the same (host, port) tuple — IDE
-// known_hosts entries and user bookmarks stay valid across recreates.
-// If the derived port is already bound by something else we fall back to
-// a Docker-picked ephemeral and emit a warning.
-//
-// The bind address defaults to 127.0.0.1 but can be widened via
-// UpOptions.SSHBindHost (driven by `dcx up --hosts`).
-func (r *Provisioner) sshPortBinding() devcontainer.PortForward {
-	host := r.sshBindHost
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	pf := devcontainer.PortForward{
-		ContainerPort: agentproto.ListenPort,
-		Host:          host,
-		Protocol:      "tcp",
-		Label:         "dcx SSH (internal)",
-		OnAutoForward: "ignore",
-	}
-
-	if id := r.resolved.ID; id != "" {
-		candidate := dcxssh.DeterministicPort(id)
-		if dcxssh.IsHostPortAvailable(candidate) {
-			pf.HostPort = candidate
-			pf.EphemeralHostPort = false
-			return pf
-		}
-		r.report.Warnf("SSH: preferred port %d is busy; falling back to an ephemeral port for this workspace", candidate)
-	}
-	pf.EphemeralHostPort = true
-	return pf
 }
 
 // Start implements ContainerRuntime.Start.
@@ -745,7 +721,14 @@ func ComposeOverridePath(workspaceID string) (string, error) {
 // writeComposeOverride renders spec for the primary service and writes it
 // to the workspace's persistent override file.
 func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
-	data, err := composeOverride(plan.Service, spec, nil)
+	file := overrideFile(plan.Service, spec, nil)
+	// network_mode service:<owner>: the agent's port is published on the
+	// owner, the only container Docker publishes ports on for that
+	// namespace.
+	if r.ssh != nil && r.ssh.publish && r.ssh.owner != "" {
+		file.Services[r.ssh.owner] = composeService{Ports: []string{r.ssh.portForward().DockerSpec()}}
+	}
+	data, err := marshalOverride(file)
 	if err != nil {
 		return err
 	}
@@ -798,55 +781,71 @@ func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontaine
 	if r.resolved.BaseImage != "" {
 		return r.resolved.BaseImage, false, nil
 	}
-
-	if plan == nil {
-		return "", false, fmt.Errorf("no compose configuration found")
-	}
-
-	if len(plan.Files) == 0 {
-		return "", false, fmt.Errorf("no compose files specified")
-	}
-
-	// Use docker compose config to get fully resolved configuration
-	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "config", "--format", "json")
+	svc, err := r.composeService(ctx, plan)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to get compose config: %w", err)
+		return "", false, err
 	}
-
-	var config struct {
-		Services map[string]struct {
-			Image string          `json:"image"`
-			Build json.RawMessage `json:"build"`
-		} `json:"services"`
-		Name string `json:"name"`
-	}
-
-	if err := json.Unmarshal(output, &config); err != nil {
-		return "", false, fmt.Errorf("failed to parse compose config: %w", err)
-	}
-
-	serviceName := plan.Service
-	if serviceName == "" {
-		return "", false, fmt.Errorf("no primary service specified")
-	}
-
-	svc, ok := config.Services[serviceName]
-	if !ok {
-		return "", false, fmt.Errorf("service %q not found in compose file", serviceName)
-	}
-	built := len(svc.Build) > 0 && string(svc.Build) != "null"
-
 	if svc.Image != "" {
-		return svc.Image, built, nil
+		return svc.Image, svc.Built, nil
 	}
 
 	// Service uses build - compute built image name
 	projectName := plan.ProjectName
 	if projectName == "" {
-		projectName = config.Name
+		projectName = svc.ProjectName
 	}
 	if projectName == "" {
 		projectName = r.resolved.ServiceName
 	}
-	return fmt.Sprintf("%s-%s", projectName, serviceName), true, nil
+	return fmt.Sprintf("%s-%s", projectName, plan.Service), true, nil
+}
+
+// composeServiceInfo is what dcx reads from the user's compose files about
+// the primary service.
+type composeServiceInfo struct {
+	Image       string
+	Built       bool // the service has a build: section
+	NetworkMode string
+	ProjectName string // the compose files' top-level name
+}
+
+// composeService reads the primary service from the user's compose files
+// (`docker compose config`, so includes, extends and variables are
+// resolved). The result is cached for the provisioner's lifetime.
+func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.ComposePlan) (*composeServiceInfo, error) {
+	if r.composeInfo != nil {
+		return r.composeInfo, nil
+	}
+	if len(plan.Files) == 0 {
+		return nil, fmt.Errorf("no compose files specified")
+	}
+	if plan.Service == "" {
+		return nil, fmt.Errorf("no primary service specified")
+	}
+	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "config", "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get compose config: %w", err)
+	}
+	var config struct {
+		Services map[string]struct {
+			Image       string          `json:"image"`
+			Build       json.RawMessage `json:"build"`
+			NetworkMode string          `json:"network_mode"`
+		} `json:"services"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(output, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse compose config: %w", err)
+	}
+	svc, ok := config.Services[plan.Service]
+	if !ok {
+		return nil, fmt.Errorf("service %q not found in compose file", plan.Service)
+	}
+	r.composeInfo = &composeServiceInfo{
+		Image:       svc.Image,
+		Built:       len(svc.Build) > 0 && string(svc.Build) != "null",
+		NetworkMode: svc.NetworkMode,
+		ProjectName: config.Name,
+	}
+	return r.composeInfo, nil
 }

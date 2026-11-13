@@ -67,9 +67,8 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	ports         sshclient.PortResolver
+	sshPort       int
 	report        report.Reporter
-	containerID   string
 	workspacePath string
 	cfg           *devcontainer.DevContainerConfig
 	workspaceID   string
@@ -86,13 +85,13 @@ type HookRunner struct {
 	execContainer func(context.Context, CommandSpec) error
 }
 
-// NewHookRunner creates a new hook runner.
-// workspaceID locates the workspace's pinned SSH host key.
-func NewHookRunner(ports sshclient.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
+// NewHookRunner creates a new hook runner. Container hooks connect to the
+// agent on 127.0.0.1:sshPort (0 when only host hooks run); workspaceID
+// locates the workspace's pinned SSH host key.
+func NewHookRunner(sshPort int, rep report.Reporter, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	r := &HookRunner{
-		ports:         ports,
+		sshPort:       sshPort,
 		report:        report.OrDiscard(rep),
-		containerID:   containerID,
 		workspacePath: workspacePath,
 		cfg:           cfg,
 		workspaceID:   workspaceID,
@@ -323,12 +322,11 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 	// The agent gives every session the workspace's remoteEnv and probed
 	// user environment, so hooks see the same environment as shells.
 	exitCode, err := sshclient.Run(ctx, sshclient.RunOptions{
-		ContainerName: r.containerID,
-		WorkspaceID:   r.workspaceID,
-		Command:       execCmd,
-		Stdout:        os.Stdout,
-		Stderr:        os.Stderr,
-		Ports:         r.ports,
+		Port:        r.sshPort,
+		WorkspaceID: r.workspaceID,
+		Command:     execCmd,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
 	})
 	if err != nil {
 		return err

@@ -41,7 +41,7 @@ func (m *memMarkers) Mark(_ context.Context, p string) error {
 func testRunner(cfg *devcontainer.DevContainerConfig, failOn string) (*HookRunner, *[]string) {
 	var mu sync.Mutex
 	var ran []string
-	r := NewHookRunner(nil, report.Discard, "c1", "/ws", cfg, "ws")
+	r := NewHookRunner(0, report.Discard, "/ws", cfg, "ws")
 	exec := func(_ context.Context, c CommandSpec) error {
 		mu.Lock()
 		ran = append(ran, strings.Join(c.Args, " "))
@@ -130,7 +130,7 @@ func TestRunInitializeUsesHost(t *testing.T) {
 // cancelled.
 func TestParallelFailureCancelsOthers(t *testing.T) {
 	cfg := &devcontainer.DevContainerConfig{OnCreateCommand: map[string]interface{}{"fail": "fail", "slow": "slow"}}
-	r := NewHookRunner(nil, report.Discard, "c1", "/ws", cfg, "ws")
+	r := NewHookRunner(0, report.Discard, "/ws", cfg, "ws")
 	cancelled := make(chan struct{})
 	r.execContainer = func(ctx context.Context, c CommandSpec) error {
 		if c.Name == "fail" {

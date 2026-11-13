@@ -17,27 +17,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/shell"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// PortResolver finds the host port a container port is published on.
-// container.Engine satisfies it.
-type PortResolver interface {
-	PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error)
-}
-
 // RunOptions describes one non-interactive command.
 type RunOptions struct {
-	ContainerName string
-	WorkspaceID   string // locates the workspace's pinned host key
-	Command       []string
-	Stdout        io.Writer
-	Stderr        io.Writer
-	Ports         PortResolver
+	// Port is the host loopback port the container's agent listens on
+	// (container.SSHHostPort).
+	Port        int
+	WorkspaceID string // locates the workspace's pinned host key
+	Command     []string
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 // Run runs a command in the container and returns its exit code. Stdin is
@@ -50,7 +44,7 @@ func Run(ctx context.Context, opts RunOptions) (int, error) {
 	if len(opts.Command) == 0 {
 		return -1, fmt.Errorf("no command")
 	}
-	client, err := connect(ctx, opts.Ports, opts.ContainerName, opts.WorkspaceID, "dcx")
+	client, err := connect(ctx, opts.Port, opts.WorkspaceID, "dcx")
 	if err != nil {
 		return -1, err
 	}
@@ -96,16 +90,15 @@ func Run(ctx context.Context, opts RunOptions) (int, error) {
 	return 0, nil
 }
 
-// connect dials the dcx-agent's TCP listener for containerName and
-// completes the SSH handshake.
+// connect dials the dcx-agent on 127.0.0.1:port and completes the SSH
+// handshake.
 //
 // The host key is verified against the workspace's persistent host key via
 // FixedHostKey — dcx controls both ends, so no known_hosts round-trip is
 // needed for this path (plain `ssh` clients use ~/.dcx/known_hosts).
-func connect(ctx context.Context, ports PortResolver, containerName, workspaceID, user string) (*ssh.Client, error) {
-	port, err := resolveSSHPort(ctx, ports, containerName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve ssh port for %s: %w", containerName, err)
+func connect(ctx context.Context, port int, workspaceID, user string) (*ssh.Client, error) {
+	if port <= 0 {
+		return nil, fmt.Errorf("no SSH port for the container")
 	}
 
 	hostKeyCallback, err := hostKeyCallbackForWorkspace(workspaceID)
@@ -235,13 +228,4 @@ func collectClientSigners() ([]ssh.Signer, error) {
 	}
 
 	return out, nil
-}
-
-// resolveSSHPort returns the ephemeral host port Docker mapped to the
-// agent's container port.
-func resolveSSHPort(ctx context.Context, ports PortResolver, containerName string) (int, error) {
-	if ports == nil {
-		return 0, fmt.Errorf("no port resolver configured")
-	}
-	return ports.PortMapping(ctx, containerName, agentproto.ListenPort, "tcp")
 }

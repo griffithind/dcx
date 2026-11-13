@@ -10,7 +10,10 @@
 // /tmp where a container user could plant symlinks or replace files.
 package agentproto
 
-import "strconv"
+import (
+	"net"
+	"strconv"
+)
 
 const (
 	// StateDir holds persistent dcx state inside the container: the agent
@@ -99,3 +102,14 @@ func ListenAddr(host string) string {
 
 // LoopbackAddr is the address used to probe the agent from inside the container.
 var LoopbackAddr = ListenAddr("127.0.0.1")
+
+// PingAddr returns the loopback address that reaches an agent listening on
+// listenAddr ("0.0.0.0:48022" -> "127.0.0.1:48022"), for probes from
+// inside the container. An unparsable address falls back to LoopbackAddr.
+func PingAddr(listenAddr string) string {
+	_, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return LoopbackAddr
+	}
+	return net.JoinHostPort("127.0.0.1", port)
+}

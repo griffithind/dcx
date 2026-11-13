@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -74,6 +75,22 @@ const (
 	BuildMethodCompose    = "compose"
 )
 
+// SSH labels: how the dcx-agent is reached, fixed when the container is
+// created (Docker publishes ports only at create time).
+const (
+	// LabelSSHPort is the host loopback port the agent is reachable on.
+	LabelSSHPort = Prefix + ".ssh.port"
+
+	// LabelSSHListen is the agent's listen address inside the container
+	// ("0.0.0.0:48022" when the port is published, "127.0.0.1:<port>" for
+	// host networking).
+	LabelSSHListen = Prefix + ".ssh.listen"
+
+	// LabelSSHAllow is the comma-separated list of CIDRs beyond loopback
+	// the agent accepts (`dcx up --hosts`); absent means loopback only.
+	LabelSSHAllow = Prefix + ".ssh.allow"
+)
+
 // Compose labels.
 const (
 	// LabelComposeProject is the compose project name.
@@ -115,6 +132,13 @@ type ContainerLabels struct {
 	BaseImage         string
 	DerivedImage      string
 	BuildMethod       string
+
+	// SSH (see LabelSSHPort). Zero values on containers created by older
+	// dcx versions: the port is then looked up from Docker and the agent
+	// listens on agentproto.ListenPort.
+	SSHPort         int
+	SSHListen       string
+	SSHAllowedCIDRs []string
 
 	// Compose
 	ComposeProject string
@@ -166,6 +190,12 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	setIfNotEmpty(m, LabelDerivedImage, l.DerivedImage)
 	setIfNotEmpty(m, LabelBuildMethod, l.BuildMethod)
 
+	if l.SSHPort > 0 {
+		m[LabelSSHPort] = strconv.Itoa(l.SSHPort)
+	}
+	setIfNotEmpty(m, LabelSSHListen, l.SSHListen)
+	setIfNotEmpty(m, LabelSSHAllow, strings.Join(l.SSHAllowedCIDRs, ","))
+
 	setIfNotEmpty(m, LabelComposeProject, l.ComposeProject)
 	setIfNotEmpty(m, LabelComposeService, l.ComposeService)
 	if l.IsPrimary {
@@ -195,6 +225,12 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	l.BaseImage = m[LabelBaseImage]
 	l.DerivedImage = m[LabelDerivedImage]
 	l.BuildMethod = m[LabelBuildMethod]
+
+	l.SSHPort, _ = strconv.Atoi(m[LabelSSHPort])
+	l.SSHListen = m[LabelSSHListen]
+	if allow := m[LabelSSHAllow]; allow != "" {
+		l.SSHAllowedCIDRs = strings.Split(allow, ",")
+	}
 
 	l.ComposeProject = m[LabelComposeProject]
 	l.ComposeService = m[LabelComposeService]

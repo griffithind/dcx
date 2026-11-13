@@ -87,6 +87,31 @@ func (p ComposeProject) Down(ctx context.Context, e Engine, opts DownOptions) er
 	return e.Compose(ctx, p, args...)
 }
 
+// ForRemoval returns p without the workspace's dcx override file, for
+// `down`. The override was written for the config the environment was
+// created from: after the user renames or removes the primary service it
+// describes a service the compose files no longer define, and compose
+// rejects the whole project. It also keeps `down -v` from removing the
+// named volumes of devcontainer.json mounts, which `docker rm -v` never
+// removes for single containers either.
+func (p ComposeProject) ForRemoval(workspaceID string) ComposeProject {
+	override, err := ComposeOverridePath(workspaceID)
+	if err != nil || workspaceID == "" {
+		return p
+	}
+	files := make([]string, 0, len(p.Files))
+	for _, f := range p.Files {
+		if filepath.Clean(f) != override {
+			files = append(files, f)
+		}
+	}
+	p.Files = files
+	if len(files) == 0 {
+		p.Dir = os.TempDir()
+	}
+	return p
+}
+
 // with returns a copy of p with extra files appended.
 func (p ComposeProject) with(files ...string) ComposeProject {
 	p.Files = append(append([]string(nil), p.Files...), files...)

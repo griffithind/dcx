@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/report"
 	"io"
 	"log/slog"
@@ -103,14 +102,10 @@ type UpOptions struct {
 	// Pull forces pulling base images
 	Pull bool
 
-	// SSHBindHost is the host interface the agent SSH port is published on.
-	// "" means 127.0.0.1 (loopback-only, the default). "0.0.0.0" exposes the
-	// port on all interfaces, gated by SSHAllowedCIDRs at the agent level.
-	SSHBindHost string
-
-	// SSHAllowedCIDRs lists CIDRs the agent's ConnCallback accepts in
-	// addition to loopback. Empty means loopback-only.
-	SSHAllowedCIDRs []string
+	// SSHAccess is who may reach the agent (`dcx up --hosts`). It is fixed
+	// when the container is created and recorded on it; nil keeps the
+	// recorded access (loopback only for a new container).
+	SSHAccess *container.SSHAccess
 }
 
 // LoadOptions configures the Load operation.
@@ -247,7 +242,7 @@ func (s *DevContainerService) prebuild(ctx context.Context, resolved *devcontain
 	})
 }
 
-func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
+func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, access container.SSHAccess, buildSecrets map[string]string) error {
 	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner: %w", err)
@@ -264,7 +259,7 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 		Rebuild:      opts.Rebuild,
 		Pull:         opts.Pull,
 		BuildSecrets: buildSecrets,
-		SSHBindHost:  opts.SSHBindHost,
+		SSHAccess:    access,
 	})
 }
 
@@ -280,7 +275,7 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 		return fmt.Errorf("no existing devcontainer to start")
 	}
 	if existing.IsSingleContainer() {
-		return s.engine.StartContainer(ctx, existing.ID)
+		return explainPortConflict(s.engine.StartContainer(ctx, existing.ID))
 	}
 
 	plan, ok := resolved.Plan.(*devcontainer.ComposePlan)
@@ -298,7 +293,7 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
-	return prov.Start(ctx)
+	return explainPortConflict(prov.Start(ctx))
 }
 
 // setupContainerEnvironment applies patches and probes the user environment.
@@ -395,8 +390,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 
 	ids := s.Identity()
 
-	// Discover the host-side ephemeral port Docker picked for our listener.
-	port, err := s.engine.PortMapping(ctx, containerInfo.Name, agentproto.ListenPort, "tcp")
+	port, err := container.SSHHostPort(ctx, s.engine, containerInfo)
 	if err != nil {
 		return fmt.Errorf("resolve ssh port: %w", err)
 	}
@@ -432,6 +426,20 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 	return nil
 }
 
+// explainPortConflict adds the way out to a start that failed because a
+// published port (usually the agent's) is now used by something else:
+// ports are fixed at create time, and a recreate picks a free one.
+func explainPortConflict(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "port is already allocated") || strings.Contains(msg, "address already in use") {
+		return fmt.Errorf("%w\na port this devcontainer publishes is in use by another process; stop it, or run 'dcx up --recreate' to pick a free SSH port", err)
+	}
+	return err
+}
+
 // DownOptions contains options for tearing down a devcontainer.
 type DownOptions = container.DownOptions
 
@@ -461,7 +469,7 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {
-		project := container.ExistingComposeProject(containerInfo, projectName, s.workspacePath)
+		project := container.ExistingComposeProject(containerInfo, projectName, s.workspacePath).ForRemoval(containerInfo.WorkspaceID)
 		if err := project.Down(ctx, s.engine, opts); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}

@@ -37,7 +37,7 @@ type Engine interface {
 	ComposeOutput(ctx context.Context, project ComposeProject, args ...string) ([]byte, error)
 
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
-	ExecDetached(ctx context.Context, containerName string, argv []string) error
+	ExecDetachedAsRoot(ctx context.Context, containerName string, argv []string) error
 	ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error)
 	ExecOutputAs(ctx context.Context, containerName, user string, argv []string) ([]byte, error)
 	ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error)

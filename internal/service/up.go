@@ -34,6 +34,7 @@ type upRun struct {
 	ids      *devcontainer.Identity
 
 	action   upAction
+	access   container.SSHAccess // SSH access of the container being created
 	state    state.ContainerState
 	existing *state.ContainerInfo // what the state lookup found before any change
 
@@ -76,9 +77,13 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	setupDone, agentUp := false, false
 	if currentState == state.StateRunning {
 		setupDone = s.setupComplete(ctx, existing)
-		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name)
+		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name, container.SSHListenAddr(existing))
 	}
 	action := decideUp(currentState, setupDone && agentUp, opts)
+	access, err := sshAccessFor(action, existing, opts.SSHAccess)
+	if err != nil {
+		return err
+	}
 	switch {
 	case action == actionNone:
 		s.report.Infof("Devcontainer is already running")
@@ -105,7 +110,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 	keepComposeProject(resolved, existing)
 
-	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, state: currentState, existing: existing}
+	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, access: access, state: currentState, existing: existing}
 	steps := []upStep{
 		{"initialize", s.stepInitialize},
 		{"container", s.stepContainer},
@@ -164,6 +169,26 @@ func decideUp(st state.ContainerState, setupComplete bool, opts UpOptions) upAct
 	}
 }
 
+// sshAccessFor returns the SSH access of the container Up ends up with.
+// Access is fixed when a container is created (Docker publishes ports only
+// then), so it is recorded on the container and kept by later runs,
+// restarts and recreates; --hosts changes it only together with a
+// (re)create.
+func sshAccessFor(action upAction, existing *state.ContainerInfo, requested *container.SSHAccess) (container.SSHAccess, error) {
+	recorded := container.RecordedSSHAccess(existing)
+	switch {
+	case requested == nil:
+		return recorded, nil
+	case action == actionCreate || action == actionRecreate:
+		return *requested, nil
+	case !requested.Equal(recorded):
+		return recorded, fmt.Errorf("--hosts=%s differs from this devcontainer's SSH access (%s), which is fixed when it is created; "+
+			"run 'dcx up --recreate --hosts=%s' to change it", requested, recorded, requested)
+	default:
+		return recorded, nil
+	}
+}
+
 // checkHostRequirements validates hostRequirements against the Docker host.
 func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
 	if resolved.RawConfig == nil || resolved.RawConfig.HostRequirements == nil {
@@ -212,7 +237,7 @@ func keepComposeProject(resolved *devcontainer.ResolvedDevContainer, existing *s
 // stepInitialize runs initializeCommand on the host. Per the spec it runs
 // before the container is created or started, every time Up does work.
 func (s *DevContainerService) stepInitialize(ctx context.Context, r *upRun) error {
-	return s.hookRunner(r, "").RunInitialize(ctx)
+	return s.hookRunner(r, 0).RunInitialize(ctx)
 }
 
 // stepContainer makes sure the container exists, matches the config and
@@ -247,13 +272,15 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 			s.report.Infof("Removing existing devcontainer...")
 			// Never remove named volumes when recreating: they hold user
 			// data that must survive a config change. Only an explicit
-			// `dcx down --volumes` removes them.
-			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.ID, DownOptions{}); err != nil {
+			// `dcx down --volumes` removes them. Orphans go: compose runs
+			// down with the edited files, so a renamed or removed service
+			// (possibly the old primary) would otherwise keep running.
+			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.ID, DownOptions{RemoveOrphans: true}); err != nil {
 				return fmt.Errorf("failed to remove existing environment: %w", err)
 			}
 			createOpts.Rebuild = false
 		}
-		if err := s.create(ctx, r.resolved, createOpts, buildSecrets); err != nil {
+		if err := s.create(ctx, r.resolved, createOpts, r.access, buildSecrets); err != nil {
 			return err
 		}
 		r.started = true
@@ -296,7 +323,8 @@ func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
 		WorkspaceID:   r.ids.WorkspaceID,
 		User:          r.resolved.EffectiveUser,
 		WorkDir:       r.resolved.WorkspaceFolder,
-		AllowedCIDRs:  r.opts.SSHAllowedCIDRs,
+		ListenAddr:    container.SSHListenAddr(r.info),
+		AllowedCIDRs:  container.RecordedSSHAccess(r.info).AllowedCIDRs,
 	})
 }
 
@@ -371,7 +399,11 @@ func (s *DevContainerService) writeSessionConfig(ctx context.Context, r *upRun, 
 // then postStartCommand when the container was started by this run or its
 // first start never completed.
 func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
-	runner := s.hookRunner(r, r.info.ID)
+	port, err := container.SSHHostPort(ctx, s.engine, r.info)
+	if err != nil {
+		return fmt.Errorf("resolve SSH port: %w", err)
+	}
+	runner := s.hookRunner(r, port)
 	markers := s.markersFor(r.info)
 
 	if err := runner.RunCreateHooks(ctx, markers); err != nil {
@@ -401,8 +433,8 @@ func (s *DevContainerService) stepSSHConfig(ctx context.Context, r *upRun) error
 }
 
 // hookRunner builds a lifecycle hook runner for the resolved config.
-func (s *DevContainerService) hookRunner(r *upRun, containerID string) *lifecycle.HookRunner {
-	runner := lifecycle.NewHookRunner(s.engine, s.report, containerID, s.workspacePath, r.resolved.RawConfig, r.resolved.ID)
+func (s *DevContainerService) hookRunner(r *upRun, sshPort int) *lifecycle.HookRunner {
+	runner := lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, r.resolved.RawConfig, r.resolved.ID)
 	if len(r.resolved.Features) > 0 {
 		runner.SetFeatureHooks(
 			features.CollectOnCreateCommands(r.resolved.Features),

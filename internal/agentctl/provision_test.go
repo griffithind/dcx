@@ -28,13 +28,9 @@ func TestLaunchSkipsWhenAlreadyListening(t *testing.T) {
 
 	err := launch(context.Background(), fake, agentOpts())
 	require.NoError(t, err)
-	assert.Empty(t, fake.CallsTo("ExecDetached"))
+	assert.Empty(t, fake.CallsTo("ExecDetachedAsRoot"))
 }
 
-// agentOwner answers the owner query launch runs.
-func agentOwner() map[string]string {
-	return map[string]string{strings.Join(ownerQuery, " "): "1000:1000"}
-}
 
 func TestLaunchStartsAndWaitsForReadiness(t *testing.T) {
 	var pings atomic.Int32
@@ -45,13 +41,13 @@ func TestLaunchStartsAndWaitsForReadiness(t *testing.T) {
 			return errors.New("connection refused")
 		}
 		return nil
-	}, Outputs: agentOwner()}
+	}}
 	t.Setenv("HOME", t.TempDir())
 
 	err := launch(context.Background(), fake, agentOpts("10.0.0.0/24"))
 	require.NoError(t, err)
 
-	launches := fake.CallsTo("ExecDetached")
+	launches := fake.CallsTo("ExecDetachedAsRoot")
 	require.Len(t, launches, 1)
 	argv := strings.Join(launches[0].Args, " ")
 	assert.Contains(t, argv, agentproto.BinaryPath+" listen")
@@ -74,7 +70,7 @@ func TestLaunchFailsWhenAgentNeverListens(t *testing.T) {
 			return errors.New("connection refused")
 		}
 		return nil
-	}, Outputs: agentOwner()}
+	}}
 	t.Setenv("HOME", t.TempDir())
 
 	err := launch(context.Background(), fake, agentOpts())
@@ -103,7 +99,7 @@ func TestWriteSecretsWritesKeysWithOwnerAndModes(t *testing.T) {
 	assert.Equal(t, "0400", modes[agentproto.HostKeyPath])
 	assert.Equal(t, "0444", modes[agentproto.AuthorizedKeysPath])
 	for _, c := range fake.CallsTo("ChownInContainer") {
-		assert.Equal(t, "dev", c.Args[2], "secrets are owned by the agent's user")
+		assert.Equal(t, "root", c.Args[2], "secrets are owned by the (root) agent")
 	}
 }
 
@@ -122,7 +118,6 @@ func TestLaunchTimeoutIncludesAgentLog(t *testing.T) {
 			return nil
 		},
 		Outputs: map[string]string{
-			strings.Join(ownerQuery, " "):      "1000:1001",
 			"tail -n 20 " + agentproto.LogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n",
 		},
 	}
@@ -132,12 +127,55 @@ func TestLaunchTimeoutIncludesAgentLog(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "address already in use")
 
-	launch := strings.Join(fake.CallsTo("ExecDetached")[0].Args, " ")
+	launch := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
 	assert.Contains(t, launch, agentproto.LogPath, "agent output must be captured")
 
-	// Root-owned dirs and the log are prepared as root first, with the log
-	// handed to the agent's own user.
+	// Root-owned dirs and the log are prepared as root first.
 	setup := fake.CallsTo("ExecAsRoot")
 	require.Len(t, setup, 1)
-	assert.Equal(t, []string{"c1", agentproto.BinaryPath, "setup", "--log-owner", "1000:1001"}, setup[0].Args)
+	assert.Equal(t, []string{"c1", agentproto.BinaryPath, "setup"}, setup[0].Args)
+}
+
+// notListeningUntilLaunched answers pings only after the agent was launched.
+func notListeningUntilLaunched(fake *containertest.Fake) func(string, []string) error {
+	return func(_ string, argv []string) error {
+		if isPing(argv) && len(fake.CallsTo("ExecDetachedAsRoot")) == 0 {
+			return errors.New("connection refused")
+		}
+		return nil
+	}
+}
+
+func TestLaunchWithoutSessionUserUsesContainerDefaultUser(t *testing.T) {
+	fake := &containertest.Fake{Outputs: map[string]string{strings.Join(defaultUIDQuery, " "): "1000\n"}}
+	fake.ExecFunc = notListeningUntilLaunched(fake)
+	t.Setenv("HOME", t.TempDir())
+
+	opts := agentOpts()
+	opts.User = ""
+	require.NoError(t, launch(context.Background(), fake, opts))
+	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
+	assert.Contains(t, argv, "--user 1000")
+}
+
+func TestLaunchHonoursListenAddr(t *testing.T) {
+	var pinged []string
+	fake := &containertest.Fake{}
+	fake.ExecFunc = func(name string, argv []string) error {
+		if isPing(argv) {
+			pinged = append(pinged, argv[len(argv)-1])
+		}
+		return notListeningUntilLaunched(fake)(name, argv)
+	}
+	t.Setenv("HOME", t.TempDir())
+
+	opts := agentOpts()
+	opts.ListenAddr = "127.0.0.1:40123"
+	require.NoError(t, launch(context.Background(), fake, opts))
+	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
+	assert.Contains(t, argv, "--addr 127.0.0.1:40123")
+	require.NotEmpty(t, pinged)
+	for _, addr := range pinged {
+		assert.Equal(t, "127.0.0.1:40123", addr, "probes must use the agent's port")
+	}
 }

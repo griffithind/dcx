@@ -212,6 +212,7 @@ All state persisted in Docker labels (prefix `com.griffithind.dcx`):
 - `hash.config` (staleness key), `hash.version`, `lifecycle.markers`
 - `build.method` (image/dockerfile/compose), `build.base.image`, `build.derived.image`, `features.installed`
 - `compose.project`, `compose.service`, `container.primary` (plus compose's own `config_files`/`working_dir`, read only)
+- `ssh.port`, `ssh.listen`, `ssh.allow`: the agent endpoint chosen at create time (`container.planSSH`); read it with `container.SSHHostPort`/`SSHListenAddr`/`RecordedSSHAccess`, never by asking Docker for the published port
 
 Labels are immutable after create: only add one if `buildLabels` writes it.
 
@@ -348,7 +349,7 @@ Stored in `customizations.dcx` within devcontainer.json:
 
 ## Agent Binary
 
-The `dcx-agent` binary is embedded (gzip-compressed) and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned; never `/tmp`). It runs as the container's default user; dcx first runs `dcx-agent setup` as root to create `/var/lib/dcx` and `/run/dcx`, the shell integration and the log. Every SSH session (dcx, OpenSSH, editors) gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. SSH host blocks live in `~/.ssh/dcx/config`, included from the top of `~/.ssh/config`.
+The `dcx-agent` binary is embedded (gzip-compressed) and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned; never `/tmp`). It runs as root (sessions switch to the session user; without a remoteUser/containerUser that is the container's default uid); dcx first runs `dcx-agent setup` to create `/var/lib/dcx` and `/run/dcx`, the shell integration and the log. How it is reached depends on the network mode (published on the container, on the compose `service:` owner, or listening on the host port with `host` networking); `--hosts` is recorded on the container and kept until a recreate changes it. Every SSH session (dcx, OpenSSH, editors) gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. SSH host blocks live in `~/.ssh/dcx/config`, included from the top of `~/.ssh/config`.
 
 Subcommands:
 - `listen` - TCP SSH server (sessions, SFTP, agent forwarding, loopback port forwarding)

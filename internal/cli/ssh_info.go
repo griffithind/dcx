@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/report"
 
 	containerPkg "github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/service"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -75,10 +73,14 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 		AllowedIPs:  []string{"127.0.0.0/8", "::1/128"},
 	}
 
-	// Best-effort: look up the actual mapped port from Docker.
-	if port, perr := docker.PortMapping(ctx, resolveContainerName(ctx, svc, ids.WorkspaceID), agentproto.ListenPort, "tcp"); perr == nil {
-		info.Port = port
-		info.BindAddress = "127.0.0.1"
+	// Best-effort: the port and access recorded on the container.
+	if _, ci, serr := svc.StateManager().State(ctx, ids.WorkspaceID); serr == nil && ci != nil {
+		if port, perr := containerPkg.SSHHostPort(ctx, docker, ci); perr == nil {
+			info.Port = port
+			access := containerPkg.RecordedSSHAccess(ci)
+			info.BindAddress = access.BindHost()
+			info.AllowedIPs = append(info.AllowedIPs, access.AllowedCIDRs...)
+		}
 	}
 
 	if sshInfoDoctor {
@@ -116,12 +118,12 @@ func runSSHDoctor(ctx context.Context, info sshInfo) error {
 	// 1. Port resolvable?
 	if info.Port == 0 {
 		ui.Printf("  [%s] Listener not bound to any host port", fail)
-		return fmt.Errorf("listener is not publishing port %d", agentproto.ListenPort)
+		return fmt.Errorf("no SSH port found for this workspace (is the devcontainer up?)")
 	}
 	ui.Printf("  [%s] Listener published on %s:%d", pass, info.BindAddress, info.Port)
 
 	// 2. TCP reachable?
-	if err := tcpReachable(ctx, info.BindAddress, info.Port); err != nil {
+	if err := tcpReachable(ctx, "127.0.0.1", info.Port); err != nil {
 		ui.Printf("  [%s] TCP reachability: %v", fail, err)
 		return fmt.Errorf("port %d not reachable", info.Port)
 	}
@@ -136,14 +138,6 @@ func runSSHDoctor(ctx context.Context, info sshInfo) error {
 
 	ui.Printf("Overall: listener healthy, fingerprint %s", info.HostKey)
 	return nil
-}
-
-func resolveContainerName(ctx context.Context, svc *service.DevContainerService, workspaceID string) string {
-	_, info, err := svc.StateManager().State(ctx, workspaceID)
-	if err != nil || info == nil {
-		return ""
-	}
-	return info.Name
 }
 
 // sshInfoReporter discards progress output in --json mode.

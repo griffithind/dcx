@@ -201,6 +201,19 @@ Regression tests cover:
   - `deps` no longer runs `go mod tidy` (new `tidy` target);
   - every target is in `.PHONY`.
 
+**Step 3 (agent reachability): done.** The agent's endpoint is decided when the container is created and recorded in labels (`ssh.port`, `ssh.listen`, `ssh.allow`). Hooks, `ssh info` and the SSH config read the port from there; containers made by older dcx versions fall back to asking Docker.
+- **R5:** the network mode decides how the agent is reached:
+  - default/bridge/user networks publish the port on the container;
+  - `host` publishes nothing, and the agent listens on `127.0.0.1:<workspace port>` (or `0.0.0.0` with `--hosts`);
+  - compose `network_mode: service:<x>` publishes on `x`;
+  - `container:<x>` and `none` fail with an explanation, before a recreate removes anything.
+- **R8:** the agent runs as root and switches to the session user for each session. The SSH secrets are root-owned, `dcx-agent setup --log-owner` is gone, and without a `remoteUser`/`containerUser` sessions run as the container's default uid.
+- **R9:** `PickPort` starts at the workspace's preferred port and probes the next ones. It skips ports that are bound or recorded on another workspace's container (stopped or not), so there's no ephemeral fallback any more. A start that fails because a published port was taken explains how to recover (`dcx up --recreate`).
+- **R10:** `--hosts` is recorded on the container. `up`, `restart` and `--recreate` without the flag keep it; a different `--hosts` without a (re)create fails and names `--recreate`.
+- **R11:** a recreate runs `compose down --remove-orphans`, and every `down` leaves out dcx's own override. Written for the old config, that override made compose reject the project once the primary service was renamed. Named volumes of `mounts` are therefore no longer removed by `down -v`, matching single containers.
+
+Regression tests: unit tests for the endpoint (published/recorded, port collision, widened access, host, `container:`, compose owner), `PickPort`, `sshAccessFor`, the agent's listen address and default user, and `ForRemoval`. New e2e tests cover host networking, compose `service:` networking, a renamed compose service, root `remoteUser` on a non-root image, and `--hosts` across restart and recreate (126 e2e tests).
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

@@ -4,37 +4,28 @@ import (
 	"fmt"
 	"net"
 	"strings"
-)
 
-// parsedHosts captures the result of parsing --hosts into the pieces dcx
-// needs to wire both sides of the network gate (Docker -p + agent
-// ConnCallback).
-type parsedHosts struct {
-	BindHost string   // "127.0.0.1" (default/none), or "0.0.0.0" (any extra/any)
-	CIDRs    []string // CIDRs beyond loopback that the ConnCallback accepts.
-}
+	"github.com/griffithind/dcx/internal/container"
+)
 
 // parseHostsSpec parses the user-supplied --hosts value.
 //
-//	(empty) / "none" / "loopback" -> loopback-only (127.0.0.1, gate=loopback)
-//	"any"                         -> bind 0.0.0.0, gate accepts everyone
-//	"10.0.0.0/24,192.168.1.5"     -> bind 0.0.0.0, gate accepts loopback + listed
+//	(empty) / "none" / "loopback" -> loopback only
+//	"any"                         -> every address
+//	"10.0.0.0/24,192.168.1.5"     -> loopback + the listed addresses
 //
-// An empty gate is never allowed — either loopback (default) or the listed
-// CIDRs are appended to the loopback baseline.
-func parseHostsSpec(spec string) (parsedHosts, error) {
+// Widened access publishes the agent's port on every host interface
+// (SSHAccess.BindHost); the agent's allowlist is the gate.
+func parseHostsSpec(spec string) (container.SSHAccess, error) {
 	trimmed := strings.TrimSpace(spec)
 	switch strings.ToLower(trimmed) {
 	case "", "none", "loopback":
-		return parsedHosts{BindHost: "127.0.0.1"}, nil
+		return container.SSHAccess{}, nil
 	case "any":
-		return parsedHosts{
-			BindHost: "0.0.0.0",
-			CIDRs:    []string{"0.0.0.0/0", "::/0"},
-		}, nil
+		return container.SSHAccess{AllowedCIDRs: []string{"0.0.0.0/0", "::/0"}}, nil
 	}
 
-	out := parsedHosts{BindHost: "0.0.0.0"}
+	var out container.SSHAccess
 	for _, raw := range strings.Split(trimmed, ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -44,7 +35,7 @@ func parseHostsSpec(spec string) (parsedHosts, error) {
 		if !strings.Contains(raw, "/") {
 			ip := net.ParseIP(raw)
 			if ip == nil {
-				return parsedHosts{}, fmt.Errorf("invalid IP address %q", raw)
+				return container.SSHAccess{}, fmt.Errorf("invalid IP address %q", raw)
 			}
 			if ip.To4() != nil {
 				raw = raw + "/32"
@@ -53,12 +44,12 @@ func parseHostsSpec(spec string) (parsedHosts, error) {
 			}
 		}
 		if _, _, err := net.ParseCIDR(raw); err != nil {
-			return parsedHosts{}, fmt.Errorf("invalid CIDR %q: %w", raw, err)
+			return container.SSHAccess{}, fmt.Errorf("invalid CIDR %q: %w", raw, err)
 		}
-		out.CIDRs = append(out.CIDRs, raw)
+		out.AllowedCIDRs = append(out.AllowedCIDRs, raw)
 	}
-	if len(out.CIDRs) == 0 {
-		return parsedHosts{}, fmt.Errorf("--hosts is empty after parsing %q", spec)
+	if len(out.AllowedCIDRs) == 0 {
+		return container.SSHAccess{}, fmt.Errorf("--hosts is empty after parsing %q", spec)
 	}
 	return out, nil
 }

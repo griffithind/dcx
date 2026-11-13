@@ -65,3 +65,24 @@ func TestIsHostPortAvailableForInvalidPorts(t *testing.T) {
 		t.Error("IsHostPortAvailable(65536) should return false (out of range)")
 	}
 }
+
+func TestPickPortSkipsTakenPorts(t *testing.T) {
+	start := DeterministicPort("wk_pick")
+	taken := map[int]bool{start: true, start + 1: true}
+	if start+1 >= sshPortBase+sshPortRange {
+		t.Skip("preferred port at the end of the range")
+	}
+	got, err := PickPort("wk_pick", func(p int) bool { return !taken[p] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != start+2 {
+		t.Errorf("PickPort = %d, want %d", got, start+2)
+	}
+}
+
+func TestPickPortGivesUp(t *testing.T) {
+	if _, err := PickPort("wk_pick", func(int) bool { return false }); err == nil {
+		t.Error("PickPort succeeded with no free port")
+	}
+}

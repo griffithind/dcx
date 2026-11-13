@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -198,11 +197,9 @@ func runPingCmd(args []string) error {
 //   - /var/lib/dcx and /run/dcx, root-owned (0755), so no container user can
 //     plant symlinks or swap files the agent reads;
 //   - the shell integration scripts;
-//   - the agent log, owned by --log-owner (the listener's uid:gid) so the
-//     listener can write it without the directory being writable.
+//   - the agent log (root-only; the listener runs as root).
 func runSetupCmd(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
-	logOwner := fs.String("log-owner", "", "uid:gid that owns the agent log")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -218,19 +215,13 @@ func runSetupCmd(args []string) error {
 		return fmt.Errorf("write shell integration: %w", err)
 	}
 
-	uid, gid := 0, 0
-	if *logOwner != "" {
-		var err error
-		if uid, gid, err = parseOwner(*logOwner); err != nil {
-			return err
-		}
-	}
 	f, err := os.OpenFile(agentproto.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("create agent log: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	return f.Chown(uid, gid)
+	// A log left by an older agent may belong to its non-root listener.
+	return f.Chown(0, 0)
 }
 
 // ensureRootDir creates dir if needed and makes sure it is a real directory
@@ -250,23 +241,6 @@ func ensureRootDir(dir string) error {
 		return err
 	}
 	return os.Chmod(dir, 0o755)
-}
-
-// parseOwner parses "uid:gid".
-func parseOwner(s string) (int, int, error) {
-	u, g, ok := strings.Cut(s, ":")
-	if !ok {
-		return 0, 0, fmt.Errorf("invalid owner %q: want uid:gid", s)
-	}
-	uid, err := strconv.Atoi(u)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid owner %q: %w", s, err)
-	}
-	gid, err := strconv.Atoi(g)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid owner %q: %w", s, err)
-	}
-	return uid, gid, nil
 }
 
 // runSFTPServerCmd serves SFTP over stdin/stdout. The listener spawns it

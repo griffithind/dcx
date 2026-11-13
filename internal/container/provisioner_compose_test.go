@@ -63,7 +63,9 @@ func TestComposeRecreateDoesNotRebuildOverDcxLayers(t *testing.T) {
 
 func TestBuildImagesBuildsComposeServicesWithoutLayers(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	fake := &containertest.Fake{}
+	fake := &containertest.Fake{
+		ComposeOutputs: map[string]string{"config --format json": `{"services":{"app":{"build":{"context":"."}}}}`},
+	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
 		ID: "ws1234567890", ServiceName: "app-ws123456",
 		Plan:      devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),

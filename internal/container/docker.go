@@ -715,14 +715,11 @@ func (d *Docker) ExecInContainer(ctx context.Context, containerName string, argv
 	return cmd.Run()
 }
 
-// ExecDetached starts a command in a container as a background process via
-// `docker exec -d`. Docker returns once the command has been spawned; its
-// lifecycle is owned by the container. The process inherits the
-// container's default user — callers that need a specific user should
-// mount any required files with that user as owner, rather than bouncing
-// to root.
-func (d *Docker) ExecDetached(ctx context.Context, containerName string, argv []string) error {
-	args := append([]string{"exec", "-d", containerName}, argv...)
+// ExecDetachedAsRoot starts a command in a container as root, as a
+// background process (`docker exec -d`). Docker returns once the command
+// has been spawned; its lifecycle is owned by the container.
+func (d *Docker) ExecDetachedAsRoot(ctx context.Context, containerName string, argv []string) error {
+	args := append([]string{"exec", "-d", "--user", "root", containerName}, argv...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker exec -d failed: %w, output: %s", err, output)

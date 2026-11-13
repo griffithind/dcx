@@ -326,10 +326,10 @@ func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte
 	return nil, nil
 }
 
-func (f *Fake) ExecDetached(_ context.Context, name string, argv []string) error {
+func (f *Fake) ExecDetachedAsRoot(_ context.Context, name string, argv []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("ExecDetached", append([]string{name}, argv...)...)
+	f.record("ExecDetachedAsRoot", append([]string{name}, argv...)...)
 	return nil
 }
 

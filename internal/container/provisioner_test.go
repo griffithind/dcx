@@ -223,7 +223,7 @@ func TestBuildPortBindings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := &Provisioner{resolved: tt.resolved}
+			runtime := &Provisioner{resolved: tt.resolved, ssh: &sshEndpoint{hostPort: 40001, publish: true}}
 			got := runtime.buildPortBindings()
 			assert.Len(t, got, tt.wantLen)
 
@@ -231,7 +231,8 @@ func TestBuildPortBindings(t *testing.T) {
 			ssh := got[len(got)-1]
 			assert.Equal(t, agentproto.ListenPort, ssh.ContainerPort)
 			assert.Equal(t, "127.0.0.1", ssh.Host)
-			assert.True(t, ssh.EphemeralHostPort)
+			assert.Equal(t, 40001, ssh.HostPort)
+			assert.False(t, ssh.EphemeralHostPort)
 		})
 	}
 }

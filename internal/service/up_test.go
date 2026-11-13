@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/state"
@@ -108,4 +109,37 @@ func TestOptionalGPUDroppedWithoutRuntime(t *testing.T) {
 	}
 	require.NoError(t, svc.checkHostRequirements(context.Background(), resolved))
 	assert.Nil(t, resolved.GPURequirements)
+}
+
+func TestSSHAccessIsKeptUnlessChangedWithACreate(t *testing.T) {
+	widened := container.SSHAccess{AllowedCIDRs: []string{"10.0.0.0/24"}}
+	labels := state.NewContainerLabels()
+	labels.SSHAllowedCIDRs = widened.AllowedCIDRs
+	existing := &state.ContainerInfo{Labels: labels}
+	loopback := container.SSHAccess{}
+
+	// No --hosts: keep what the container records (restart, plain up).
+	got, err := sshAccessFor(actionStart, existing, nil)
+	require.NoError(t, err)
+	assert.Equal(t, widened, got)
+	got, err = sshAccessFor(actionRecreate, existing, nil)
+	require.NoError(t, err)
+	assert.Equal(t, widened, got, "a recreate keeps --hosts too")
+
+	// New container without --hosts: loopback.
+	got, err = sshAccessFor(actionCreate, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, loopback, got)
+
+	// --hosts with a (re)create applies.
+	got, err = sshAccessFor(actionRecreate, existing, &loopback)
+	require.NoError(t, err)
+	assert.Equal(t, loopback, got)
+
+	// The same --hosts again is fine; a different one needs --recreate.
+	_, err = sshAccessFor(actionNone, existing, &widened)
+	require.NoError(t, err)
+	_, err = sshAccessFor(actionStart, existing, &loopback)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--recreate")
 }

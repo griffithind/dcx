@@ -94,9 +94,9 @@ func installedDigest(ctx context.Context, engine container.Engine, containerName
 // StopOutdated terminates agent processes still running a binary that has
 // been replaced on disk (their /proc/<pid>/exe is "<path> (deleted)") or
 // running from the legacy /tmp location, then waits for the listener port
-// to be released so a fresh agent can bind.
-func StopOutdated(ctx context.Context, engine container.Engine, containerName string) error {
-	return stopOutdated(ctx, engine, containerName, agentproto.BinaryPath, agentproto.LoopbackAddr, 15*time.Second)
+// (listenAddr) to be released so a fresh agent can bind.
+func StopOutdated(ctx context.Context, engine container.Engine, containerName, listenAddr string) error {
+	return stopOutdated(ctx, engine, containerName, agentproto.BinaryPath, agentproto.PingAddr(listenAddr), 15*time.Second)
 }
 
 func stopOutdated(ctx context.Context, engine container.Engine, containerName, binaryPath, listenAddr string, timeout time.Duration) error {

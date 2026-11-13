@@ -1,5 +1,10 @@
 package container
 
+import (
+	"slices"
+	"strings"
+)
+
 // UpOptions configures the Up operation.
 //
 // Note: Runtime secrets (mounted at /run/secrets) are handled by the service
@@ -17,10 +22,38 @@ type UpOptions struct {
 	// Map of secret ID to temp file path containing the secret value.
 	BuildSecrets map[string]string
 
-	// SSHBindHost is the host interface the dcx-agent SSH port is published
-	// on. Empty means 127.0.0.1 (loopback-only); "0.0.0.0" exposes it on
-	// every host interface, gated by the agent's ConnCallback.
-	SSHBindHost string
+	// SSHAccess is who may reach the dcx-agent; recorded on the container.
+	SSHAccess SSHAccess
+}
+
+// SSHAccess is who may reach a workspace's dcx-agent: loopback only (the
+// zero value) or, with `dcx up --hosts`, also the listed CIDRs. Widened
+// access publishes the port on every host interface and relies on the
+// agent's connection allowlist as the gate.
+type SSHAccess struct {
+	AllowedCIDRs []string
+}
+
+// BindHost is the host interface the agent's port is published (or, with
+// host networking, listened) on.
+func (a SSHAccess) BindHost() string {
+	if len(a.AllowedCIDRs) > 0 {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
+}
+
+// Equal reports whether a and b allow the same CIDRs, in the same order.
+func (a SSHAccess) Equal(b SSHAccess) bool {
+	return slices.Equal(a.AllowedCIDRs, b.AllowedCIDRs)
+}
+
+// String describes the access for messages: "loopback" or the CIDRs.
+func (a SSHAccess) String() string {
+	if len(a.AllowedCIDRs) == 0 {
+		return "loopback"
+	}
+	return strings.Join(a.AllowedCIDRs, ",")
 }
 
 // DownOptions configures the Down operation.

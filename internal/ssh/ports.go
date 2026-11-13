@@ -7,11 +7,11 @@
 // like "connection refused" or a host-key-changed warning even though dcx
 // is doing its job.
 //
-// The port is a pure function of the workspace ID — no state file, no
-// labels, no persistence. Any dcx invocation for the same workspace
-// computes the same port. The service layer probes availability before
-// committing; if the derived port is bound by something else we fall back
-// to a Docker-picked ephemeral and the user sees a yellow warning.
+// The preferred port is a pure function of the workspace ID. When it is
+// taken (by another process, or recorded by another workspace's container,
+// stopped or not) [PickPort] probes the following ports in order, so the
+// result is still stable as long as the neighbourhood doesn't change. The
+// chosen port is recorded on the container (state.LabelSSHPort).
 package ssh
 
 import (
@@ -33,20 +33,35 @@ const (
 	sshPortRange = 8000 // [40000, 48000)
 )
 
+// maxPortProbes bounds how many ports PickPort tries after the preferred one.
+const maxPortProbes = 64
+
 // DeterministicPort returns the host port dcx prefers for this workspace.
 // Two invocations with the same workspaceID always return the same port.
-// Callers should check [IsHostPortAvailable] before requesting it from
-// Docker — if the port is taken, fall back to an ephemeral.
 func DeterministicPort(workspaceID string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(workspaceID))
 	return sshPortBase + int(h.Sum32()%sshPortRange)
 }
 
+// PickPort returns the first port, starting at the workspace's
+// DeterministicPort and wrapping within the range, for which free reports
+// true.
+func PickPort(workspaceID string, free func(port int) bool) (int, error) {
+	start := DeterministicPort(workspaceID)
+	for i := 0; i < maxPortProbes; i++ {
+		port := sshPortBase + (start-sshPortBase+i)%sshPortRange
+		if free(port) {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free SSH port in %d..%d (tried %d ports)", start, start+maxPortProbes-1, maxPortProbes)
+}
+
 // IsHostPortAvailable probes whether the given TCP port is currently free
 // on 127.0.0.1. There is an inherent TOCTOU gap between this probe and
-// `docker run`, but the gap is microseconds and the fallback (ephemeral)
-// handles the race harmlessly.
+// `docker run`; losing that race fails the create with "port is already
+// allocated", and the next `dcx up` picks another port.
 func IsHostPortAvailable(port int) bool {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
