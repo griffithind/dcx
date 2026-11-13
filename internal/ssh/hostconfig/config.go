@@ -68,6 +68,30 @@ type Entry struct {
 // includeLine is the directive dcx adds to the top of ~/.ssh/config.
 const includeLine = "Include ~/.ssh/dcx/config"
 
+// SSHDirEnv overrides ~/.ssh for everything dcx writes (the main config,
+// the include file, the Include line). The e2e tests set it so they never
+// touch the developer's real SSH configuration; OpenSSH then needs
+// `ssh -F $DCX_SSH_DIR/config` (see ConfigFileOverride).
+const SSHDirEnv = "DCX_SSH_DIR"
+
+// ConfigFileOverride returns the SSH config file to pass to `ssh -F` when
+// SSHDirEnv is set, or "" when dcx uses the default ~/.ssh/config.
+func ConfigFileOverride() string {
+	if dir := os.Getenv(SSHDirEnv); dir != "" {
+		return filepath.Join(dir, "config")
+	}
+	return ""
+}
+
+// wantedInclude is the Include directive for the include file: the short
+// ~ form normally, an absolute path when SSHDirEnv relocates it.
+func wantedInclude() string {
+	if os.Getenv(SSHDirEnv) != "" {
+		return "Include " + getDCXConfigPath()
+	}
+	return includeLine
+}
+
 // AddSSHConfig writes or replaces the ssh_config block for a container and
 // returns the aliases it can be reached by. The block always answers to
 // "<container>.dcx", which is unique per checkout; it also answers to
@@ -185,7 +209,7 @@ func ensureInclude(main []byte) []byte {
 			return main
 		}
 	}
-	header := "# Added by dcx: per-workspace hosts. Must stay above any Host block.\n" + includeLine + "\n"
+	header := "# Added by dcx: per-workspace hosts. Must stay above any Host block.\n" + wantedInclude() + "\n"
 	if len(main) > 0 {
 		header += "\n"
 	}
@@ -278,6 +302,9 @@ func getDCXConfigPath() string {
 
 // getSSHConfigPath returns the path to the SSH config file.
 func getSSHConfigPath() string {
+	if override := ConfigFileOverride(); override != "" {
+		return override
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = os.Getenv("HOME")

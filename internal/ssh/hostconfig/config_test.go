@@ -397,3 +397,21 @@ func TestAddSSHConfigAliasCollision(t *testing.T) {
 	require.NoError(t, RemoveSSHConfig("test-aaaa1111"))
 	assert.Equal(t, []string{"test.dcx", "test-bbbb2222.dcx"}, addSSHConfig(t, second))
 }
+
+func TestSSHDirOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(t.TempDir(), "isolated-ssh")
+	t.Setenv(SSHDirEnv, dir)
+
+	addSSHConfig(t, sampleEntry())
+
+	main, err := os.ReadFile(filepath.Join(dir, "config"))
+	require.NoError(t, err)
+	assert.Contains(t, string(main), "Include "+filepath.Join(dir, "dcx", "config"), "the include points at the relocated file")
+	_, err = os.ReadFile(filepath.Join(dir, "dcx", "config"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(home, ".ssh"))
+	assert.True(t, os.IsNotExist(err), "~/.ssh must not be touched")
+	assert.Equal(t, filepath.Join(dir, "config"), ConfigFileOverride())
+}

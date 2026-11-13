@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var statusDetailed bool
+var (
+	statusDetailed bool
+	statusJSONOut  bool
+)
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -29,6 +32,7 @@ This is an offline-safe command that does not require network access.`,
 
 func init() {
 	statusCmd.Flags().BoolVarP(&statusDetailed, "detailed", "d", false, "show detailed environment information")
+	statusCmd.Flags().BoolVar(&statusJSONOut, "json", false, "print machine-readable JSON (stable keys) instead of text")
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
@@ -38,9 +42,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer cliCtx.Close()
 
-	report, err := cliCtx.Service.Status(cliCtx.Ctx, statusDetailed)
+	report, err := cliCtx.Service.Status(cliCtx.Ctx, statusDetailed || statusJSONOut)
 	if err != nil {
 		return err
+	}
+	if statusJSONOut {
+		return printJSON(statusToJSON(report))
 	}
 	renderStatus(report, statusDetailed)
 	return nil
@@ -140,4 +147,48 @@ func shortID(s string) string {
 		return s[:12]
 	}
 	return s
+}
+
+// statusJSON is the `dcx status --json` contract: stable, camelCase keys,
+// for scripts and tests (the human output may change).
+type statusJSON struct {
+	WorkspacePath string         `json:"workspacePath"`
+	WorkspaceID   string         `json:"workspaceID"`
+	Name          string         `json:"name"`
+	ResourceName  string         `json:"resourceName"`
+	State         string         `json:"state"`
+	SSHAlias      string         `json:"sshAlias,omitempty"`
+	ConfigHash    string         `json:"configHash,omitempty"`
+	Shortcuts     int            `json:"shortcuts"`
+	Container     *containerJSON `json:"container"`
+}
+
+type containerJSON struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Running    bool   `json:"running"`
+	ConfigHash string `json:"configHash,omitempty"`
+	Image      string `json:"image,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"`
+}
+
+func statusToJSON(r *service.StatusReport) statusJSON {
+	out := statusJSON{
+		WorkspacePath: r.WorkspacePath,
+		WorkspaceID:   r.Identity.WorkspaceID,
+		Name:          r.Identity.Name,
+		ResourceName:  r.Identity.ResourceName,
+		State:         string(r.State),
+		SSHAlias:      r.SSHAlias,
+		ConfigHash:    r.ConfigHash,
+		Shortcuts:     r.Shortcuts,
+	}
+	if c := r.Container; c != nil {
+		out.Container = &containerJSON{
+			ID: c.ID, Name: c.Name, Status: c.Status, Running: c.Running,
+			ConfigHash: c.ConfigHash, Image: r.Image, StartedAt: r.StartedAt,
+		}
+	}
+	return out
 }

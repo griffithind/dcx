@@ -1,0 +1,19 @@
+[
+  {
+    "workspaceID": "abcd1234efgh",
+    "name": "myapp",
+    "workspacePath": "/home/dev/myapp",
+    "state": "running",
+    "buildMethod": "compose",
+    "createdAt": "2026-11-13T10:00:00Z",
+    "containers": [
+      {
+        "id": "c1",
+        "name": "myapp-app-1",
+        "status": "running",
+        "primary": true,
+        "createdAt": "2026-11-13T10:00:00Z"
+      }
+    ]
+  }
+]

@@ -75,6 +75,9 @@ func sshInto(remote string) error {
 	}
 
 	argv := []string{"ssh"}
+	if config := hostconfig.ConfigFileOverride(); config != "" {
+		argv = append(argv, "-F", config)
+	}
 	if remote != "" {
 		// A terminal only when both ends are one, so interactive commands
 		// (rails console, vim) work and piped output stays clean.

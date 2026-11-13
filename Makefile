@@ -1,9 +1,11 @@
-.PHONY: build build-agent build-linux release release-agent test test-unit test-e2e test-conformance test-all test-coverage lint clean install deadcode
+.PHONY: all build build-agent build-linux release release-agent test test-unit test-e2e test-conformance test-all test-coverage lint clean install deadcode deps tidy verify fmt vet help
 
 # Build variables
 BINARY_NAME=dcx
 AGENT_NAME=dcx-agent
 BUILD_DIR=bin
+# agent-embed.go embeds this directory; only the .gz files are generated.
+EMBED_DIR=agentbin
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
 RELEASE_LDFLAGS=-trimpath -ldflags "-s -w -X github.com/griffithind/dcx/internal/version.Version=$(VERSION)"
@@ -21,8 +23,8 @@ build-agent:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
 	@echo "Compressing agent binaries for embedding..."
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
 
 # Build main CLI with embedded agent binaries
 build: build-agent
@@ -51,12 +53,12 @@ release-agent:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
 	@echo "Compressing agent binaries for embedding..."
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
 
-# Install to GOPATH/bin
+# Install to $(go env GOPATH)/bin
 install: build
-	cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
+	cp $(BUILD_DIR)/$(BINARY_NAME) $(shell go env GOPATH)/bin/
 
 # Run all tests
 test: test-unit
@@ -92,11 +94,15 @@ lint: build-agent
 # Clean build artifacts
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -f $(EMBED_DIR)/$(AGENT_NAME)-linux-*.gz
 	rm -f coverage.out coverage.html
 
 # Download dependencies
 deps:
 	go mod download
+
+# Tidy go.mod/go.sum (modifies files)
+tidy:
 	go mod tidy
 
 # Verify dependencies
@@ -111,9 +117,13 @@ fmt:
 vet: build-agent
 	go vet ./...
 
-# Find dead (unused) code
+# Pinned deadcode version (keep in sync with CI)
+DEADCODE_VERSION ?= v0.52.0
+
+# Find dead (unused) code; fails when any is found (deadcode itself exits 0)
 deadcode: build-agent
-	go run golang.org/x/tools/cmd/deadcode@latest -test -filter='github.com/griffithind/dcx/(cmd|internal)' ./...
+	@out="$$(go run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -test -filter='github.com/griffithind/dcx/(cmd|internal)' ./...)"; \
+	if [ -n "$$out" ]; then echo "$$out"; echo "dead code found"; exit 1; fi
 
 # Help target
 help:
@@ -131,7 +141,8 @@ help:
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  lint               - Run golangci-lint"
 	@echo "  clean              - Remove build artifacts"
-	@echo "  deps               - Download and tidy dependencies"
+	@echo "  deps               - Download dependencies"
+	@echo "  tidy               - go mod tidy (modifies go.mod/go.sum)"
 	@echo "  fmt                - Format source code"
 	@echo "  vet                - Run go vet"
 	@echo "  deadcode           - Find unused code"

@@ -9,27 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// primaryContainer returns the name of the workspace's primary container.
-func primaryContainer(t *testing.T, workspace string) string {
-	t.Helper()
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			if parts := strings.Fields(line); len(parts) >= 2 {
-				return parts[1]
-			}
-		}
-	}
-	t.Fatalf("no container name in status output:\n%s", statusOut)
-	return ""
-}
 
 func inspect(t *testing.T, container, format string) string {
 	t.Helper()
@@ -74,7 +58,7 @@ func TestComposeRuntimeParityE2E(t *testing.T) {
 	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	c := primaryContainer(t, workspace)
+	c := helpers.ContainerName(t, workspace)
 
 	assert.Contains(t, inspect(t, c, "{{.HostConfig.CapAdd}}"), "SYS_PTRACE")
 	assert.Contains(t, inspect(t, c, "{{.HostConfig.SecurityOpt}}"), "no-new-privileges:true")
@@ -137,7 +121,8 @@ func TestComposeNonDefaultFileStopDownE2E(t *testing.T) {
 }
 
 // TestKeepAliveStopsPromptlyE2E: the overrideCommand keep-alive handles
-// SIGTERM, so stopping does not wait out Docker's 10s kill timeout.
+// SIGTERM, so stopping does not wait out Docker's 10s kill timeout. A
+// container killed after the timeout exits 137; a handled SIGTERM exits 0.
 func TestKeepAliveStopsPromptlyE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -148,8 +133,8 @@ func TestKeepAliveStopsPromptlyE2E(t *testing.T) {
 	})
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	start := time.Now()
+	name := helpers.ContainerName(t, workspace)
 	helpers.RunDCXInDirSuccess(t, workspace, "stop")
-	assert.Less(t, time.Since(start), 8*time.Second, "stop should not hit the kill timeout")
 	assert.Equal(t, "created", helpers.GetContainerState(t, workspace))
+	assert.Equal(t, "0", inspect(t, name, "{{.State.ExitCode}}"), "the keep-alive must exit on SIGTERM, not be killed (137)")
 }

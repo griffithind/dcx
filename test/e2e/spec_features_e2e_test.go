@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"os/exec"
-	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -52,45 +51,6 @@ func TestOverrideCommandE2E(t *testing.T) {
 		require.NoError(t, err)
 		// Should have a sleep process running
 		assert.Contains(t, stdout, "sleep")
-	})
-}
-
-// TestOverrideCommandFalseE2E tests that overrideCommand: false uses default entrypoint.
-func TestOverrideCommandFalseE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// alpine with explicit overrideCommand: false should use image's CMD (/bin/sh)
-	// With TTY enabled (standard for devcontainers), the shell stays alive
-	devcontainerJSON := `{
-		"name": "No Override Test",
-		"image": "alpine:latest",
-		"workspaceFolder": "/workspace",
-		"overrideCommand": false
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up - alpine runs /bin/sh which stays alive with TTY
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Container should still be running because TTY keeps shell alive
-	t.Run("container_runs_with_default_cmd", func(t *testing.T) {
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Verify we're running the default command (sh), not the override (sleep loop)
-	t.Run("runs_default_shell_not_sleep_loop", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
-		require.NoError(t, err)
-		// Should have /bin/sh as PID 1, not /bin/sh -c "while sleep..."
-		assert.Contains(t, stdout, "/bin/sh")
-		// Should NOT have the sleep loop pattern
-		assert.NotContains(t, stdout, "while sleep")
 	})
 }
 
@@ -265,40 +225,6 @@ func TestRemoteUserE2E(t *testing.T) {
 	})
 }
 
-// TestContainerEnvE2E tests containerEnv configuration.
-func TestContainerEnvE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Spec Container Env Test",
-		"image": "alpine:latest",
-		"workspaceFolder": "/workspace",
-		"overrideCommand": true,
-		"containerEnv": {
-			"MY_CUSTOM_VAR": "custom-value-123",
-			"ANOTHER_VAR": "another-value"
-		}
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	t.Run("container_env_vars_set", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "MY_CUSTOM_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "custom-value-123")
-
-		stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "ANOTHER_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "another-value")
-	})
-}
-
 // TestForwardPortsE2E tests forwardPorts configuration.
 func TestForwardPortsE2E(t *testing.T) {
 	t.Parallel()
@@ -320,17 +246,7 @@ func TestForwardPortsE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Get container name from status
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
-	}
-	require.NotEmpty(t, containerName)
+	containerName := helpers.ContainerName(t, workspace)
 
 	// Verify ports are exposed
 	t.Run("ports_are_exposed", func(t *testing.T) {

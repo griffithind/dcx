@@ -13,6 +13,7 @@ var (
 	cleanAll      bool
 	cleanDangling bool
 	dryRun        bool
+	cleanCurrent  bool
 )
 
 var cleanCmd = &cobra.Command{
@@ -34,6 +35,7 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "also clean dangling images")
 	cleanCmd.Flags().BoolVar(&cleanDangling, "dangling", false, "only clean dangling images")
 	cleanCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be cleaned without removing")
+	cleanCmd.Flags().BoolVar(&cleanCurrent, "current", false, "only clean images of the current workspace")
 	cleanCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(cleanCmd)
 }
@@ -57,7 +59,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Clean derived images (unless only dangling is requested)
 	if !cleanDangling {
 		ui.Println("Cleaning derived images...")
-		result, err := docker.CleanupAllDerivedImages(ctx)
+		scope := ""
+		if cleanCurrent {
+			scope = newService(docker, ui.Reporter()).Identity().WorkspaceID
+		}
+		result, err := docker.CleanupDerivedImages(ctx, scope)
 		if err != nil {
 			return fmt.Errorf("failed to clean derived images: %w", err)
 		}

@@ -1,0 +1,19 @@
+{
+  "workspacePath": "/home/dev/myapp",
+  "workspaceID": "abcd1234efgh",
+  "name": "",
+  "resourceName": "myapp-abcd1234",
+  "state": "running",
+  "sshAlias": "myapp.dcx",
+  "configHash": "0123456789abcdef0123",
+  "shortcuts": 2,
+  "container": {
+    "id": "f00dfeedbeef0123456789",
+    "name": "myapp-abcd1234",
+    "status": "running",
+    "running": true,
+    "configHash": "0123456789abcdef0123",
+    "image": "dcx/abcd1234efgh:uid-0123",
+    "startedAt": "2026-11-13T10:00:00Z"
+  }
+}

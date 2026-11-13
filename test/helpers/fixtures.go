@@ -66,6 +66,7 @@ func CreateTempWorkspace(t *testing.T, devcontainerJSON string) string {
 
 	// Create temp directory
 	tmpDir := t.TempDir()
+	registerWorkspace(tmpDir)
 
 	// Create .devcontainer directory
 	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
@@ -117,6 +118,7 @@ func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAM
 	t.Helper()
 
 	tmpDir := t.TempDir()
+	registerWorkspace(tmpDir)
 
 	// Create .devcontainer directory
 	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")

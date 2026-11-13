@@ -11,7 +11,7 @@ make test           # Run unit tests (alias for test-unit)
 make test-e2e       # Run end-to-end tests (requires Docker)
 make test-all       # Run unit + conformance + e2e tests
 make lint           # Run golangci-lint
-make deadcode       # Find unused code
+make deadcode       # Fail if unused code is found (pinned deadcode)
 ```
 
 Run a single test:
@@ -54,7 +54,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 ### Entry Points
 - `cmd/dcx/main.go` - Main CLI bootstrap, calls `cli.Execute()`
 - `cmd/dcx-agent/main.go` - Agent binary bootstrap, calls `agent.Execute()` (`internal/agent`)
-- `agent-embed.go` - Embedded agent binaries via `//go:embed bin/dcx-agent-linux-*.gz`
+- `agent-embed.go` - Embeds `agentbin/` (the gzip-compressed agent binaries `make build-agent` writes there; the directory is committed so a clean checkout compiles)
 
 ### CLI Layer (`internal/cli/`)
 | File | Purpose |

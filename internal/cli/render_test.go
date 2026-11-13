@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -96,4 +97,28 @@ func TestRenderList(t *testing.T) {
 	}
 	golden(t, "list", captureUI(t, func() { require.NoError(t, renderList(envs, true)) }))
 	golden(t, "list_empty", captureUI(t, func() { require.NoError(t, renderList(nil, false)) }))
+}
+
+func marshal(t *testing.T, v any) string {
+	t.Helper()
+	data, err := json.MarshalIndent(v, "", "  ")
+	require.NoError(t, err)
+	return string(data) + "\n"
+}
+
+// The --json outputs are a contract for scripts and tests; golden files
+// make any change to them deliberate.
+func TestStatusAndListJSON(t *testing.T) {
+	golden(t, "status_running.json", marshal(t, statusToJSON(runningReport())))
+	golden(t, "status_absent.json", marshal(t, statusToJSON(&service.StatusReport{
+		WorkspacePath: "/home/dev/empty",
+		Identity:      &devcontainer.Identity{WorkspaceID: "zzzz9999yyyy", Name: "empty", ResourceName: "empty-zzzz9999"},
+		State:         state.StateAbsent,
+	})))
+	created := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	golden(t, "list.json", marshal(t, listToJSON([]service.Environment{{
+		WorkspaceID: "abcd1234efgh", Name: "myapp", WorkspacePath: "/home/dev/myapp", State: state.StateRunning,
+		BuildMethod: "compose", CreatedAt: created,
+		Containers: []service.EnvironmentContainer{{ID: "c1", Name: "myapp-app-1", Status: "running", IsPrimary: true, CreatedAt: created}},
+	}})))
 }

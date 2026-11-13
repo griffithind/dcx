@@ -3,6 +3,8 @@
 package e2e
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -50,59 +52,31 @@ func TestParallelPostCreateCommandE2E(t *testing.T) {
 	assert.Contains(t, stdout, "task3", "task3 should have executed")
 }
 
-// TestParallelPostCreateCommandTimingE2E verifies commands actually run in parallel
-// by checking that total execution time is less than sequential would require.
+// TestParallelPostCreateCommandTimingE2E proves object-form commands run
+// concurrently without timing thresholds: each command checks in, then
+// waits for the other two. Run in sequence, the first one would wait in
+// vain and fail the hook (after a generous 20s), so `up` succeeding with
+// every "saw all" file present means they ran at the same time.
 func TestParallelPostCreateCommandTimingE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Each command sleeps 1 second. If parallel, total time < 3s. If sequential, ~3s.
-	// We use timestamps to verify parallel execution.
-	devcontainerJSON := `{
-		"name": "Parallel Timing Test",
+	rendezvous := func(name string) string {
+		return `mkdir -p /tmp/rv && touch /tmp/rv/` + name + ` && i=0; while [ "$(ls /tmp/rv | wc -l)" -lt 3 ]; do i=$((i+1)); [ $i -gt 200 ] && exit 1; sleep 0.1; done; touch /tmp/saw-all-` + name
+	}
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
 		"image": "debian:bookworm-slim",
 		"workspaceFolder": "/workspace",
-		"postCreateCommand": {
-			"cmd1": "date +%s > /tmp/start1.txt && sleep 1 && date +%s > /tmp/end1.txt",
-			"cmd2": "date +%s > /tmp/start2.txt && sleep 1 && date +%s > /tmp/end2.txt",
-			"cmd3": "date +%s > /tmp/start3.txt && sleep 1 && date +%s > /tmp/end3.txt"
-		}
-	}`
+		"postCreateCommand": {"cmd1": %q, "cmd2": %q, "cmd3": %q}
+	}`, helpers.UniqueTestName(t), rendezvous("cmd1"), rendezvous("cmd2"), rendezvous("cmd3"))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// All commands should have completed
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c",
-		"cat /tmp/end1.txt /tmp/end2.txt /tmp/end3.txt | wc -l")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "ls /tmp/saw-all-* | wc -l")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "3", "all three commands should have completed")
-
-	// Check that start times overlap (parallel execution)
-	// Get all start times and verify they're within 1 second of each other
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", `
-		start1=$(cat /tmp/start1.txt)
-		start2=$(cat /tmp/start2.txt)
-		start3=$(cat /tmp/start3.txt)
-		# Find min and max start times
-		min=$start1
-		max=$start1
-		for s in $start2 $start3; do
-			[ $s -lt $min ] && min=$s
-			[ $s -gt $max ] && max=$s
-		done
-		diff=$((max - min))
-		echo "start_diff=$diff"
-		# If parallel, all should start within 1 second
-		[ $diff -le 1 ] && echo "PARALLEL" || echo "SEQUENTIAL"
-	`)
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "PARALLEL", "commands should have started in parallel (within 1 second of each other)")
+	assert.Equal(t, "3", strings.TrimSpace(stdout), "every command must have seen the other two running")
 }
 
 // TestParallelOnCreateCommandE2E tests that onCreateCommand with object syntax

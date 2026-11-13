@@ -163,7 +163,7 @@ func TestUpFromAbsentE2E(t *testing.T) {
 }
 
 // TestExecOnStoppedFailsE2E tests that exec fails on stopped container.
-func TestExecOnStoppedFailsE2E(t *testing.T) {
+func TestSSHOnStoppedFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
@@ -184,7 +184,7 @@ func TestExecOnStoppedFailsE2E(t *testing.T) {
 }
 
 // TestExecOnAbsentFailsE2E tests that exec fails when no container exists.
-func TestExecOnAbsentFailsE2E(t *testing.T) {
+func TestSSHOnAbsentFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 

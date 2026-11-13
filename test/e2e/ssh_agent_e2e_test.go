@@ -211,7 +211,9 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 			defer wg.Done()
 			// This exec will sleep for 3 seconds then check agent
 			stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
-				"sh", "-c", "sleep 3 && ssh-add -l 2>&1 || echo 'agent-accessible'")
+				// ssh-add exits 0 (keys) or 1 (no identities) when it reaches
+				// the agent, and 2 when it can't connect.
+				"sh", "-c", "sleep 3; ssh-add -l >/dev/null 2>&1; echo \"exit=$?\"")
 			if err == nil {
 				longExecResult <- stdout
 			}
@@ -232,12 +234,9 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 		// The long exec should have been able to access the SSH agent
 		select {
 		case result := <-longExecResult:
-			// Should either show keys or say "no identities" - both mean agent was accessible
-			assert.True(t,
-				strings.Contains(result, "agent-accessible") ||
-					strings.Contains(strings.ToLower(result), "no identities") ||
-					strings.Contains(result, "SHA256:"),
-				"Long-running exec should still have SSH agent access after quick exec cleanup, got: %s", result)
+			got := strings.TrimSpace(result)
+			assert.Contains(t, []string{"exit=0", "exit=1"}, got,
+				"Long-running exec should still reach the SSH agent after the quick exec ended (exit 2 = unreachable)")
 		default:
 			t.Error("Long exec should have completed with a result")
 		}

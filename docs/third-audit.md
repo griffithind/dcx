@@ -178,6 +178,29 @@ Regression tests cover:
 - `BuildImages` for compose;
 - absolute `-w`.
 
+**Step 2 (test trust and hygiene): done.**
+- **T1:** `TestEnvProbeCachingE2E` is deleted (it tested a removed cache). The patched/not-patched check uses `Equal`. The SSH agent check asserts `ssh-add`'s exit code (0 or 1 means it reached the agent; 2 means it didn't). The agent cleanup test counts the agent's child processes after sessions end.
+- **T3:** `agent-embed.go` embeds the committed `agentbin/` directory (a README plus the generated `.gz` files), so a clean checkout builds, vets and tests. `Binary()` says to run `make build` when the binaries are missing.
+- **T7:**
+  - Docker is checked once, and `CI=1` turns a missing daemon into a failure instead of skipped (green) tests.
+  - `GetDCXBinary` refuses a missing `bin/dcx`, or one older than the sources, instead of silently building one without agents.
+- **T2:**
+  - `DCX_SSH_DIR` relocates everything dcx writes for SSH (main config, include file, the `Include` line). `dcx ssh` passes `-F` when it's set.
+  - e2e `TestMain` sets it to a temp directory, and every OpenSSH call goes through `helpers.SSHCommand` or `helpers.SFTPCommand`.
+  - `TestMain` removes the `dcx/<test workspace id>:*` images afterwards.
+  - The clean test uses the new `dcx clean --current`, which only touches the current workspace's images.
+- **T4:** `dcx status --json` and `dcx list --json` have stable camelCase keys, with golden tests. The e2e helpers (`GetStatus`, `GetContainerState`, `ContainerName`) use them, and all status-text parsing is gone from e2e.
+- **T5:**
+  - The parallel-hooks test uses a rendezvous: each hook waits for the others, so it fails rather than flakes when run in sequence.
+  - The fast-stop test checks exit code 0 (not 137).
+  - The deploy test asserts no reinstall instead of a time limit.
+- **T6:** five duplicate tests are removed (override-command false, two containerEnv tests, same-name coexist, `/etc/environment` patching, merged into the "follows config" test). `TestExec*` is renamed to `TestSSHCommand*`/`TestSSH*`. There are now 121 e2e tests. The secrets matrix and `error_handling_e2e` are left as they are.
+- **Makefile:**
+  - `deadcode` is pinned and fails when dead code is found (checked with a probe file);
+  - `install` uses `go env GOPATH`;
+  - `deps` no longer runs `go mod tidy` (new `tidy` target);
+  - every target is in `.PHONY`.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

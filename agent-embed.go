@@ -4,60 +4,60 @@ package dcxembed
 import (
 	"bytes"
 	"compress/gzip"
-	_ "embed"
+	"embed"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"sync"
 )
 
-// Embedded gzip-compressed Linux agent binaries.
-// Built by: make build-agent
-
-//go:embed bin/dcx-agent-linux-amd64.gz
-var agentLinuxAmd64Compressed []byte
-
-//go:embed bin/dcx-agent-linux-arm64.gz
-var agentLinuxArm64Compressed []byte
+// agentFS holds the gzip-compressed Linux agent binaries `make build-agent`
+// writes to agentbin/. The directory is committed (with a README) so the
+// module compiles on a clean checkout; the binaries themselves are not.
+//
+//go:embed agentbin
+var agentFS embed.FS
 
 var (
-	agentLinuxAmd64   []byte
-	agentLinuxArm64   []byte
-	decompressOnce    sync.Once
-	decompressAmd64Ok bool
-	decompressArm64Ok bool
+	binaries   = map[string][]byte{}
+	binaryErrs = map[string]error{}
+	loadOnce   sync.Once
 )
 
 // Binary returns the decompressed Linux agent binary for the given architecture.
 func Binary(arch string) ([]byte, error) {
-	decompressOnce.Do(func() {
-		if len(agentLinuxAmd64Compressed) > 0 {
-			if data, err := decompress(agentLinuxAmd64Compressed); err == nil {
-				agentLinuxAmd64 = data
-				decompressAmd64Ok = true
-			}
-		}
-		if len(agentLinuxArm64Compressed) > 0 {
-			if data, err := decompress(agentLinuxArm64Compressed); err == nil {
-				agentLinuxArm64 = data
-				decompressArm64Ok = true
-			}
+	loadOnce.Do(func() {
+		for _, a := range []string{"amd64", "arm64"} {
+			binaries[a], binaryErrs[a] = load(a)
 		}
 	})
-
 	switch arch {
 	case "amd64", "x86_64":
-		if !decompressAmd64Ok {
-			return nil, fmt.Errorf("linux/amd64 agent binary not available")
-		}
-		return agentLinuxAmd64, nil
+		arch = "amd64"
 	case "arm64", "aarch64":
-		if !decompressArm64Ok {
-			return nil, fmt.Errorf("linux/arm64 agent binary not available")
-		}
-		return agentLinuxArm64, nil
+		arch = "arm64"
 	default:
 		return nil, fmt.Errorf("unsupported architecture: %s", arch)
 	}
+	if err := binaryErrs[arch]; err != nil {
+		return nil, err
+	}
+	return binaries[arch], nil
+}
+
+func load(arch string) ([]byte, error) {
+	compressed, err := agentFS.ReadFile("agentbin/dcx-agent-linux-" + arch + ".gz")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("linux/%s agent binary not embedded: build dcx with `make build` (it runs `make build-agent` first)", arch)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(compressed) == 0 {
+		return nil, fmt.Errorf("linux/%s agent binary is empty: rebuild with `make build`", arch)
+	}
+	return decompress(compressed)
 }
 
 func decompress(data []byte) ([]byte, error) {

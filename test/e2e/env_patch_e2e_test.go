@@ -33,7 +33,7 @@ func TestEnvValuesAreNotExecutedE2E(t *testing.T) {
 	}`, helpers.UniqueTestName(t), evil))
 	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	helpers.RunDCXInDirSuccess(t, ws, "up")
-	c := primaryContainer(t, ws)
+	c := helpers.ContainerName(t, ws)
 
 	out, _ := exec.Command("docker", "exec", c, "sh", "-c", "ls /tmp/pwned-* 2>/dev/null; true").CombinedOutput()
 	assert.Empty(t, strings.TrimSpace(string(out)), "no injected command may have run")
@@ -53,19 +53,21 @@ func TestEtcEnvironmentFollowsConfigE2E(t *testing.T) {
 
 	name := helpers.UniqueTestName(t)
 	config := func(value string) string {
-		return fmt.Sprintf(`{"name": %q, "image": "alpine:latest", "workspaceFolder": "/workspace", "remoteEnv": {"STAGE": %q}}`, name, value)
+		return fmt.Sprintf(`{"name": %q, "image": "alpine:latest", "workspaceFolder": "/workspace", "containerEnv": {"FROM_CONTAINER": "container-value"}, "remoteEnv": {"STAGE": %q}}`, name, value)
 	}
 	ws := helpers.CreateTempWorkspace(t, config("one"))
 	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	helpers.RunDCXInDirSuccess(t, ws, "up")
-	c := primaryContainer(t, ws)
+	c := helpers.ContainerName(t, ws)
 
 	read := func() string {
 		out, err := exec.Command("docker", "exec", c, "cat", "/etc/environment").CombinedOutput()
 		require.NoError(t, err, string(out))
 		return string(out)
 	}
-	assert.Contains(t, read(), `STAGE="one"`)
+	first := read()
+	assert.Contains(t, first, `STAGE="one"`, "remoteEnv is written")
+	assert.Contains(t, first, `FROM_CONTAINER="container-value"`, "containerEnv is written")
 
 	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "devcontainer.json"), []byte(config("two")), 0o644))
 	helpers.RunDCXInDirSuccess(t, ws, "restart")

@@ -2,13 +2,17 @@ package cli
 
 import (
 	"strings"
+	"time"
 
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
 
-var listShowAll bool
+var (
+	listShowAll bool
+	listJSONOut bool
+)
 
 var listCmd = &cobra.Command{
 	Use:     "list",
@@ -35,6 +39,9 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 	envs, err := cliCtx.Service.List(cliCtx.Ctx, listShowAll)
 	if err != nil {
 		return err
+	}
+	if listJSONOut {
+		return printJSON(listToJSON(envs))
 	}
 	return renderList(envs, listShowAll)
 }
@@ -80,6 +87,42 @@ func formatListState(s string) string {
 
 func init() {
 	listCmd.Flags().BoolVar(&listShowAll, "all", false, "show all environments (including stopped)")
+	listCmd.Flags().BoolVar(&listJSONOut, "json", false, "print machine-readable JSON (stable keys) instead of a table")
 	listCmd.GroupID = "info"
 	rootCmd.AddCommand(listCmd)
+}
+
+// environmentJSON is one entry of the `dcx list --json` contract.
+type environmentJSON struct {
+	WorkspaceID   string                `json:"workspaceID"`
+	Name          string                `json:"name"`
+	WorkspacePath string                `json:"workspacePath"`
+	State         string                `json:"state"`
+	BuildMethod   string                `json:"buildMethod"`
+	CreatedAt     time.Time             `json:"createdAt"`
+	Containers    []environmentItemJSON `json:"containers"`
+}
+
+type environmentItemJSON struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	Primary   bool      `json:"primary"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func listToJSON(envs []service.Environment) []environmentJSON {
+	out := make([]environmentJSON, 0, len(envs))
+	for _, e := range envs {
+		j := environmentJSON{
+			WorkspaceID: e.WorkspaceID, Name: e.Name, WorkspacePath: e.WorkspacePath,
+			State: string(e.State), BuildMethod: e.BuildMethod, CreatedAt: e.CreatedAt,
+			Containers: []environmentItemJSON{},
+		}
+		for _, c := range e.Containers {
+			j.Containers = append(j.Containers, environmentItemJSON{ID: c.ID, Name: c.Name, Status: c.Status, Primary: c.IsPrimary, CreatedAt: c.CreatedAt})
+		}
+		out = append(out, j)
+	}
+	return out
 }

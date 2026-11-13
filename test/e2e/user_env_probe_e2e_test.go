@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -44,41 +45,6 @@ func TestUserEnvProbeE2E(t *testing.T) {
 	assert.Contains(t, stdout, "HOME=", "probed env should contain HOME")
 }
 
-// TestEtcEnvironmentPatchingE2E tests that containerEnv/remoteEnv
-// are properly patched into /etc/environment.
-func TestEtcEnvironmentPatchingE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Etc Environment Patch Test",
-		"image": "debian:bookworm-slim",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {
-			"MY_CONTAINER_VAR": "container-value"
-		},
-		"remoteEnv": {
-			"MY_REMOTE_VAR": "remote-value"
-		}
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Check that /etc/environment contains our variables
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/etc/environment")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "MY_CONTAINER_VAR", "/etc/environment should contain containerEnv")
-	assert.Contains(t, stdout, "container-value")
-	assert.Contains(t, stdout, "MY_REMOTE_VAR", "/etc/environment should contain remoteEnv")
-	assert.Contains(t, stdout, "remote-value")
-}
-
 // TestEtcProfilePatchingE2E tests that /etc/profile is patched
 // to preserve PATH from features.
 func TestEtcProfilePatchingE2E(t *testing.T) {
@@ -100,9 +66,9 @@ func TestEtcProfilePatchingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Check that the marker file exists (indicating patching was done)
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/.patchEtcProfileMarker && echo 'patched' || echo 'not-patched'")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/.patchEtcProfileMarker && echo patched || echo not-patched")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "patched", "/etc/profile should be patched")
+	assert.Equal(t, "patched", strings.TrimSpace(stdout), "/etc/profile should be patched")
 }
 
 // TestUserEnvProbeWithFeatureE2E tests that userEnvProbe captures
@@ -164,40 +130,4 @@ func TestUserEnvProbeNoneE2E(t *testing.T) {
 	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "hello")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "hello")
-}
-
-// TestEnvProbeCachingE2E tests that probed environment is cached
-// and reused on subsequent starts.
-func TestEnvProbeCachingE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Env Probe Cache Test",
-		"image": "debian:bookworm-slim",
-		"workspaceFolder": "/workspace",
-		"userEnvProbe": "loginShell"
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// First up - should probe and cache
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Check cache file exists
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "cached", "Probed environment should be cached")
-
-	// Down then up again - should use cache
-	helpers.RunDCXInDirSuccess(t, workspace, "down")
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Cache should still be there
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "cached", "Cache should persist across restarts")
 }

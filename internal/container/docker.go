@@ -593,7 +593,10 @@ func isDcxImage(img imageInfo) bool {
 // CleanupDerivedImages removes images built by dcx. Images still used by a
 // container (running or stopped) are kept: docker refuses to remove them
 // without --force, which is never passed.
-func (d *Docker) CleanupDerivedImages(ctx context.Context) (*CleanupResult, error) {
+//
+// workspaceID limits the cleanup to one workspace's images
+// (dcx/<workspaceID>:*); "" cleans every dcx image.
+func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID string) (*CleanupResult, error) {
 	result := &CleanupResult{}
 
 	images, err := d.listImages(ctx)
@@ -603,6 +606,9 @@ func (d *Docker) CleanupDerivedImages(ctx context.Context) (*CleanupResult, erro
 
 	for _, img := range images {
 		if !isDcxImage(img) {
+			continue
+		}
+		if workspaceID != "" && img.Repository != ImageTagPrefix+workspaceID {
 			continue
 		}
 		// Remove by reference so an image with several dcx tags is untagged
@@ -620,11 +626,6 @@ func (d *Docker) CleanupDerivedImages(ctx context.Context) (*CleanupResult, erro
 	}
 
 	return result, nil
-}
-
-// CleanupAllDerivedImages removes all images built by dcx that are not in use.
-func (d *Docker) CleanupAllDerivedImages(ctx context.Context) (*CleanupResult, error) {
-	return d.CleanupDerivedImages(ctx)
 }
 
 // CleanupDanglingImages removes dangling (untagged) images.

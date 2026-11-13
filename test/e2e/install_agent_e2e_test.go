@@ -18,23 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// getContainerName extracts the container name from dcx status output.
-// The status output has the format:
-//
-//	Primary Container
-//	  Name:    container-name
-func getContainerName(statusOutput string) string {
-	for _, line := range strings.Split(statusOutput, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				return parts[1]
-			}
-		}
-	}
-	return ""
-}
-
 // TestInstallAgentDeploysToContainerE2E tests that the install agent can deploy
 // the dcx binary to a container and run it.
 func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
@@ -59,8 +42,7 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Get the container name from status
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	containerName := getContainerName(stdout)
+	containerName := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, containerName, "should find container name")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -108,8 +90,7 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	containerName := getContainerName(stdout)
+	containerName := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, containerName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -119,19 +100,14 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	_, err = agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "first deploy should succeed")
 
-	// Second deploy should also succeed (and be fast since binary exists)
-	start := time.Now()
+	// The second deploy of the same binary only compares the recorded digest.
 	updated, err := agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "second deploy should succeed")
 	assert.False(t, updated, "second deploy of the same binary should be a no-op")
-	elapsed := time.Since(start)
-
-	// Second deploy should be fast (just a test -f check)
-	assert.Less(t, elapsed, 2*time.Second, "idempotent deploy should be fast")
 }
 
-// TestInstallAgentPreDeployE2E tests the PreDeployAgent function.
-func TestInstallAgentPreDeployE2E(t *testing.T) {
+// TestInstallAgentDeployMakesAgentRunnableE2E checks the deployed agent runs.
+func TestInstallAgentDeployMakesAgentRunnableE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
@@ -149,8 +125,7 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	containerName := getContainerName(stdout)
+	containerName := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, containerName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -187,8 +162,7 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	containerName := getContainerName(stdout)
+	containerName := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, containerName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

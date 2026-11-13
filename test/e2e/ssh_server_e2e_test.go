@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
@@ -56,30 +57,20 @@ func TestSSHServerE2E(t *testing.T) {
 	hostname := workspaceID + ".dcx"
 
 	// Get the actual container name from status
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
-	}
-	require.NotEmpty(t, containerName, "should find container name in status output")
+	containerName := helpers.ContainerName(t, workspace)
 
 	// Verify SSH config entry was added
 	t.Run("ssh_config_entry_added", func(t *testing.T) {
-		home, err := os.UserHomeDir()
+		// Blocks live in <ssh dir>/dcx/config, included from <ssh dir>/config
+		// (the run's isolated stand-in for ~/.ssh).
+		sshDir := helpers.SSHDir()
+		require.NotEmpty(t, sshDir)
+		mainConfig, err := os.ReadFile(filepath.Join(sshDir, "config"))
 		require.NoError(t, err)
-
-		// Blocks live in ~/.ssh/dcx/config, included from ~/.ssh/config.
-		mainConfig, err := os.ReadFile(filepath.Join(home, ".ssh", "config"))
-		require.NoError(t, err)
-		assert.Contains(t, string(mainConfig), "Include ~/.ssh/dcx/config")
+		assert.Contains(t, string(mainConfig), "Include "+filepath.Join(sshDir, "dcx", "config"))
 		assert.NotContains(t, string(mainConfig), "# DCX managed - "+containerName)
 
-		configPath := filepath.Join(home, ".ssh", "dcx", "config")
+		configPath := filepath.Join(sshDir, "dcx", "config")
 		content, err := os.ReadFile(configPath)
 		require.NoError(t, err)
 
@@ -142,11 +133,9 @@ func TestSSHServerE2E(t *testing.T) {
 		assert.Contains(t, stdout, "removed")
 
 		// Verify SSH config entry was removed
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
 
 		for _, f := range []string{"config", filepath.Join("dcx", "config")} {
-			content, err := os.ReadFile(filepath.Join(home, ".ssh", f))
+			content, err := os.ReadFile(filepath.Join(helpers.SSHDir(), f))
 			if err == nil {
 				assert.NotContains(t, string(content), "# DCX managed - "+containerName,
 					"SSH config entry should be removed after down (%s)", f)
@@ -275,17 +264,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	hostname := extractSSHHostname(t, stdout)
 
 	// Get the actual container name from status
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
-	}
-	require.NotEmpty(t, containerName, "should find container name in status output")
+	containerName := helpers.ContainerName(t, workspace)
 
 	// Verify workspace_path label is set on container
 	t.Run("workspace_path_label_set", func(t *testing.T) {
@@ -303,7 +282,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	// Test `ssh <host>` from /tmp. With TCP transport, cwd is irrelevant —
 	// the generated block has HostName/Port baked in.
 	t.Run("ssh_from_different_directory", func(t *testing.T) {
-		cmd := exec.Command("ssh",
+		cmd := helpers.SSHCommand(
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
 			hostname, "pwd")
@@ -316,7 +295,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	})
 
 	t.Run("ssh_user_from_different_directory", func(t *testing.T) {
-		cmd := exec.Command("ssh",
+		cmd := helpers.SSHCommand(
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=10",
 			hostname, "whoami")
@@ -346,37 +325,30 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 	hostname := extractSSHHostname(t, stdout)
 
 	// Get container name for direct docker exec checks
-	statusOut, _, err := helpers.RunDCXInDir(t, workspace, "status")
-	require.NoError(t, err)
+	containerName := helpers.ContainerName(t, workspace)
 
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
+	// agentChildren counts processes whose parent is the dcx-agent
+	// listener: every session runs as one, so after sessions end it is 0.
+	agentChildren := func(t *testing.T) string {
+		t.Helper()
+		script := `a=$(pgrep -f '[d]cx-agent listen' | head -n1)
+[ -n "$a" ] || { echo no-agent; exit 0; }
+n=0
+for s in /proc/[0-9]*/stat; do
+  set -- $(cat "$s" 2>/dev/null)
+  [ "$4" = "$a" ] && n=$((n+1))
+done
+echo "$n"`
+		out, err := exec.Command("docker", "exec", containerName, "sh", "-c", script).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
 	}
-	require.NotEmpty(t, containerName, "should find container name")
 
-	// Run SSH command (this starts ssh-server process in container)
 	t.Run("ssh_server_cleanup_after_session", func(t *testing.T) {
-		// Execute a command via SSH
 		_, _, err := runSSH(t, hostname, "echo", "test")
 		require.NoError(t, err)
-
-		// Give a moment for cleanup to complete
-		// (SSH session closes, docker exec exits, process terminates)
-
-		// Verify no dcx ssh-server processes remain in container
-		// Use [s] character class trick to prevent pgrep from matching itself
-		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "pgrep -f '[s]sh-server' || echo 'no-processes'")
-		output, _ := checkCmd.CombinedOutput()
-		outputStr := strings.TrimSpace(string(output))
-
-		assert.Equal(t, "no-processes", outputStr,
-			"No ssh-server processes should remain in container after SSH session, but found: %s", outputStr)
+		assert.Eventually(t, func() bool { return agentChildren(t) == "0" }, 5*time.Second, 100*time.Millisecond,
+			"session processes must exit with their session")
 	})
 
 	// Run multiple SSH sessions and verify cleanup
@@ -387,14 +359,8 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		// Verify no lingering processes
-		// Use [s] character class trick to prevent pgrep from matching itself
-		checkCmd := exec.Command("docker", "exec", containerName, "sh", "-c", "pgrep -f '[s]sh-server' || echo 'no-processes'")
-		output, _ := checkCmd.CombinedOutput()
-		outputStr := strings.TrimSpace(string(output))
-
-		assert.Equal(t, "no-processes", outputStr,
-			"No ssh-server processes should remain after multiple SSH sessions, but found: %s", outputStr)
+		assert.Eventually(t, func() bool { return agentChildren(t) == "0" }, 5*time.Second, 100*time.Millisecond,
+			"no session processes may linger after several sessions")
 	})
 }
 
@@ -527,7 +493,7 @@ func runSSHRaw(t *testing.T, hostname string, command string) (string, string, e
 		command,
 	}
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := helpers.SSHCommand(sshArgs...)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -550,7 +516,7 @@ func runSSH(t *testing.T, hostname string, args ...string) (string, string, erro
 	}
 	sshArgs = append(sshArgs, args...)
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := helpers.SSHCommand(sshArgs...)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -574,7 +540,7 @@ func runSSHWithAgent(t *testing.T, hostname string, args ...string) (string, str
 	}
 	sshArgs = append(sshArgs, args...)
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := helpers.SSHCommand(sshArgs...)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -596,7 +562,7 @@ func runSFTP(t *testing.T, hostname string, command string) (string, string, err
 		hostname,
 	}
 
-	cmd := exec.Command("sftp", sftpArgs...)
+	cmd := helpers.SFTPCommand(sftpArgs...)
 	cmd.Stdin = strings.NewReader(command + "\n")
 
 	var stdout, stderr strings.Builder

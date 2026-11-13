@@ -9,7 +9,7 @@ bin/
 /dcx-linux-*
 
 # Embedded agent binaries (built during make, not committed)
-bin/*.gz
+agentbin/*.gz
 
 # Test binary, built with `go test -c`
 *.test

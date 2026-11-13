@@ -214,33 +214,14 @@ services:
 	// First up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Get container info before recreate
-	statusBefore := helpers.RunDCXInDirSuccess(t, workspace, "status")
+	before := helpers.GetStatus(t, workspace).Container
+	require.NotNil(t, before)
 
-	// Recreate
 	helpers.RunDCXInDirSuccess(t, workspace, "up", "--recreate")
 
-	// Get container info after recreate
-	statusAfter := helpers.RunDCXInDirSuccess(t, workspace, "status")
-
-	// Container IDs should be different (we can check the status output changed)
-	// The ID line will be different after recreate
-	assert.NotEqual(t, extractContainerID(statusBefore), extractContainerID(statusAfter))
-}
-
-// extractContainerID extracts the container ID from status output.
-func extractContainerID(status string) string {
-	// Strip ANSI codes before parsing
-	clean := helpers.StripANSI(status)
-	for _, line := range strings.Split(clean, "\n") {
-		// Look for lines where "ID:" is the first field (container ID line)
-		// This avoids matching "Workspace ID:" line
-		parts := strings.Fields(line)
-		if len(parts) >= 2 && parts[0] == "ID:" {
-			return parts[1]
-		}
-	}
-	return ""
+	after := helpers.GetStatus(t, workspace).Container
+	require.NotNil(t, after)
+	assert.NotEqual(t, before.ID, after.ID, "--recreate must replace the container")
 }
 
 // TestComposeContainerLabelsE2E tests that all required labels are set on compose containers.
@@ -275,17 +256,7 @@ services:
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Get container name from status
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
-	}
-	require.NotEmpty(t, containerName, "should find container name")
+	containerName := helpers.ContainerName(t, workspace)
 
 	// Test all labels in a single subtest group
 	t.Run("labels", func(t *testing.T) {

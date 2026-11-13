@@ -19,33 +19,11 @@ import (
 // containerID returns the ID of the workspace's primary container.
 func containerID(t *testing.T, workspace string) string {
 	t.Helper()
-	name := getContainerName(helpers.RunDCXInDirSuccess(t, workspace, "status"))
+	name := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, name)
 	out, err := exec.Command("docker", "inspect", "--format", "{{.Id}}", name).Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out))
-}
-
-// Two checkouts with the same devcontainer "name" must be able to run side
-// by side (container names used to collide).
-func TestSameNameWorkspacesCoexistE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	cfg := helpers.SimpleImageConfigWithName("alpine:latest", helpers.UniqueTestName(t))
-	a := helpers.CreateTempWorkspace(t, cfg)
-	b := helpers.CreateTempWorkspace(t, cfg)
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, a, "down")
-		helpers.RunDCXInDir(t, b, "down")
-	})
-
-	helpers.RunDCXInDirSuccess(t, a, "up")
-	helpers.RunDCXInDirSuccess(t, b, "up")
-
-	assert.NotEqual(t, containerID(t, a), containerID(t, b))
-	assert.Equal(t, "running", helpers.GetContainerState(t, a))
-	assert.Equal(t, "running", helpers.GetContainerState(t, b))
 }
 
 // Edits that don't affect the container must not recreate it; edits that
@@ -127,7 +105,8 @@ func TestFeaturesUIDAndLocalFeatureEditsE2E(t *testing.T) {
 }
 
 // `dcx clean` must remove dcx-built images that no container uses (it used
-// to match a repository name dcx never produced).
+// to match a repository name dcx never produced). The test uses --current so
+// it never removes the developer's own images.
 func TestCleanRemovesUnusedDcxImagesE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
@@ -147,11 +126,11 @@ func TestCleanRemovesUnusedDcxImagesE2E(t *testing.T) {
 	require.True(t, strings.HasPrefix(image, "dcx/"), "image %q", image)
 
 	// In use: kept.
-	helpers.RunDCXInDirSuccess(t, ws, "clean")
+	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
 	require.NoError(t, exec.Command("docker", "image", "inspect", image).Run(), "in-use image must be kept")
 
 	// Unused after down: removed.
 	helpers.RunDCXInDirSuccess(t, ws, "down")
-	helpers.RunDCXInDirSuccess(t, ws, "clean")
+	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
 	assert.Error(t, exec.Command("docker", "image", "inspect", image).Run(), "unused dcx image must be removed")
 }

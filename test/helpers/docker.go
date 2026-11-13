@@ -4,8 +4,10 @@ package helpers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/creack/pty"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 var (
 	dcxBinaryPath string
+	dcxBinaryErr  error
 	dcxBinaryOnce sync.Once
 )
 
@@ -51,6 +54,7 @@ func RunDCXInDir(t *testing.T, dir string, args ...string) (string, string, erro
 	t.Helper()
 
 	binaryPath := GetDCXBinary(t)
+	registerWorkspace(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -87,41 +91,53 @@ func RunDCXInDirSuccess(t *testing.T, dir string, args ...string) string {
 	return stdout
 }
 
-// GetDCXBinary returns the path to the dcx binary.
+// GetDCXBinary returns bin/dcx, built by `make build`. It fails rather
+// than building one itself: a plain `go build` would embed stale or
+// missing agent binaries, and a binary older than the sources would test
+// old code (both have produced misleading results before).
 func GetDCXBinary(t *testing.T) string {
 	t.Helper()
 
 	dcxBinaryOnce.Do(func() {
 		root := GetProjectRoot(t)
 		binaryPath := filepath.Join(root, "bin", "dcx")
-
-		// Check if binary exists
-		if _, err := os.Stat(binaryPath); err == nil {
-			// Verify it works
-			cmd := exec.Command(binaryPath, "--version")
-			if err := cmd.Run(); err == nil {
-				dcxBinaryPath = binaryPath
+		info, err := os.Stat(binaryPath)
+		if err != nil {
+			dcxBinaryErr = fmt.Errorf("%s not found: run `make build` first", binaryPath)
+			return
+		}
+		if newer := newestSource(root); newer != "" {
+			if src, err := os.Stat(newer); err == nil && src.ModTime().After(info.ModTime()) {
+				dcxBinaryErr = fmt.Errorf("%s is older than %s: run `make build` first", binaryPath, newer)
 				return
 			}
 		}
-
-		// Binary doesn't exist or doesn't work, build it
-		t.Logf("Building dcx binary...")
-		buildCmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/dcx")
-		buildCmd.Dir = root
-		output, err := buildCmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("failed to build dcx: %v\noutput: %s", err, output)
-		}
-
 		dcxBinaryPath = binaryPath
 	})
 
-	if dcxBinaryPath == "" {
-		t.Fatal("dcx binary path not set")
+	if dcxBinaryErr != nil {
+		t.Fatal(dcxBinaryErr)
 	}
-
 	return dcxBinaryPath
+}
+
+// newestSource returns the most recently modified Go source that ends up
+// in the dcx binary.
+func newestSource(root string) string {
+	var newest string
+	var newestTime time.Time
+	for _, dir := range []string{"cmd", "internal"} {
+		_ = filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			if info, err := d.Info(); err == nil && info.ModTime().After(newestTime) {
+				newest, newestTime = path, info.ModTime()
+			}
+			return nil
+		})
+	}
+	return newest
 }
 
 // GetProjectRoot returns the project root directory.
@@ -138,36 +154,6 @@ func GetProjectRoot(t *testing.T) string {
 	return strings.TrimSpace(string(output))
 }
 
-// GetContainerState returns the current state string from dcx status.
-func GetContainerState(t *testing.T, dir string) string {
-	t.Helper()
-
-	stdout := RunDCXInDirSuccess(t, dir, "status")
-
-	// Parse state from output (strip ANSI color codes first)
-	for _, line := range strings.Split(stdout, "\n") {
-		cleanLine := ansiRegex.ReplaceAllString(line, "")
-		if strings.HasPrefix(cleanLine, "State:") {
-			parts := strings.Fields(cleanLine)
-			if len(parts) >= 2 {
-				return parts[1]
-			}
-		}
-	}
-
-	return ""
-}
-
-// RequireDockerAvailable skips the test if Docker is not available.
-func RequireDockerAvailable(t *testing.T) {
-	t.Helper()
-
-	cmd := exec.Command("docker", "info")
-	if err := cmd.Run(); err != nil {
-		t.Skip("Docker is not available, skipping E2E test")
-	}
-}
-
 // RequireComposeAvailable skips the test if docker compose is not available.
 func RequireComposeAvailable(t *testing.T) {
 	t.Helper()
@@ -181,19 +167,6 @@ func RequireComposeAvailable(t *testing.T) {
 // StripANSI removes ANSI escape sequences from a string.
 func StripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
-}
-
-// ContainsLabel checks if the output contains a label:value pair.
-// It strips ANSI codes and checks for the pattern "Label: value" with flexible spacing.
-func ContainsLabel(output, label, value string) bool {
-	cleaned := StripANSI(output)
-	// Check for label followed by value on same line (with any spacing)
-	for _, line := range strings.Split(cleaned, "\n") {
-		if strings.Contains(line, label+":") && strings.Contains(line, value) {
-			return true
-		}
-	}
-	return false
 }
 
 // RunDCXInPTY runs dcx in dir with a pseudo-terminal as its stdin/stdout,

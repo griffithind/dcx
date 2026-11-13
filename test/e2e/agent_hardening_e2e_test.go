@@ -19,7 +19,7 @@ import (
 // editors connect.
 func plainSSH(t *testing.T, alias string, stdin string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command("ssh", append([]string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias}, args...)...)
+	cmd := helpers.SSHCommand(append([]string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias}, args...)...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -37,7 +37,7 @@ func TestAgentFilesRootOwnedE2E(t *testing.T) {
 	ws := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:latest"))
 	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	helpers.RunDCXInDirSuccess(t, ws, "up")
-	c := primaryContainer(t, ws)
+	c := helpers.ContainerName(t, ws)
 
 	out, err := exec.Command("docker", "exec", c, "stat", "-c", "%n %U %a",
 		"/var/lib/dcx", "/var/lib/dcx/bin", "/var/lib/dcx/bin/dcx-agent", "/run/dcx", "/run/dcx/shell", "/run/dcx/session.json").CombinedOutput()

@@ -12,7 +12,7 @@ import (
 
 // TestExecE2E tests exec functionality with a shared container.
 // This consolidates basic exec, shell commands, and exit code tests.
-func TestExecE2E(t *testing.T) {
+func TestSSHCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
@@ -115,7 +115,7 @@ func TestExecE2E(t *testing.T) {
 
 // TestExecWithEnvE2E tests exec with environment variables from config.
 // This needs its own container due to the different containerEnv configuration.
-func TestExecWithEnvE2E(t *testing.T) {
+func TestSSHCommandWithEnvE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
@@ -143,7 +143,7 @@ func TestExecWithEnvE2E(t *testing.T) {
 }
 
 // TestExecBinaryDataE2E tests that binary data is streamed correctly through exec.
-func TestExecBinaryDataE2E(t *testing.T) {
+func TestSSHCommandBinaryDataE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 

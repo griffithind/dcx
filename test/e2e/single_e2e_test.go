@@ -137,35 +137,6 @@ RUN echo "built from dockerfile" > /built-marker
 	})
 }
 
-// TestSingleContainerWithEnv tests environment variables.
-func TestSingleContainerWithEnv(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Single Container Env Test",
-		"image": "alpine:latest",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {
-			"MY_TEST_VAR": "test-value-123"
-		}
-	}`
-
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test env var is set
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "MY_TEST_VAR")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "test-value-123")
-}
-
 // TestSingleContainerWithMounts tests volume mounts.
 func TestSingleContainerWithMounts(t *testing.T) {
 	t.Parallel()
@@ -271,17 +242,7 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Get container name from status
-	statusOut := helpers.RunDCXInDirSuccess(t, workspace, "status")
-	var containerName string
-	for _, line := range strings.Split(statusOut, "\n") {
-		if strings.Contains(line, "Name:") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				containerName = parts[1]
-			}
-		}
-	}
-	require.NotEmpty(t, containerName, "should find container name")
+	containerName := helpers.ContainerName(t, workspace)
 
 	// Test workspace_path label is set correctly
 	t.Run("workspace_path_label", func(t *testing.T) {

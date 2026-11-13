@@ -50,25 +50,18 @@ services:
 
 	// Test status shows project name
 	t.Run("status_shows_project_name", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.True(t, helpers.ContainsLabel(stdout, "Project", "testproject"), "should show project name")
-		assert.True(t, helpers.ContainsLabel(stdout, "SSH", "ssh testproject.dcx"), "should show SSH command")
+		st := helpers.GetStatus(t, workspace)
+		assert.Contains(t, st.ResourceName, "testproject", "resource name comes from the devcontainer name")
+		assert.Equal(t, "testproject.dcx", st.SSHAlias)
 	})
 
 	// The compose project is "<name>-<workspace id prefix>" so two checkouts
 	// with the same name don't share containers or volumes.
-	project := ""
-	for _, line := range strings.Split(helpers.StripANSI(helpers.RunDCXInDirSuccess(t, workspace, "status")), "\n") {
-		if strings.HasPrefix(line, "Project:") {
-			project = strings.TrimSpace(strings.TrimPrefix(line, "Project:"))
-		}
-	}
+	project := helpers.GetStatus(t, workspace).ResourceName
 
 	t.Run("container_name_uses_project", func(t *testing.T) {
 		require.True(t, strings.HasPrefix(project, "testproject-"), "project = %q", project)
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "Name:")
-		assert.Contains(t, stdout, project+"-app-1")
+		assert.Equal(t, project+"-app-1", helpers.ContainerName(t, workspace))
 	})
 
 	// Test compose_project label is set correctly
@@ -137,8 +130,7 @@ services:
 
 	// Test status shows shortcuts count
 	t.Run("status_shows_shortcuts_count", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.True(t, helpers.ContainsLabel(stdout, "Shortcuts", "3 defined"), "should show shortcuts count")
+		assert.Equal(t, 3, helpers.GetStatus(t, workspace).Shortcuts)
 	})
 
 	// Test running simple command shortcut
@@ -247,12 +239,11 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 
 	// Don't bring up, just check status
 	t.Run("status_shows_project_and_shortcuts_when_absent", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.True(t, helpers.ContainsLabel(stdout, "Project", "noenvtest"), "should show project name")
-		assert.True(t, helpers.ContainsLabel(stdout, "State", "absent"), "should show absent state")
-		assert.True(t, helpers.ContainsLabel(stdout, "Shortcuts", "1 defined"), "should show shortcuts count")
-		// SSH should NOT be shown when environment is absent
-		assert.NotContains(t, helpers.StripANSI(stdout), "SSH:")
+		st := helpers.GetStatus(t, workspace)
+		assert.Contains(t, st.ResourceName, "noenvtest")
+		assert.Equal(t, "absent", st.State)
+		assert.Equal(t, 1, st.Shortcuts)
+		assert.Empty(t, st.SSHAlias, "no SSH alias before the environment exists")
 	})
 }
 
