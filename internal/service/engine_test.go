@@ -56,10 +56,27 @@ func TestDownWithIDsStopsAndRemovesSingleContainer(t *testing.T) {
 	require.Len(t, fake.CallsTo("StopContainer"), 1)
 	removes := fake.CallsTo("RemoveContainer")
 	require.Len(t, removes, 1)
-	// `docker rm -v` only drops anonymous volumes; named volumes are never
-	// touched for single containers.
+	// `docker rm -v` only drops anonymous volumes; without --volumes the
+	// named ones are kept.
 	assert.Equal(t, []string{"c1", "force=true", "volumes=true"}, removes[0].Args)
 	assert.Empty(t, fake.Containers)
+	assert.Empty(t, fake.CallsTo("RemoveVolume"))
+}
+
+// `down --volumes` removes a single container's named volumes too (F18),
+// as `compose down -v` does.
+func TestDownWithVolumesRemovesNamedVolumes(t *testing.T) {
+	fake := &containertest.Fake{
+		Containers: []state.ContainerSummary{singleContainer("c1", "ws1", false)},
+		Volumes:    map[string][]string{"c1": {"app-data", "cache"}},
+	}
+	svc, _ := newTestService(t, fake)
+	require.NoError(t, svc.DownWithIDs(context.Background(), "", "ws1", DownOptions{RemoveVolumes: true}))
+	var removed []string
+	for _, c := range fake.CallsTo("RemoveVolume") {
+		removed = append(removed, c.Args[0])
+	}
+	assert.Equal(t, []string{"app-data", "cache"}, removed)
 }
 
 func TestDownWithIDsSkipsStopForStoppedContainer(t *testing.T) {

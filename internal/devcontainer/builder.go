@@ -169,8 +169,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		}
 	}
 
-	// Extract secrets from DCX customizations
-	if dcxConfig := opts.Config.DcxCustomizations(); dcxConfig != nil {
+	// dcx customizations come from devcontainer.json only (secrets run
+	// commands on the host; image metadata must not supply them).
+	if dcxConfig := resolved.Local.DcxCustomizations(); dcxConfig != nil {
 		if len(dcxConfig.Secrets) > 0 {
 			resolved.RuntimeSecrets = dcxConfig.Secrets
 		}

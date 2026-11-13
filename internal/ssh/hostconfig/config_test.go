@@ -158,7 +158,29 @@ func TestAddSSHConfigStrictHostKeyCheckingWhenKnownHostsSet(t *testing.T) {
 
 	content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "dcx", "config"))
 	assert.Contains(t, string(content), "StrictHostKeyChecking yes")
-	assert.Contains(t, string(content), "UserKnownHostsFile "+e.KnownHostsPath)
+	assert.Contains(t, string(content), `UserKnownHostsFile "`+e.KnownHostsPath+`"`)
+}
+
+// Paths are quoted (F10): a home directory with a space used to split
+// IdentityFile into extra arguments, which OpenSSH rejects, breaking every
+// ssh command since dcx's Include is at the top of ~/.ssh/config.
+func TestAddSSHConfigQuotesPathsWithSpaces(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "John Smith")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".ssh"), 0o700))
+	t.Setenv("HOME", home)
+	t.Setenv(SSHDirEnv, filepath.Join(home, "ssh dir"))
+
+	e := sampleEntry()
+	e.KnownHostsPath = filepath.Join(home, ".dcx", "known%hosts")
+	addSSHConfig(t, e)
+
+	content, err := os.ReadFile(filepath.Join(home, "ssh dir", "dcx", "config"))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), `IdentityFile "`+filepath.Join(home, ".dcx", "id_ed25519")+`"`)
+	assert.Contains(t, string(content), `UserKnownHostsFile "`+filepath.Join(home, ".dcx", "known%%hosts")+`"`, "%-tokens are escaped")
+	main, err := os.ReadFile(filepath.Join(home, "ssh dir", "config"))
+	require.NoError(t, err)
+	assert.Contains(t, string(main), `Include "`+filepath.Join(home, "ssh dir", "dcx", "config")+`"`)
 }
 
 func TestRemoveSSHConfig(t *testing.T) {

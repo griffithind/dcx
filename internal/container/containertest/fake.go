@@ -36,8 +36,8 @@ type Fake struct {
 	Images map[string]bool
 	// LocalImageLabels maps image refs to their labels (local images).
 	LocalImageLabels map[string]map[string]string
-	// ImageCommands maps image refs to their [ENTRYPOINT, CMD].
-	ImageCommands map[string][2][]string
+	// ImageConfigs maps image refs to their configuration.
+	ImageConfigs map[string]build.ImageConfig
 	// Registry maps image refs to the labels they get once pulled.
 	Registry map[string]map[string]string
 	// ExecFunc decides the result of ExecInContainer (nil = success).
@@ -57,6 +57,10 @@ type Fake struct {
 	Specs []container.ContainerSpec
 	// Env holds each container's environment (KEY=VALUE) by ID or name.
 	Env map[string][]string
+	// StartedAt holds each container's start time (RFC 3339) by ID.
+	StartedAt map[string]string
+	// Volumes holds each container's named volumes by ID.
+	Volumes map[string][]string
 
 	calls   []Call
 	created int
@@ -127,7 +131,7 @@ func (f *Fake) InspectContainer(_ context.Context, id string) (*state.ContainerD
 	if env == nil {
 		env = f.Env[c.Name]
 	}
-	return &state.ContainerDetails{ID: c.ID, Name: c.Name, State: c.State, Running: c.Running, Labels: c.Labels, Env: env}, nil
+	return &state.ContainerDetails{ID: c.ID, Name: c.Name, State: c.State, Running: c.Running, Labels: c.Labels, Env: env, StartedAt: f.StartedAt[c.ID], Volumes: f.Volumes[c.ID]}, nil
 }
 
 func (f *Fake) StopContainer(_ context.Context, id string, _ *time.Duration) error {
@@ -150,6 +154,13 @@ func (f *Fake) RemoveContainer(_ context.Context, id string, force, removeVolume
 			break
 		}
 	}
+	return nil
+}
+
+func (f *Fake) RemoveVolume(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("RemoveVolume", name)
 	return nil
 }
 
@@ -225,12 +236,11 @@ func (f *Fake) ImageLabels(_ context.Context, ref string) (map[string]string, er
 	return nil, fmt.Errorf("image not found: %s", ref)
 }
 
-func (f *Fake) ImageCommand(_ context.Context, ref string) ([]string, []string, error) {
+func (f *Fake) ImageConfig(_ context.Context, ref string) (build.ImageConfig, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("ImageCommand", ref)
-	c := f.ImageCommands[ref]
-	return c[0], c[1], nil
+	f.record("ImageConfig", ref)
+	return f.ImageConfigs[ref], nil
 }
 
 func (f *Fake) PullImageWithProgress(_ context.Context, ref string, _ io.Writer) error {
@@ -322,19 +332,28 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 	return nil, fmt.Errorf("exec failed")
 }
 
-// FileMarkers makes marker queries (`sh -c … <path>` printing "done")
-// answer from Files, so lifecycle markers written with WriteFileInContainer
-// are found again.
+// FileMarkers makes marker queries (`sh -c … <path>` printing "done") and
+// `cat <path>` answer from Files, so lifecycle markers written with
+// WriteFileInContainer are found (and read) again.
 func (f *Fake) FileMarkers() {
 	f.OutputFunc = func(name string, argv []string) ([]byte, error) {
-		if len(argv) == 5 && argv[0] == "sh" && argv[3] == "dcx-marker" {
+		read := func(path string) ([]byte, bool) {
 			f.mu.Lock()
-			_, ok := f.Files[name+":"+argv[4]]
-			f.mu.Unlock()
-			if ok {
+			defer f.mu.Unlock()
+			data, ok := f.Files[name+":"+path]
+			return data, ok
+		}
+		switch {
+		case len(argv) == 5 && argv[0] == "sh" && argv[3] == "dcx-marker":
+			if _, ok := read(argv[4]); ok {
 				return []byte("done\n"), nil
 			}
 			return nil, nil
+		case len(argv) == 2 && argv[0] == "cat":
+			if data, ok := read(argv[1]); ok {
+				return data, nil
+			}
+			return nil, fmt.Errorf("cat: %s: no such file", argv[1])
 		}
 		return nil, fmt.Errorf("exec failed")
 	}

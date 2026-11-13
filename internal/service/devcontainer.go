@@ -394,11 +394,22 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 				return err
 			}
 		}
-		// `docker rm -v` only removes the container's anonymous volumes;
-		// named volumes are never touched, so this is always safe and avoids
-		// leaking anonymous volumes on every recreate.
+		// `docker rm -v` only removes the container's anonymous volumes, so
+		// recreates never lose named ones; `down --volumes` removes those
+		// too, as `compose down -v` does for compose environments.
+		var volumes []string
+		if opts.RemoveVolumes {
+			if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
+				volumes = details.Volumes
+			}
+		}
 		if err := s.engine.RemoveContainer(ctx, containerInfo.ID, true, true); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
+		}
+		for _, v := range volumes {
+			if err := s.engine.RemoveVolume(ctx, v); err != nil {
+				s.report.Warnf("%v", err)
+			}
 		}
 	} else {
 		project := container.ExistingComposeProject(containerInfo, projectName, s.workspacePath).ForRemoval(containerInfo.WorkspaceID)

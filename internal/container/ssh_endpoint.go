@@ -76,6 +76,9 @@ func (r *Provisioner) planSSH(ctx context.Context, access SSHAccess) error {
 	}
 	if kind == "host" {
 		ep.listen = net.JoinHostPort(access.BindHost(), strconv.Itoa(ep.hostPort))
+		if len(r.resolved.ForwardPorts)+len(r.resolved.AppPorts) > 0 {
+			r.report.Infof("Host networking: forwardPorts and appPort are already on the host and are not published")
+		}
 	}
 	r.ssh = &ep
 	return nil

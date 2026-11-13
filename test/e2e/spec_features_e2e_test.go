@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -235,7 +236,8 @@ func TestForwardPortsE2E(t *testing.T) {
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": true,
-		"forwardPorts": [8080, "9000:9000"]
+		"forwardPorts": [8080, "9000:9000"],
+		"appPort": [7071]
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
@@ -259,5 +261,16 @@ func TestForwardPortsE2E(t *testing.T) {
 		portInfo := string(output)
 		assert.Contains(t, portInfo, "8080")
 		assert.Contains(t, portInfo, "9000")
+		assert.Contains(t, portInfo, "7071", "appPort creates (Docker rejected the literal \"localhost\")")
+	})
+
+	// Ports bind loopback unless the config names an address: dev servers
+	// must not be reachable from the network by default.
+	t.Run("ports_bind_loopback", func(t *testing.T) {
+		out, err := exec.Command("docker", "port", containerName).CombinedOutput()
+		require.NoError(t, err, string(out))
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			assert.Contains(t, line, "127.0.0.1:", "published beyond loopback: %s", line)
+		}
 	})
 }

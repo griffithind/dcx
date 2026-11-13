@@ -14,15 +14,17 @@ var (
 var restartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart the devcontainer",
-	Long: `Stop and start devcontainer containers without rebuilding.
+	Long: `Stop the devcontainer and bring it up again.
 
-This command stops running containers and starts them again. It's useful
-for applying configuration changes that don't require a full rebuild.
+The start goes through 'dcx up', so the agent, runtime secrets and
+postStartCommand are set up again. If devcontainer.json changed since the
+container was created, it is recreated.
 
-If the devcontainer.json has shutdownAction set to "none", the container
-will not be restarted unless --force is used.
+If devcontainer.json sets shutdownAction to "none", the container is not
+restarted unless --force is given.
 
-Use --rebuild to perform a full rebuild instead of just restart.`,
+--rebuild rebuilds the images and recreates the container (shutdownAction
+does not apply to it).`,
 	RunE: runRestart,
 }
 

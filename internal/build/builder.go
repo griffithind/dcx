@@ -20,6 +20,15 @@ type Engine interface {
 	BuildImage(ctx context.Context, opts DockerfileBuildOptions) error
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
 	ImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
+	ImageConfig(ctx context.Context, imageRef string) (ImageConfig, error)
+}
+
+// ImageConfig is the part of an image's configuration dcx reads.
+type ImageConfig struct {
+	// User is the image's USER ("" means root).
+	User       string
+	Entrypoint []string
+	Cmd        []string
 }
 
 // DockerfileBuildOptions contains options for building from a Dockerfile.
@@ -89,6 +98,9 @@ type FeatureBuildOptions struct {
 
 	// Rebuild forces rebuilding even if cached.
 	Rebuild bool
+
+	// NoCache builds without BuildKit's cache.
+	NoCache bool
 
 	// Progress is the writer for build output.
 	Progress io.Writer

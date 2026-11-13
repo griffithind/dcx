@@ -57,11 +57,11 @@ func (r *Provisioner) prepareCommand(ctx context.Context, image string) error {
 	if r.resolved.OverrideCommand || len(r.featureEntrypoints()) == 0 {
 		return nil
 	}
-	imageEntrypoint, imageCmd, err := r.engine.ImageCommand(ctx, image)
+	imageCfg, err := r.engine.ImageConfig(ctx, image)
 	if err != nil {
 		return fmt.Errorf("read the command of %s: %w", image, err)
 	}
-	entrypoint, cmd := imageEntrypoint, imageCmd
+	entrypoint, cmd := imageCfg.Entrypoint, imageCfg.Cmd
 	if plan, ok := r.composePlan(); ok {
 		svc, err := r.composeService(ctx, plan)
 		if err != nil {

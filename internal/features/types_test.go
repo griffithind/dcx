@@ -1,6 +1,7 @@
 package features
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -471,4 +472,45 @@ func TestGetEnvVarsWithNormalization(t *testing.T) {
 	assert.Equal(t, "value1", env["MY_OPTION"])
 	assert.Equal(t, "value2", env["ANOTHER_OPT"])
 	assert.Equal(t, "value3", env["_FAST2FURIOUS"])
+}
+
+// Features install as root whatever the base image's USER is (F1), and the
+// image's user is restored afterwards.
+func TestDockerfileInstallsAsRootAndRestoresTheImageUser(t *testing.T) {
+	feats := []*Feature{{ID: "node", Metadata: &FeatureMetadata{ID: "node"}}}
+	g := NewDockerfileGenerator("base:1", feats, "/tmp/x", "vscode", "")
+	g.SetImageUser("vscode")
+	out := g.Generate()
+
+	root := strings.Index(out, "\nUSER root\n")
+	install := strings.Index(out, "install.sh")
+	restore := strings.LastIndex(out, "\nUSER vscode\n")
+	if root < 0 || install < 0 || restore < 0 || root >= install || install >= restore {
+		t.Fatalf("want USER root, then the install, then USER vscode; got:\n%s", out)
+	}
+
+	g = NewDockerfileGenerator("base:1", feats, "/tmp/x", "", "")
+	g.SetImageUser("")
+	if out := g.Generate(); strings.Count(out, "\nUSER ") != 1 {
+		t.Errorf("a root image needs no restore:\n%s", out)
+	}
+}
+
+// Digest-pinned references (F12) used to parse into resource "node@sha256"
+// and version "<hex>", so the manifest URL and token scope were wrong.
+func TestParseFeatureSourceDigest(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	ref, err := ParseFeatureSource("ghcr.io/devcontainers/features/node@" + digest)
+	require.NoError(t, err)
+	assert.Equal(t, "ghcr.io", ref.Registry)
+	assert.Equal(t, "devcontainers/features", ref.Repository)
+	assert.Equal(t, "node", ref.Resource)
+	assert.Equal(t, digest, ref.Version)
+	assert.True(t, ref.IsDigest())
+	assert.Equal(t, "ghcr.io/devcontainers/features/node@"+digest, ref.CanonicalID())
+
+	tag, err := ParseFeatureSource("ghcr.io/devcontainers/features/node:1")
+	require.NoError(t, err)
+	assert.False(t, tag.IsDigest())
+	assert.Equal(t, "ghcr.io/devcontainers/features/node:1", tag.CanonicalID())
 }

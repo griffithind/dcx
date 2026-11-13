@@ -26,6 +26,10 @@ const lifecycleMarkerDir = "/var/lib/dcx/lifecycle"
 // succeeded, i.e. setup finished completely.
 const phaseReady = "ready"
 
+// phasePostStart is rewritten (with the time) after every postStartCommand,
+// so a start outside dcx can be told from an agent that merely died.
+const phasePostStart = "poststart"
+
 // upRun carries the state of one Up invocation through the reconcile steps.
 type upRun struct {
 	opts     UpOptions
@@ -120,14 +124,22 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	keepComposeProject(resolved, existing)
 
 	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, access: access, state: currentState, existing: existing}
+	// A container whose agent is gone after its setup completed was usually
+	// started outside dcx (docker restart, a reboot with a restart policy):
+	// postStartCommand runs when it started after the last one ran.
+	if action == actionResume && setupDone {
+		run.started = s.startedSinceLastPostStart(ctx, existing)
+	}
 	steps := []upStep{
 		{"initialize", s.stepInitialize},
 		{"container", s.stepContainer},
 		{"agent", s.stepAgent},
 		{"secrets", s.stepRuntimeSecrets},
 		{"environment", s.stepEnvironment},
-		{"lifecycle hooks", s.stepHooks},
+		// SSH access before the hooks: when a hook fails, the user can
+		// still get in to see why.
 		{"ssh config", s.stepSSHConfig},
+		{"lifecycle hooks", s.stepHooks},
 	}
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
@@ -434,6 +446,11 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		if err := runner.RunStartHooks(ctx); err != nil {
 			return fmt.Errorf("lifecycle hooks failed: %w", err)
 		}
+		if markers != nil {
+			if err := markers.Mark(ctx, phasePostStart); err != nil {
+				return fmt.Errorf("record postStartCommand: %w", err)
+			}
+		}
 	}
 	if markers != nil && firstStartPending {
 		if err := markers.Mark(ctx, phaseReady); err != nil {
@@ -471,6 +488,31 @@ func (s *DevContainerService) hookRunner(r *upRun, sshPort int) lifecycleHooks {
 // newHookRunner builds the real hook runner for the resolved config.
 func newHookRunner(s *DevContainerService, resolved *devcontainer.ResolvedDevContainer, sshPort int) *lifecycle.HookRunner {
 	return lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, resolved.Hooks, resolved.WorkspaceID)
+}
+
+// startedSinceLastPostStart reports whether the container started after
+// postStartCommand last ran (the poststart marker, else the ready marker).
+// When that can't be told it answers true: re-running postStart after a
+// reconnect is the lesser evil next to skipping it after a restart.
+func (s *DevContainerService) startedSinceLastPostStart(ctx context.Context, info *state.ContainerInfo) bool {
+	details, err := s.engine.InspectContainer(ctx, info.ID)
+	if err != nil || details == nil {
+		return true
+	}
+	started, err := time.Parse(time.RFC3339Nano, details.StartedAt)
+	if err != nil {
+		return true
+	}
+	for _, phase := range []string{phasePostStart, phaseReady} {
+		out, err := s.engine.ExecOutput(ctx, info.ID, []string{"cat", markerPath(phase)})
+		if err != nil {
+			continue
+		}
+		if ran, err := time.Parse(time.RFC3339, strings.TrimSpace(string(out))); err == nil {
+			return started.After(ran)
+		}
+	}
+	return true
 }
 
 // setupComplete reports whether a running container finished its setup.

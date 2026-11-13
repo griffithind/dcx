@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/report"
@@ -21,9 +22,9 @@ type cmdEngine struct {
 	compose string
 }
 
-func (e *cmdEngine) ImageCommand(_ context.Context, ref string) ([]string, []string, error) {
+func (e *cmdEngine) ImageConfig(_ context.Context, ref string) (build.ImageConfig, error) {
 	c := e.images[ref]
-	return c[0], c[1], nil
+	return build.ImageConfig{Entrypoint: c[0], Cmd: c[1]}, nil
 }
 
 func (e *cmdEngine) ComposeOutput(context.Context, ComposeProject, ...string) ([]byte, error) {

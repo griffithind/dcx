@@ -216,7 +216,7 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 				return "", err
 			}
 		}
-		finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+		finalImage, err := r.layerImages(ctx, baseImage, opts)
 		if err != nil {
 			return "", err
 		}
@@ -230,7 +230,7 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 	if err != nil {
 		return "", err
 	}
-	finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+	finalImage, err := r.layerImages(ctx, baseImage, opts)
 	if err != nil {
 		return "", err
 	}
@@ -270,7 +270,7 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 		imageTag := fmt.Sprintf("%s%s:base", ImageTagPrefix, r.resolved.WorkspaceID)
 		r.report.Infof("Building image: %s", imageTag)
 
-		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
+		if err := r.buildDockerfile(ctx, imageTag, plan, opts); err != nil {
 			return "", fmt.Errorf("failed to build image: %w", err)
 		}
 
@@ -281,7 +281,9 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 }
 
 // buildDockerfile builds an image from a Dockerfile using the CLI.
-func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan, buildSecrets map[string]string) error {
+// buildDockerfile builds the user's Dockerfile. --pull refreshes its FROM
+// image and --no-cache (dcx build) bypasses BuildKit's cache.
+func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan, opts UpOptions) error {
 	buildCtx := plan.Context
 	if buildCtx == "" {
 		buildCtx = r.resolved.ConfigDir
@@ -314,8 +316,10 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 		CacheFrom:  plan.CacheFrom,
 		Progress:   os.Stdout,
 		Metadata:   metadata,
-		Secrets:    buildSecrets,
+		Secrets:    opts.BuildSecrets,
 		Options:    plan.Options,
+		Pull:       opts.Pull,
+		NoCache:    opts.NoCache,
 	})
 	return err
 }
@@ -327,7 +331,8 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 // the ID of the image it is built on plus the layer's own inputs. A new base
 // (pulled or rebuilt) therefore produces new tags instead of reusing stale
 // layers, and a cached features image still gets its UID layer.
-func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild bool) (string, error) {
+func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts UpOptions) (string, error) {
+	rebuild := opts.Rebuild
 	image := baseImage
 
 	if len(r.resolved.Features) > 0 {
@@ -349,6 +354,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 			RemoteUser:        r.resolved.RemoteUser,
 			ContainerUser:     r.resolved.ContainerUser,
 			Rebuild:           rebuild,
+			NoCache:           opts.NoCache,
 			Progress:          os.Stdout,
 			BaseImageMetadata: baseImageMetadata,
 			LocalConfig:       r.resolved.Local,
@@ -417,7 +423,7 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 		User:        res.ContainerUser,
 		Labels:      r.buildLabels(),
 		Env:         r.buildEnvironment(),
-		Ports:       r.buildPortBindings(),
+		Ports:       r.containerPorts(),
 		CapAdd:      append([]string(nil), res.CapAdd...),
 		SecurityOpt: append([]string(nil), res.SecurityOpt...),
 		Privileged:  res.Privileged,
@@ -602,30 +608,40 @@ func (r *Provisioner) buildEnvironment() map[string]string {
 	return env
 }
 
-// buildPortBindings combines forwardPorts, appPorts, and the dcx-agent SSH
-// listener into a single slice. AppPorts are bound to localhost for
-// security per the devcontainer spec.
+// buildPortBindings returns the ports published for the environment: the
+// user's forwardPorts and appPort, then the dcx-agent's port. Ports without
+// an explicit host address bind 127.0.0.1: forwardPorts are forwarded to
+// the local machine in the spec, and a dev server or database should not
+// be reachable from the network unless asked for ("0.0.0.0:3000:3000").
+// With host networking nothing is published (the ports are on the host);
+// with a compose network owner they are published there (see
+// writeComposeOverride).
 func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
-	var ports []devcontainer.PortForward
-
-	// Add forward ports (bind to all interfaces by default)
-	ports = append(ports, r.resolved.ForwardPorts...)
-
-	// Add app ports (bound to localhost for security)
-	for _, ap := range r.resolved.AppPorts {
-		if ap.Host == "" {
-			ap.Host = "localhost"
-		}
-		ports = append(ports, ap)
+	if r.ssh != nil && !r.ssh.publish {
+		return nil
 	}
-
-	// The dcx-agent's port, when it is published on this container (see
-	// planSSH for the other network modes).
-	if r.ssh != nil && r.ssh.publish && r.ssh.owner == "" {
+	var ports []devcontainer.PortForward
+	for _, group := range [][]devcontainer.PortForward{r.resolved.ForwardPorts, r.resolved.AppPorts} {
+		for _, p := range group {
+			if p.Host == "" {
+				p.Host = "127.0.0.1"
+			}
+			ports = append(ports, p)
+		}
+	}
+	if r.ssh != nil {
 		ports = append(ports, r.ssh.portForward())
 	}
-
 	return ports
+}
+
+// containerPorts is what the primary container publishes itself: nothing
+// when it shares a compose network owner's namespace.
+func (r *Provisioner) containerPorts() []devcontainer.PortForward {
+	if r.ssh != nil && r.ssh.owner != "" {
+		return nil
+	}
+	return r.buildPortBindings()
 }
 
 // Start implements ContainerRuntime.Start.
@@ -653,7 +669,7 @@ func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
 		return r.engine.Compose(ctx, r.userCompose(plan), args...)
 	}
 
-	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull})
+	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, NoCache: opts.NoCache, Pull: opts.Pull})
 	if err != nil {
 		return err
 	}
@@ -715,11 +731,15 @@ func ComposeOverridePath(workspaceID string) (string, error) {
 // to the workspace's persistent override file.
 func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
 	file := overrideFile(plan.Service, spec, nil)
-	// network_mode service:<owner>: the agent's port is published on the
-	// owner, the only container Docker publishes ports on for that
-	// namespace.
-	if r.ssh != nil && r.ssh.publish && r.ssh.owner != "" {
-		file.Services[r.ssh.owner] = composeService{Ports: []string{r.ssh.portForward().DockerSpec()}}
+	// network_mode service:<owner>: every port (the user's and the
+	// agent's) is published on the owner, the only container Docker
+	// publishes ports on for that namespace.
+	if r.ssh != nil && r.ssh.owner != "" {
+		var owned []string
+		for _, p := range r.buildPortBindings() {
+			owned = append(owned, p.DockerSpec())
+		}
+		file.Services[r.ssh.owner] = composeService{Ports: owned}
 	}
 	data, err := marshalOverride(file)
 	if err != nil {

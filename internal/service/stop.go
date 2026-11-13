@@ -72,11 +72,14 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 	if st == state.StateAbsent {
 		return false, fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
 	}
-	if !opts.Force && s.keepRunning() {
-		return true, nil
-	}
+	// An explicit --rebuild is a request to replace the container, which
+	// shutdownAction "none" (keep it running when tools detach) does not
+	// argue against.
 	if opts.Rebuild {
 		return false, s.Up(ctx, UpOptions{Recreate: true, Rebuild: true})
+	}
+	if !opts.Force && s.keepRunning() {
+		return true, nil
 	}
 	if info != nil && info.Running {
 		s.report.Infof("Stopping devcontainer...")

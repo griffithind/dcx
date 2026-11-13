@@ -171,10 +171,19 @@ func (f *Feature) String() string {
 	return f.ID
 }
 
+// IsDigest reports whether the reference pins a manifest digest
+// ("…@sha256:<hex>") rather than naming a tag, which can move.
+func (r *FeatureSource) IsDigest() bool {
+	return strings.HasPrefix(r.Version, "sha256:")
+}
+
 // CanonicalID returns a canonical identifier for caching.
 func (r *FeatureSource) CanonicalID() string {
 	switch r.Type {
 	case SourceTypeOCI:
+		if r.IsDigest() {
+			return fmt.Sprintf("%s/%s/%s@%s", r.Registry, r.Repository, r.Resource, r.Version)
+		}
 		return fmt.Sprintf("%s/%s/%s:%s", r.Registry, r.Repository, r.Resource, r.Version)
 	case SourceTypeLocalPath:
 		return fmt.Sprintf("local:%s", r.Path)
@@ -207,9 +216,11 @@ func ParseFeatureSource(id string) (FeatureSource, error) {
 	// Format: [registry/]repository/feature[:version]
 	ref.Type = SourceTypeOCI
 
-	// Split off version
-	versionIdx := strings.LastIndex(id, ":")
-	if versionIdx != -1 && !strings.Contains(id[versionIdx:], "/") {
+	// Split off the version: a digest ("@sha256:<hex>") or a tag (":1").
+	if at := strings.Index(id, "@"); at != -1 {
+		ref.Version = id[at+1:]
+		id = id[:at]
+	} else if versionIdx := strings.LastIndex(id, ":"); versionIdx != -1 && !strings.Contains(id[versionIdx:], "/") {
 		ref.Version = id[versionIdx+1:]
 		id = id[:versionIdx]
 	} else {

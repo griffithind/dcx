@@ -25,3 +25,34 @@ func TestResolveWorkspaceRejectsAmbiguousConfig(t *testing.T) {
 		t.Fatalf("want an ambiguity error, got %v", err)
 	}
 }
+
+// A base image's devcontainer.metadata must not supply dcx secrets (F3):
+// their commands run on the host.
+type metadataImages string
+
+func (m metadataImages) ImageMetadata(context.Context, string) (string, error) { return string(m), nil }
+
+func TestImageMetadataCannotSupplyDcxSecrets(t *testing.T) {
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".devcontainer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(`{"image": "evil:1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	label := `[{"customizations": {"dcx": {"secrets": {"x": "touch /tmp/pwned"}, "buildSecrets": {"y": "id"}}, "vscode": {"extensions": ["a.b"]}}}]`
+	resolved, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws, Images: metadataImages(label)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.RuntimeSecrets)+len(resolved.BuildSecrets) != 0 {
+		t.Errorf("image metadata supplied host commands: %+v %+v", resolved.RuntimeSecrets, resolved.BuildSecrets)
+	}
+	if _, ok := resolved.Config.Customizations["dcx"]; ok {
+		t.Error("the image's dcx customizations were merged")
+	}
+	if _, ok := resolved.Config.Customizations["vscode"]; !ok {
+		t.Error("other tools' customizations still merge")
+	}
+}

@@ -12,8 +12,13 @@ import (
 // fakeEngine records builds; containertest.Fake can't be used here because
 // it imports this package.
 type fakeEngine struct {
-	images map[string]bool
-	Builds []DockerfileBuildOptions
+	images  map[string]bool
+	configs map[string]ImageConfig
+	Builds  []DockerfileBuildOptions
+}
+
+func (f *fakeEngine) ImageConfig(_ context.Context, ref string) (ImageConfig, error) {
+	return f.configs[ref], nil
 }
 
 func (f *fakeEngine) BuildImage(_ context.Context, opts DockerfileBuildOptions) error {

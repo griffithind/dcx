@@ -48,6 +48,16 @@ over SSH to a small agent inside the container: use 'dcx ssh' or plain
 			return err
 		}
 		workspacePath = path
+		// A relative --config is relative to the current directory, like
+		// every other path argument (and what shell completion produces),
+		// not to the workspace.
+		if configPath != "" && !filepath.IsAbs(configPath) {
+			abs, err := filepath.Abs(configPath)
+			if err != nil {
+				return fmt.Errorf("invalid config path %q: %w", configPath, err)
+			}
+			configPath = abs
+		}
 		return nil
 	},
 }
@@ -101,7 +111,7 @@ func initUI() {
 func init() {
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&workspacePath, "workspace", "w", "", "workspace directory (default: current directory)")
-	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to devcontainer.json (default: auto-detect)")
+	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)")
 
 	// Output flags
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")

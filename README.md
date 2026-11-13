@@ -81,18 +81,19 @@ curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | s
 
 Installs to `~/.local/bin/dcx`.
 
-### Using Go
-
-```bash
-go install github.com/griffithind/dcx/cmd/dcx@latest
-```
+`go install github.com/griffithind/dcx/cmd/dcx@latest` is not a supported
+install method: dcx embeds the agent binaries it deploys into containers,
+which `make build` generates, so a `go install` build cannot start a
+devcontainer ("agent binary not embedded"). Use the install script, a
+release binary, or build from source.
 
 ### From Source
 
 ```bash
 git clone https://github.com/griffithind/dcx.git
 cd dcx
-make build
+make build     # bin/dcx, with the agent binaries embedded
+make install   # copies it to $(go env GOPATH)/bin
 ```
 
 ## Commands
@@ -452,6 +453,19 @@ Changes since 0.7 that affect existing setups:
 - JSON keys of `config --json` and `ssh info --json` are camelCase.
 - A config that sets more than one of `image`, `build` and
   `dockerComposeFile` is rejected instead of silently picking one.
+- `forwardPorts` and `appPort` entries without a host address are
+  published on `127.0.0.1` only (`forwardPorts` used to bind every
+  interface, and `appPort` failed to create). Write `"0.0.0.0:3000:3000"`
+  in `appPort` to expose a port on the network. With compose
+  `network_mode: service:<x>` the ports are published on `<x>`; with host
+  networking they are not published (they are already on the host).
+- Features install as root, whatever the base image's `USER`; the image's
+  user is restored afterwards. A feature given as a string
+  (`"…/node:1": "18"`) sets its `version` option.
+- A relative `--config` is relative to the current directory, not the
+  workspace.
+- `dcx restart --rebuild` is no longer skipped by `shutdownAction: "none"`.
+- `dcx down --volumes` also removes a single container's named volumes.
 - Containers from older versions keep working; run `dcx up --recreate` to
   pick up every change.
 

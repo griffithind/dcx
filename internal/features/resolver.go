@@ -232,7 +232,7 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	// Cached tags are re-checked after ociTagTTL, falling back to the
 	// cached copy when the registry cannot be reached.
 	var maxAge time.Duration
-	if lockedManifestDigest == "" && !strings.HasSuffix(ref.Resource, "@sha256") {
+	if lockedManifestDigest == "" && !ref.IsDigest() {
 		maxAge = ociTagTTL
 	}
 	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID(), maxAge); hit || err != nil {

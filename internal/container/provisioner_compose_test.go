@@ -75,3 +75,21 @@ func TestBuildImagesBuildsComposeServicesWithoutLayers(t *testing.T) {
 	require.Len(t, calls, 1)
 	assert.Equal(t, []string{"proj", "build"}, calls[0].Args, "a recreate builds compose services before the old environment is removed")
 }
+
+// --pull and --no-cache reach the user's Dockerfile build (F11); they used
+// to only affect dcx's own tag reuse.
+func TestDockerfileBuildHonoursPullAndNoCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fake := &containertest.Fake{}
+	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
+		Identity:  devcontainer.Identity{WorkspaceID: "ws1234567890", ResourceName: "app-ws123456"},
+		ConfigDir: "/w/.devcontainer",
+		Plan:      devcontainer.NewDockerfilePlan("Dockerfile", "."),
+		Config:    &devcontainer.DevContainerConfig{},
+	})
+	require.NoError(t, err)
+	require.NoError(t, prov.Build(context.Background(), container.BuildOptions{NoCache: true, Pull: true}))
+	require.NotEmpty(t, fake.Builds)
+	assert.True(t, fake.Builds[0].Pull, "--pull refreshes the Dockerfile's FROM")
+	assert.True(t, fake.Builds[0].NoCache, "--no-cache bypasses BuildKit's cache")
+}

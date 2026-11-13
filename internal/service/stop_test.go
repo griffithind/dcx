@@ -82,3 +82,11 @@ func TestRestartSkipsWithShutdownActionNone(t *testing.T) {
 	_, err = empty.Restart(context.Background(), RestartOptions{})
 	assert.ErrorContains(t, err, "no devcontainer found")
 }
+
+// An explicit --rebuild is not skipped by shutdownAction "none" (U3).
+func TestRestartRebuildIgnoresShutdownActionNone(t *testing.T) {
+	svc, fake := stopTestService(t, true, "none")
+	skipped, _ := svc.Restart(context.Background(), RestartOptions{Rebuild: true})
+	assert.False(t, skipped)
+	assert.NotEmpty(t, fake.CallsTo("ImageLabels"), "the rebuild went through Up (which resolves the image metadata)")
+}

@@ -178,6 +178,12 @@ func mergeCustomizations(target, source *DevContainerConfig) {
 		target.Customizations = make(map[string]interface{})
 	}
 	for tool, sourceConfig := range source.Customizations {
+		// dcx's own customizations (secrets and build secrets run commands
+		// on the host) are taken from devcontainer.json only: a base image
+		// must not be able to run commands on the developer's machine.
+		if tool == dcxCustomizationsKey {
+			continue
+		}
 		if targetConfig, exists := target.Customizations[tool]; exists {
 			if tool == "vscode" {
 				deepMergeVSCode(targetConfig, sourceConfig)

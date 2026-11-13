@@ -36,6 +36,9 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanDangling, "dangling", false, "only clean dangling images")
 	cleanCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be cleaned without removing")
 	cleanCmd.Flags().BoolVar(&cleanCurrent, "current", false, "only clean images of the current workspace")
+	// The flags select one mode; together they used to cancel out
+	// (doctor then checked nothing and reported success).
+	cleanCmd.MarkFlagsMutuallyExclusive("all", "dangling")
 	cleanCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(cleanCmd)
 }

@@ -87,13 +87,16 @@ func (s Shortcut) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*Alias)(&s))
 }
 
+// dcxCustomizationsKey is dcx's key under "customizations".
+const dcxCustomizationsKey = "dcx"
+
 // DcxCustomizations extracts DCX customizations from a DevContainerConfig.
 // Returns nil if no customizations.dcx section exists.
 func (cfg *DevContainerConfig) DcxCustomizations() *DcxCustomizations {
 	if cfg == nil || cfg.Customizations == nil {
 		return nil
 	}
-	dcxRaw, ok := cfg.Customizations["dcx"]
+	dcxRaw, ok := cfg.Customizations[dcxCustomizationsKey]
 	if !ok {
 		return nil
 	}

@@ -24,14 +24,16 @@ type ContainerSummary struct {
 
 // ContainerDetails is detailed container info returned by InspectContainer.
 type ContainerDetails struct {
-	ID         string
-	Name       string
-	State      string
-	Running    bool
-	StartedAt  string
-	Image      string
-	Labels     map[string]string
-	Mounts     []string
+	ID        string
+	Name      string
+	State     string
+	Running   bool
+	StartedAt string
+	Image     string
+	Labels    map[string]string
+	Mounts    []string
+	// Volumes are the named volumes mounted in the container.
+	Volumes    []string
 	WorkingDir string
 	// Env is the container's environment (image ENV plus containerEnv) as
 	// KEY=VALUE pairs.

@@ -41,6 +41,9 @@ func init() {
 	_ = lockCmd.Flags().MarkDeprecated("update", "it is the default; run 'dcx lock'")
 	lockCmd.Flags().BoolVar(&lockVerify, "verify", false, "verify lockfile matches resolved features without updating")
 	lockCmd.Flags().BoolVar(&lockFrozen, "frozen", false, "fail if lockfile doesn't exist or doesn't match (CI mode)")
+	// The flags select one mode; together they used to cancel out
+	// (doctor then checked nothing and reported success).
+	lockCmd.MarkFlagsMutuallyExclusive("verify", "frozen", "update")
 	lockCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(lockCmd)
 }

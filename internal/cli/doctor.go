@@ -43,6 +43,9 @@ func init() {
 	// Not --config: that is the global flag selecting the devcontainer.json.
 	doctorCmd.Flags().BoolVar(&doctorConfig, "config-only", false, "only check configuration (skip system checks)")
 	doctorCmd.Flags().BoolVar(&doctorSystem, "system", false, "only check system requirements (skip config checks)")
+	// The flags select one mode; together they used to cancel out
+	// (doctor then checked nothing and reported success).
+	doctorCmd.MarkFlagsMutuallyExclusive("config-only", "system")
 }
 
 // CheckResult represents a single check result.

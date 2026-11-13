@@ -18,6 +18,8 @@ type UpOptions struct {
 	Rebuild bool
 	// Pull forces re-fetch of remote resources (images, features).
 	Pull bool
+	// NoCache builds without BuildKit's cache (dcx build --no-cache).
+	NoCache bool
 	// BuildSecrets are secrets to pass to docker build (BuildKit secrets).
 	// Map of secret ID to temp file path containing the secret value.
 	BuildSecrets map[string]string

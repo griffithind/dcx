@@ -274,8 +274,10 @@ Service.Up (internal/service/up.go)
         agent        agentctl.Provision: install, root-owned SSH secrets, setup, launch as root
         secrets      runtime secrets on the /run/secrets tmpfs
         environment  /etc/environment, userEnvProbe, /run/dcx/session.json
+        ssh config   ~/.ssh/dcx/config block, known_hosts pin (before the hooks, so a
+                     failing hook still leaves a way in)
         hooks        onCreate/updateContent/postCreate once (markers), postStart per start
-        ssh config   ~/.ssh/dcx/config block, known_hosts pin
+                     (also after a restart outside dcx: StartedAt vs the poststart marker)
 ```
 
 ### State Detection
@@ -324,6 +326,8 @@ No database - all state in Docker container labels. Survives Docker restarts, wo
 Base Image → Features Layer → UID Update Layer → Final Image
 ```
 - Base: pulled, or built from the Dockerfile on every create (BuildKit's cache makes this cheap) as `dcx/<workspace>:base`.
+- Features install as root (`USER root`); the base image's `USER` (`Engine.ImageConfig`) is restored after them.
+- Ports: `forwardPorts`/`appPort` without a host address publish on `127.0.0.1`; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 
 ### Naming and staleness

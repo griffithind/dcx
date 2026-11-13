@@ -77,6 +77,10 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 				continue // Skip disabled features
 			}
 			options = make(map[string]interface{})
+		case string:
+			// A string is the "version" option ("…/node:1": "18"), as in
+			// the reference implementation.
+			options = map[string]interface{}{"version": v}
 		default:
 			options = make(map[string]interface{})
 		}

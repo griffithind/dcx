@@ -14,6 +14,7 @@ import (
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/report"
+	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -73,9 +74,10 @@ func (h *upHarness) writeConfig(config string) {
 
 func (h *upHarness) up(opts UpOptions) error {
 	svc := NewDevContainerService(h.engine, report.Discard, h.workspace, "", false)
-	svc.provisionAgent = func(context.Context, container.Engine, report.Reporter, agentctl.Options) error {
+	svc.provisionAgent = func(_ context.Context, _ container.Engine, _ report.Reporter, opts agentctl.Options) error {
 		h.agents++
-		return nil
+		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID) // as the real provisioner does
+		return err
 	}
 	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
 	return svc.Up(context.Background(), opts)
@@ -190,4 +192,50 @@ func TestUpWaitsForTheWorkspaceLock(t *testing.T) {
 	unlock()
 	require.NoError(t, <-done)
 	assert.Len(t, h.engine.CallsTo("CreateContainer"), 1)
+}
+
+// After a restart outside dcx the agent is gone and setup is complete; up
+// reconnects and, since the container started after postStart last ran,
+// runs postStartCommand again (F14). An agent that merely died does not.
+func TestUpRunsPostStartAfterARestartOutsideDcx(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		restarted bool
+		wantStart int
+	}{
+		{"restarted outside dcx", true, 2},
+		{"agent died, no restart", false, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newUpHarness(t, upTestConfig)
+			require.NoError(t, h.up(UpOptions{}))
+			id := h.containers()[0].ID
+			started := time.Now().Add(-time.Hour)
+			if tt.restarted {
+				started = time.Now().Add(time.Hour)
+			}
+			h.engine.StartedAt = map[string]string{id: started.UTC().Format(time.RFC3339Nano)}
+			h.engine.ExecFunc = func(_ string, argv []string) error {
+				if len(argv) > 1 && argv[1] == "ping" {
+					return errors.New("connection refused")
+				}
+				return nil
+			}
+
+			require.NoError(t, h.up(UpOptions{}))
+			assert.Equal(t, 2, h.agents, "the agent is relaunched")
+			assert.Equal(t, tt.wantStart, h.hooks.start)
+		})
+	}
+}
+
+// The SSH entry is written before the hooks (F7): a failing hook must not
+// leave the user without a way in.
+func TestSSHConfigIsWrittenBeforeHooks(t *testing.T) {
+	h := newUpHarness(t, upTestConfig)
+	h.hooks.failCreate = errors.New("postCreateCommand exited with code 1")
+	require.Error(t, h.up(UpOptions{}))
+	data, err := os.ReadFile(filepath.Join(os.Getenv(hostconfig.SSHDirEnv), "dcx", "config"))
+	require.NoError(t, err, "no SSH config after a failed hook")
+	assert.Contains(t, string(data), "Host up-test.dcx")
 }

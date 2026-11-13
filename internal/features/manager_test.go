@@ -165,3 +165,17 @@ func TestDockerfileIsDeterministicWithPerFeatureEnv(t *testing.T) {
 	require.True(t, installA >= 0 && envA > installA && installB > envA, "feature a's ENV must come between its install and feature b's:\n%s", first)
 	assert.NotContains(t, first, "# syntax=")
 }
+
+// A feature given as a string is its "version" option (F13); it used to
+// resolve with no options, silently ignoring the version.
+func TestResolveAllStringValueIsVersion(t *testing.T) {
+	var got map[string]interface{}
+	m := &Manager{}
+	m.resolveFeature = func(_ context.Context, id string, options map[string]interface{}) (*Feature, error) {
+		got = options
+		return &Feature{ID: id, Options: options, Metadata: &FeatureMetadata{ID: "node"}}, nil
+	}
+	_, err := m.ResolveAll(context.Background(), map[string]interface{}{"ghcr.io/devcontainers/features/node:1": "18"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]interface{}{"version": "18"}, got)
+}

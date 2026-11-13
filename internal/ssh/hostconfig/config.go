@@ -87,7 +87,7 @@ func ConfigFileOverride() string {
 // ~ form normally, an absolute path when SSHDirEnv relocates it.
 func wantedInclude() string {
 	if os.Getenv(SSHDirEnv) != "" {
-		return "Include " + getDCXConfigPath()
+		return absInclude()
 	}
 	return includeLine
 }
@@ -209,7 +209,7 @@ func removeIfPresent(content []byte, containerName string) []byte {
 // ensureInclude puts the dcx Include line at the top of the main config,
 // unless it is already present.
 func ensureInclude(main []byte) []byte {
-	abs := "Include " + getDCXConfigPath()
+	abs := absInclude()
 	for _, line := range strings.Split(string(main), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == includeLine || trimmed == abs {
@@ -254,7 +254,7 @@ func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string 
 		fmt.Fprintf(&b, "  HostKeyAlias %s\n", dcxssh.HostKeyAlias(e.WorkspaceID))
 	}
 	if knownHosts != "" {
-		fmt.Fprintf(&b, "  UserKnownHostsFile %s\n", knownHosts)
+		fmt.Fprintf(&b, "  UserKnownHostsFile %s\n", configPath(knownHosts))
 		fmt.Fprintln(&b, "  StrictHostKeyChecking yes")
 	} else {
 		// Fallback if we can't resolve a per-dcx known_hosts path. Keeps the
@@ -267,13 +267,30 @@ func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string 
 	// plain `ssh <host>` invocation. If the file is absent, OpenSSH silently
 	// skips it, so this is safe to add unconditionally.
 	if home, err := os.UserHomeDir(); err == nil {
-		fmt.Fprintf(&b, "  IdentityFile %s\n", filepath.Join(home, ".dcx", "id_ed25519"))
+		fmt.Fprintf(&b, "  IdentityFile %s\n", configPath(filepath.Join(home, ".dcx", "id_ed25519")))
 	}
 	fmt.Fprintln(&b, "  ForwardAgent yes")
 	fmt.Fprintln(&b, "  IdentitiesOnly no")
 	fmt.Fprintln(&b, "  LogLevel ERROR")
 	fmt.Fprintf(&b, "%s%s\n\n", sshConfigMarkerEnd, e.ContainerName)
 	return b.String()
+}
+
+// absInclude is the Include line naming the dcx config by absolute path,
+// quoted when the path contains whitespace.
+func absInclude() string {
+	p := getDCXConfigPath()
+	if strings.ContainsAny(p, " \t") {
+		p = configPath(p)
+	}
+	return "Include " + p
+}
+
+// configPath renders a file path as one ssh_config argument: quoted (a
+// home directory may contain spaces, which would split it into several
+// arguments) with '%' doubled (OpenSSH expands %-tokens in these paths).
+func configPath(p string) string {
+	return `"` + strings.ReplaceAll(p, "%", "%%") + `"`
 }
 
 // safeConfigToken reports whether v can be written as a single ssh_config

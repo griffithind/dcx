@@ -19,6 +19,7 @@ type Engine interface {
 	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
 	StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error
 	RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error
+	RemoveVolume(ctx context.Context, name string) error
 
 	Info(ctx context.Context) (*SystemInfo, error)
 
@@ -30,7 +31,7 @@ type Engine interface {
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
 	ImageID(ctx context.Context, imageRef string) (string, error)
 	ImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
-	ImageCommand(ctx context.Context, imageRef string) (entrypoint, cmd []string, err error)
+	ImageConfig(ctx context.Context, imageRef string) (build.ImageConfig, error)
 	PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error
 	BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error
 

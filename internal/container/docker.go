@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,8 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 			Env        []string          `json:"Env"`
 		} `json:"Config"`
 		Mounts []struct {
+			Type        string `json:"Type"`
+			Name        string `json:"Name"`
 			Source      string `json:"Source"`
 			Destination string `json:"Destination"`
 		} `json:"Mounts"`
@@ -210,8 +213,12 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 
 	info := results[0]
 	mounts := make([]string, len(info.Mounts))
+	var volumes []string
 	for i, m := range info.Mounts {
 		mounts[i] = fmt.Sprintf("%s:%s", m.Source, m.Destination)
+		if m.Type == "volume" && m.Name != "" && !anonymousVolume.MatchString(m.Name) {
+			volumes = append(volumes, m.Name)
+		}
 	}
 
 	return &state.ContainerDetails{
@@ -223,6 +230,7 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 		Image:      info.Image,
 		Labels:     info.Config.Labels,
 		Mounts:     mounts,
+		Volumes:    volumes,
 		WorkingDir: info.Config.WorkingDir,
 		Env:        info.Config.Env,
 	}, nil
@@ -283,25 +291,27 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 }
 
 // ImageLabels returns the labels for an image.
-// ImageCommand returns an image's configured ENTRYPOINT and CMD.
-func (d *Docker) ImageCommand(ctx context.Context, imageRef string) (entrypoint, cmd []string, err error) {
+// ImageConfig returns an image's USER, ENTRYPOINT and CMD.
+func (d *Docker) ImageConfig(ctx context.Context, imageRef string) (build.ImageConfig, error) {
 	output, err := runOutput(exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to inspect image: %w", err)
+		return build.ImageConfig{}, fmt.Errorf("failed to inspect image: %w", err)
 	}
 	var results []struct {
 		Config struct {
+			User       string   `json:"User"`
 			Entrypoint []string `json:"Entrypoint"`
 			Cmd        []string `json:"Cmd"`
 		} `json:"Config"`
 	}
 	if err := json.Unmarshal(output, &results); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse image inspect output: %w", err)
+		return build.ImageConfig{}, fmt.Errorf("failed to parse image inspect output: %w", err)
 	}
 	if len(results) == 0 {
-		return nil, nil, fmt.Errorf("image not found: %s", imageRef)
+		return build.ImageConfig{}, fmt.Errorf("image not found: %s", imageRef)
 	}
-	return results[0].Config.Entrypoint, results[0].Config.Cmd, nil
+	c := results[0].Config
+	return build.ImageConfig{User: c.User, Entrypoint: c.Entrypoint, Cmd: c.Cmd}, nil
 }
 
 func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
@@ -369,6 +379,18 @@ func (d *Docker) StopContainer(ctx context.Context, containerID string, timeout 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to stop container: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// anonymousVolume matches the generated names of anonymous volumes, which
+// `docker rm -v` removes with their container.
+var anonymousVolume = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// RemoveVolume removes a named volume.
+func (d *Docker) RemoveVolume(ctx context.Context, name string) error {
+	if _, err := runOutput(exec.CommandContext(ctx, "docker", "volume", "rm", name)); err != nil {
+		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
 }

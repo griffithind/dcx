@@ -19,7 +19,7 @@ import (
 
 const sshTestWorkspace = "ws_ssh_endpoint"
 
-func singleRuntime(t *testing.T, fake *containertest.Fake, network string) *container.Provisioner {
+func singleRuntime(t *testing.T, fake *containertest.Fake, network string, adjust ...func(*devcontainer.ResolvedDevContainer)) *container.Provisioner {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	resolved := &devcontainer.ResolvedDevContainer{
@@ -30,6 +30,9 @@ func singleRuntime(t *testing.T, fake *containertest.Fake, network string) *cont
 	}
 	if network != "" {
 		resolved.RunArgs = &devcontainer.ParsedRunArgs{NetworkMode: network}
+	}
+	for _, f := range adjust {
+		f(resolved)
 	}
 	fake.Registry = map[string]map[string]string{"alpine:3": {}}
 	prov, err := container.NewProvisioner(fake, nil, resolved)
@@ -114,9 +117,10 @@ func TestComposeSharedNetworkPublishesOnTheOwner(t *testing.T) {
 		Registry: map[string]map[string]string{"mcr.example/base:1": {}},
 	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
-		Identity: devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
-		Plan:     devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
-		Config:   &devcontainer.DevContainerConfig{},
+		Identity:     devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
+		Plan:         devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
+		Config:       &devcontainer.DevContainerConfig{},
+		ForwardPorts: []devcontainer.PortForward{{ContainerPort: 5432, HostPort: 5432}},
 	})
 	require.NoError(t, err)
 	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
@@ -136,8 +140,8 @@ func TestComposeSharedNetworkPublishesOnTheOwner(t *testing.T) {
 	port := state.ContainerLabelsFromMap(override.Services["app"].Labels).SSHPort
 	require.NotZero(t, port)
 	assert.Empty(t, override.Services["app"].Ports, "a service sharing another's network can't publish ports")
-	assert.Equal(t, []string{"127.0.0.1:" + strconv.Itoa(port) + ":" + strconv.Itoa(agentproto.ListenPort)},
-		override.Services["db"].Ports)
+	assert.Equal(t, []string{"127.0.0.1:5432:5432", "127.0.0.1:" + strconv.Itoa(port) + ":" + strconv.Itoa(agentproto.ListenPort)},
+		override.Services["db"].Ports, "user ports go to the network owner too")
 }
 
 func TestSSHHostPortPrefersTheRecordedPort(t *testing.T) {
@@ -146,4 +150,32 @@ func TestSSHHostPortPrefersTheRecordedPort(t *testing.T) {
 	port, err := container.SSHHostPort(context.Background(), &containertest.Fake{}, &state.ContainerInfo{Name: "c", Labels: labels})
 	require.NoError(t, err)
 	assert.Equal(t, 41234, port)
+}
+
+// Ports without a host address bind loopback (F2): forwardPorts used to be
+// published on every interface, and appPort's literal "localhost" was
+// rejected by Docker ("invalid IP address: localhost").
+func TestUserPortsBindLoopback(t *testing.T) {
+	fake := &containertest.Fake{}
+	prov := singleRuntime(t, fake, "", func(r *devcontainer.ResolvedDevContainer) {
+		r.ForwardPorts = []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}, {ContainerPort: 80, HostPort: 8080}}
+		r.AppPorts = []devcontainer.PortForward{{ContainerPort: 9000, HostPort: 9000, Host: "0.0.0.0"}}
+	})
+	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	var specs []string
+	for _, p := range fake.Specs[0].Ports {
+		if p.ContainerPort != agentproto.ListenPort {
+			specs = append(specs, p.DockerSpec())
+		}
+	}
+	assert.Equal(t, []string{"127.0.0.1:3000:3000", "127.0.0.1:8080:80", "0.0.0.0:9000:9000"}, specs)
+}
+
+func TestHostNetworkPublishesNoUserPorts(t *testing.T) {
+	fake := &containertest.Fake{}
+	prov := singleRuntime(t, fake, "host", func(r *devcontainer.ResolvedDevContainer) {
+		r.ForwardPorts = []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}}
+	})
+	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	assert.Empty(t, fake.Specs[0].Ports, "Docker discards published ports with host networking")
 }

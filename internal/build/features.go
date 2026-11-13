@@ -78,6 +78,11 @@ func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOption
 	// Generate Dockerfile using the features package
 	generator := features.NewDockerfileGenerator(opts.BaseImage, opts.Features, buildContextDir, remoteUser, containerUser)
 	generator.SetMetadata(metadataLabel)
+	imageCfg, err := b.engine.ImageConfig(ctx, opts.BaseImage)
+	if err != nil {
+		return "", fmt.Errorf("read the user of %s: %w", opts.BaseImage, err)
+	}
+	generator.SetImageUser(imageCfg.User)
 	dockerfile := generator.Generate()
 
 	// Write Dockerfile to build context
@@ -99,6 +104,7 @@ func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOption
 		BuildContexts: map[string]string{
 			"dev_containers_feature_content_source": featureSourceDir,
 		},
+		NoCache: opts.NoCache,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to build derived image: %w", err)
