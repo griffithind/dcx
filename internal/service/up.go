@@ -59,19 +59,24 @@ type upStep struct {
 // environment needs. It is also the only start path (`dcx up` on a stopped
 // container, `dcx restart`).
 func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
+	// Decide and act under the workspace lock: a concurrent Up would see
+	// the same state and both would create (or recreate) the container,
+	// and a concurrent down could remove it mid-setup.
+	unlock, err := s.lockWorkspace(ctx, s.Identity().WorkspaceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.up(ctx, opts)
+}
+
+// up is Up without taking the workspace lock (the caller holds it).
+func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	resolved, err := s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true})
 	if err != nil {
 		return err
 	}
 	ids := s.Identity()
-
-	// Decide and act under the workspace lock: a concurrent Up would see
-	// the same state and both would create (or recreate) the container.
-	unlock, err := s.lockWorkspace(ctx, resolved.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 
 	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.WorkspaceID, resolved.ConfigHash)
 	if err != nil {
@@ -97,6 +102,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	if err != nil {
 		return err
 	}
+	if (action == actionNone || action == actionStart || action == actionResume) && inputsDrifted(existing, resolved) {
+		s.report.Infof("Some inputs changed since this devcontainer was created (a substituted value such as ${localEnv:...}, or a feature tag that now points to a new release); it was kept. Run 'dcx up --recreate' to apply them.")
+	}
 	switch {
 	case action == actionNone:
 		s.report.Infof("Devcontainer is already running")
@@ -115,6 +123,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 
+	if action == actionCreate {
+		s.reportPreviousIDContainer(ctx, resolved)
+	}
 	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
 		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
 	}
@@ -150,6 +161,41 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 	return nil
+}
+
+// reportPreviousIDContainer points at a container this config created
+// under an older dcx: a config outside the default locations used to share
+// the folder's workspace ID, so that container is not found under the
+// config's own ID and a new environment is created next to it.
+func (s *DevContainerService) reportPreviousIDContainer(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) {
+	folderID := devcontainer.ComputeID(resolved.LocalRoot)
+	if folderID == resolved.WorkspaceID {
+		return
+	}
+	old, err := s.engine.ListContainersWithLabels(ctx, map[string]string{
+		state.LabelWorkspaceID: folderID,
+		state.LabelConfigPath:  resolved.ConfigPath,
+	})
+	if err != nil || len(old) == 0 {
+		return
+	}
+	remove := "docker rm -f " + old[0].Name
+	if project := state.ContainerLabelsFromMap(old[0].Labels).ComposeProject; project != "" {
+		remove = "docker compose -p " + project + " down"
+	}
+	s.report.Warnf("Container %s was created for this config by an older dcx (under the folder's ID) and is left as is; remove it with '%s' once the new environment works.", old[0].Name, remove)
+}
+
+// inputsDrifted reports whether what determined the container changed
+// while the files the user edits did not (see ComputeInputsHash): dcx
+// reports that instead of recreating, since such inputs change without
+// anyone editing anything (a new SSH agent socket, a moved feature tag).
+func inputsDrifted(existing *state.ContainerInfo, resolved *devcontainer.ResolvedDevContainer) bool {
+	if existing == nil || existing.Labels == nil || existing.IsLegacyHash() {
+		return false
+	}
+	recorded := existing.Labels.HashInputs
+	return recorded != "" && existing.ConfigHash == resolved.ConfigHash && recorded != resolved.InputsHash
 }
 
 // upAction is what Up does with the workspace's container.

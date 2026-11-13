@@ -370,9 +370,18 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 			return "", fmt.Errorf("failed to inspect image %s: %w", image, err)
 		}
 		effectiveUser := r.resolved.EffectiveUser
-		imageUser := r.resolved.ContainerUser
+		// The layer ends with the image's own USER, as the reference
+		// implementation does; it used to end with containerUser or the
+		// remote user, which made the keep-alive, feature entrypoints and
+		// compose commands run as the remote user. containerUser applies at
+		// runtime anyway (ContainerSpec.User).
+		imageCfg, err := r.engine.ImageConfig(ctx, image)
+		if err != nil {
+			return "", fmt.Errorf("failed to inspect image %s: %w", image, err)
+		}
+		imageUser := imageCfg.User
 		if imageUser == "" {
-			imageUser = effectiveUser
+			imageUser = "root"
 		}
 		hostUID, hostGID := r.resolved.HostUID, r.resolved.HostGID
 		tag := r.layerTag("uid", imageID, effectiveUser, imageUser, strconv.Itoa(hostUID), strconv.Itoa(hostGID))
@@ -543,6 +552,7 @@ func (r *Provisioner) buildLabels() map[string]string {
 	l.WorkspacePath = r.resolved.LocalRoot
 	l.ConfigPath = r.resolved.ConfigPath
 	l.HashConfig = r.resolved.ConfigHash
+	l.HashInputs = r.resolved.InputsHash
 	l.HashVersion = state.CurrentHashVersion
 	l.LifecycleMarkers = true
 	l.BuildMethod = string(r.resolved.Plan.Type())

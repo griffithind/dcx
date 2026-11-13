@@ -155,6 +155,22 @@
 - **U3:** `restart --rebuild` is checked before `shutdownAction: none`, and the restart help describes what it does.
 - **Doc1:** the README says `go install` is unsupported and shows `make install`. The upgrade notes list this step's behaviour changes.
 
+**Step 2 (staleness and identity): done**, with option (b) for F4.
+- **F4:** the staleness key and a drift key are now separate.
+  - `ComputeConfigHash`, the staleness key, covers devcontainer.json as written (parsed again without substitution), the Dockerfile and compose files, and local feature files.
+  - `ComputeInputsHash`, the new `hash.inputs` label, covers the substituted config and feature digests (`FeaturesKey`).
+  - `up` recreates only when the staleness key changes. When only the inputs changed, `up` and `status` report drift and keep the container.
+  - `hash.version` is now 3, so existing containers are treated as current (with the one-time notice), not recreated.
+  - Tested at three levels: hashing (a moved tag), resolution (`${localEnv:…}` in a mount) and `Up` (drift keeps the container).
+- **F8:** `WorkspaceID(path, configPath)` keeps the path-only ID for `.devcontainer/devcontainer.json` and `.devcontainer.json`, and hashes path plus config otherwise. `${devcontainerId}` and identity use it. `up` warns about (and leaves alone) a container this config created under the folder's old ID.
+- **F9:** a compose top-level `name:` gives `<name>-<id8>`. Existing environments keep their recorded project.
+- **F5:** the UID layer ends with the image's own `USER` (`Engine.ImageConfig`).
+- **F15:**
+  - `Up`, `Down` (new, used by the CLI, and now also retiring the host key), `Stop` and `Restart` take the workspace lock.
+  - `Restart` holds it across the stop and the up (internal `up`).
+  - `DownWithIDs` stays unlocked for `Up`'s recreate.
+- **F17:** the fallback client key is created with a unique temp file plus a link, so the first writer wins. The public key is always derived from the private one, and a missing or mismatched `.pub` is rewritten.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

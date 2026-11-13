@@ -20,3 +20,23 @@ func TestResourceNameUniquePerWorkspace(t *testing.T) {
 	b := ResourceName("Go", ComputeID(filepath.Join(t.TempDir(), "clone-b")))
 	assert.NotEqual(t, a, b)
 }
+
+// Two configs of one folder are two environments (F8); the default
+// locations keep the path-only ID, so existing workspaces keep theirs.
+func TestWorkspaceIDDependsOnNonDefaultConfig(t *testing.T) {
+	ws := t.TempDir()
+	base := ComputeID(ws)
+	for _, cfg := range []string{"", filepath.Join(ws, ".devcontainer", "devcontainer.json"), filepath.Join(ws, ".devcontainer.json")} {
+		if got := WorkspaceID(ws, cfg); got != base {
+			t.Errorf("WorkspaceID(%q) = %s, want the path-only ID %s", cfg, got, base)
+		}
+	}
+	a := WorkspaceID(ws, filepath.Join(ws, ".devcontainer", "a", "devcontainer.json"))
+	b := WorkspaceID(ws, filepath.Join(ws, ".devcontainer", "b", "devcontainer.json"))
+	if a == base || b == base || a == b {
+		t.Errorf("per-config IDs must differ: base=%s a=%s b=%s", base, a, b)
+	}
+	if again := WorkspaceID(ws, filepath.Join(ws, ".devcontainer", "a", "devcontainer.json")); again != a {
+		t.Error("per-config IDs must be stable")
+	}
+}

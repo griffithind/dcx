@@ -32,6 +32,11 @@ type StatusReport struct {
 	ConfigError string
 	Shortcuts   int
 
+	// Drift reports that inputs changed while the files did not (see
+	// inputsDrifted): the container is current but not what an up from
+	// scratch would create.
+	Drift bool
+
 	// From the resolved config, when it could be resolved.
 	PlanType  devcontainer.PlanType
 	BaseImage string
@@ -58,6 +63,7 @@ func (s *DevContainerService) Status(ctx context.Context, detailed bool) (*Statu
 			r.Features = append(r.Features, f.ID)
 		}
 		r.State, r.Container, err = s.stateManager.StateWithHash(ctx, ids.WorkspaceID, resolved.ConfigHash)
+		r.Drift = err == nil && r.State != state.StateStale && inputsDrifted(r.Container, resolved)
 	} else {
 		r.ConfigError = rerr.Error()
 		if cfg, _, lerr := devcontainer.Load(s.workspacePath, s.configPath); lerr == nil {

@@ -88,6 +88,9 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 	if reason := staleReason(r); reason != "" {
 		label("", "Stale", reason)
 	}
+	if r.Drift {
+		label("", "Drift", "inputs changed (substituted values or feature versions); 'dcx up --recreate' applies them")
+	}
 
 	if c := r.Container; c != nil {
 		ui.Println("")
@@ -182,6 +185,7 @@ type statusJSON struct {
 	ConfigHash    string         `json:"configHash,omitempty"`
 	Shortcuts     int            `json:"shortcuts"`
 	ConfigError   string         `json:"configError,omitempty"`
+	Drift         bool           `json:"drift,omitempty"`
 	Container     *containerJSON `json:"container"`
 	// Detail is set with --detailed (what the old hidden `debug` showed).
 	Detail *statusDetailJSON `json:"detail,omitempty"`
@@ -218,6 +222,7 @@ func statusToJSON(r *service.StatusReport, detailed bool) statusJSON {
 		ConfigHash:    r.ConfigHash,
 		Shortcuts:     r.Shortcuts,
 		ConfigError:   r.ConfigError,
+		Drift:         r.Drift,
 	}
 	if detailed {
 		out.Detail = &statusDetailJSON{

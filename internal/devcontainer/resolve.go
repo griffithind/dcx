@@ -72,7 +72,14 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		}
 	}
 
+	// The staleness key is computed from the file as written.
+	raw, err := ParseFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
 	resolved, err := NewBuilder(slog.Default(), rep).Build(ctx, BuilderOptions{
+		Raw:           raw,
 		ConfigPath:    configPath,
 		WorkspaceRoot: opts.WorkspacePath,
 		Config:        cfg,

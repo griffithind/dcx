@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +78,36 @@ func TestCollectAuthorizedKeys_GeneratesFallbackWhenEmpty(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".dcx", "id_ed25519.pub")); err != nil {
 		t.Errorf("fallback public key missing: %v", err)
+	}
+}
+
+// The public half is derived from the private key (F17): a mismatched
+// .pub, as two concurrent first runs could leave, is repaired.
+func TestFallbackClientKeyRepairsMismatchedPub(t *testing.T) {
+	home := t.TempDir()
+	first, err := ensureFallbackClientKey(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubPath := filepath.Join(home, ".dcx", "id_ed25519.pub")
+	if err := os.WriteFile(pubPath, []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyOtherKeyOtherKeyOtherKeyOtherKeyOt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	again, err := ensureFallbackClientKey(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != string(first) {
+		t.Errorf("the public key no longer matches the private key:\n%s\n%s", first, again)
+	}
+	repaired, _ := os.ReadFile(pubPath)
+	if strings.TrimSpace(string(repaired)) != strings.TrimSpace(string(first)) {
+		t.Error("the .pub file was not rewritten")
+	}
+	if err := os.Remove(pubPath); err != nil {
+		t.Fatal(err)
+	}
+	if missing, err := ensureFallbackClientKey(home); err != nil || string(missing) != string(first) {
+		t.Errorf("a missing .pub must be re-derived, not the pair regenerated: %v", err)
 	}
 }

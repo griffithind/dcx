@@ -119,7 +119,7 @@ func Load(workspacePath, configPath string) (*DevContainerConfig, string, error)
 		return nil, configPath, err
 	}
 
-	SubstituteConfig(cfg, NewSubstitutionContext(workspacePath, cfg))
+	SubstituteConfig(cfg, NewSubstitutionContext(workspacePath, configPath, cfg))
 	return cfg, configPath, nil
 }
 

@@ -192,8 +192,8 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   shows it).
 - **Container / compose project:** `<sanitized name>-<first 8 characters
   of the workspace id>`, so two checkouts with the same `name` never
-  collide. A top-level `name:` in your compose files sets the compose
-  project instead.
+  collide. A top-level `name:` in your compose files replaces the name
+  part (`<name>-<id>`), so two checkouts never share a compose project.
 
 ### Shortcuts
 
@@ -466,6 +466,16 @@ Changes since 0.7 that affect existing setups:
   workspace.
 - `dcx restart --rebuild` is no longer skipped by `shutdownAction: "none"`.
 - `dcx down --volumes` also removes a single container's named volumes.
+- Changed inputs that are not edits (a `${localEnv:...}` value that differs
+  between logins, a feature tag that moved to a new release) no longer
+  recreate the container: `dcx up` and `dcx status` report the drift, and
+  `dcx up --recreate` applies it. Editing devcontainer.json, a Dockerfile,
+  a compose file or a local feature still recreates. The first `dcx up`
+  after upgrading says the container was created by an older dcx.
+- A config outside the default locations (`.devcontainer/<name>/devcontainer.json`,
+  `--config`) is its own environment, so several configs of one folder
+  coexist. A top-level compose `name:` gets the workspace suffix
+  (existing environments keep their project).
 - Containers from older versions keep working; run `dcx up --recreate` to
   pick up every change.
 

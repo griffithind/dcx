@@ -56,3 +56,43 @@ func TestImageMetadataCannotSupplyDcxSecrets(t *testing.T) {
 		t.Error("other tools' customizations still merge")
 	}
 }
+
+// A ${localEnv:…} value that differs between logins (an SSH agent socket)
+// changes only the inputs hash; editing the file changes the staleness key
+// (F4).
+func TestStalenessKeyIgnoresSubstitutedValues(t *testing.T) {
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".devcontainer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(cfg string) {
+		if err := os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(cfg), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolve := func() *ResolvedDevContainer {
+		r, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	cfg := `{"image": "alpine:3", "mounts": ["source=${localEnv:DCX_TEST_SOCK},target=/ssh-agent,type=bind"]}`
+	write(cfg)
+	t.Setenv("DCX_TEST_SOCK", "/tmp/ssh-AAA/agent.1")
+	first := resolve()
+	t.Setenv("DCX_TEST_SOCK", "/tmp/ssh-BBB/agent.2")
+	second := resolve()
+	if first.ConfigHash != second.ConfigHash {
+		t.Error("a new login's socket path made the container stale")
+	}
+	if first.InputsHash == second.InputsHash {
+		t.Error("the inputs hash must see the substituted value")
+	}
+
+	write(`{"image": "alpine:3.21", "mounts": ["source=${localEnv:DCX_TEST_SOCK},target=/ssh-agent,type=bind"]}`)
+	if resolve().ConfigHash == second.ConfigHash {
+		t.Error("editing devcontainer.json must change the staleness key")
+	}
+}

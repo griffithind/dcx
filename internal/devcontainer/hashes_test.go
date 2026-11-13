@@ -141,22 +141,35 @@ func TestComputeConfigHash(t *testing.T) {
 		assert.NotEqual(t, hash1, hash2, "changing any service's Dockerfile should change the hash")
 	})
 
-	t.Run("feature change produces different hash", func(t *testing.T) {
-		cfg := &DevContainerConfig{Image: "alpine:latest"}
-
-		feats1 := []*features.Feature{
-			{ID: "feat1", Options: map[string]interface{}{"version": "1.0"}},
-		}
-		feats2 := []*features.Feature{
-			{ID: "feat1", Options: map[string]interface{}{"version": "2.0"}},
-		}
-
-		hash1, err := ComputeConfigHash(cfg, "", nil, feats1)
+	t.Run("feature options are part of the file", func(t *testing.T) {
+		cfg1 := &DevContainerConfig{Image: "alpine:latest", Features: map[string]interface{}{"feat1": map[string]interface{}{"version": "1.0"}}}
+		cfg2 := &DevContainerConfig{Image: "alpine:latest", Features: map[string]interface{}{"feat1": map[string]interface{}{"version": "2.0"}}}
+		hash1, err := ComputeConfigHash(cfg1, "", nil, nil)
 		require.NoError(t, err)
-		hash2, err := ComputeConfigHash(cfg, "", nil, feats2)
+		hash2, err := ComputeConfigHash(cfg2, "", nil, nil)
 		require.NoError(t, err)
-
 		assert.NotEqual(t, hash1, hash2)
+	})
+
+	// A tag resolving to a new release changes what would be built, but no
+	// file changed: only the inputs hash moves (F4), so dcx reports drift
+	// instead of recreating.
+	t.Run("a moved feature tag is drift, not staleness", func(t *testing.T) {
+		cfg := &DevContainerConfig{Image: "alpine:latest"}
+		old := []*features.Feature{{ID: "ghcr.io/x/node:1", ManifestDigest: "sha256:old", Metadata: &features.FeatureMetadata{Version: "1.1.0"}}}
+		moved := []*features.Feature{{ID: "ghcr.io/x/node:1", ManifestDigest: "sha256:new", Metadata: &features.FeatureMetadata{Version: "1.2.0"}}}
+
+		c1, err := ComputeConfigHash(cfg, "", nil, old)
+		require.NoError(t, err)
+		c2, err := ComputeConfigHash(cfg, "", nil, moved)
+		require.NoError(t, err)
+		assert.Equal(t, c1, c2, "the staleness key ignores feature digests")
+
+		i1, err := ComputeInputsHash(cfg, "", nil, old)
+		require.NoError(t, err)
+		i2, err := ComputeInputsHash(cfg, "", nil, moved)
+		require.NoError(t, err)
+		assert.NotEqual(t, i1, i2, "the inputs hash sees them")
 	})
 
 	t.Run("feature order does not affect hash", func(t *testing.T) {

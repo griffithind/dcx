@@ -42,6 +42,11 @@ const (
 	// container was created from (see devcontainer.ComputeConfigHash).
 	LabelHashConfig = Prefix + ".hash.config"
 
+	// LabelHashInputs is the hash of everything that determined the
+	// container (substituted values, feature digests); a difference from
+	// the current one is drift, reported but not acted on.
+	LabelHashInputs = Prefix + ".hash.inputs"
+
 	// LabelHashVersion identifies the algorithm behind LabelHashConfig.
 	// Containers without it were created by a dcx version whose hashes are
 	// not comparable with the current ones.
@@ -121,6 +126,7 @@ type ContainerLabels struct {
 
 	// Staleness
 	HashConfig  string
+	HashInputs  string
 	HashVersion string
 
 	// LifecycleMarkers reports whether lifecycle progress is tracked with
@@ -176,6 +182,7 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	setIfNotEmpty(m, LabelConfigPath, l.ConfigPath)
 
 	setIfNotEmpty(m, LabelHashConfig, l.HashConfig)
+	setIfNotEmpty(m, LabelHashInputs, l.HashInputs)
 	setIfNotEmpty(m, LabelHashVersion, l.HashVersion)
 	if l.LifecycleMarkers {
 		m[LabelLifecycleMarkers] = "1"
@@ -216,6 +223,7 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	l.ConfigPath = m[LabelConfigPath]
 
 	l.HashConfig = m[LabelHashConfig]
+	l.HashInputs = m[LabelHashInputs]
 	l.HashVersion = m[LabelHashVersion]
 	l.LifecycleMarkers = m[LabelLifecycleMarkers] == "1"
 

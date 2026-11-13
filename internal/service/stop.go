@@ -33,6 +33,11 @@ type StopOptions struct {
 // shutdownAction "none" unless forced.
 func (s *DevContainerService) Stop(ctx context.Context, opts StopOptions) (StopOutcome, error) {
 	ids := s.Identity()
+	unlock, err := s.lockWorkspace(ctx, ids.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	st, info, err := s.stateManager.State(ctx, ids.WorkspaceID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get state: %w", err)
@@ -65,6 +70,12 @@ type RestartOptions struct {
 // skipped it.
 func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) (skipped bool, err error) {
 	ids := s.Identity()
+	// One lock for the stop and the up, so nothing runs in between.
+	unlock, err := s.lockWorkspace(ctx, ids.WorkspaceID)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	st, info, err := s.stateManager.State(ctx, ids.WorkspaceID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get state: %w", err)
@@ -76,7 +87,7 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 	// shutdownAction "none" (keep it running when tools detach) does not
 	// argue against.
 	if opts.Rebuild {
-		return false, s.Up(ctx, UpOptions{Recreate: true, Rebuild: true})
+		return false, s.up(ctx, UpOptions{Recreate: true, Rebuild: true})
 	}
 	if !opts.Force && s.keepRunning() {
 		return true, nil
@@ -87,7 +98,7 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 			return false, err
 		}
 	}
-	return false, s.Up(ctx, UpOptions{})
+	return false, s.up(ctx, UpOptions{})
 }
 
 // keepRunning reports whether devcontainer.json sets shutdownAction "none".

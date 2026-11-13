@@ -16,23 +16,36 @@ import (
 )
 
 // ComputeConfigHash computes the staleness key of a devcontainer: when it
-// changes, the container must be recreated.
-//
-// It hashes what determines the container, not the bytes on disk:
-//   - the substituted local devcontainer.json, normalized (so comments,
-//     formatting and key order don't matter) and without properties that
-//     don't affect the container: name, customizations, ports attributes,
-//     remoteEnv, host requirements, waitFor, userEnvProbe, shutdownAction,
-//     and the lifecycle commands that run on every start/attach
-//     (initializeCommand, postStartCommand, postAttachCommand);
+// changes, `dcx up` recreates the container. It covers only what the user
+// edits:
+//   - devcontainer.json as written (before variable substitution, so a
+//     ${localEnv:…} value that differs between shells or logins is not a
+//     change), normalized (comments, formatting and key order don't matter)
+//     and without properties that don't affect the container: name,
+//     customizations, ports attributes, remoteEnv, host requirements,
+//     waitFor, userEnvProbe, shutdownAction, and the lifecycle commands that
+//     run on every start/attach (initializeCommand, postStartCommand,
+//     postAttachCommand);
 //   - the Dockerfile, compose files and Dockerfiles referenced by compose
 //     services;
-//   - the resolved features (see FeaturesKey), including local feature
-//     contents.
+//   - the files of local features.
 //
-// Pass the local config before image-metadata merging so the key does not
-// depend on whether the base image happens to be available locally.
-func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
+// What else determines the container (substituted values, the digests a
+// feature tag resolves to) is ComputeInputsHash: when only that changes,
+// dcx reports the drift instead of recreating.
+func ComputeConfigHash(raw *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
+	return computeHash(raw, dockerfilePath, composeFiles, localFeaturesKey(resolvedFeatures))
+}
+
+// ComputeInputsHash covers everything that determines the container: the
+// substituted local config (before image-metadata merging, so it does not
+// depend on whether the base image happens to be available) and the
+// resolved features with their versions and digests (FeaturesKey).
+func ComputeInputsHash(local *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
+	return computeHash(local, dockerfilePath, composeFiles, FeaturesKey(resolvedFeatures))
+}
+
+func computeHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, featuresKey string) (string, error) {
 	h := sha256.New()
 
 	norm, err := normalizedConfigJSON(cfg)
@@ -73,12 +86,29 @@ func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFi
 		}
 	}
 
-	if len(resolvedFeatures) > 0 {
+	if featuresKey != "" {
 		h.Write([]byte("\x00features\x00"))
-		h.Write([]byte(FeaturesKey(resolvedFeatures)))
+		h.Write([]byte(featuresKey))
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// localFeaturesKey identifies the files of the local (./path) features;
+// "" without any.
+func localFeaturesKey(feats []*features.Feature) string {
+	var entries []string
+	for _, f := range feats {
+		if f.Source.Type == features.SourceTypeLocalPath && f.CachePath != "" {
+			entries = append(entries, f.ID+"\x1f"+hashDir(f.CachePath))
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	sort.Strings(entries)
+	sum := sha256.Sum256([]byte(strings.Join(entries, "\x1e")))
+	return hex.EncodeToString(sum[:])
 }
 
 // normalizedConfigJSON marshals the container-relevant part of cfg.

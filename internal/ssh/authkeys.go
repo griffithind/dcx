@@ -3,9 +3,11 @@ package ssh
 // authkeys.go collects the public keys the in-container agent accepts.
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -84,46 +86,64 @@ func AuthorizedKeys() ([]byte, error) {
 
 // ensureFallbackClientKey returns the public key half of ~/.dcx/id_ed25519,
 // generating the key pair on first call.
+//
+// The private key is the source of truth: it is created race-free (a
+// unique temp file linked into place, so the first of several concurrent
+// `dcx up`s wins and the others use its key), and the public key is always
+// derived from it. A missing or mismatched id_ed25519.pub is rewritten;
+// it used to be trusted as is, so two concurrent first runs could leave a
+// pair that never authenticated.
 func ensureFallbackClientKey(home string) ([]byte, error) {
 	dir := filepath.Join(home, ".dcx")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create ~/.dcx: %w", err)
 	}
-
 	privPath := filepath.Join(dir, "id_ed25519")
 	pubPath := privPath + ".pub"
 
-	// Fast path: both already exist.
-	if pub, err := os.ReadFile(pubPath); err == nil {
-		if _, err := os.Stat(privPath); err == nil {
-			return pub, nil
+	data, err := os.ReadFile(privPath)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := createFallbackKey(privPath); err != nil {
+			return nil, err
+		}
+		data, err = os.ReadFile(privPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read fallback key: %w", err)
+	}
+	signer, err := gossh.ParsePrivateKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("fallback key %s is unreadable: %w", privPath, err)
+	}
+	authLine := gossh.MarshalAuthorizedKey(signer.PublicKey())
+	if current, err := os.ReadFile(pubPath); err != nil || !bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(authLine)) {
+		if err := writeAtomic(pubPath, authLine, 0644); err != nil {
+			return nil, fmt.Errorf("write fallback public key: %w", err)
 		}
 	}
+	return authLine, nil
+}
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+// createFallbackKey writes a new ed25519 key to privPath unless one
+// appears there first.
+func createFallbackKey(privPath string) error {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("generate fallback key: %w", err)
+		return fmt.Errorf("generate fallback key: %w", err)
 	}
-
-	// Write the private key in OpenSSH format.
 	pemBlock, err := gossh.MarshalPrivateKey(priv, "dcx fallback client key")
 	if err != nil {
-		return nil, fmt.Errorf("marshal fallback private key: %w", err)
+		return fmt.Errorf("marshal fallback private key: %w", err)
 	}
-	pemBytes := pem.EncodeToMemory(pemBlock)
-	if err := os.WriteFile(privPath, pemBytes, 0600); err != nil {
-		return nil, fmt.Errorf("write fallback private key: %w", err)
-	}
-
-	sshPub, err := gossh.NewPublicKey(pub)
+	tmp, err := writeTemp(privPath, pem.EncodeToMemory(pemBlock), 0600)
 	if err != nil {
-		return nil, fmt.Errorf("public key from fallback: %w", err)
+		return fmt.Errorf("write fallback private key: %w", err)
 	}
-	authLine := gossh.MarshalAuthorizedKey(sshPub)
-	if err := os.WriteFile(pubPath, authLine, 0644); err != nil {
-		return nil, fmt.Errorf("write fallback public key: %w", err)
+	defer func() { _ = os.Remove(tmp) }()
+	if err := os.Link(tmp, privPath); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("install fallback private key: %w", err)
 	}
-	return authLine, nil
+	return nil
 }
 
 // readAgentPubkeys connects to the SSH agent and returns its identities

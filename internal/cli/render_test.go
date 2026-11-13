@@ -85,6 +85,10 @@ func TestRenderStatus(t *testing.T) {
 	stale.State, stale.ConfigHash = state.StateStale, "fedcba9876543210fedc"
 	golden(t, "status_stale", captureUI(t, func() { renderStatus(stale, false) }))
 
+	drift := runningReport()
+	drift.Drift = true
+	golden(t, "status_drift", captureUI(t, func() { renderStatus(drift, false) }))
+
 	broken := &service.StatusReport{
 		WorkspacePath: "/home/dev/broken",
 		Identity:      &devcontainer.Identity{WorkspaceID: "bbbb1111cccc"},

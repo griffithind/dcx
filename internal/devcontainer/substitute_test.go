@@ -219,7 +219,7 @@ func TestSubstituteConfigFeatureOptions(t *testing.T) {
 		"ghcr.io/devcontainers/features/git:1": true,
 	}}
 	ws := t.TempDir()
-	SubstituteConfig(cfg, NewSubstitutionContext(ws, cfg))
+	SubstituteConfig(cfg, NewSubstitutionContext(ws, "", cfg))
 	opts := cfg.Features["ghcr.io/devcontainers/features/node:1"].(map[string]interface{})
 	if opts["version"] != "20" {
 		t.Errorf("version = %v", opts["version"])

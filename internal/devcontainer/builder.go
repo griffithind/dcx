@@ -47,6 +47,10 @@ type BuilderOptions struct {
 	// (already merged into Config); their lifecycle hooks run first.
 	ImageMetadata []DevContainerConfig
 
+	// Raw is devcontainer.json as written (no substitution), the input of
+	// the staleness key. Defaults to Local.
+	Raw *DevContainerConfig
+
 	// Local is the substituted devcontainer.json before image-metadata
 	// merging; the staleness key is computed from it. Defaults to Config.
 	Local *DevContainerConfig
@@ -69,11 +73,12 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	if resolved.Local == nil {
 		resolved.Local = opts.Config
 	}
+	resolved.Raw = opts.Raw
 
 	// The config has already been substituted by Load. The context is still
 	// needed for values contributed by features (e.g. mounts referencing
 	// ${devcontainerId}).
-	subCtx := NewSubstitutionContext(opts.WorkspaceRoot, opts.Config)
+	subCtx := NewSubstitutionContext(opts.WorkspaceRoot, opts.ConfigPath, opts.Config)
 
 	// Create execution plan based on config type
 	planType := opts.Config.PlanType()
@@ -333,12 +338,19 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 		composeFiles = cp.Files
 	}
 
-	configHash, err := ComputeConfigHash(cfg, dockerfilePath, composeFiles, resolved.Features)
+	raw := resolved.Raw
+	if raw == nil {
+		raw = cfg
+	}
+	configHash, err := ComputeConfigHash(raw, dockerfilePath, composeFiles, resolved.Features)
 	if err != nil {
 		return err
 	}
-
-	resolved.ConfigHash = configHash
+	inputsHash, err := ComputeInputsHash(cfg, dockerfilePath, composeFiles, resolved.Features)
+	if err != nil {
+		return err
+	}
+	resolved.ConfigHash, resolved.InputsHash = configHash, inputsHash
 	return nil
 }
 

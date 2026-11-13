@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -92,4 +93,32 @@ func TestDockerfileBuildHonoursPullAndNoCache(t *testing.T) {
 	require.NotEmpty(t, fake.Builds)
 	assert.True(t, fake.Builds[0].Pull, "--pull refreshes the Dockerfile's FROM")
 	assert.True(t, fake.Builds[0].NoCache, "--no-cache bypasses BuildKit's cache")
+}
+
+// The UID layer ends with the image's own USER (F5): it used to end with
+// the remote user, so the keep-alive, feature entrypoints and compose
+// commands ran as that user.
+func TestUIDLayerKeepsTheImageUser(t *testing.T) {
+	for _, tt := range []struct{ imageUser, want string }{{"", "root"}, {"app", "app"}} {
+		t.Setenv("HOME", t.TempDir())
+		fake := &containertest.Fake{
+			Registry:     map[string]map[string]string{"base:1": {}},
+			ImageConfigs: map[string]build.ImageConfig{"base:1": {User: tt.imageUser}},
+		}
+		prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
+			Identity:        devcontainer.Identity{WorkspaceID: "ws1234567890", ResourceName: "app-ws123456"},
+			BaseImage:       "base:1",
+			Plan:            devcontainer.NewImagePlan("base:1"),
+			Config:          &devcontainer.DevContainerConfig{},
+			RemoteUser:      "vscode",
+			EffectiveUser:   "vscode",
+			ShouldUpdateUID: true,
+			HostUID:         1000,
+			HostGID:         1000,
+		})
+		require.NoError(t, err)
+		require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+		require.NotEmpty(t, fake.Builds)
+		assert.Equal(t, tt.want, fake.Builds[len(fake.Builds)-1].Args["IMAGE_USER"], "image USER %q", tt.imageUser)
+	}
 }

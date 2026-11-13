@@ -177,10 +177,10 @@ func Substitute(s string, ctx *SubstitutionContext) string {
 // ${containerEnv:VAR} is intentionally left unresolved here: container
 // environment only exists once the container runs, so those references are
 // resolved at exec time (see ResolveContainerEnvRefs).
-func NewSubstitutionContext(workspaceRoot string, cfg *DevContainerConfig) *SubstitutionContext {
+func NewSubstitutionContext(workspaceRoot, configPath string, cfg *DevContainerConfig) *SubstitutionContext {
 	ctx := &SubstitutionContext{
 		LocalWorkspaceFolder: workspaceRoot,
-		DevcontainerID:       ComputeID(workspaceRoot),
+		DevcontainerID:       WorkspaceID(workspaceRoot, configPath),
 		LocalEnv:             os.Getenv,
 	}
 	if home, err := os.UserHomeDir(); err == nil {

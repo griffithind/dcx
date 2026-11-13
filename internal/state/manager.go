@@ -114,7 +114,10 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 }
 
 // CurrentHashVersion is stamped on containers as LabelHashVersion.
-const CurrentHashVersion = "2"
+//
+// "3": the staleness key covers devcontainer.json as written (before
+// substitution) and no feature digests; those are in hash.inputs.
+const CurrentHashVersion = "3"
 
 // IsLegacyHash reports whether the container's config hash was computed by
 // an older dcx and therefore cannot be used to detect config changes.

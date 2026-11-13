@@ -375,7 +375,29 @@ func explainPortConflict(err error) error {
 // DownOptions contains options for tearing down a devcontainer.
 type DownOptions = container.DownOptions
 
-// DownWithIDs removes the environment using just project name and workspace ID.
+// Down removes the workspace's environment and its SSH host key, under the
+// workspace lock (so it cannot pull the container out from under a running
+// up).
+func (s *DevContainerService) Down(ctx context.Context, opts DownOptions) error {
+	ids := s.Identity()
+	unlock, err := s.lockWorkspace(ctx, ids.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := s.DownWithIDs(ctx, ids.ResourceName, ids.WorkspaceID, opts); err != nil {
+		return err
+	}
+	// A user-requested down retires the workspace's SSH host key too (a
+	// recreate inside Up keeps it, so editors' pins stay valid).
+	if err := dcxssh.RemoveHostKey(ids.WorkspaceID); err != nil {
+		s.report.Warnf("Failed to remove SSH host key: %v", err)
+	}
+	return nil
+}
+
+// DownWithIDs removes the environment using just project name and workspace
+// ID, without the workspace lock (Up holds it when recreating).
 func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
 	currentState, containerInfo, err := s.stateManager.State(ctx, workspaceID)
 	if err != nil {

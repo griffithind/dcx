@@ -1,0 +1,13 @@
+Workspace: /home/dev/myapp
+Project: myapp-abcd1234
+Workspace ID: abcd1234efgh
+State: running
+SSH: ssh myapp.dcx
+Shortcuts: 2 defined (use 'dcx run --list' to view)
+Drift: inputs changed (substituted values or feature versions); 'dcx up --recreate' applies them
+
+Primary Container
+  ID: f00dfeedbeef
+  Name: myapp-abcd1234
+  Status: running
+  Config: 0123456789ab

@@ -30,6 +30,10 @@ type ResolvedDevContainer struct {
 	// with the base image's devcontainer.metadata merged in.
 	Config *DevContainerConfig
 
+	// Raw is devcontainer.json as written, before variable substitution:
+	// the input of the staleness key (ConfigHash).
+	Raw *DevContainerConfig
+
 	// Local is devcontainer.json as written (substituted, before image
 	// metadata was merged in). It is the staleness key's input and the
 	// "local" entry dcx adds to an image's devcontainer.metadata label.
@@ -135,10 +139,14 @@ type ResolvedDevContainer struct {
 
 	// === Hash ===
 
-	// ConfigHash is the combined hash of all build inputs (devcontainer.json,
-	// Dockerfiles, compose files, features). Used for staleness detection
-	// and image cache tagging.
+	// ConfigHash is the staleness key: the files the user edits (see
+	// ComputeConfigHash). A change recreates the container.
 	ConfigHash string
+
+	// InputsHash covers everything that determines the container,
+	// substituted values and feature digests included (ComputeInputsHash).
+	// When only it changes, dcx reports drift and keeps the container.
+	InputsHash string
 
 	// === GPU ===
 

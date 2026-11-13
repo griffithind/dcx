@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -238,4 +239,83 @@ func TestSSHConfigIsWrittenBeforeHooks(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(os.Getenv(hostconfig.SSHDirEnv), "dcx", "config"))
 	require.NoError(t, err, "no SSH config after a failed hook")
 	assert.Contains(t, string(data), "Host up-test.dcx")
+}
+
+// Inputs that change without an edit (here an env var substituted into a
+// mount) keep the container and say so (F4, option b); an edit recreates.
+func TestUpKeepsTheContainerOnInputDrift(t *testing.T) {
+	t.Setenv("DCX_TEST_SOCK", "/tmp/a")
+	h := newUpHarness(t, `{"name": "up-test", "image": "alpine:3", "mounts": ["source=${localEnv:DCX_TEST_SOCK},target=/agent,type=bind"]}`)
+	require.NoError(t, h.up(UpOptions{}))
+	id := h.containers()[0].ID
+
+	t.Setenv("DCX_TEST_SOCK", "/tmp/b")
+	rec := &report.Recorder{}
+	svc := NewDevContainerService(h.engine, rec, h.workspace, "", false)
+	svc.provisionAgent = func(context.Context, container.Engine, report.Reporter, agentctl.Options) error { return nil }
+	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
+	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
+
+	require.Len(t, h.containers(), 1)
+	assert.Equal(t, id, h.containers()[0].ID, "drift does not recreate")
+	var drift bool
+	for _, m := range rec.Messages() {
+		if strings.Contains(m.Text, "dcx up --recreate") {
+			drift = true
+		}
+	}
+	assert.True(t, drift, "the drift is reported")
+}
+
+// A non-default config's container from before per-config IDs is pointed
+// out, not silently left behind (F8).
+func TestUpPointsAtAContainerFromThePreviousIDScheme(t *testing.T) {
+	h := newUpHarness(t, upTestConfig)
+	cfgPath := filepath.Join(h.workspace, ".devcontainer", "alt", "devcontainer.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(cfgPath), 0o755))
+	require.NoError(t, os.WriteFile(cfgPath, []byte(upTestConfig), 0o644))
+	old := state.NewContainerLabels()
+	old.WorkspaceID = devcontainer.ComputeID(h.workspace)
+	old.ConfigPath = cfgPath
+	h.engine.Containers = []state.ContainerSummary{{ID: "old1", Name: "up-test-old", Labels: old.ToMap()}}
+
+	rec := &report.Recorder{}
+	svc := NewDevContainerService(h.engine, rec, h.workspace, cfgPath, false)
+	svc.provisionAgent = func(_ context.Context, _ container.Engine, _ report.Reporter, opts agentctl.Options) error {
+		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID)
+		return err
+	}
+	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
+	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
+
+	var warned bool
+	for _, m := range rec.Messages() {
+		warned = warned || strings.Contains(m.Text, "docker rm -f up-test-old")
+	}
+	assert.True(t, warned)
+	assert.Len(t, h.engine.CallsTo("CreateContainer"), 1, "a new environment is created for the config's own ID")
+}
+
+// down waits for a running up (F15) instead of removing the container and
+// host key under it.
+func TestDownWaitsForTheWorkspaceLock(t *testing.T) {
+	h := newUpHarness(t, upTestConfig)
+	require.NoError(t, h.up(UpOptions{}))
+	svc := NewDevContainerService(h.engine, report.Discard, h.workspace, "", false)
+	unlock, err := svc.lockWorkspace(context.Background(), svc.Identity().WorkspaceID)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- NewDevContainerService(h.engine, report.Discard, h.workspace, "", false).Down(context.Background(), DownOptions{})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("down ran while the workspace was locked: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	assert.Len(t, h.containers(), 1)
+	unlock()
+	require.NoError(t, <-done)
+	assert.Empty(t, h.containers())
 }

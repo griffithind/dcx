@@ -4,12 +4,12 @@
     "files": [
       "<workspace>/.devcontainer/docker-compose.yml"
     ],
-    "project": "my_stack",
+    "project": "my_stack-<id8>",
     "runServices": null,
     "service": "app",
     "type": "compose"
   },
-  "resourceName": "my_stack",
+  "resourceName": "my_stack-<id8>",
   "sshHost": "named_project.dcx",
   "overrideCommand": false,
   "workspaceFolder": "/workspace"

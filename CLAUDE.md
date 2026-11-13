@@ -201,7 +201,7 @@ type ResolvedDevContainer struct {
     ContainerEnv, RemoteEnv map[string]string    // Environment
     Mounts []Mount                               // Volume mounts
     Features []*features.Feature                 // Resolved features
-    ConfigHash string                            // Staleness key (hash.config label)
+    ConfigHash, InputsHash string                // Staleness key (hash.config) / drift key (hash.inputs)
 }
 ```
 
@@ -224,7 +224,7 @@ StateBroken   // Inconsistent state
 All state persisted in Docker labels (prefix `com.griffithind.dcx`):
 - `schema.version`, `managed`
 - `workspace.id`, `workspace.name`, `workspace.path`, `config.path`
-- `hash.config` (staleness key), `hash.version`, `lifecycle.markers`
+- `hash.config` (staleness key), `hash.inputs` (drift key), `hash.version`, `lifecycle.markers`
 - `build.method` (image/dockerfile/compose), `build.base.image`, `build.derived.image`, `features.installed`
 - `compose.project`, `compose.service`, `container.primary` (plus compose's own `config_files`/`working_dir`, read only)
 - `ssh.port`, `ssh.listen`, `ssh.allow`: the agent endpoint chosen at create time (`container.planSSH`); read it with `container.SSHHostPort`/`SSHListenAddr`/`RecordedSSHAccess`, never by asking Docker for the published port
@@ -259,7 +259,7 @@ CLI: dcx up [--recreate] [--rebuild] [--pull] [--hosts]
     ↓ NewCLIContext() → Service.Up(UpOptions)
 Service.Up (internal/service/up.go)
     ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
-    ├─ lockWorkspace (~/.dcx/locks/<id>.lock; a concurrent up waits)
+    ├─ lockWorkspace (~/.dcx/locks/<id>.lock; Up, Down, Stop and Restart take it)
     ├─ StateWithHash + setupComplete + agentctl.Listening
     ├─ decideUp → none | resume | start | create | recreate
     ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
@@ -333,7 +333,10 @@ Base Image → Features Layer → UID Update Layer → Final Image
 ### Naming and staleness
 - Container / default compose project name: `devcontainer.ResourceName(name, id)` (`<slug>-<id8>`). Never derive Docker names from `name` alone.
 - Existing environments are always located by the `workspace.id` label and operated on by container ID / recorded compose project.
-- `hash.config` is the semantic staleness key from `ComputeConfigHash`; `hash.version` marks its algorithm. Containers with an older version are treated as current.
+- Workspace ID: `WorkspaceID(path, configPath)`, the path-only `ComputeID` for the default config locations and path + config file otherwise, so several configs of one folder are separate environments. `${devcontainerId}` is the same ID.
+- `hash.config` is the staleness key from `ComputeConfigHash`: devcontainer.json as written (no substitution), the Dockerfile and compose files, and local feature files. A change recreates the container.
+- `hash.inputs` (`ComputeInputsHash`) adds substituted values and feature digests. When only it differs, up and status report drift and keep the container (`--recreate` applies it).
+- `hash.version` marks the algorithm; containers with an older version are treated as current.
 
 ## Variable Substitution
 
