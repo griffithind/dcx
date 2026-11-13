@@ -29,7 +29,6 @@ type Provisioner struct {
 	resolved *devcontainer.ResolvedDevContainer
 	builder  *build.Builder
 
-	containerID   string
 	containerName string
 
 	derivedImage string
@@ -39,6 +38,8 @@ type Provisioner struct {
 	composeInfo *composeServiceInfo
 	// command is what a chained feature entrypoint execs (prepareCommand).
 	command []string
+	// selinux is set when the daemon labels containers for SELinux.
+	selinux bool
 }
 
 // NewProvisioner creates a new runtime for a resolved devcontainer.
@@ -59,12 +60,8 @@ func NewProvisioner(engine Engine, rep report.Reporter, resolved *devcontainer.R
 	}, nil
 }
 
-// Up implements ContainerRuntime.Up.
+// Up builds the images and creates and starts the environment.
 func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
-	if r.resolved == nil {
-		return fmt.Errorf("no resolved configuration - use NewProvisioner")
-	}
-
 	// Determine the approach based on plan type
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ComposePlan:
@@ -147,6 +144,11 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 	if err := r.prepareCommand(ctx, finalImage); err != nil {
 		return err
 	}
+	// With SELinux labelling in the daemon, the workspace bind mount must
+	// be relabelled to be readable in the container.
+	if info, err := r.engine.Info(ctx); err == nil {
+		r.selinux = info.SELinux
+	}
 
 	// Create the container
 	containerID, err := r.createContainer(ctx, finalImage)
@@ -159,7 +161,6 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	r.containerID = containerID
 	return nil
 }
 
@@ -455,7 +456,7 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 		r.applyRunArgs(&s)
 	}
 
-	r.applyFeatureRequirements(&s)
+	r.warnElevatedFeatures()
 
 	if gpu := res.GPU; gpu.Wanted() {
 		if gpu.Count > 0 {
@@ -478,15 +479,17 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 // workspaceMount returns the workspace mount of a single-container plan:
 // workspaceMount from the config, or a bind of the local workspace.
 func (r *Provisioner) workspaceMount() *devcontainer.Mount {
+	var m *devcontainer.Mount
 	if r.resolved.WorkspaceMount != "" {
-		if m := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount); m != nil {
-			return m
-		}
+		m = devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount)
 	}
-	if r.resolved.LocalRoot != "" && r.resolved.WorkspaceFolder != "" {
-		return &devcontainer.Mount{Type: "bind", Source: r.resolved.LocalRoot, Target: r.resolved.WorkspaceFolder}
+	if m == nil && r.resolved.LocalRoot != "" && r.resolved.WorkspaceFolder != "" {
+		m = &devcontainer.Mount{Type: "bind", Source: r.resolved.LocalRoot, Target: r.resolved.WorkspaceFolder}
 	}
-	return nil
+	if m != nil && r.selinux && (m.Type == "" || m.Type == "bind") {
+		m.Relabel = true
+	}
+	return m
 }
 
 // applyRunArgs applies the runArgs dcx models to s and keeps the rest for
@@ -523,30 +526,16 @@ func (r *Provisioner) applyRunArgs(s *ContainerSpec) {
 	s.RunArgs = ra.Passthrough
 }
 
-// applyFeatureRequirements adds the capabilities, security options,
-// privileged mode and init that features declare.
-//
-// Feature containerEnv is baked into the derived image as ENV, so it is not
-// passed again here (that would override user containerEnv and freeze
-// ${VAR} references unexpanded).
-func (r *Provisioner) applyFeatureRequirements(s *ContainerSpec) {
-	if len(r.resolved.Features) == 0 {
-		return
-	}
-	reqs := features.CollectSecurityRequirements(r.resolved.Features)
-	if reqs.Privileged || len(reqs.Capabilities) > 0 {
+// warnElevatedFeatures says which features need elevated permissions. The
+// permissions themselves (capAdd, securityOpt, privileged, init) were
+// merged into the resolved configuration by the builder; adding them again
+// here emitted every one twice.
+func (r *Provisioner) warnElevatedFeatures() {
+	if names := features.ElevatedFeatures(r.resolved.Features); len(names) > 0 {
 		r.report.Warnf("Features require elevated permissions:")
-		for _, name := range reqs.FeatureNames {
+		for _, name := range names {
 			r.report.Warnf("  - %s", name)
 		}
-	}
-	s.CapAdd = append(s.CapAdd, reqs.Capabilities...)
-	s.SecurityOpt = append(s.SecurityOpt, reqs.SecurityOpts...)
-	if reqs.Privileged {
-		s.Privileged = true
-	}
-	if features.NeedsInit(r.resolved.Features) {
-		s.Init = true
 	}
 }
 
@@ -559,6 +548,9 @@ func (r *Provisioner) buildLabels() map[string]string {
 	l.ConfigPath = r.resolved.ConfigPath
 	l.HashConfig = r.resolved.ConfigHash
 	l.HashInputs = r.resolved.InputsHash
+	if r.resolved.Config != nil {
+		l.ShutdownAction = r.resolved.Config.ShutdownAction
+	}
 	l.HashVersion = state.CurrentHashVersion
 	l.LifecycleMarkers = true
 	l.BuildMethod = string(r.resolved.Plan.Type())
@@ -592,6 +584,19 @@ func (r *Provisioner) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
+// tmpfsOptions translates a tmpfs mount's --mount options (tmpfs-size,
+// tmpfs-mode) into --tmpfs / compose options ("size=64m,mode=1777").
+func tmpfsOptions(m devcontainer.Mount) string {
+	var opts []string
+	if v := m.Option("tmpfs-size"); v != "" {
+		opts = append(opts, "size="+v)
+	}
+	if v := m.Option("tmpfs-mode"); v != "" {
+		opts = append(opts, "mode="+v)
+	}
+	return strings.Join(opts, ",")
+}
+
 // buildMounts returns the configured mounts, with tmpfs mounts split out.
 // /run/secrets is always a tmpfs: besides user runtime secrets it holds
 // the dcx-managed SSH host private key, which must never land in the
@@ -601,7 +606,7 @@ func (r *Provisioner) buildMounts() ([]devcontainer.Mount, map[string]string) {
 	tmpfs := map[string]string{agentproto.SecretsDir: "rw,noexec,nosuid,size=" + strconv.Itoa(SecretsTmpfsMiB) + "m"}
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {
-			tmpfs[m.Target] = ""
+			tmpfs[m.Target] = tmpfsOptions(m)
 		} else {
 			mounts = append(mounts, m)
 		}
@@ -660,7 +665,7 @@ func (r *Provisioner) containerPorts() []devcontainer.PortForward {
 	return r.buildPortBindings()
 }
 
-// Start implements ContainerRuntime.Start.
+// Start starts the existing, stopped environment.
 func (r *Provisioner) Start(ctx context.Context) error {
 	if plan, ok := r.composePlan(); ok {
 		return r.composeProject(plan).Start(ctx, r.engine)
@@ -668,12 +673,8 @@ func (r *Provisioner) Start(ctx context.Context) error {
 	return r.engine.StartContainer(ctx, r.containerName)
 }
 
-// Build implements ContainerRuntime.Build.
+// Build builds the images without creating anything.
 func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
-	if r.resolved == nil {
-		return fmt.Errorf("no resolved configuration - use NewProvisioner")
-	}
-
 	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
 		args := []string{"build"}
 		if opts.NoCache {
@@ -698,9 +699,6 @@ func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
 // Compose helper methods
 
 func (r *Provisioner) composePlan() (*devcontainer.ComposePlan, bool) {
-	if r.resolved == nil {
-		return nil, false
-	}
 	plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan)
 	return plan, ok
 }

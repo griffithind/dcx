@@ -4,8 +4,6 @@
 package devcontainer
 
 import (
-	"encoding/json"
-
 	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/mount"
 )
@@ -50,8 +48,8 @@ type DevContainerConfig struct {
 	UpdateRemoteUserUID *bool  `json:"updateRemoteUserUID,omitempty"` // Auto-update UID to match host user
 
 	// Environment variables
-	ContainerEnv map[string]string `json:"containerEnv,omitempty"`
-	RemoteEnv    map[string]string `json:"remoteEnv,omitempty"`
+	ContainerEnv map[string]string  `json:"containerEnv,omitempty"`
+	RemoteEnv    map[string]*string `json:"remoteEnv,omitempty"` // null unsets the variable
 
 	// Features
 	Features                    map[string]interface{} `json:"features,omitempty"`
@@ -94,6 +92,12 @@ type DevContainerConfig struct {
 
 	// Customizations for tools like VS Code
 	Customizations map[string]interface{} `json:"customizations,omitempty"`
+
+	// LegacyDockerFile and LegacyContext are the pre-"build" spellings of
+	// build.dockerfile and build.context, still accepted by the reference
+	// implementation; ParseFile moves them into Build.
+	LegacyDockerFile string `json:"dockerFile,omitempty"`
+	LegacyContext    string `json:"context,omitempty"`
 
 	// ID and Entrypoint appear in devcontainer.metadata entries a feature
 	// contributed (the feature's id and its entrypoint script); they are
@@ -140,12 +144,6 @@ func (c *DevContainerConfig) IsComposePlan() bool {
 // IsSinglePlan returns true if this config uses image or build.
 func (c *DevContainerConfig) IsSinglePlan() bool {
 	return c.Image != "" || c.Build != nil
-}
-
-// MarshalJSON implements json.Marshaler.
-func (c *DevContainerConfig) MarshalJSON() ([]byte, error) {
-	type Alias DevContainerConfig
-	return json.Marshal((*Alias)(c))
 }
 
 // PortAttribute represents attributes for a specific port.

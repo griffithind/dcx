@@ -60,13 +60,13 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | File | Purpose |
 |------|---------|
 | `root.go` | Root command, global flags (`--workspace`, `--config`, `--quiet`, `--verbose`) |
-| `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newService`, `CLIContext` (Docker, Service, Identity) |
+| `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newEngine`/`newDaemonEngine` (the only engine construction; tests swap in `containertest.Fake`; `-v` traces docker commands), `newService`, `CLIContext` (Docker, Service, Identity) |
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
 | `status.go`, `logs.go`, `list.go` | Information commands |
 
-Commands get their context, engine and service from `context.go` (`NewCLIContext`, or `commandContext` + `newService` for commands that must work without a Docker daemon); they never construct a service or Docker client themselves.
+Commands get their context, engine and service from `context.go` (`NewCLIContext`, or `commandContext` + `newEngine()` + `newService` for commands that must work without a Docker daemon); they never construct a service or Docker client themselves, so command-level tests run against `containertest.Fake` (`internal/cli/commands_engine_test.go`).
 
 **CLI Pattern:**
 ```go
@@ -178,7 +178,6 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/env/` - `/etc/environment` and `/etc/profile` patching; `userEnvProbe` (the user's login shell, NUL-separated output)
 - `internal/secrets/` - Fetching runtime and build secrets (commands run on the host)
 - `internal/lockfile/` - `devcontainer-lock.json` read/write
-- `internal/selinux/` - SELinux detection for bind-mount labels
 - `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data (shown with `--quiet`), `Info` is progress; colour off with `NO_COLOR`, `--no-color` or a non-terminal
 - `internal/version/` - Build version
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
@@ -331,6 +330,7 @@ Base Image → Features Layer → UID Update Layer → Final Image
 - Base: pulled, or built from the Dockerfile on every create (BuildKit's cache makes this cheap) as `dcx/<workspace>:base`.
 - Features install as root (`USER root`); the base image's `USER` (`Engine.ImageConfig`) is restored after them.
 - Entrypoints (`resolved.Entrypoints`): those recorded in the base image's metadata, then the features', run before the keep-alive or the original command.
+- Mounts: unmodelled `--mount` options (`Mount.Options`) pass through; relative and `~` bind sources resolve against the workspace; the workspace mount is relabelled (`:z`) when Docker labels containers for SELinux (`SystemInfo.SELinux`).
 - Labels: a built image carries the FROM image's metadata plus the local config; the features layer adds the features to the metadata resolution read (`resolved.MetadataLabel`).
 - Ports: `forwardPorts`/`appPort` without a host address publish on `127.0.0.1`; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.

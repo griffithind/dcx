@@ -246,19 +246,21 @@ func TestMergeMetadata(t *testing.T) {
 			name: "map merge: remoteEnv",
 			local: &DevContainerConfig{
 				Image:     "alpine",
-				RemoteEnv: map[string]string{"EDITOR": "vim"},
+				RemoteEnv: map[string]*string{"EDITOR": strPtr("vim"), "PAGER": nil},
 			},
 			imageConfigs: []DevContainerConfig{
 				{
-					RemoteEnv: map[string]string{
-						"TERM":   "xterm-256color",
-						"EDITOR": "nano", // Should not override local
+					RemoteEnv: map[string]*string{
+						"TERM":   strPtr("xterm-256color"),
+						"EDITOR": strPtr("nano"), // Should not override local
+						"PAGER":  strPtr("less"), // unset by local null
 					},
 				},
 			},
 			check: func(t *testing.T, merged *DevContainerConfig) {
-				assert.Equal(t, "vim", merged.RemoteEnv["EDITOR"])
-				assert.Equal(t, "xterm-256color", merged.RemoteEnv["TERM"])
+				assert.Equal(t, "vim", *merged.RemoteEnv["EDITOR"])
+				assert.Equal(t, "xterm-256color", *merged.RemoteEnv["TERM"])
+				assert.Nil(t, merged.RemoteEnv["PAGER"], "a local null unsets the image's value")
 			},
 		},
 		{
@@ -433,3 +435,5 @@ func TestMergeMetadataMountsLastWinsPerTarget(t *testing.T) {
 	assert.Equal(t, "local-vol", merged.Mounts[0].Source)
 	assert.Equal(t, "/other", merged.Mounts[1].Target)
 }
+
+func strPtr(s string) *string { return &s }

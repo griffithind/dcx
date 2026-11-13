@@ -73,6 +73,10 @@ type SessionConfig struct {
 	// with remoteEnv (${containerEnv:…} already resolved).
 	Env map[string]string `json:"env,omitempty"`
 
+	// Unset lists variables removed from the session environment
+	// (remoteEnv entries set to null), applied after Env.
+	Unset []string `json:"unset,omitempty"`
+
 	// PostAttach runs at the start of each interactive session (a PTY
 	// without a command), before the shell starts.
 	PostAttach []AttachStep `json:"postAttach,omitempty"`
@@ -99,6 +103,10 @@ type AttachCommand struct {
 func ListenAddr(host string) string {
 	return host + ":" + strconv.Itoa(ListenPort)
 }
+
+// ServerVersion is the agent's SSH software version: its banner is
+// "SSH-2.0-" + ServerVersion, which the ping probe checks.
+const ServerVersion = "dcx-agent"
 
 // LoopbackAddr is the address used to probe the agent from inside the container.
 var LoopbackAddr = ListenAddr("127.0.0.1")

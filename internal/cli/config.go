@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/griffithind/dcx/internal/report"
 
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -67,7 +66,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	// Progress output is discarded so it cannot corrupt the printed config.
-	svc := newService(container.NewDockerCLI(), report.Discard)
+	svc := newService(newEngine(), report.Discard)
 
 	ids := svc.Identity()
 

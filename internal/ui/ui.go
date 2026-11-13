@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -86,6 +87,22 @@ func isTerminal(w io.Writer) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
+// IsVerbose reports whether -v was given.
+func IsVerbose() bool {
+	configMu.Lock()
+	defer configMu.Unlock()
+	return config.Verbosity == VerbosityVerbose
+}
+
+// Debug prints a diagnostic line (the docker commands dcx runs) to stderr,
+// only with -v.
+func Debug(format string, args ...interface{}) {
+	if !IsVerbose() {
+		return
+	}
+	_, _ = fmt.Fprintln(ErrWriter(), Dim(fmt.Sprintf(format, args...)))
+}
+
 // IsQuiet returns true if quiet mode is enabled.
 func IsQuiet() bool {
 	configMu.Lock()
@@ -112,7 +129,7 @@ func Success(format string, args ...interface{}) {
 	if IsQuiet() {
 		return
 	}
-	pterm.Success.Printf(format+"\n", args...)
+	pterm.Success.WithWriter(Writer()).Printf(format+"\n", args...)
 }
 
 // Error prints an error message (always shown, even in quiet mode).

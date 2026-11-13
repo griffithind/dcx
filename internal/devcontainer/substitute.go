@@ -13,7 +13,6 @@ type SubstitutionContext struct {
 	ContainerWorkspaceFolder string
 	DevcontainerID           string
 	UserHome                 string              // User's home directory for ${userHome}
-	ContainerEnv             map[string]string   // Container environment variables for ${containerEnv:VAR}
 	LocalEnv                 func(string) string // Optional function to get local env vars; falls back to os.Getenv
 }
 
@@ -24,6 +23,8 @@ type substitution struct {
 }
 
 // substitutions is the registry of all variable substitution patterns.
+// ${containerEnv:VAR} is not among them: it is resolved at exec time
+// (ResolveContainerEnvRefs) and left as is here.
 // Order matters - more specific patterns should come before general ones.
 var substitutions = []substitution{
 	// Environment variable patterns with optional defaults
@@ -34,10 +35,6 @@ var substitutions = []substitution{
 	{
 		pattern: regexp.MustCompile(`\$\{env:([^}:]+)(?::([^}]*))?\}`),
 		handler: handleLocalEnv, // env is alias for localEnv
-	},
-	{
-		pattern: regexp.MustCompile(`\$\{containerEnv:([^}:]+)(?::([^}]*))?\}`),
-		handler: handleContainerEnv,
 	},
 
 	// Workspace folder patterns
@@ -85,17 +82,6 @@ func handleLocalEnv(match []string, ctx *SubstitutionContext) string {
 	} else {
 		value = os.Getenv(match[1])
 	}
-	if value == "" && len(match) >= 3 {
-		value = match[2] // default value
-	}
-	return value
-}
-
-func handleContainerEnv(match []string, ctx *SubstitutionContext) string {
-	if ctx == nil || ctx.ContainerEnv == nil || len(match) < 2 {
-		return match[0]
-	}
-	value := ctx.ContainerEnv[match[1]]
 	if value == "" && len(match) >= 3 {
 		value = match[2] // default value
 	}
@@ -239,7 +225,12 @@ func SubstituteConfig(cfg *DevContainerConfig, ctx *SubstitutionContext) {
 	}
 
 	subMap(cfg.ContainerEnv)
-	subMap(cfg.RemoteEnv)
+	for k, v := range cfg.RemoteEnv {
+		if v != nil {
+			substituted := sub(*v)
+			cfg.RemoteEnv[k] = &substituted
+		}
+	}
 	subSlice(cfg.RunArgs)
 	subSlice(cfg.CapAdd)
 	subSlice(cfg.SecurityOpt)

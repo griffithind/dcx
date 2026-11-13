@@ -31,7 +31,6 @@ type DevContainerService struct {
 	report        report.Reporter
 	logger        *slog.Logger
 	stateManager  *state.StateManager
-	builder       *devcontainer.Builder
 	workspacePath string
 	configPath    string
 	verbose       bool
@@ -54,7 +53,6 @@ func NewDevContainerService(engine container.Engine, rep report.Reporter, worksp
 		report:        rep,
 		logger:        slog.Default(),
 		stateManager:  state.NewStateManager(engine),
-		builder:       devcontainer.NewBuilder(slog.Default(), rep),
 		workspacePath: workspacePath,
 		configPath:    configPath,
 		verbose:       verbose,
@@ -303,9 +301,10 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 
 // setupSSHAccess configures SSH access to the container.
 //
-// Looks up the ephemeral host port Docker assigned to the agent's 48022
-// listener, pins the workspace's host key into ~/.dcx/known_hosts, and
-// writes the ~/.ssh/config block pointing at 127.0.0.1:<port>.
+// Reads the agent's host port recorded on the container
+// (container.SSHHostPort), pins the workspace's host key into
+// ~/.dcx/known_hosts, and writes the ~/.ssh/dcx/config block pointing at
+// 127.0.0.1:<port>.
 func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
 	if containerInfo == nil {
 		_, containerInfo, _ = s.stateManager.State(ctx, resolved.WorkspaceID)
@@ -461,11 +460,6 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 type BuildOptions struct {
 	NoCache bool
 	Pull    bool
-
-	// UpdateLockfile updates the lockfile after successful build
-	UpdateLockfile bool
-	// FrozenLockfile fails if lockfile doesn't match resolved features
-	FrozenLockfile bool
 }
 
 // LockMode specifies the lockfile operation mode.
@@ -508,7 +502,7 @@ type LockResult struct {
 func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) error {
 	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
 		ForcePull:       opts.Pull,
-		UseLockfile:     !opts.FrozenLockfile, // Don't use lockfile if frozen (verify mode)
+		UseLockfile:     true,
 		PullForMetadata: true,
 	})
 	if err != nil {

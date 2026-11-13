@@ -184,6 +184,38 @@
 - **S2:** the `waitFor` machinery only timed a misleading "Container is ready" message, so it is removed. All hooks finish before `up` returns, which is documented.
 - **Tests:** unit tests for FROM and compose base images, Dockerfile-base metadata, substitution and entrypoints, single-object labels, and host requirements. A new e2e test builds a local base image whose label sets `remoteUser`, a hook and an entrypoint, then builds `FROM` it.
 
+**Step 4 (seams and cleanup): done.**
+- **Q3:**
+  - `newEngine` and `newDaemonEngine` in `context.go` are the only place the CLI builds an engine.
+  - `clean` goes through new service methods. The maintenance calls (`ComposeVersion`, the image cleanup) are on the Engine interface, and `Info` reports `ServerVersion` and `SELinux`.
+  - `doctor` is rewritten: one `printChecks`, system checks through the engine (including a "permission denied" hint), and a config section that reports what `ResolveWorkspace` concluded plus missing files.
+  - Command-level tests run against the fake.
+- **Q4:** the host-mode `selinux` package was deleted, along with its depguard exception: the host's mode was the wrong signal (this Fedora host is enforcing while Docker doesn't label containers). When `docker info` lists selinux, the workspace bind mount is rendered as `-v …:z` (compose: `bind.selinux: z`).
+- **Q1:** feature permissions are merged once (builder). The provisioner only warns, and `features.ElevatedFeatures` replaces the duplicate collector and `NeedsInit`.
+- **Q2, S6:** `devcontainer.ShouldUpdateUID` is the only UID decision (Linux hosts only; off for root and when `updateRemoteUserUID` is false). `build.ShouldUpdateRemoteUserUID` and `resolved.UpdateRemoteUserUID` are gone.
+- **Q5:** `up` resolves once (pulling the base image for metadata only when absent) and uses `resolved.Identity`.
+- **Q6:** deleted the dead pieces:
+  - the unused fields `Builder.logger`, `DevContainerService.builder` and `Provisioner.containerID`;
+  - `BuildOptions.UpdateLockfile` and `FrozenLockfile`;
+  - the never-populated `${containerEnv}` substitution path (references are resolved at exec time);
+  - the alias `MarshalJSON` and impossible nil checks.
+- **Q7:** stale comments fixed.
+- **Q9:** `Builder.Build` is split into `buildPlan`, `resolveUsers` and `resolveRuntime`, and `up` into `planUp`, `announceUp` and the step loop.
+- **Q10:** `mergeMap` and `slices.Contains` replace the duplicates. Feature users and homes have one place (`features.FeatureUsers`, `BuiltinEnv`).
+- **Q11:** every docker command goes through `Docker.command`, which `-v` traces (shell-quoted, via `ui.Debug`). `ui.Success` now honours the configured writer.
+- **S5:** `builtin.env` resolves `_REMOTE_USER_HOME` and `_CONTAINER_USER_HOME` from the passwd database when each feature installs, falling back to the conventional home.
+- **S7:** the legacy top-level `dockerFile` and `context` map onto `build`.
+- **S8:** `deprecated` warns, and `legacyIds` name the feature in ordering and dependency matching.
+- **S10:** `otherPortsAttributes` merges from image layers.
+- **S11:** `shutdownAction` falls back to the value recorded at create time (`shutdown.action`, image metadata included), and `stopContainer` stops only the compose primary.
+- **S12:** a `build` without `dockerfile` uses `<context>/Dockerfile`.
+- **S13:** `remoteEnv` values are `*string`; null resolves to `RemoteEnvUnset`, which the session config's `unset` removes in the agent.
+- **S14:** discovery no longer picks the first `.devcontainer/*.json`.
+- **F16:** `--mount` fields with a comma or quote are CSV-quoted.
+- **F19:** the agent's SSH version is `dcx-agent`, and ping reads the banner and requires it.
+- **F20:** unmodelled mount options pass through (compose: `bind.propagation`, `volume.subpath`/`nocopy`, tmpfs size and mode), and relative and `~` bind sources resolve.
+- **F21:** the `--hosts` limitation behind proxied ports is documented.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

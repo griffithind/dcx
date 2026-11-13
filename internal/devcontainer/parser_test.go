@@ -81,10 +81,13 @@ func TestParseDevcontainerJSON(t *testing.T) {
 		},
 		{
 			name:  "with containerEnv and remoteEnv",
-			input: `{"image": "alpine", "containerEnv": {"FOO": "bar"}, "remoteEnv": {"BAZ": "qux"}}`,
+			input: `{"image": "alpine", "containerEnv": {"FOO": "bar"}, "remoteEnv": {"BAZ": "qux", "GONE": null}}`,
 			check: func(t *testing.T, cfg *DevContainerConfig) {
 				assert.Equal(t, map[string]string{"FOO": "bar"}, cfg.ContainerEnv)
-				assert.Equal(t, map[string]string{"BAZ": "qux"}, cfg.RemoteEnv)
+				require.NotNil(t, cfg.RemoteEnv["BAZ"])
+				assert.Equal(t, "qux", *cfg.RemoteEnv["BAZ"])
+				gone, present := cfg.RemoteEnv["GONE"]
+				assert.True(t, present && gone == nil, "null is kept as an unset marker")
 			},
 		},
 	}
@@ -140,13 +143,16 @@ func TestResolve(t *testing.T) {
 			wantPath: ".devcontainer/devcontainer.json",
 		},
 		{
-			name: "finds custom named json in .devcontainer",
+			// Another .devcontainer/*.json needs --config (S14): taking
+			// the first one could pick an unrelated file.
+			name: "does not guess a custom named json",
 			setup: func(t *testing.T, dir string) {
 				devDir := filepath.Join(dir, ".devcontainer")
 				require.NoError(t, os.MkdirAll(devDir, 0755))
-				require.NoError(t, os.WriteFile(filepath.Join(devDir, "custom.json"), []byte(`{}`), 0644))
+				require.NoError(t, os.WriteFile(filepath.Join(devDir, "settings.json"), []byte(`{}`), 0644))
 			},
-			wantPath: ".devcontainer/custom.json",
+			wantErr:     true,
+			errContains: "use --config",
 		},
 		{
 			name: "finds single multi-folder config",
@@ -299,4 +305,15 @@ func TestResolveIgnoresComposeFileAsConfig(t *testing.T) {
 	got, err := Resolve(ws)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dc, "app", "devcontainer.json"), got)
+}
+
+// The legacy top-level dockerFile/context map onto build (S7).
+func TestParseLegacyDockerFile(t *testing.T) {
+	cfg, err := Parse([]byte(`{"dockerFile": "Dockerfile.dev", "context": ".."}`))
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Build)
+	assert.Equal(t, "Dockerfile.dev", cfg.Build.Dockerfile)
+	assert.Equal(t, "..", cfg.Build.Context)
+	assert.Equal(t, PlanTypeDockerfile, cfg.PlanType())
+	assert.NoError(t, Validate(cfg))
 }

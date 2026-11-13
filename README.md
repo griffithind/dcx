@@ -111,7 +111,7 @@ make install   # copies it to $(go env GOPATH)/bin
 - `--rebuild` - Force rebuild images
 - `--recreate` - Force recreate containers
 - `--pull` - Re-pull the base image and re-fetch features (for moving tags like `:latest`); applies when the container is created, so add `--recreate` for an existing one
-- `--hosts` - Allow SSH from more than loopback (`--hosts=10.0.0.0/24`, `--hosts=any`, `--hosts=loopback`). It is recorded on the container and kept by `up`, `restart` and `--recreate`; changing it needs `--recreate`
+- `--hosts` - Allow SSH from more than loopback (`--hosts=10.0.0.0/24`, `--hosts=any`, `--hosts=loopback`). It is recorded on the container and kept by `up`, `restart` and `--recreate`; changing it needs `--recreate`. SSH keys are always required; the address list is an extra gate, and where Docker proxies published ports (Docker Desktop, rootless Docker) every client appears to come from the Docker gateway, so the list cannot tell them apart
 
 **`dcx down` flags:** `--volumes` (also remove named volumes), `--remove-orphans`
 

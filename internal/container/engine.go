@@ -12,8 +12,8 @@ import (
 // Engine is the container engine dcx drives. The Docker CLI implementation
 // (*Docker) is the only production engine; tests substitute fakes.
 //
-// It covers what the service, runtime and secret code need. Inventory and
-// maintenance commands (clean, list) use *Docker directly.
+// It covers everything dcx asks of the engine; the CLI gets one from
+// context.go and never builds a client itself.
 type Engine interface {
 	state.ContainerClient
 	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
@@ -36,6 +36,7 @@ type Engine interface {
 	BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error
 
 	Compose(ctx context.Context, project ComposeProject, args ...string) error
+	ComposeVersion(ctx context.Context) (string, error)
 	ComposeOutput(ctx context.Context, project ComposeProject, args ...string) ([]byte, error)
 
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
@@ -48,6 +49,11 @@ type Engine interface {
 	ChownInContainer(ctx context.Context, containerName, path, owner string) error
 	CopyToContainer(ctx context.Context, src, containerName, dest string) error
 	WriteFileInContainer(ctx context.Context, containerName, path string, content []byte, user string) error
+
+	// Image maintenance (dcx clean).
+	CleanupDerivedImages(ctx context.Context, workspaceID string) (*CleanupResult, error)
+	CleanupDanglingImages(ctx context.Context) (*CleanupResult, error)
+	DerivedImageStats(ctx context.Context) (count int, totalSize int64, err error)
 }
 
 var _ Engine = (*Docker)(nil)

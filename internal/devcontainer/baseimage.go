@@ -21,15 +21,8 @@ func metadataImage(cfg *DevContainerConfig, configPath string) string {
 	case PlanTypeImage:
 		return cfg.Image
 	case PlanTypeDockerfile:
-		dir := filepath.Dir(configPath)
-		dockerfile := cfg.Build.Dockerfile
-		if dockerfile == "" {
-			dockerfile = "Dockerfile"
-		}
-		if !filepath.IsAbs(dockerfile) {
-			dockerfile = filepath.Join(dir, dockerfile)
-		}
-		return dockerfileBaseImage(dockerfile, cfg.Build.Target, cfg.Build.Args)
+		plan := buildPlan(cfg, configPath, "").(*DockerfilePlan)
+		return dockerfileBaseImage(plan.Dockerfile, cfg.Build.Target, cfg.Build.Args)
 	case PlanTypeCompose:
 		return composeServiceBaseImage(composeFilePaths(cfg, configPath), cfg.Service)
 	}

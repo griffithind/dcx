@@ -3,11 +3,12 @@ package features
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/report"
 )
 
 // maxDependencyPasses bounds dependency resolution. Real dependency chains
@@ -19,6 +20,7 @@ type Manager struct {
 	resolver  *Resolver
 	configDir string
 	lockfile  *lockfile.Lockfile
+	report    report.Reporter
 
 	// resolveFeature resolves one feature reference. Defaults to the
 	// resolver (honouring the lockfile); overridable in tests.
@@ -35,6 +37,7 @@ func NewManager(configDir string, rep report.Reporter) (*Manager, error) {
 	m := &Manager{
 		resolver:  resolver,
 		configDir: configDir,
+		report:    report.OrDiscard(rep),
 	}
 	m.resolveFeature = func(ctx context.Context, id string, options map[string]interface{}) (*Feature, error) {
 		return m.resolver.ResolveWithLockfile(ctx, id, options, m.lockfile)
@@ -54,7 +57,7 @@ func (m *Manager) SetLockfile(lf *lockfile.Lockfile) {
 }
 
 // ResolveAll resolves all features from a devcontainer.json features map.
-// It recursively resolves dependencies specified in dependsOn and installsAfter.
+// It recursively resolves dependencies (dependsOn; installsAfter only orders).
 // If a lockfile is set via SetLockfile, pinned versions will be used.
 func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]interface{}, overrideOrder []string) ([]*Feature, error) {
 	if len(featuresConfig) == 0 {
@@ -108,9 +111,12 @@ func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]inte
 	features := make([]*Feature, 0, len(resolved))
 	for _, f := range resolved {
 		features = append(features, f)
+		if f.Metadata != nil && f.Metadata.Deprecated {
+			report.OrDiscard(m.report).Warnf("Feature %s is deprecated; see its documentation for a replacement", f.ID)
+		}
 	}
 
-	// Order features (ValidateDependencies is no longer needed since we auto-resolved deps)
+	// Order features (dependencies were resolved above)
 	ordered, err := OrderFeatures(features, overrideOrder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to order features: %w", err)
@@ -215,6 +221,9 @@ func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) ma
 				return true
 			}
 			if f.Metadata != nil && f.Metadata.ID == want {
+				return true
+			}
+			if f.Metadata != nil && slices.ContainsFunc(f.Metadata.LegacyIds, func(id string) bool { return normalizeFeatureRef(id) == want }) {
 				return true
 			}
 		}

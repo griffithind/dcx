@@ -3,10 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/ui"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/griffithind/dcx/internal/ui"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -21,8 +22,8 @@ type CLIContext struct {
 	// Ctx is the context for the operation.
 	Ctx context.Context
 
-	// Docker is the initialized Docker client.
-	Docker *container.Docker
+	// Docker is the container engine (the daemon was reachable).
+	Docker container.Engine
 
 	// Service is the devcontainer service for devcontainer operations.
 	Service *service.DevContainerService
@@ -43,6 +44,25 @@ func commandContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
+// newEngine and newDaemonEngine are the only places the CLI gets a container
+// engine; tests replace them with containertest.Fake. newEngine does not
+// contact the daemon (commands that work without Docker, or report its
+// absence themselves); newDaemonEngine first checks it is reachable.
+var (
+	newEngine       = func() container.Engine { return container.NewDockerCLI().WithTrace(traceDocker) }
+	newDaemonEngine = func() (container.Engine, error) {
+		d, err := container.NewDocker()
+		if err != nil {
+			return nil, err
+		}
+		return d.WithTrace(traceDocker), nil
+	}
+)
+
+// traceDocker shows each docker command line with -v, so a failure can be
+// understood and reproduced by hand.
+func traceDocker(cmdline string) { ui.Debug("$ %s", cmdline) }
+
 // newService builds the DevContainerService for the global workspace and
 // config flags. It is the only place the CLI constructs one.
 func newService(engine container.Engine, rep report.Reporter) *service.DevContainerService {
@@ -55,7 +75,7 @@ func newService(engine container.Engine, rep report.Reporter) *service.DevContai
 func NewCLIContext() (*CLIContext, error) {
 	ctx, stop := commandContext()
 
-	docker, err := container.NewDocker()
+	docker, err := newDaemonEngine()
 	if err != nil {
 		stop()
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
@@ -50,7 +49,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if statusJSONOut {
 		rep = report.Discard
 	}
-	svc := newService(container.NewDockerCLI(), rep)
+	svc := newService(newEngine(), rep)
 
 	status, err := svc.Status(ctx, statusDetailed || statusJSONOut)
 	if err != nil {

@@ -8,8 +8,7 @@ import (
 // This is the central domain object containing everything needed to create/run a container.
 //
 // It is produced only by ResolveWorkspace. Read resolved fields; Config is
-// for display and for the lifecycle commands (which become resolved hook
-// lists once they are typed).
+// for display.
 type ResolvedDevContainer struct {
 	// Identity is the workspace's ID, name, Docker resource name and SSH
 	// alias (see NewIdentity).
@@ -48,10 +47,8 @@ type ResolvedDevContainer struct {
 	// === Resolved Runtime Configuration ===
 	// These are the final values after variable substitution and feature merging.
 
-	// BaseImage is the original base image (before features).
-	// For ImagePlan: the image specified in config
-	// For DockerfilePlan: determined after building
-	// For ComposePlan: extracted from service config
+	// BaseImage is the image of an image plan ("" for Dockerfile and
+	// compose plans; see MetadataImage for the image they build FROM).
 	BaseImage string
 
 	// WorkspaceFolder is the path inside the container.
@@ -67,9 +64,6 @@ type ResolvedDevContainer struct {
 
 	// ContainerUser is the user for container creation.
 	ContainerUser string
-
-	// UpdateRemoteUserUID indicates whether to update UID to match host user.
-	UpdateRemoteUserUID bool
 
 	// EffectiveUser is the resolved user (RemoteUser or ContainerUser).
 	EffectiveUser string
@@ -87,6 +81,10 @@ type ResolvedDevContainer struct {
 
 	// RemoteEnv is set in shell sessions.
 	RemoteEnv map[string]string
+
+	// RemoteEnvUnset are variables remoteEnv sets to null: removed from
+	// sessions.
+	RemoteEnvUnset []string
 
 	// === Runtime Options ===
 
@@ -176,7 +174,8 @@ type ResolvedDevContainer struct {
 
 	// === Build State ===
 
-	// ShouldUpdateUID indicates whether UID update layer is needed.
+	// ShouldUpdateUID is whether the UID update layer is built (see
+	// ShouldUpdateUID, the function).
 	ShouldUpdateUID bool
 }
 

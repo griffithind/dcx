@@ -3,7 +3,6 @@ package devcontainer
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/report"
@@ -49,7 +48,7 @@ const (
 // devcontainer.json, merges the base image's devcontainer.metadata, applies
 // the lockfile, resolves features, computes the identity and the
 // staleness key, and returns the result. `dcx up`, status, build, lock,
-// debug and the golden tests all resolve through it.
+// config, doctor and the golden tests all resolve through it.
 func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevContainer, error) {
 	rep := report.OrDiscard(opts.Report)
 	local, configPath, err := Load(opts.WorkspacePath, opts.ConfigPath)
@@ -85,7 +84,7 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	resolved, err := NewBuilder(slog.Default(), rep).Build(ctx, BuilderOptions{
+	resolved, err := NewBuilder(rep).Build(ctx, BuilderOptions{
 		Raw:           raw,
 		ConfigPath:    configPath,
 		WorkspaceRoot: opts.WorkspacePath,

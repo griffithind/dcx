@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -62,11 +61,6 @@ func (b *Builder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (str
 	}
 	if opts.RemoteUser == "" {
 		return "", fmt.Errorf("remoteUser is required for UID update")
-	}
-
-	// Check if UID update is needed
-	if !ShouldUpdateRemoteUserUID(opts.RemoteUser, opts.HostUID) {
-		return opts.BaseImage, nil
 	}
 
 	// Check if image already exists
@@ -128,30 +122,4 @@ func (b *Builder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (str
 	}
 
 	return opts.Tag, nil
-}
-
-// ShouldUpdateRemoteUserUID determines if we should update the remote user's UID.
-// This is called during the build phase to decide whether to add the UID update layer.
-//
-// Returns true when:
-//   - Platform is Linux or macOS (Darwin)
-//   - Host user is not root (UID 0)
-//   - remoteUser is not "root"
-func ShouldUpdateRemoteUserUID(remoteUser string, hostUID int) bool {
-	// Skip on Windows (different file sharing semantics)
-	if runtime.GOOS == "windows" {
-		return false
-	}
-
-	// Skip if host is root
-	if hostUID == 0 {
-		return false
-	}
-
-	// Skip if remote user is root
-	if remoteUser == "root" || remoteUser == "0" {
-		return false
-	}
-
-	return true
 }

@@ -130,12 +130,11 @@ func TestSubstitute(t *testing.T) {
 			want: "defaultvalue",
 		},
 		{
-			name:  "containerEnv",
+			// Resolved at exec time (ResolveContainerEnvRefs), not here.
+			name:  "containerEnv is left for exec time",
 			input: "path=${containerEnv:PATH}",
-			ctx: &SubstitutionContext{
-				ContainerEnv: map[string]string{"PATH": "/usr/bin"},
-			},
-			want: "path=/usr/bin",
+			ctx:   &SubstitutionContext{},
+			want:  "path=${containerEnv:PATH}",
 		},
 		{
 			name:  "multiple substitutions",

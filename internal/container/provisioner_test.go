@@ -1,11 +1,12 @@
 package container
 
 import (
-	"github.com/griffithind/dcx/internal/agentproto"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,239 +237,22 @@ func TestBuildPortBindings(t *testing.T) {
 	}
 }
 
-func TestFeatureSecurityRequirementsIntegration(t *testing.T) {
-	// Test that feature security requirements are properly collected
-	// This tests the integration logic used in createContainer()
-
-	tests := []struct {
-		name             string
-		features         []*features.Feature
-		wantCaps         []string
-		wantSecurityOpts []string
-		wantPrivileged   bool
-		wantInit         bool
-		wantEnvKeys      []string
-	}{
-		{
-			name:           "no features",
-			features:       nil,
-			wantCaps:       nil,
-			wantPrivileged: false,
-			wantInit:       false,
-		},
-		{
-			name: "feature with capabilities",
-			features: []*features.Feature{
-				{
-					ID: "test-feature",
-					Metadata: &features.FeatureMetadata{
-						ID:     "test-feature",
-						Name:   "Test Feature",
-						CapAdd: []string{"SYS_PTRACE", "NET_ADMIN"},
-					},
-				},
-			},
-			wantCaps:       []string{"SYS_PTRACE", "NET_ADMIN"},
-			wantPrivileged: false,
-			wantInit:       false,
-		},
-		{
-			name: "feature with privileged mode",
-			features: []*features.Feature{
-				{
-					ID: "privileged-feature",
-					Metadata: &features.FeatureMetadata{
-						ID:         "privileged-feature",
-						Name:       "Privileged Feature",
-						Privileged: true,
-					},
-				},
-			},
-			wantCaps:       nil,
-			wantPrivileged: true,
-			wantInit:       false,
-		},
-		{
-			name: "feature with init",
-			features: []*features.Feature{
-				{
-					ID: "init-feature",
-					Metadata: &features.FeatureMetadata{
-						ID:   "init-feature",
-						Name: "Init Feature",
-						Init: true,
-					},
-				},
-			},
-			wantCaps:       nil,
-			wantPrivileged: false,
-			wantInit:       true,
-		},
-		{
-			name: "feature with security options",
-			features: []*features.Feature{
-				{
-					ID: "secopt-feature",
-					Metadata: &features.FeatureMetadata{
-						ID:          "secopt-feature",
-						Name:        "SecOpt Feature",
-						SecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
-					},
-				},
-			},
-			wantCaps:         nil,
-			wantSecurityOpts: []string{"seccomp=unconfined", "apparmor=unconfined"},
-			wantPrivileged:   false,
-			wantInit:         false,
-		},
-		{
-			name: "feature with container env",
-			features: []*features.Feature{
-				{
-					ID: "env-feature",
-					Metadata: &features.FeatureMetadata{
-						ID:   "env-feature",
-						Name: "Env Feature",
-						ContainerEnv: map[string]string{
-							"MY_VAR":    "value1",
-							"OTHER_VAR": "value2",
-						},
-					},
-				},
-			},
-			wantCaps:       nil,
-			wantPrivileged: false,
-			wantInit:       false,
-			wantEnvKeys:    []string{"MY_VAR", "OTHER_VAR"},
-		},
-		{
-			name: "multiple features with various requirements",
-			features: []*features.Feature{
-				{
-					ID: "feature1",
-					Metadata: &features.FeatureMetadata{
-						ID:     "feature1",
-						Name:   "Feature 1",
-						CapAdd: []string{"SYS_PTRACE"},
-						Init:   true,
-					},
-				},
-				{
-					ID: "feature2",
-					Metadata: &features.FeatureMetadata{
-						ID:          "feature2",
-						Name:        "Feature 2",
-						CapAdd:      []string{"NET_ADMIN", "SYS_PTRACE"}, // duplicate cap
-						SecurityOpt: []string{"seccomp=unconfined"},
-						ContainerEnv: map[string]string{
-							"FEATURE2_VAR": "test",
-						},
-					},
-				},
-			},
-			wantCaps:         []string{"SYS_PTRACE", "NET_ADMIN"}, // deduplicated
-			wantSecurityOpts: []string{"seccomp=unconfined"},
-			wantPrivileged:   false,
-			wantInit:         true,
-			wantEnvKeys:      []string{"FEATURE2_VAR"},
-		},
-		{
-			name: "feature with nil metadata is skipped",
-			features: []*features.Feature{
-				{
-					ID:       "no-metadata",
-					Metadata: nil,
-				},
-				{
-					ID: "with-metadata",
-					Metadata: &features.FeatureMetadata{
-						ID:     "with-metadata",
-						CapAdd: []string{"SYS_ADMIN"},
-					},
-				},
-			},
-			wantCaps:       []string{"SYS_ADMIN"},
-			wantPrivileged: false,
-			wantInit:       false,
-		},
+// Feature permissions are merged once, by the builder; the spec renders
+// them as resolved (Q1: they used to be appended a second time).
+func TestFeaturePermissionsAreNotDuplicated(t *testing.T) {
+	feats := []*features.Feature{
+		{ID: "dind", Metadata: &features.FeatureMetadata{ID: "dind", Name: "Docker in Docker", Privileged: true, CapAdd: []string{"NET_ADMIN"}}},
+		{ID: "go", Metadata: &features.FeatureMetadata{ID: "go", Name: "Go", CapAdd: []string{"SYS_PTRACE"}}},
+		{ID: "node", Metadata: &features.FeatureMetadata{ID: "node", Name: "Node"}},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test CollectSecurityRequirements
-			reqs := features.CollectSecurityRequirements(tt.features)
-			assert.Equal(t, tt.wantPrivileged, reqs.Privileged, "privileged mismatch")
-			assert.ElementsMatch(t, tt.wantCaps, reqs.Capabilities, "capabilities mismatch")
-			assert.ElementsMatch(t, tt.wantSecurityOpts, reqs.SecurityOpts, "security opts mismatch")
-
-			// Test NeedsInit
-			needsInit := features.NeedsInit(tt.features)
-			assert.Equal(t, tt.wantInit, needsInit, "init mismatch")
-
-		})
-	}
-}
-
-func TestFeatureSecurityWarnings(t *testing.T) {
-	// Test that features requiring elevated permissions generate proper warnings
-	tests := []struct {
-		name             string
-		features         []*features.Feature
-		wantFeatureNames []string
-	}{
-		{
-			name:             "no elevated permissions",
-			features:         nil,
-			wantFeatureNames: nil,
-		},
-		{
-			name: "privileged feature generates warning",
-			features: []*features.Feature{
-				{
-					ID: "docker-in-docker",
-					Metadata: &features.FeatureMetadata{
-						ID:         "docker-in-docker",
-						Name:       "Docker in Docker",
-						Privileged: true,
-					},
-				},
-			},
-			wantFeatureNames: []string{"Docker in Docker (privileged)"},
-		},
-		{
-			name: "feature with caps but not privileged - no warning names",
-			features: []*features.Feature{
-				{
-					ID: "debugger",
-					Metadata: &features.FeatureMetadata{
-						ID:     "debugger",
-						Name:   "Debugger",
-						CapAdd: []string{"SYS_PTRACE"},
-					},
-				},
-			},
-			wantFeatureNames: nil, // caps alone don't add to FeatureNames
-		},
-		{
-			name: "uses ID when Name is empty",
-			features: []*features.Feature{
-				{
-					ID: "ghcr.io/test/feature:1",
-					Metadata: &features.FeatureMetadata{
-						ID:         "ghcr.io/test/feature:1",
-						Name:       "", // empty name
-						Privileged: true,
-					},
-				},
-			},
-			wantFeatureNames: []string{"ghcr.io/test/feature:1 (privileged)"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reqs := features.CollectSecurityRequirements(tt.features)
-			assert.ElementsMatch(t, tt.wantFeatureNames, reqs.FeatureNames, "feature names mismatch")
-		})
-	}
+	r := &Provisioner{report: report.Discard, resolved: &devcontainer.ResolvedDevContainer{
+		Plan:       devcontainer.NewImagePlan("img"),
+		Features:   feats,
+		CapAdd:     []string{"NET_ADMIN", "SYS_PTRACE"},
+		Privileged: true,
+	}}
+	s := r.spec("img")
+	assert.Equal(t, []string{"NET_ADMIN", "SYS_PTRACE"}, s.CapAdd)
+	assert.True(t, s.Privileged)
+	assert.Equal(t, []string{"Docker in Docker (privileged)", "Go (capabilities)"}, features.ElevatedFeatures(feats))
 }

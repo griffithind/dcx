@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-// UpOptions configures the Up operation.
-//
-// Note: Runtime secrets (mounted at /run/secrets) are handled by the service
-// layer after Up() returns, because the service layer has access to the
-// container name via stateManager. Build secrets are passed here because
-// they're needed during the docker build phase.
+// UpOptions configures the Up operation. Build secrets are passed here
+// (the builds need them); runtime secrets are mounted by the service once
+// the container runs.
 type UpOptions struct {
 	// Build builds images before starting containers.
 	Build bool

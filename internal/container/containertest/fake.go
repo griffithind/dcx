@@ -61,6 +61,8 @@ type Fake struct {
 	StartedAt map[string]string
 	// Volumes holds each container's named volumes by ID.
 	Volumes map[string][]string
+	// SELinux is what Info reports for the daemon's SELinux labelling.
+	SELinux bool
 
 	calls   []Call
 	created int
@@ -157,6 +159,34 @@ func (f *Fake) RemoveContainer(_ context.Context, id string, force, removeVolume
 	return nil
 }
 
+func (f *Fake) ComposeVersion(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ComposeVersion")
+	return "2.40.0", nil
+}
+
+func (f *Fake) CleanupDerivedImages(_ context.Context, workspaceID string) (*container.CleanupResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("CleanupDerivedImages", workspaceID)
+	return &container.CleanupResult{}, nil
+}
+
+func (f *Fake) CleanupDanglingImages(context.Context) (*container.CleanupResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("CleanupDanglingImages")
+	return &container.CleanupResult{}, nil
+}
+
+func (f *Fake) DerivedImageStats(context.Context) (int, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("DerivedImageStats")
+	return 0, 0, nil
+}
+
 func (f *Fake) RemoveVolume(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -168,7 +198,7 @@ func (f *Fake) Info(context.Context) (*container.SystemInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("Info")
-	return &container.SystemInfo{NCPU: 8, MemTotal: 16 << 30}, nil
+	return &container.SystemInfo{NCPU: 8, MemTotal: 16 << 30, ServerVersion: "28.0.0", SELinux: f.SELinux}, nil
 }
 
 func (f *Fake) CreateContainer(_ context.Context, opts container.ContainerSpec) (string, error) {

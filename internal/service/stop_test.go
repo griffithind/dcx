@@ -90,3 +90,37 @@ func TestRestartRebuildIgnoresShutdownActionNone(t *testing.T) {
 	assert.False(t, skipped)
 	assert.NotEmpty(t, fake.CallsTo("ImageLabels"), "the rebuild went through Up (which resolves the image metadata)")
 }
+
+// shutdownAction recorded at create time (from image metadata) applies when
+// devcontainer.json has none; "stopContainer" stops only the dev container
+// of a compose environment (S11).
+func TestShutdownActionFromLabelAndStopContainer(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		action      string
+		wantOutcome StopOutcome
+		wantStop    int // StopContainer calls
+		wantCompose int // compose calls
+	}{
+		{"none", StopSkipped, 0, 0},
+		{"stopContainer", StopDone, 1, 0},
+		{"", StopDone, 0, 1},
+	} {
+		fake := &containertest.Fake{}
+		svc, _ := newTestService(t, fake)
+		labels := state.NewContainerLabels()
+		labels.WorkspaceID = svc.Identity().WorkspaceID
+		labels.BuildMethod = state.BuildMethodCompose
+		labels.ComposeProject = "proj"
+		labels.ComposeService = "app"
+		labels.IsPrimary = true
+		labels.ShutdownAction = tt.action
+		fake.Containers = []state.ContainerSummary{{ID: "c1", Name: "proj-app-1", State: "running", Running: true, Labels: labels.ToMap()}}
+
+		outcome, err := svc.Stop(ctx, StopOptions{})
+		require.NoError(t, err, tt.action)
+		assert.Equal(t, tt.wantOutcome, outcome, tt.action)
+		assert.Len(t, fake.CallsTo("StopContainer"), tt.wantStop, tt.action)
+		assert.Len(t, fake.CallsTo("Compose"), tt.wantCompose, tt.action)
+	}
+}

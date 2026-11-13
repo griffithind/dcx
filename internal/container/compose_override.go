@@ -81,6 +81,15 @@ func overrideFile(service string, s ContainerSpec, buildSecrets map[string]strin
 		if m.Consistency != "" {
 			v.Consistency = m.Consistency
 		}
+		if p := m.Option("bind-propagation"); p != "" || m.Relabel {
+			v.Bind = &composeBindOptions{Propagation: p}
+			if m.Relabel {
+				v.Bind.SELinux = "z"
+			}
+		}
+		if sub, nocopy := m.Option("volume-subpath"), m.Option("volume-nocopy"); sub != "" || nocopy != "" {
+			v.Volume = &composeVolumeOptions{Subpath: esc(sub), NoCopy: nocopy == "true" || nocopy == "1"}
+		}
 		svc.Volumes = append(svc.Volumes, v)
 
 		// Compose rejects named volumes that are not declared, and would
@@ -160,11 +169,23 @@ type composeBuild struct {
 }
 
 type composeVolume struct {
-	Type        string `yaml:"type"`
-	Source      string `yaml:"source,omitempty"`
-	Target      string `yaml:"target"`
-	ReadOnly    bool   `yaml:"read_only,omitempty"`
-	Consistency string `yaml:"consistency,omitempty"`
+	Type        string                `yaml:"type"`
+	Source      string                `yaml:"source,omitempty"`
+	Target      string                `yaml:"target"`
+	ReadOnly    bool                  `yaml:"read_only,omitempty"`
+	Consistency string                `yaml:"consistency,omitempty"`
+	Bind        *composeBindOptions   `yaml:"bind,omitempty"`
+	Volume      *composeVolumeOptions `yaml:"volume,omitempty"`
+}
+
+type composeBindOptions struct {
+	Propagation string `yaml:"propagation,omitempty"`
+	SELinux     string `yaml:"selinux,omitempty"`
+}
+
+type composeVolumeOptions struct {
+	Subpath string `yaml:"subpath,omitempty"`
+	NoCopy  bool   `yaml:"nocopy,omitempty"`
 }
 
 type composeTopVolume struct {

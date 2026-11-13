@@ -74,3 +74,20 @@ func indexOf(list []string, s string) int {
 	}
 	return -1
 }
+
+// A feature's legacyIds name it in dependency references (S8).
+func TestOrderFeaturesHonoursLegacyIDs(t *testing.T) {
+	renamed := &Feature{ID: "ghcr.io/x/features/new-name:1", Metadata: &FeatureMetadata{ID: "new-name", LegacyIds: []string{"old-name"}}}
+	dependent := &Feature{ID: "ghcr.io/x/features/app:1", Metadata: &FeatureMetadata{ID: "app", DependsOn: map[string]interface{}{"ghcr.io/x/features/old-name:1": map[string]interface{}{}}}}
+	ordered, err := OrderFeatures([]*Feature{dependent, renamed}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordered[0] != renamed {
+		t.Errorf("the feature named by its legacy ID must install first, got %s first", ordered[0].ID)
+	}
+	m := &Manager{}
+	if unresolved := m.collectUnresolvedDependencies(map[string]*Feature{"new-name": renamed, "app": dependent}); len(unresolved) != 0 {
+		t.Errorf("a dependency on a legacy ID must count as resolved: %v", unresolved)
+	}
+}

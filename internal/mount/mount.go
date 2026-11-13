@@ -19,6 +19,14 @@ type Mount struct {
 	Consistency string `json:"consistency,omitempty"` // cached, delegated, consistent (macOS)
 	// Raw holds the original string if mount was specified as a string
 	Raw string `json:"-"`
+	// Options are --mount options dcx does not model (bind-propagation,
+	// volume-subpath, volume-nocopy, volume-opt, tmpfs-size, tmpfs-mode),
+	// as key=value, passed on rather than dropped.
+	Options []string `json:"-"`
+	// Relabel asks Docker to relabel a bind mount's source for SELinux
+	// (":z"); dcx sets it on the workspace mount when the daemon labels
+	// containers. Never read from a config.
+	Relabel bool `json:"-"`
 }
 
 // UnmarshalJSON handles both string and object forms of mount specifications.
@@ -124,6 +132,8 @@ func parseKeyValueMount(spec string) (Mount, error) {
 			m.ReadOnly = !hasValue || value == "true" || value == "1"
 		case "consistency":
 			m.Consistency = value
+		default:
+			m.Options = append(m.Options, part)
 		}
 	}
 	if m.Target == "" {
@@ -133,4 +143,14 @@ func parseKeyValueMount(spec string) (Mount, error) {
 		return Mount{}, fmt.Errorf("invalid mount %q: missing source", spec)
 	}
 	return m, nil
+}
+
+// Option returns the value of an unmodelled --mount option ("" when absent).
+func (m Mount) Option(key string) string {
+	for _, o := range m.Options {
+		if k, v, _ := strings.Cut(o, "="); k == key {
+			return v
+		}
+	}
+	return ""
 }

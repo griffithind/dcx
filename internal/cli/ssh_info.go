@@ -51,7 +51,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 
 	// Docker is optional here: identifiers and host-key details work without
 	// it, and the port lookup below is best-effort.
-	docker := containerPkg.NewDockerCLI()
+	docker := newEngine()
 	svc := newService(docker, sshInfoReporter())
 
 	ids := svc.Identity()

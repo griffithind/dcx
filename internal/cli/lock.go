@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -52,7 +51,7 @@ func runLock(cmd *cobra.Command, args []string) error {
 	// Locking resolves features from registries; it needs no Docker daemon.
 	ctx, stop := commandContext()
 	defer stop()
-	svc := newService(container.NewDockerCLI(), ui.Reporter())
+	svc := newService(newEngine(), ui.Reporter())
 
 	// Determine lock mode
 	mode := service.LockModeGenerate

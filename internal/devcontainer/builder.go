@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/griffithind/dcx/internal/report"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"sort"
+	"strings"
 
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
@@ -16,14 +18,13 @@ import (
 
 // Builder constructs a ResolvedDevContainer from configuration and resolves all references.
 type Builder struct {
-	logger *slog.Logger
 	report report.Reporter
 }
 
 // NewBuilder creates a new devcontainer builder. Progress from feature
 // resolution is sent to rep (nil discards it).
-func NewBuilder(logger *slog.Logger, rep report.Reporter) *Builder {
-	return &Builder{logger: logger, report: report.OrDiscard(rep)}
+func NewBuilder(rep report.Reporter) *Builder {
+	return &Builder{report: report.OrDiscard(rep)}
 }
 
 // BuilderOptions contains options for building a resolved devcontainer.
@@ -86,88 +87,15 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	// ${devcontainerId}).
 	subCtx := NewSubstitutionContext(opts.WorkspaceRoot, opts.ConfigPath, opts.Config)
 
-	// Create execution plan based on config type
 	planType := opts.Config.PlanType()
-	switch planType {
-	case PlanTypeImage:
-		resolved.Plan = NewImagePlan(opts.Config.Image)
+	resolved.Plan = buildPlan(opts.Config, opts.ConfigPath, resolved.ResourceName)
+	if planType == PlanTypeImage {
 		resolved.BaseImage = opts.Config.Image
-
-	case PlanTypeDockerfile:
-		dockerfilePath := filepath.Join(resolved.ConfigDir, opts.Config.Build.Dockerfile)
-		contextPath := resolved.ConfigDir
-		if opts.Config.Build.Context != "" {
-			contextPath = filepath.Join(resolved.ConfigDir, opts.Config.Build.Context)
-		}
-		plan := NewDockerfilePlan(dockerfilePath, contextPath)
-		plan.Args = opts.Config.Build.Args
-		plan.Target = opts.Config.Build.Target
-		plan.CacheFrom = opts.Config.Build.CacheFrom
-		plan.Options = opts.Config.Build.Options
-		resolved.Plan = plan
-
-	case PlanTypeCompose:
-		plan := NewComposePlan(composeFilePaths(opts.Config, opts.ConfigPath), opts.Config.Service, resolved.ResourceName)
-		plan.RunServices = opts.Config.RunServices
-		resolved.Plan = plan
 	}
-
-	// Resolve workspace paths
 	resolved.WorkspaceFolder = DetermineContainerWorkspaceFolder(opts.Config, opts.WorkspaceRoot)
 	resolved.WorkspaceMount = opts.Config.WorkspaceMount
-
-	// User configuration
-	resolved.RemoteUser = opts.Config.RemoteUser
-	resolved.ContainerUser = opts.Config.ContainerUser
-	if opts.Config.UpdateRemoteUserUID != nil {
-		resolved.UpdateRemoteUserUID = *opts.Config.UpdateRemoteUserUID
-	}
-
-	// Effective user
-	resolved.EffectiveUser = resolved.RemoteUser
-	if resolved.EffectiveUser == "" {
-		resolved.EffectiveUser = resolved.ContainerUser
-	}
-	resolved.HostUID = os.Getuid()
-	resolved.HostGID = os.Getgid()
-
-	// Environment variables
-	for k, v := range opts.Config.ContainerEnv {
-		resolved.ContainerEnv[k] = v
-	}
-	for k, v := range opts.Config.RemoteEnv {
-		resolved.RemoteEnv[k] = v
-	}
-
-	// Runtime options
-	resolved.CapAdd = opts.Config.CapAdd
-	resolved.SecurityOpt = opts.Config.SecurityOpt
-	if opts.Config.Privileged != nil {
-		resolved.Privileged = *opts.Config.Privileged
-	}
-	if opts.Config.Init != nil {
-		resolved.Init = *opts.Config.Init
-	}
-
-	// Parse runArgs into structured form
-	if len(opts.Config.RunArgs) > 0 {
-		resolved.RunArgs = ParseRunArgs(opts.Config.RunArgs)
-		for _, arg := range resolved.RunArgs.Ignored {
-			b.report.Warnf("runArgs: ignoring %s (dcx manages the container's name and lifetime)", arg)
-		}
-		if planType == PlanTypeCompose {
-			b.report.Warnf("runArgs are not applied to Docker Compose configurations; set these options in the compose file")
-		}
-	}
-
-	// Forward ports
-	resolved.ForwardPorts = b.parsePorts("forwardPorts", opts.Config.ForwardPorts)
-
-	// App ports (bound to localhost for security)
-	resolved.AppPorts = b.parsePorts("appPort", opts.Config.AppPort)
-
-	// Mounts
-	resolved.Mounts = b.parseMounts(opts.Config.Mounts)
+	resolveUsers(resolved, opts.Config)
+	b.resolveRuntime(resolved, opts.Config, opts.WorkspaceRoot)
 
 	resolved.OverrideCommand = overrideCommand(planType, opts.Config.OverrideCommand)
 	resolved.HostRequirements = opts.Config.HostRequirements
@@ -235,6 +163,83 @@ func resolveEntrypoints(imageConfigs []DevContainerConfig, feats []*features.Fea
 	return out
 }
 
+// buildPlan creates the execution plan of the config. A build without a
+// dockerfile uses <context>/Dockerfile (Docker's default).
+func buildPlan(cfg *DevContainerConfig, configPath, resourceName string) ExecutionPlan {
+	configDir := filepath.Dir(configPath)
+	switch cfg.PlanType() {
+	case PlanTypeDockerfile:
+		contextPath := configDir
+		if cfg.Build.Context != "" {
+			contextPath = filepath.Join(configDir, cfg.Build.Context)
+		}
+		dockerfilePath := filepath.Join(contextPath, "Dockerfile")
+		if cfg.Build.Dockerfile != "" {
+			dockerfilePath = filepath.Join(configDir, cfg.Build.Dockerfile)
+		}
+		plan := NewDockerfilePlan(dockerfilePath, contextPath)
+		plan.Args = cfg.Build.Args
+		plan.Target = cfg.Build.Target
+		plan.CacheFrom = cfg.Build.CacheFrom
+		plan.Options = cfg.Build.Options
+		return plan
+	case PlanTypeCompose:
+		plan := NewComposePlan(composeFilePaths(cfg, configPath), cfg.Service, resourceName)
+		plan.RunServices = cfg.RunServices
+		return plan
+	}
+	return NewImagePlan(cfg.Image)
+}
+
+// resolveUsers sets the remote, container and effective users and the host
+// user's IDs.
+func resolveUsers(resolved *ResolvedDevContainer, cfg *DevContainerConfig) {
+	resolved.RemoteUser = cfg.RemoteUser
+	resolved.ContainerUser = cfg.ContainerUser
+	resolved.EffectiveUser = resolved.RemoteUser
+	if resolved.EffectiveUser == "" {
+		resolved.EffectiveUser = resolved.ContainerUser
+	}
+	resolved.HostUID = os.Getuid()
+	resolved.HostGID = os.Getgid()
+}
+
+// resolveRuntime sets the environment, runtime options, runArgs, ports and
+// mounts.
+func (b *Builder) resolveRuntime(resolved *ResolvedDevContainer, cfg *DevContainerConfig, workspaceRoot string) {
+	for k, v := range cfg.ContainerEnv {
+		resolved.ContainerEnv[k] = v
+	}
+	for k, v := range cfg.RemoteEnv {
+		if v == nil {
+			resolved.RemoteEnvUnset = append(resolved.RemoteEnvUnset, k)
+		} else {
+			resolved.RemoteEnv[k] = *v
+		}
+	}
+	sort.Strings(resolved.RemoteEnvUnset)
+	resolved.CapAdd = cfg.CapAdd
+	resolved.SecurityOpt = cfg.SecurityOpt
+	if cfg.Privileged != nil {
+		resolved.Privileged = *cfg.Privileged
+	}
+	if cfg.Init != nil {
+		resolved.Init = *cfg.Init
+	}
+	if len(cfg.RunArgs) > 0 {
+		resolved.RunArgs = ParseRunArgs(cfg.RunArgs)
+		for _, arg := range resolved.RunArgs.Ignored {
+			b.report.Warnf("runArgs: ignoring %s (dcx manages the container's name and lifetime)", arg)
+		}
+		if cfg.PlanType() == PlanTypeCompose {
+			b.report.Warnf("runArgs are not applied to Docker Compose configurations; set these options in the compose file")
+		}
+	}
+	resolved.ForwardPorts = b.parsePorts("forwardPorts", cfg.ForwardPorts)
+	resolved.AppPorts = b.parsePorts("appPort", cfg.AppPort)
+	resolved.Mounts = b.parseMounts(cfg.Mounts, workspaceRoot)
+}
+
 // overrideCommand applies the spec's default for overrideCommand: true for
 // image and Dockerfile plans, false for compose (whose service command is
 // usually the point).
@@ -295,12 +300,12 @@ func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feat
 		}
 
 		for _, c := range feat.Metadata.CapAdd {
-			if !contains(resolved.CapAdd, c) {
+			if !slices.Contains(resolved.CapAdd, c) {
 				resolved.CapAdd = append(resolved.CapAdd, c)
 			}
 		}
 		for _, opt := range feat.Metadata.SecurityOpt {
-			if !contains(resolved.SecurityOpt, opt) {
+			if !slices.Contains(resolved.SecurityOpt, opt) {
 				resolved.SecurityOpt = append(resolved.SecurityOpt, opt)
 			}
 		}
@@ -346,16 +351,6 @@ func mergeMountByTarget(mounts []Mount, m Mount) []Mount {
 	return append(mounts, m)
 }
 
-// contains checks if a string slice contains a value.
-func contains(slice []string, val string) bool {
-	for _, s := range slice {
-		if s == val {
-			return true
-		}
-	}
-	return false
-}
-
 // computeHashes computes the configuration hash from all build inputs.
 func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContainerConfig) error {
 	var dockerfilePath string
@@ -386,19 +381,33 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 
 // populateBuildDecisions populates build-time decisions.
 func (b *Builder) populateBuildDecisions(resolved *ResolvedDevContainer, cfg *DevContainerConfig) {
-	// UID update decision
-	if resolved.EffectiveUser != "" && resolved.EffectiveUser != "root" && resolved.HostUID != 0 {
-		shouldUpdate := true
-		if cfg.UpdateRemoteUserUID != nil {
-			shouldUpdate = *cfg.UpdateRemoteUserUID
-		}
-		resolved.ShouldUpdateUID = shouldUpdate
+	resolved.ShouldUpdateUID = ShouldUpdateUID(cfg.UpdateRemoteUserUID, resolved.EffectiveUser, resolved.HostUID, runtime.GOOS)
+}
+
+// ShouldUpdateUID decides whether dcx adds the UID update layer, which maps
+// the remote user's UID/GID to the host user's so bind-mounted files have
+// the right owner. It is the only place this is decided:
+//   - only on Linux hosts (as the spec and reference CLI do: Docker
+//     Desktop's file sharing maps ownership itself, and remapping to
+//     macOS's GID 20 collides with dialout on Debian images);
+//   - updateRemoteUserUID: false turns it off (it defaults to true);
+//   - never for root (as the remote user, or as the host user).
+func ShouldUpdateUID(configured *bool, effectiveUser string, hostUID int, goos string) bool {
+	if goos != "linux" || (configured != nil && !*configured) {
+		return false
 	}
+	if effectiveUser == "" || effectiveUser == "root" || effectiveUser == "0" {
+		return false
+	}
+	return hostUID != 0
 }
 
 // parseMounts validates config mounts (parsed when the config was read and
 // again after substitution) and defaults the Type field.
-func (b *Builder) parseMounts(mounts []Mount) []Mount {
+//
+// Relative bind sources ("./data:/data") are resolved against the workspace
+// root and "~" against the home directory: Docker rejects both as given.
+func (b *Builder) parseMounts(mounts []Mount, workspaceRoot string) []Mount {
 	if len(mounts) == 0 {
 		return nil
 	}
@@ -416,9 +425,27 @@ func (b *Builder) parseMounts(mounts []Mount) []Mount {
 		if m.Type == "" {
 			m.Type = "bind"
 		}
+		if m.Type == "bind" {
+			m.Source = absoluteBindSource(m.Source, workspaceRoot)
+		}
 		result = mergeMountByTarget(result, m)
 	}
 	return result
+}
+
+// absoluteBindSource resolves a relative or "~" bind source.
+func absoluteBindSource(src, workspaceRoot string) string {
+	switch {
+	case src == "" || filepath.IsAbs(src):
+		return src
+	case src == "~" || strings.HasPrefix(src, "~/"):
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(src, "~"))
+		}
+		return src
+	default:
+		return filepath.Join(workspaceRoot, src)
+	}
 }
 
 // getExplicitProjectName checks compose files for an explicit "name" field.

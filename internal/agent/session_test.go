@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -363,5 +365,51 @@ func TestPTYSessionEndsWithBackgroundJob(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "started") {
 		t.Errorf("output before exit was lost: %q", out.String())
+	}
+}
+
+// remoteEnv entries set to null remove the variable from sessions (S13).
+func TestSessionEnvironmentUnsetsVariables(t *testing.T) {
+	s := &Server{cfg: Config{}}
+	env := s.sessionEnvironment(agentproto.SessionConfig{
+		Env:   map[string]string{"KEEP": "1", "DROP": "x"},
+		Unset: []string{"DROP", "HOME"},
+	}, nil)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "DROP=") || strings.HasPrefix(kv, "HOME=") {
+			t.Errorf("%s was not unset", kv)
+		}
+	}
+	if !slices.Contains(env, "KEEP=1") {
+		t.Error("other variables must stay")
+	}
+}
+
+// ping accepts the dcx agent and rejects another listener on the port
+// (F19): a bare TCP connect counted any process as a running agent.
+func TestPingChecksTheBanner(t *testing.T) {
+	_, dir := startTestServer(t, nil)
+	addr := waitForReadyAddr(t, filepath.Join(dir, "ready"), 2*time.Second)
+	if err := pingAddr(addr); err != nil {
+		t.Errorf("ping rejected the dcx agent: %v", err)
+	}
+
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	go func() {
+		for {
+			c, err := other.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = c.Write([]byte("SSH-2.0-OpenSSH_9.9\r\n"))
+			_ = c.Close()
+		}
+	}()
+	if err := pingAddr(other.Addr().String()); err == nil {
+		t.Error("ping accepted a listener that is not a dcx agent")
 	}
 }

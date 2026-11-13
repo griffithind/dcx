@@ -73,6 +73,7 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	server := &ssh.Server{
+		Version: agentproto.ServerVersion,
 		Handler: s.sessionHandler,
 		SubsystemHandlers: map[string]ssh.SubsystemHandler{
 			"sftp": s.sftpHandler,

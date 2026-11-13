@@ -96,6 +96,10 @@ const (
 	LabelSSHAllow = Prefix + ".ssh.allow"
 )
 
+// LabelShutdownAction records shutdownAction as resolved at create time
+// (image metadata included); devcontainer.json's own value wins.
+const LabelShutdownAction = Prefix + ".shutdown.action"
+
 // Compose labels.
 const (
 	// LabelComposeProject is the compose project name.
@@ -145,6 +149,9 @@ type ContainerLabels struct {
 	SSHPort         int
 	SSHListen       string
 	SSHAllowedCIDRs []string
+
+	// ShutdownAction is shutdownAction as resolved at create time.
+	ShutdownAction string
 
 	// Compose
 	ComposeProject string
@@ -203,6 +210,7 @@ func (l *ContainerLabels) ToMap() map[string]string {
 	setIfNotEmpty(m, LabelSSHListen, l.SSHListen)
 	setIfNotEmpty(m, LabelSSHAllow, strings.Join(l.SSHAllowedCIDRs, ","))
 
+	setIfNotEmpty(m, LabelShutdownAction, l.ShutdownAction)
 	setIfNotEmpty(m, LabelComposeProject, l.ComposeProject)
 	setIfNotEmpty(m, LabelComposeService, l.ComposeService)
 	if l.IsPrimary {
@@ -240,6 +248,7 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 		l.SSHAllowedCIDRs = strings.Split(allow, ",")
 	}
 
+	l.ShutdownAction = m[LabelShutdownAction]
 	l.ComposeProject = m[LabelComposeProject]
 	l.ComposeService = m[LabelComposeService]
 	l.IsPrimary = m[LabelIsPrimary] == "true"

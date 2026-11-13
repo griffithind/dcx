@@ -70,17 +70,21 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	return s.up(ctx, opts)
 }
 
-// up is Up without taking the workspace lock (the caller holds it).
-func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
-	resolved, err := s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true})
+// planUp resolves the configuration, looks at what exists and decides what
+// Up does. It returns nil when there is nothing to do.
+func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRun, error) {
+	// One resolution: the base image is pulled for its devcontainer.metadata
+	// only when it is not present (the first run), so its metadata applies
+	// then too. (It used to resolve twice, features included.)
+	resolved, err := s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ids := s.Identity()
+	ids := &resolved.Identity
 
 	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.WorkspaceID, resolved.ConfigHash)
 	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
+		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
 	if s.verbose {
 		s.report.Infof("Current state: %s", currentState)
@@ -93,45 +97,20 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	setupDone, agentUp := false, false
 	if currentState == state.StateRunning {
 		if setupDone, err = s.setupComplete(ctx, existing); err != nil {
-			return err
+			return nil, err
 		}
 		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name, container.SSHListenAddr(existing))
 	}
 	action := decideUp(currentState, setupDone && agentUp, opts)
 	access, err := sshAccessFor(action, existing, opts.SSHAccess)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if (action == actionNone || action == actionStart || action == actionResume) && inputsDrifted(existing, resolved) {
-		s.report.Infof("Some inputs changed since this devcontainer was created (a substituted value such as ${localEnv:...}, or a feature tag that now points to a new release); it was kept. Run 'dcx up --recreate' to apply them.")
-	}
-	switch {
-	case action == actionNone:
-		s.report.Infof("Devcontainer is already running")
-		return nil
-	case action == actionResume && setupDone:
-		s.report.Infof("The dcx agent is not running (was the container restarted outside dcx?); reconnecting...")
-	case action == actionResume:
-		s.report.Infof("The previous setup of this devcontainer did not finish; resuming...")
-	}
-	if action != actionResume && resolved.MetadataImage != "" {
-		// Work to do: reload with the base image pulled if needed, so its
-		// devcontainer.metadata applies on the first run too (for a
-		// Dockerfile or compose build, the image it builds FROM).
-		resolved, err = s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true})
-		if err != nil {
-			return err
-		}
-	}
-
-	if action == actionCreate {
-		s.reportPreviousIDContainer(ctx, resolved)
-	}
-	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
-		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
+	if !s.announceUp(ctx, action, setupDone, existing, resolved, opts) {
+		return nil, nil
 	}
 	if err := s.checkHostRequirements(ctx, resolved); err != nil {
-		return err
+		return nil, err
 	}
 	keepComposeProject(resolved, existing)
 
@@ -141,6 +120,15 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	// postStartCommand runs when it started after the last one ran.
 	if action == actionResume && setupDone {
 		run.started = s.startedSinceLastPostStart(ctx, existing)
+	}
+	return run, nil
+}
+
+// up is Up without taking the workspace lock (the caller holds it).
+func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
+	run, err := s.planUp(ctx, opts)
+	if err != nil || run == nil {
+		return err
 	}
 	steps := []upStep{
 		{"initialize", s.stepInitialize},
@@ -197,6 +185,30 @@ func inputsDrifted(existing *state.ContainerInfo, resolved *devcontainer.Resolve
 	}
 	recorded := existing.Labels.HashInputs
 	return recorded != "" && existing.ConfigHash == resolved.ConfigHash && recorded != resolved.InputsHash
+}
+
+// announceUp tells the user what up is about to do and why (drift, a
+// reconnect, a resumed setup, an older container). It returns false when
+// there is nothing to do.
+func (s *DevContainerService) announceUp(ctx context.Context, action upAction, setupDone bool, existing *state.ContainerInfo, resolved *devcontainer.ResolvedDevContainer, opts UpOptions) bool {
+	if (action == actionNone || action == actionStart || action == actionResume) && inputsDrifted(existing, resolved) {
+		s.report.Infof("Some inputs changed since this devcontainer was created (a substituted value such as ${localEnv:...}, or a feature tag that now points to a new release); it was kept. Run 'dcx up --recreate' to apply them.")
+	}
+	switch {
+	case action == actionNone:
+		s.report.Infof("Devcontainer is already running")
+		return false
+	case action == actionResume && setupDone:
+		s.report.Infof("The dcx agent is not running (was the container restarted outside dcx?); reconnecting...")
+	case action == actionResume:
+		s.report.Infof("The previous setup of this devcontainer did not finish; resuming...")
+	case action == actionCreate:
+		s.reportPreviousIDContainer(ctx, resolved)
+	}
+	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
+		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
+	}
+	return true
 }
 
 // upAction is what Up does with the workspace's container.
@@ -445,6 +457,7 @@ func sessionConfig(resolved *devcontainer.ResolvedDevContainer, probed, remoteEn
 		}
 	}
 	cfg.PostAttach = lifecycle.AttachSteps(resolved.Hooks.PostAttach)
+	cfg.Unset = resolved.RemoteEnvUnset
 	return cfg
 }
 

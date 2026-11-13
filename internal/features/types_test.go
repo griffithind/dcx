@@ -1,6 +1,11 @@
 package features
 
 import (
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -513,4 +518,19 @@ func TestParseFeatureSourceDigest(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, tag.IsDigest())
 	assert.Equal(t, "ghcr.io/devcontainers/features/node:1", tag.CanonicalID())
+}
+
+// builtin.env resolves homes from the passwd database when the install
+// step runs (S5), falling back to the conventional home.
+func TestBuiltinEnvResolvesHomes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("needs a Linux passwd database")
+	}
+	me, err := user.Current()
+	require.NoError(t, err)
+	env := filepath.Join(t.TempDir(), "builtin.env")
+	require.NoError(t, os.WriteFile(env, []byte(BuiltinEnv("no-such-user-dcx", me.Username)), 0o644))
+	out, err := exec.Command("sh", "-c", `. "$1" && echo "$_REMOTE_USER_HOME|$_CONTAINER_USER_HOME"`, "sh", env).Output()
+	require.NoError(t, err)
+	assert.Equal(t, "/home/no-such-user-dcx|"+me.HomeDir, strings.TrimSpace(string(out)))
 }

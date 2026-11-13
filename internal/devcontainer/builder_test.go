@@ -3,7 +3,6 @@ package devcontainer
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,7 +19,7 @@ func TestBuilderBuild(t *testing.T) {
 			WorkspaceFolder: "/workspace",
 		}
 
-		builder := NewBuilder(slog.Default(), nil)
+		builder := NewBuilder(nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/.devcontainer/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -41,7 +40,7 @@ func TestBuilderBuild(t *testing.T) {
 			ForwardPorts: PortList{{Spec: "8080"}, {Spec: "9000:9000"}},
 		}
 
-		builder := NewBuilder(slog.Default(), nil)
+		builder := NewBuilder(nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -65,7 +64,7 @@ func TestBuilderBuild(t *testing.T) {
 			},
 		}
 
-		builder := NewBuilder(slog.Default(), nil)
+		builder := NewBuilder(nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -100,7 +99,7 @@ func TestBuilderBuild(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				builder := NewBuilder(slog.Default(), nil)
+				builder := NewBuilder(nil)
 				resolved, err := builder.Build(context.Background(), BuilderOptions{
 					ConfigPath:    "/tmp/test/devcontainer.json",
 					WorkspaceRoot: "/tmp/test",
@@ -119,7 +118,7 @@ func TestBuilderBuild(t *testing.T) {
 			require.NoError(t, os.WriteFile(composeFile, []byte("services:\n  app:\n    image: alpine\n"), 0644))
 
 			cfg := &DevContainerConfig{DockerComposeFile: StringOrSlice{"docker-compose.yml"}, Service: "app"}
-			builder := NewBuilder(slog.Default(), nil)
+			builder := NewBuilder(nil)
 			resolved, err := builder.Build(context.Background(), BuilderOptions{
 				ConfigPath:    filepath.Join(dir, "devcontainer.json"),
 				WorkspaceRoot: dir,
@@ -226,3 +225,51 @@ func TestOverrideCommandDefault(t *testing.T) {
 }
 
 func overridePtr(b bool) *bool { return &b }
+
+// Relative and "~" bind sources resolve (F20); Docker rejects them as given.
+func TestBindSourcesAreMadeAbsolute(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	assert.Equal(t, "/ws/data", absoluteBindSource("./data", "/ws"))
+	assert.Equal(t, "/ws/data", absoluteBindSource("data", "/ws"))
+	assert.Equal(t, filepath.Join(home, ".aws"), absoluteBindSource("~/.aws", "/ws"))
+	assert.Equal(t, "/abs", absoluteBindSource("/abs", "/ws"))
+
+	m, err := ParseMountString("source=/a,target=/b,type=bind,bind-propagation=rshared")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"bind-propagation=rshared"}, m.Options, "unmodelled options are kept")
+}
+
+// One decision for the UID layer (Q2), Linux hosts only (S6).
+func TestShouldUpdateUID(t *testing.T) {
+	off := false
+	on := true
+	tests := []struct {
+		name       string
+		configured *bool
+		user       string
+		hostUID    int
+		goos       string
+		want       bool
+	}{
+		{"default on linux", nil, "vscode", 1000, "linux", true},
+		{"explicit true", &on, "vscode", 1000, "linux", true},
+		{"turned off", &off, "vscode", 1000, "linux", false},
+		{"root remote user", nil, "root", 1000, "linux", false},
+		{"numeric root", nil, "0", 1000, "linux", false},
+		{"no user", nil, "", 1000, "linux", false},
+		{"root host user", nil, "vscode", 0, "linux", false},
+		{"macOS", nil, "vscode", 501, "darwin", false},
+		{"windows", &on, "vscode", 1000, "windows", false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, ShouldUpdateUID(tt.configured, tt.user, tt.hostUID, tt.goos), tt.name)
+	}
+}
+
+// A build without a dockerfile uses <context>/Dockerfile (S12); it used to
+// pass the config directory itself as the Dockerfile.
+func TestBuildPlanDefaultsTheDockerfile(t *testing.T) {
+	plan := buildPlan(&DevContainerConfig{Build: &BuildConfig{Context: ".."}}, "/ws/.devcontainer/devcontainer.json", "").(*DockerfilePlan)
+	assert.Equal(t, "/ws", plan.Context)
+	assert.Equal(t, "/ws/Dockerfile", plan.Dockerfile)
+}

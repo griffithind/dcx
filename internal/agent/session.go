@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -115,6 +116,12 @@ func (s *Server) sessionEnvironment(cfg agentproto.SessionConfig, clientEnv []st
 	sort.Strings(keys)
 	for _, k := range keys {
 		env = append(env, k+"="+cfg.Env[k])
+	}
+	if len(cfg.Unset) > 0 {
+		env = slices.DeleteFunc(env, func(kv string) bool {
+			name, _, _ := strings.Cut(kv, "=")
+			return slices.Contains(cfg.Unset, name)
+		})
 	}
 	return append(env, clientEnv...)
 }

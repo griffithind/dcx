@@ -25,11 +25,23 @@ func OrderFeatures(features []*Feature, overrideOrder []string) ([]*Feature, err
 	for _, f := range features {
 		featureMap[featureKey(f)] = f
 	}
+	// A feature's legacyIds name it too (references written before a
+	// rename keep working).
+	for _, f := range features {
+		if f.Metadata == nil {
+			continue
+		}
+		for _, legacy := range f.Metadata.LegacyIds {
+			if key := normalizeFeatureRef(legacy); featureMap[key] == nil {
+				featureMap[key] = f
+			}
+		}
+	}
 
 	var first []*Feature
 	used := map[string]bool{}
 	for _, ref := range overrideOrder {
-		key := normalizeFeatureRef(ref)
+		key := canonicalRef(ref, featureMap)
 		if f, ok := featureMap[key]; ok && !used[key] {
 			first = append(first, f)
 			used[key] = true
@@ -47,6 +59,17 @@ func OrderFeatures(features []*Feature, overrideOrder []string) ([]*Feature, err
 		return nil, err
 	}
 	return append(first, sorted...), nil
+}
+
+// canonicalRef maps a reference (full, versioned, or a legacy ID) to the
+// featureKey of the feature it names, or to its normalized form when no
+// present feature matches.
+func canonicalRef(ref string, featureMap map[string]*Feature) string {
+	key := normalizeFeatureRef(ref)
+	if f := featureMap[key]; f != nil {
+		return featureKey(f)
+	}
+	return key
 }
 
 // featureKey is a feature's canonical identity for ordering: its metadata
@@ -80,12 +103,12 @@ func buildDependencyGraph(features []*Feature, featureMap map[string]*Feature) *
 			continue
 		}
 		for dep := range f.Metadata.DependsOn {
-			graph.hardDeps[id] = append(graph.hardDeps[id], normalizeFeatureRef(dep))
+			graph.hardDeps[id] = append(graph.hardDeps[id], canonicalRef(dep, featureMap))
 		}
 		for _, dep := range f.Metadata.InstallsAfter {
 			// Soft dependencies only matter for features that are present.
-			if key := normalizeFeatureRef(dep); featureMap[key] != nil {
-				graph.softDeps[id] = append(graph.softDeps[id], key)
+			if featureMap[normalizeFeatureRef(dep)] != nil {
+				graph.softDeps[id] = append(graph.softDeps[id], canonicalRef(dep, featureMap))
 			}
 		}
 	}

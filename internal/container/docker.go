@@ -13,26 +13,48 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/shell"
 	"github.com/griffithind/dcx/internal/state"
 )
 
 // Docker wraps the Docker CLI with dcx-specific functionality.
 // All operations use the Docker CLI for reliability and simplicity.
-type Docker struct{}
+type Docker struct {
+	// trace, when set, receives every docker command line before it runs
+	// (dcx -v).
+	trace func(cmdline string)
+}
+
+// WithTrace makes d report every docker command line to trace before
+// running it, shell-quoted so it can be copied and rerun.
+func (d *Docker) WithTrace(trace func(cmdline string)) *Docker {
+	d.trace = trace
+	return d
+}
+
+// command builds a docker invocation, reporting it to the trace.
+func (d *Docker) command(ctx context.Context, args ...string) *exec.Cmd {
+	if d.trace != nil {
+		d.trace(shell.Join(append([]string{"docker"}, args...)))
+	}
+	return exec.CommandContext(ctx, "docker", args...)
+}
 
 // NewDocker returns a Docker CLI engine after checking that the daemon is
 // reachable.
 func NewDocker() (*Docker, error) {
-	if _, err := runOutput(exec.Command("docker", "version", "--format", "{{.Server.Version}}")); err != nil {
+	d := &Docker{}
+	if _, err := runOutput(d.command(context.Background(), "version", "--format", "{{.Server.Version}}")); err != nil {
 		return nil, fmt.Errorf("docker not accessible: %w", err)
 	}
-	return &Docker{}, nil
+	return d, nil
 }
 
 // NewDockerCLI returns a Docker CLI engine without contacting the daemon.
@@ -41,22 +63,6 @@ func NewDocker() (*Docker, error) {
 // when they are actually attempted.
 func NewDockerCLI() *Docker {
 	return &Docker{}
-}
-
-// Ping checks if the Docker daemon is accessible.
-func (d *Docker) Ping(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "info")
-	return cmd.Run()
-}
-
-// ServerVersion returns the Docker server version.
-func (d *Docker) ServerVersion(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
-	output, err := runOutput(cmd)
-	if err != nil {
-		return "", fmt.Errorf("failed to get Docker version: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
 }
 
 // SystemInfo contains information about the Docker daemon's resources.
@@ -68,13 +74,19 @@ type SystemInfo struct {
 	// GPU reports whether containers can be given GPUs (`--gpus`): the
 	// NVIDIA container runtime is registered with the daemon.
 	GPU bool
+	// ServerVersion is the daemon's version.
+	ServerVersion string
+	// SELinux reports whether the daemon labels containers for SELinux
+	// (its security options include selinux). Bind mounts then need
+	// relabelling to be readable inside the container.
+	SELinux bool
 }
 
 // Info returns system-wide information about Docker.
 // This reflects Docker's configured resource limits, which may be less than the host's
 // actual resources (e.g., Docker Desktop VM limits, cgroup limits).
 func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
-	cmd := exec.CommandContext(ctx, "docker", "info", "--format", "json")
+	cmd := d.command(ctx, "info", "--format", "json")
 	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Docker info: %w", err)
@@ -86,17 +98,23 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 		OSType       string                     `json:"OSType"`
 		Architecture string                     `json:"Architecture"`
 		Runtimes     map[string]json.RawMessage `json:"Runtimes"`
+		Version      string                     `json:"ServerVersion"`
+		Security     []string                   `json:"SecurityOptions"`
 	}
 	if err := json.Unmarshal(output, &info); err != nil {
 		return nil, fmt.Errorf("failed to parse Docker info: %w", err)
 	}
 
 	return &SystemInfo{
-		NCPU:         info.NCPU,
-		MemTotal:     uint64(info.MemTotal),
-		OSType:       info.OSType,
-		Architecture: info.Architecture,
-		GPU:          info.Runtimes["nvidia"] != nil,
+		NCPU:          info.NCPU,
+		MemTotal:      uint64(info.MemTotal),
+		OSType:        info.OSType,
+		Architecture:  info.Architecture,
+		GPU:           info.Runtimes["nvidia"] != nil,
+		ServerVersion: info.Version,
+		SELinux: slices.ContainsFunc(info.Security, func(opt string) bool {
+			return opt == "name=selinux" || strings.HasPrefix(opt, "name=selinux,")
+		}),
 	}, nil
 }
 
@@ -112,7 +130,7 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", k, v))
 	}
 
-	output, err := runOutput(exec.CommandContext(ctx, "docker", args...))
+	output, err := runOutput(d.command(ctx, args...))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -122,7 +140,7 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 	}
 
 	inspectArgs := append([]string{"inspect", "--type", "container", "--format", "json"}, ids...)
-	inspectOut, inspectErr := runOutput(exec.CommandContext(ctx, "docker", inspectArgs...))
+	inspectOut, inspectErr := runOutput(d.command(ctx, inspectArgs...))
 	summaries, parseErr := parseContainerSummaries(inspectOut)
 	if parseErr != nil {
 		if inspectErr != nil {
@@ -174,7 +192,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 // InspectContainer returns detailed information about a container.
 // Implements state.ContainerClient.
 func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error) {
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "json", containerID)
+	cmd := d.command(ctx, "inspect", "--format", "json", containerID)
 	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)
@@ -245,7 +263,7 @@ var _ state.ContainerClient = (*Docker)(nil)
 // Returns an error if the port is not published or the container is gone.
 func (d *Docker) PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error) {
 	target := fmt.Sprintf("%d/%s", containerPort, proto)
-	cmd := exec.CommandContext(ctx, "docker", "port", containerName, target)
+	cmd := d.command(ctx, "port", containerName, target)
 	output, err := runOutput(cmd)
 	if err != nil {
 		return 0, fmt.Errorf("docker port %s %s: %w", containerName, target, err)
@@ -279,7 +297,7 @@ func (d *Docker) PortMapping(ctx context.Context, containerName string, containe
 
 // ImageExists checks if an image exists locally.
 func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", imageRef)
+	cmd := d.command(ctx, "image", "inspect", imageRef)
 	if err := cmd.Run(); err != nil {
 		// Exit code 1 means image not found
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -293,7 +311,7 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 // ImageLabels returns the labels for an image.
 // ImageConfig returns an image's USER, ENTRYPOINT and CMD.
 func (d *Docker) ImageConfig(ctx context.Context, imageRef string) (build.ImageConfig, error) {
-	output, err := runOutput(exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef))
+	output, err := runOutput(d.command(ctx, "image", "inspect", "--format", "json", imageRef))
 	if err != nil {
 		return build.ImageConfig{}, fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -315,7 +333,7 @@ func (d *Docker) ImageConfig(ctx context.Context, imageRef string) (build.ImageC
 }
 
 func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
+	cmd := d.command(ctx, "image", "inspect", "--format", "json", imageRef)
 	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
@@ -338,7 +356,7 @@ func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]s
 
 // ImageID returns the ID of an image.
 func (d *Docker) ImageID(ctx context.Context, imageRef string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
+	cmd := d.command(ctx, "image", "inspect", "--format", "{{.Id}}", imageRef)
 	output, err := runOutput(cmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
@@ -348,7 +366,7 @@ func (d *Docker) ImageID(ctx context.Context, imageRef string) (string, error) {
 
 // PullImageWithProgress pulls an image with optional progress display.
 func (d *Docker) PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error {
-	cmd := exec.CommandContext(ctx, "docker", "pull", imageRef)
+	cmd := d.command(ctx, "pull", imageRef)
 	if progressOut != nil {
 		cmd.Stdout = progressOut
 		cmd.Stderr = progressOut
@@ -361,7 +379,7 @@ func (d *Docker) PullImageWithProgress(ctx context.Context, imageRef string, pro
 
 // StartContainer starts a stopped container using Docker CLI.
 func (d *Docker) StartContainer(ctx context.Context, containerID string) error {
-	cmd := exec.CommandContext(ctx, "docker", "start", containerID)
+	cmd := d.command(ctx, "start", containerID)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start container: %s", strings.TrimSpace(string(output)))
 	}
@@ -376,7 +394,7 @@ func (d *Docker) StopContainer(ctx context.Context, containerID string, timeout 
 	}
 	args = append(args, containerID)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to stop container: %s", strings.TrimSpace(string(output)))
 	}
@@ -389,7 +407,7 @@ var anonymousVolume = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // RemoveVolume removes a named volume.
 func (d *Docker) RemoveVolume(ctx context.Context, name string) error {
-	if _, err := runOutput(exec.CommandContext(ctx, "docker", "volume", "rm", name)); err != nil {
+	if _, err := runOutput(d.command(ctx, "volume", "rm", name)); err != nil {
 		return fmt.Errorf("remove volume %s: %w", name, err)
 	}
 	return nil
@@ -406,7 +424,7 @@ func (d *Docker) RemoveContainer(ctx context.Context, containerID string, force,
 	}
 	args = append(args, containerID)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to remove container: %s", strings.TrimSpace(string(output)))
 	}
@@ -416,7 +434,7 @@ func (d *Docker) RemoveContainer(ctx context.Context, containerID string, force,
 // CreateContainer creates (but does not start) the container described by
 // spec and returns its ID.
 func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", dockerRunArgs(spec)...)
+	cmd := d.command(ctx, dockerRunArgs(spec)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := runOutput(cmd)
@@ -497,7 +515,12 @@ func dockerRunArgs(s ContainerSpec) []string {
 		add("-p", p.DockerSpec())
 	}
 	for i := range s.Mounts {
-		add("--mount", formatMount(&s.Mounts[i]))
+		if m := &s.Mounts[i]; m.Relabel {
+			// --mount cannot relabel; the -v form can (":z").
+			add("-v", relabelVolume(m))
+		} else {
+			add("--mount", formatMount(m))
+		}
 	}
 	for _, k := range sortedKeys(s.Labels) {
 		add("-l", k+"="+s.Labels[k])
@@ -529,22 +552,38 @@ func formatMount(m *devcontainer.Mount) string {
 	if mountType == "" {
 		mountType = "bind"
 	}
-	parts := []string{fmt.Sprintf("type=%s", mountType)}
-
+	parts := []string{"type=" + mountType}
 	if m.Source != "" {
-		parts = append(parts, fmt.Sprintf("source=%s", m.Source))
+		parts = append(parts, "source="+m.Source)
 	}
 	if m.Target != "" {
-		parts = append(parts, fmt.Sprintf("target=%s", m.Target))
+		parts = append(parts, "target="+m.Target)
 	}
 	if m.ReadOnly {
 		parts = append(parts, "readonly")
 	}
 	if m.Consistency != "" {
-		parts = append(parts, fmt.Sprintf("consistency=%s", m.Consistency))
+		parts = append(parts, "consistency="+m.Consistency)
 	}
-
+	parts = append(parts, m.Options...)
+	// --mount is CSV: a field containing a comma or quote (a path such as
+	// /home/u/a,b) is quoted, or Docker splits it.
+	for i, p := range parts {
+		if strings.ContainsAny(p, ",\"") {
+			parts[i] = `"` + strings.ReplaceAll(p, `"`, `""`) + `"`
+		}
+	}
 	return strings.Join(parts, ",")
+}
+
+// relabelVolume renders a bind mount as a -v value with SELinux
+// relabelling ("source:target[:ro],z").
+func relabelVolume(m *devcontainer.Mount) string {
+	opts := "z"
+	if m.ReadOnly {
+		opts = "ro,z"
+	}
+	return m.Source + ":" + m.Target + ":" + opts
 }
 
 // CleanupResult contains statistics about cleaned up resources.
@@ -568,7 +607,7 @@ func (d *Docker) listImages(ctx context.Context, filters ...string) ([]imageInfo
 		args = append(args, "--filter", f)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
@@ -591,7 +630,7 @@ func (d *Docker) listImages(ctx context.Context, filters ...string) ([]imageInfo
 
 // removeImage removes an image by ID using docker rmi.
 func (d *Docker) removeImage(ctx context.Context, imageID string) error {
-	cmd := exec.CommandContext(ctx, "docker", "rmi", imageID)
+	cmd := d.command(ctx, "rmi", imageID)
 	return cmd.Run()
 }
 
@@ -729,7 +768,7 @@ func (d *Docker) Logs(ctx context.Context, containerID string, opts LogsOptions)
 	}
 	args = append(args, containerID)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	pr, pw := io.Pipe()
 	// Both streams go to the reader: `docker logs` replays the container's
 	// stderr on its own stderr. A failure (no such container, daemon gone)
@@ -753,7 +792,7 @@ func (d *Docker) Logs(ctx context.Context, containerID string, opts LogsOptions)
 // exit status (e.g. liveness probes).
 func (d *Docker) ExecInContainer(ctx context.Context, containerName string, argv []string) error {
 	args := append([]string{"exec", containerName}, argv...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	return cmd.Run()
 }
 
@@ -762,7 +801,7 @@ func (d *Docker) ExecInContainer(ctx context.Context, containerName string, argv
 // has been spawned; its lifecycle is owned by the container.
 func (d *Docker) ExecDetachedAsRoot(ctx context.Context, containerName string, argv []string) error {
 	args := append([]string{"exec", "-d", "--user", "root", containerName}, argv...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker exec -d failed: %w, output: %s", err, output)
 	}
@@ -773,7 +812,7 @@ func (d *Docker) ExecDetachedAsRoot(ctx context.Context, containerName string, a
 // output.
 func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error) {
 	args := append([]string{"exec", "--user", "root", containerName}, argv...)
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	out, err := d.command(ctx, args...).CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("docker exec as root failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -784,7 +823,7 @@ func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []st
 // its stdout.
 func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error) {
 	args := append([]string{"exec", containerName}, argv...)
-	return runOutput(exec.CommandContext(ctx, "docker", args...))
+	return runOutput(d.command(ctx, args...))
 }
 
 // ExecOutputAs runs argv in the container as user ("" = the container's
@@ -795,7 +834,7 @@ func (d *Docker) ExecOutputAs(ctx context.Context, containerName, user string, a
 		args = append(args, "--user", user)
 	}
 	args = append(append(args, containerName), argv...)
-	return runOutput(exec.CommandContext(ctx, "docker", args...))
+	return runOutput(d.command(ctx, args...))
 }
 
 // ChmodInContainer changes file permissions inside a container.
@@ -806,7 +845,7 @@ func (d *Docker) ChmodInContainer(ctx context.Context, containerName, path, mode
 	}
 	args = append(args, containerName, "chmod", mode, path)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("chmod failed: %w, output: %s", err, output)
 	}
@@ -821,7 +860,7 @@ func (d *Docker) MkdirInContainer(ctx context.Context, containerName, path, user
 	}
 	args = append(args, containerName, "mkdir", "-p", path)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mkdir failed: %w, output: %s", err, output)
 	}
@@ -832,7 +871,7 @@ func (d *Docker) MkdirInContainer(ctx context.Context, containerName, path, user
 func (d *Docker) ChownInContainer(ctx context.Context, containerName, path, owner string) error {
 	args := []string{"exec", "--user", "root", containerName, "chown", owner, path}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("chown failed: %w, output: %s", err, output)
 	}
@@ -853,7 +892,7 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 	args := []string{"exec", "-i", "--user", user, containerName,
 		"sh", "-c", `umask 077 && cat > "$1"`, "dcx-write", path}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := d.command(ctx, args...)
 	cmd.Stdin = bytes.NewReader(content)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -866,7 +905,7 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 // absolute (build.Builder resolves them). Output streams to opts.Progress,
 // or to dcx's stdout/stderr.
 func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error {
-	cmd := exec.CommandContext(ctx, "docker", buildArgs(opts)...)
+	cmd := d.command(ctx, buildArgs(opts)...)
 	if opts.Progress != nil {
 		cmd.Stdout = opts.Progress
 		cmd.Stderr = opts.Progress
@@ -922,7 +961,7 @@ func buildArgs(opts build.DockerfileBuildOptions) []string {
 
 // CopyToContainer copies a host file into the container (`docker cp`).
 func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
-	out, err := exec.CommandContext(ctx, "docker", "cp", src, containerName+":"+dest).CombinedOutput()
+	out, err := d.command(ctx, "cp", src, containerName+":"+dest).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker cp: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -931,7 +970,7 @@ func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest s
 
 // Compose runs `docker compose` for project p, streaming its output.
 func (d *Docker) Compose(ctx context.Context, p ComposeProject, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", p.args(args...)...)
+	cmd := d.command(ctx, p.args(args...)...)
 	cmd.Dir = p.Dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -940,14 +979,14 @@ func (d *Docker) Compose(ctx context.Context, p ComposeProject, args ...string) 
 
 // ComposeOutput runs `docker compose` for project p and returns its stdout.
 func (d *Docker) ComposeOutput(ctx context.Context, p ComposeProject, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", p.args(args...)...)
+	cmd := d.command(ctx, p.args(args...)...)
 	cmd.Dir = p.Dir
 	return runOutput(cmd)
 }
 
 // ComposeVersion returns the version of the docker compose plugin.
 func (d *Docker) ComposeVersion(ctx context.Context) (string, error) {
-	out, err := runOutput(exec.CommandContext(ctx, "docker", "compose", "version", "--short"))
+	out, err := runOutput(d.command(ctx, "compose", "version", "--short"))
 	if err != nil {
 		return "", err
 	}

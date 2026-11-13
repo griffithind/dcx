@@ -156,8 +156,6 @@ func ResourceName(displayName, workspaceID string) string {
 	return slug + "-" + suffix
 }
 
-// SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-
 // SSHHostSuffix is appended to a workspace's name to form its SSH alias.
 const SSHHostSuffix = ".dcx"
 

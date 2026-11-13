@@ -38,10 +38,14 @@ func ParseImageMetadata(labelValue string) ([]DevContainerConfig, error) {
 //   - capAdd, securityOpt, forwardPorts, runArgs: union
 //   - mounts: last wins per target
 //   - containerEnv, remoteEnv, portsAttributes, features: last wins per key
-//   - customizations: tool-specific merge, local wins
+//   - otherPortsAttributes: last wins
+//   - hostRequirements: the larger of each
+//   - customizations: tool-specific merge, local wins (dcx's own are never
+//     taken from an image)
 //
-// Properties that only make sense locally (name, image, build, compose,
-// lifecycle commands) come from the local config. The inputs are never
+// Properties that only make sense locally (name, image, build, compose)
+// come from the local config. Lifecycle commands are not merged here: each
+// layer's hooks run in order (see resolveHooks). The inputs are never
 // modified.
 func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig) *DevContainerConfig {
 	if len(imageConfigs) == 0 {
@@ -105,10 +109,13 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 		}
 
 		merged.HostRequirements = maxHostRequirements(merged.HostRequirements, l.HostRequirements)
-		merged.ContainerEnv = mergeStringMap(merged.ContainerEnv, l.ContainerEnv)
-		merged.RemoteEnv = mergeStringMap(merged.RemoteEnv, l.RemoteEnv)
+		merged.ContainerEnv = mergeMap(merged.ContainerEnv, l.ContainerEnv)
+		merged.RemoteEnv = mergeMap(merged.RemoteEnv, l.RemoteEnv)
 		merged.PortsAttributes = mergeMap(merged.PortsAttributes, l.PortsAttributes)
-		merged.Features = mergeAnyMap(merged.Features, l.Features)
+		if l.OtherPortsAttributes != nil {
+			merged.OtherPortsAttributes = l.OtherPortsAttributes
+		}
+		merged.Features = mergeMap(merged.Features, l.Features)
 	}
 
 	// Customizations: start from a copy of the local ones (which win) and
@@ -166,19 +173,6 @@ func gpuStrength(m GPUMode) int {
 	return 0
 }
 
-func mergeStringMap(dst, src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[string]string, len(src))
-	}
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
-}
-
 // mergeMap copies src's entries into dst (allocated when needed).
 func mergeMap[V any](dst, src map[string]V) map[string]V {
 	if len(src) == 0 {
@@ -186,19 +180,6 @@ func mergeMap[V any](dst, src map[string]V) map[string]V {
 	}
 	if dst == nil {
 		dst = make(map[string]V, len(src))
-	}
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
-}
-
-func mergeAnyMap(dst, src map[string]interface{}) map[string]interface{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[string]interface{}, len(src))
 	}
 	for k, v := range src {
 		dst[k] = v

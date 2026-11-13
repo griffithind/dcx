@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -47,13 +47,14 @@ func runClean(cmd *cobra.Command, args []string) error {
 	ctx, stop := commandContext()
 	defer stop()
 
-	docker, err := container.NewDocker()
+	docker, err := newDaemonEngine()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
+	svc := newService(docker, ui.Reporter())
 
 	if dryRun {
-		return showCleanStats(ctx, docker)
+		return showCleanStats(ctx, svc)
 	}
 
 	var totalImages int
@@ -62,11 +63,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Clean derived images (unless only dangling is requested)
 	if !cleanDangling {
 		ui.Info("Cleaning derived images...")
-		scope := ""
-		if cleanCurrent {
-			scope = newService(docker, ui.Reporter()).Identity().WorkspaceID
-		}
-		result, err := docker.CleanupDerivedImages(ctx, scope)
+		result, err := svc.CleanDerivedImages(ctx, cleanCurrent)
 		if err != nil {
 			return fmt.Errorf("failed to clean derived images: %w", err)
 		}
@@ -84,7 +81,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	// Clean dangling images if requested
 	if cleanAll || cleanDangling {
 		ui.Info("Cleaning dangling images...")
-		result, err := docker.CleanupDanglingImages(ctx)
+		result, err := svc.CleanDanglingImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean dangling images: %w", err)
 		}
@@ -109,12 +106,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func showCleanStats(ctx context.Context, docker *container.Docker) error {
+func showCleanStats(ctx context.Context, svc *service.DevContainerService) error {
 	ui.Println(ui.Bold("Dry run - showing what would be cleaned:"))
 	ui.Println("")
 
 	// Show derived images
-	count, size, err := docker.DerivedImageStats(ctx)
+	count, size, err := svc.DerivedImageStats(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get derived image stats: %w", err)
 	}

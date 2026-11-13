@@ -24,6 +24,11 @@ func Parse(data []byte) (*DevContainerConfig, error) {
 	if err := json.Unmarshal(stripped, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse devcontainer.json: %w", err)
 	}
+	// The legacy top-level dockerFile/context mean build.dockerfile/context.
+	if cfg.LegacyDockerFile != "" && cfg.Build == nil {
+		cfg.Build = &BuildConfig{Dockerfile: cfg.LegacyDockerFile, Context: cfg.LegacyContext}
+	}
+	cfg.LegacyDockerFile, cfg.LegacyContext = "", ""
 
 	return &cfg, nil
 }
@@ -87,14 +92,10 @@ func Resolve(workspacePath string) (string, error) {
 		return folderConfigs[0], nil
 	}
 
-	// Fall back to custom named JSON file in .devcontainer directory
-	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
-			return filepath.Join(devcontainerDir, entry.Name()), nil
-		}
-	}
-
-	return "", fmt.Errorf("no devcontainer.json found in %s", workspacePath)
+	// Any other .devcontainer/*.json (it used to take the first one, which
+	// could be an unrelated file) needs --config, as the spec defines only
+	// the locations above.
+	return "", fmt.Errorf("no devcontainer.json found in %s (use --config for a file elsewhere)", workspacePath)
 }
 
 // Load locates, parses and substitutes the devcontainer configuration.

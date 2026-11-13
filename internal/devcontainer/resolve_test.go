@@ -159,3 +159,19 @@ func TestDockerfileBaseImageMetadataApplies(t *testing.T) {
 		t.Errorf("the base image's hooks were lost: %+v", resolved.Hooks.PostCreate)
 	}
 }
+
+// remoteEnv: null resolves to an unset (S13); it used to become X="".
+func TestRemoteEnvNullUnsets(t *testing.T) {
+	ws := t.TempDir()
+	writeFile(t, filepath.Join(ws, ".devcontainer", "devcontainer.json"), `{"image": "alpine:3", "remoteEnv": {"KEEP": "1", "GONE": null}}`)
+	resolved, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.RemoteEnv["KEEP"] != "1" {
+		t.Errorf("RemoteEnv = %v", resolved.RemoteEnv)
+	}
+	if _, set := resolved.RemoteEnv["GONE"]; set || len(resolved.RemoteEnvUnset) != 1 || resolved.RemoteEnvUnset[0] != "GONE" {
+		t.Errorf("GONE must be unset: env %v, unset %v", resolved.RemoteEnv, resolved.RemoteEnvUnset)
+	}
+}

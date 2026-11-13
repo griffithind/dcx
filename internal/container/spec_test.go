@@ -210,7 +210,8 @@ func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
 		WorkspaceFolder: "/workspaces/ws",
 		Plan:            plan,
 		ContainerUser:   "vscode",
-		CapAdd:          []string{"SYS_ADMIN"},
+		CapAdd:          []string{"SYS_ADMIN", "NET_ADMIN"}, // the builder merges feature caps
+		SecurityOpt:     []string{"seccomp=unconfined"},
 		Privileged:      true,
 		Init:            true,
 		AppPorts:        []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}},
@@ -317,4 +318,32 @@ func TestBuildArgsAreDeterministic(t *testing.T) {
 		"--secret", "id=tok,src=/tmp/tok",
 		"--network=host", "--load", "/w",
 	}, buildArgs(opts))
+}
+
+// Mount rendering (F16, F20, Q4): CSV quoting, passed-through options,
+// SELinux relabelling, tmpfs options.
+func TestMountRendering(t *testing.T) {
+	comma := devcontainer.Mount{Type: "bind", Source: "/home/u/a,b", Target: "/w"}
+	assert.Equal(t, `type=bind,"source=/home/u/a,b",target=/w`, formatMount(&comma))
+
+	prop := devcontainer.Mount{Type: "bind", Source: "/src", Target: "/dst", Options: []string{"bind-propagation=rshared"}}
+	assert.Equal(t, "type=bind,source=/src,target=/dst,bind-propagation=rshared", formatMount(&prop))
+
+	relabel := ContainerSpec{Image: "img", Mounts: []devcontainer.Mount{{Type: "bind", Source: "/ws", Target: "/workspaces/ws", Relabel: true}}}
+	args := dockerRunArgs(relabel)
+	i := slices.Index(args, "-v")
+	require.GreaterOrEqual(t, i, 0)
+	assert.Equal(t, "/ws:/workspaces/ws:z", args[i+1])
+
+	out, err := composeOverride("app", ContainerSpec{Mounts: []devcontainer.Mount{
+		{Type: "bind", Source: "/ws", Target: "/w", Relabel: true, Options: []string{"bind-propagation=rslave"}},
+		{Type: "volume", Source: "data", Target: "/d", Options: []string{"volume-subpath=sub", "volume-nocopy=true"}},
+	}}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "propagation: rslave")
+	assert.Contains(t, string(out), "selinux: z")
+	assert.Contains(t, string(out), "subpath: sub")
+	assert.Contains(t, string(out), "nocopy: true")
+
+	assert.Equal(t, "size=64m,mode=1777", tmpfsOptions(devcontainer.Mount{Type: "tmpfs", Target: "/t", Options: []string{"tmpfs-size=64m", "tmpfs-mode=1777"}}))
 }

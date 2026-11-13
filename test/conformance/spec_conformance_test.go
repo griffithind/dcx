@@ -95,7 +95,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "bar", cfg.ContainerEnv["FOO"])
-		assert.Contains(t, cfg.RemoteEnv["PATH"], "${containerEnv:PATH}")
+		assert.Contains(t, *cfg.RemoteEnv["PATH"], "${containerEnv:PATH}")
 	})
 
 	t.Run("port properties", func(t *testing.T) {
@@ -297,10 +297,6 @@ func TestVariableSubstitution(t *testing.T) {
 		LocalWorkspaceFolder:     "/home/user/project",
 		ContainerWorkspaceFolder: "/workspace",
 		DevcontainerID:           "abc123",
-		ContainerEnv: map[string]string{
-			"PATH":  "/usr/bin:/bin",
-			"SHELL": "/bin/bash",
-		},
 	}
 
 	tests := []struct {
@@ -334,14 +330,11 @@ func TestVariableSubstitution(t *testing.T) {
 			expected: "default",
 		},
 		{
+			// Resolved at exec time from the container's environment
+			// (ResolveContainerEnvRefs), so config substitution keeps it.
 			name:     "${containerEnv:PATH}",
 			input:    "${containerEnv:PATH}",
-			expected: "/usr/bin:/bin",
-		},
-		{
-			name:     "${containerEnv:MISSING:fallback}",
-			input:    "${containerEnv:MISSING:fallback}",
-			expected: "fallback",
+			expected: "${containerEnv:PATH}",
 		},
 		{
 			name:     "mixed substitutions",

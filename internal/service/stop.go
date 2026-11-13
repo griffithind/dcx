@@ -47,7 +47,7 @@ func (s *DevContainerService) Stop(ctx context.Context, opts StopOptions) (StopO
 		return StopNotFound, nil
 	case info == nil || !info.Running:
 		return StopAlreadyStopped, nil
-	case !opts.Force && s.keepRunning():
+	case !opts.Force && s.shutdownAction(info) == "none":
 		return StopSkipped, nil
 	}
 	if err := s.stopContainers(ctx, info, ids.ResourceName); err != nil {
@@ -89,7 +89,7 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 	if opts.Rebuild {
 		return false, s.up(ctx, UpOptions{Recreate: true, Rebuild: true})
 	}
-	if !opts.Force && s.keepRunning() {
+	if !opts.Force && s.shutdownAction(info) == "none" {
 		return true, nil
 	}
 	if info != nil && info.Running {
@@ -101,17 +101,31 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 	return false, s.up(ctx, UpOptions{})
 }
 
-// keepRunning reports whether devcontainer.json sets shutdownAction "none".
-// It reads the file directly (no feature resolution), so stopping works
-// offline.
-func (s *DevContainerService) keepRunning() bool {
-	cfg, _, err := devcontainer.Load(s.workspacePath, s.configPath)
-	return err == nil && cfg.ShutdownAction == "none"
+// shutdownAction is the workspace's shutdownAction: devcontainer.json's
+// own value, else the one recorded on the container at create time (which
+// includes image metadata). The file is read directly (no feature
+// resolution), so stopping works offline.
+func (s *DevContainerService) shutdownAction(info *state.ContainerInfo) string {
+	if cfg, _, err := devcontainer.Load(s.workspacePath, s.configPath); err == nil && cfg.ShutdownAction != "" {
+		return cfg.ShutdownAction
+	}
+	if info != nil && info.Labels != nil {
+		return info.Labels.ShutdownAction
+	}
+	return ""
 }
 
 // stopContainers stops a workspace's container (single) or compose project.
 func (s *DevContainerService) stopContainers(ctx context.Context, info *state.ContainerInfo, projectName string) error {
 	if info.IsSingleContainer() {
+		if err := s.engine.StopContainer(ctx, info.ID, nil); err != nil {
+			return fmt.Errorf("failed to stop container: %w", err)
+		}
+		return nil
+	}
+	// shutdownAction "stopContainer" stops only the dev container; the
+	// compose default ("stopCompose") stops the whole project.
+	if s.shutdownAction(info) == "stopContainer" {
 		if err := s.engine.StopContainer(ctx, info.ID, nil); err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
