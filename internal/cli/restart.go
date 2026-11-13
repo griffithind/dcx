@@ -48,8 +48,8 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if skipped {
-		ui.Println("Skipping restart: shutdownAction is set to 'none'")
-		ui.Println("Use --force to restart anyway")
+		ui.Info("Skipping restart: shutdownAction is set to 'none'")
+		ui.Info("Use --force to restart anyway")
 		return nil
 	}
 	ui.Success("Devcontainer restarted")

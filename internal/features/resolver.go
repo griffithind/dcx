@@ -42,6 +42,10 @@ type DigestInfo struct {
 
 const digestFileName = ".dcx-integrity"
 
+// ociTagTTL is how long a feature fetched by tag is used before the
+// registry is asked again whether the tag moved (D9).
+const ociTagTTL = 24 * time.Hour
+
 // computeIntegrity computes the SHA256 integrity hash of data.
 // Returns format: "sha256:hexstring"
 func computeIntegrity(data []byte) string {
@@ -224,7 +228,14 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	cacheKey := computeCacheKey(ref.CanonicalID())
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID()); hit || err != nil {
+	// A tag (":1", ":latest") moves; a digest or a lockfile pin does not.
+	// Cached tags are re-checked after ociTagTTL, falling back to the
+	// cached copy when the registry cannot be reached.
+	var maxAge time.Duration
+	if lockedManifestDigest == "" && !strings.HasSuffix(ref.Resource, "@sha256") {
+		maxAge = ociTagTTL
+	}
+	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID(), maxAge); hit || err != nil {
 		return err
 	}
 
@@ -241,6 +252,12 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 		return err
 	})
 	if err != nil {
+		if maxAge > 0 {
+			if hit, _ := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID(), 0); hit {
+				r.report.Warnf("Could not refresh %s (%v); using the cached copy", ref.CanonicalID(), err)
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
 
@@ -274,7 +291,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 	cacheKey := computeCacheKey(ref.URL)
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.URL); hit || err != nil {
+	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.URL, 0); hit || err != nil {
 		return err
 	}
 
@@ -310,7 +327,10 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 // An entry is complete only once its digest file exists: fetchInto writes
 // it last and moves the entry into place atomically, so a crashed or
 // failed fetch never leaves an entry that looks usable.
-func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name string) (bool, error) {
+//
+// With maxAge > 0 an entry fetched longer ago is not used (but kept, as a
+// fallback when the refresh fails).
+func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name string, maxAge time.Duration) (bool, error) {
 	if r.forcePull {
 		return false, os.RemoveAll(cachePath)
 	}
@@ -321,6 +341,12 @@ func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name
 	if err != nil {
 		r.report.Infof("  Cached copy of %s is incomplete, re-fetching...", name)
 		return false, os.RemoveAll(cachePath)
+	}
+	if maxAge > 0 {
+		if st, err := os.Stat(filepath.Join(cachePath, digestFileName)); err == nil && time.Since(st.ModTime()) > maxAge {
+			r.report.Infof("  Checking %s for updates...", name)
+			return false, nil
+		}
 	}
 	if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
 		r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", name)

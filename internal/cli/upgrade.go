@@ -44,7 +44,7 @@ type githubRelease struct {
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
-	ui.Printf("Current version: %s", ui.Code(version.Version))
+	ui.Info("Current version: %s", ui.Code(version.Version))
 
 	// Get latest release info
 	release, err := getLatestRelease()
@@ -53,7 +53,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	latestVersion := release.TagName
-	ui.Printf("Latest version:  %s", ui.Code(latestVersion))
+	ui.Info("Latest version:  %s", ui.Code(latestVersion))
 
 	// Compare versions (strip 'v' prefix for comparison)
 	currentClean := strings.TrimPrefix(version.Version, "v")
@@ -108,7 +108,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	spinner.Success(fmt.Sprintf("Successfully upgraded to %s!", latestVersion))
 
-	ui.Printf("Release notes: %s", ui.Code(release.HTMLURL))
+	ui.Info("Release notes: %s", ui.Code(release.HTMLURL))
 
 	return nil
 }

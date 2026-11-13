@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/pterm/pterm"
+	"golang.org/x/term"
 )
 
 // Verbosity represents the output verbosity level.
@@ -54,13 +55,35 @@ func Configure(cfg Config) {
 
 	config = cfg
 
-	if cfg.NoColor {
+	if cfg.NoColor || !colorWanted(cfg.Writer) {
 		pterm.DisableColor()
+		pterm.DisableStyling()
 	} else {
 		pterm.EnableColor()
+		pterm.EnableStyling()
 	}
 
 	pterm.SetDefaultOutput(cfg.Writer)
+}
+
+// colorWanted reports whether output to w should be coloured: it is a
+// terminal, NO_COLOR (https://no-color.org) is unset and TERM is not
+// "dumb".
+func colorWanted(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return isTerminal(w)
+}
+
+// interactive reports whether stdout is a terminal.
+func interactive() bool {
+	return isTerminal(Writer())
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // IsQuiet returns true if quiet mode is enabled.
@@ -105,28 +128,31 @@ func Warning(format string, args ...interface{}) {
 	pterm.Warning.WithWriter(ErrWriter()).Printf(format+"\n", args...)
 }
 
-// Println prints a line if not in quiet mode.
-func Println(args ...interface{}) {
-	if IsQuiet() {
-		return
-	}
-	pterm.Println(args...)
-}
-
-// Printf prints a formatted line if not in quiet mode.
-func Printf(format string, args ...interface{}) {
+// Info prints a progress line ("Creating container...") unless in quiet
+// mode. Library progress (report.Reporter) goes through it.
+func Info(format string, args ...interface{}) {
 	if IsQuiet() {
 		return
 	}
 	pterm.Printf(format+"\n", args...)
 }
 
-// RenderTable renders a table with headers and rows.
-// Does nothing in quiet mode.
+// Println prints a line of output the user asked for (status, lists,
+// reports). Data is printed even in quiet mode, which only silences
+// progress.
+func Println(args ...interface{}) {
+	pterm.Println(args...)
+}
+
+// Printf prints a formatted line of output the user asked for (see
+// Println).
+func Printf(format string, args ...interface{}) {
+	pterm.Printf(format+"\n", args...)
+}
+
+// RenderTable renders a table with headers and rows (data: printed even in
+// quiet mode).
 func RenderTable(headers []string, rows [][]string) error {
-	if IsQuiet() {
-		return nil
-	}
 	data := pterm.TableData{headers}
 	for _, row := range rows {
 		data = append(data, row)
@@ -139,14 +165,27 @@ type Spinner struct {
 	printer *pterm.SpinnerPrinter
 }
 
-// StartSpinner starts a spinner with the given message.
-// Returns a no-op spinner in quiet mode.
+// StartSpinner starts a spinner with the given message. In quiet mode it
+// does nothing; when stdout is not a terminal it prints the message once
+// instead of animating (no \r junk in logs and pipes).
 func StartSpinner(message string) *Spinner {
 	if IsQuiet() {
 		return &Spinner{}
 	}
+	if !interactive() {
+		Info("%s", message)
+		return &Spinner{}
+	}
 	s, _ := pterm.DefaultSpinner.Start(message)
 	return &Spinner{printer: s}
+}
+
+// Stop stops the spinner without a message (the caller reports the
+// outcome, e.g. by returning an error).
+func (s *Spinner) Stop() {
+	if s.printer != nil {
+		_ = s.printer.Stop()
+	}
 }
 
 // Success stops the spinner with a success message.

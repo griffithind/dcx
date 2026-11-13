@@ -20,25 +20,20 @@ func markerInfo(withMarkers bool) *state.ContainerInfo {
 }
 
 func TestContainerMarkersRoundTrip(t *testing.T) {
-	written := map[string]bool{}
 	fake := &containertest.Fake{}
-	fake.ExecFunc = func(_ string, argv []string) error {
-		if len(argv) == 3 && argv[0] == "test" && written[argv[2]] {
-			return nil
-		}
-		return errors.New("missing")
-	}
+	fake.FileMarkers()
 	svc, _ := newTestService(t, fake)
 	m := svc.markersFor(markerInfo(true))
 	require.NotNil(t, m)
 
 	ctx := context.Background()
-	assert.False(t, m.Done(ctx, phaseReady))
+	done, err := m.Done(ctx, phaseReady)
+	require.NoError(t, err)
+	assert.False(t, done)
 	require.NoError(t, m.Mark(ctx, phaseReady))
-	for k := range fake.Files {
-		written[k[len("c1:"):]] = true
-	}
-	assert.True(t, m.Done(ctx, phaseReady))
+	done, err = m.Done(ctx, phaseReady)
+	require.NoError(t, err)
+	assert.True(t, done)
 	assert.Contains(t, fake.Files, "c1:"+lifecycleMarkerDir+"/ready.done")
 
 	mkdirs := fake.CallsTo("MkdirInContainer")
@@ -47,17 +42,30 @@ func TestContainerMarkersRoundTrip(t *testing.T) {
 }
 
 // A running container whose setup never finished must not be reported as
-// "already running"; one created before markers existed must.
+// "already running"; one created before markers existed must; and a
+// container that cannot be asked is an error, not "unfinished".
 func TestSetupComplete(t *testing.T) {
-	fake := &containertest.Fake{ExecFunc: func(string, []string) error { return errors.New("missing") }}
+	fake := &containertest.Fake{}
+	fake.FileMarkers()
 	svc, _ := newTestService(t, fake)
 	ctx := context.Background()
 
-	assert.True(t, svc.setupComplete(ctx, markerInfo(false)), "legacy containers are assumed complete")
-	assert.False(t, svc.setupComplete(ctx, markerInfo(true)), "no ready marker: setup unfinished")
+	done, err := svc.setupComplete(ctx, markerInfo(false))
+	require.NoError(t, err)
+	assert.True(t, done, "legacy containers are assumed complete")
 
-	fake.ExecFunc = nil // every `test -f` succeeds
-	assert.True(t, svc.setupComplete(ctx, markerInfo(true)))
+	done, err = svc.setupComplete(ctx, markerInfo(true))
+	require.NoError(t, err)
+	assert.False(t, done, "no ready marker: setup unfinished")
+
+	fake.Files = map[string][]byte{"c1:" + markerPath(phaseReady): []byte("x")}
+	done, err = svc.setupComplete(ctx, markerInfo(true))
+	require.NoError(t, err)
+	assert.True(t, done)
+
+	fake.OutputFunc = func(string, []string) ([]byte, error) { return nil, errors.New("container not responding") }
+	_, err = svc.setupComplete(ctx, markerInfo(true))
+	assert.Error(t, err)
 }
 
 func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {

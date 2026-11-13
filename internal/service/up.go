@@ -61,6 +61,14 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 	ids := s.Identity()
 
+	// Decide and act under the workspace lock: a concurrent Up would see
+	// the same state and both would create (or recreate) the container.
+	unlock, err := s.lockWorkspace(ctx, resolved.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.WorkspaceID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
@@ -75,7 +83,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	// the /run/secrets tmpfs do not.
 	setupDone, agentUp := false, false
 	if currentState == state.StateRunning {
-		setupDone = s.setupComplete(ctx, existing)
+		if setupDone, err = s.setupComplete(ctx, existing); err != nil {
+			return err
+		}
 		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name, container.SSHListenAddr(existing))
 	}
 	action := decideUp(currentState, setupDone && agentUp, opts)
@@ -412,7 +422,14 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
-	firstStartPending := markers != nil && !markers.Done(ctx, phaseReady)
+	firstStartPending := false
+	if markers != nil {
+		ready, err := markers.Done(ctx, phaseReady)
+		if err != nil {
+			return fmt.Errorf("cannot tell whether setup completed: %w", err)
+		}
+		firstStartPending = !ready
+	}
 	if r.started || firstStartPending {
 		if err := runner.RunStartHooks(ctx); err != nil {
 			return fmt.Errorf("lifecycle hooks failed: %w", err)
@@ -458,9 +475,16 @@ func newHookRunner(s *DevContainerService, resolved *devcontainer.ResolvedDevCon
 
 // setupComplete reports whether a running container finished its setup.
 // Containers created before lifecycle markers existed are assumed complete.
-func (s *DevContainerService) setupComplete(ctx context.Context, info *state.ContainerInfo) bool {
+func (s *DevContainerService) setupComplete(ctx context.Context, info *state.ContainerInfo) (bool, error) {
 	m := s.markersFor(info)
-	return m == nil || m.Done(ctx, phaseReady)
+	if m == nil {
+		return true, nil
+	}
+	done, err := m.Done(ctx, phaseReady)
+	if err != nil {
+		return false, fmt.Errorf("cannot tell whether setup completed: %w", err)
+	}
+	return done, nil
 }
 
 // markersFor returns marker storage for a container, or nil when the
@@ -484,8 +508,15 @@ func markerPath(phase string) string {
 	return path.Join(lifecycleMarkerDir, strings.ReplaceAll(phase, "/", "_")+".done")
 }
 
-func (m *containerMarkers) Done(ctx context.Context, phase string) bool {
-	return m.engine.ExecInContainer(ctx, m.container, []string{"test", "-f", markerPath(phase)}) == nil
+// markerQuery prints "done" when the marker file ($1) exists.
+const markerQuery = `if [ -f "$1" ]; then echo done; fi`
+
+func (m *containerMarkers) Done(ctx context.Context, phase string) (bool, error) {
+	out, err := m.engine.ExecOutput(ctx, m.container, []string{"sh", "-c", markerQuery, "dcx-marker", markerPath(phase)})
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "done", nil
 }
 
 func (m *containerMarkers) Mark(ctx context.Context, phase string) error {

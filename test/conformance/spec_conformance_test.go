@@ -358,55 +358,19 @@ func TestVariableSubstitution(t *testing.T) {
 	}
 }
 
-// TestUserEnvProbe verifies userEnvProbe implementation.
-func TestUserEnvProbe(t *testing.T) {
-	tests := []struct {
-		name        string
-		probeType   env.ProbeType
-		expectedCmd []string
-	}{
-		{
-			name:        "none",
-			probeType:   env.ProbeNone,
-			expectedCmd: nil,
-		},
-		{
-			name:        "loginShell",
-			probeType:   env.ProbeLoginShell,
-			expectedCmd: []string{"sh", "-l", "-c", "env"},
-		},
-		{
-			name:        "loginInteractiveShell",
-			probeType:   env.ProbeLoginInteractiveShell,
-			expectedCmd: []string{"sh", "-l", "-i", "-c", "env"},
-		},
-		{
-			name:        "interactiveShell",
-			probeType:   env.ProbeInteractiveShell,
-			expectedCmd: []string{"sh", "-i", "-c", "env"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := env.ProbeCommand(tt.probeType)
-			assert.Equal(t, tt.expectedCmd, cmd)
-		})
-	}
-}
-
-// TestParseProbeType verifies probe type parsing.
+// TestParseProbeType verifies probe type parsing: unset means
+// loginInteractiveShell, the spec's default.
 func TestParseProbeType(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected env.ProbeType
 	}{
 		{"none", env.ProbeNone},
-		{"", env.ProbeNone},
+		{"", env.ProbeLoginInteractiveShell},
 		{"loginShell", env.ProbeLoginShell},
 		{"loginInteractiveShell", env.ProbeLoginInteractiveShell},
 		{"interactiveShell", env.ProbeInteractiveShell},
-		{"invalid", env.ProbeNone},
+		{"invalid", env.ProbeLoginInteractiveShell},
 	}
 
 	for _, tt := range tests {

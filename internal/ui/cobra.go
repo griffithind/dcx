@@ -1,6 +1,7 @@
 package ui
 
-// CobraOutWriter wraps stdout for Cobra, respecting quiet mode.
+// CobraOutWriter wraps stdout for Cobra (help, version: output the user
+// asked for, so it is printed even in quiet mode).
 // It delegates to ui.Writer() at write-time, so it automatically uses
 // the configured writer after ui.Configure() is called.
 type CobraOutWriter struct{}
@@ -11,9 +12,6 @@ func NewCobraOutWriter() *CobraOutWriter {
 }
 
 func (w *CobraOutWriter) Write(p []byte) (n int, err error) {
-	if IsQuiet() {
-		return len(p), nil // Suppress in quiet mode
-	}
 	return Writer().Write(p)
 }
 

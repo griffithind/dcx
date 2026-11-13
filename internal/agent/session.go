@@ -20,6 +20,7 @@ import (
 	"github.com/gliderlabs/ssh"
 	"github.com/griffithind/dcx/internal/agentproto"
 	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/sys/unix"
 )
 
 // defaultHangupGrace is how long a session's processes get to exit after
@@ -284,22 +285,22 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 	// closed terminal.
 	var ptmxMu sync.Mutex
 	ptmxClosed := false
-	defer func() {
+	closePTY := func() {
 		ptmxMu.Lock()
 		defer ptmxMu.Unlock()
-		ptmxClosed = true
-		_ = ptmx.Close()
-	}()
+		if !ptmxClosed {
+			ptmxClosed = true
+			_ = ptmx.Close()
+		}
+	}
+	defer closePTY()
 	stop := superviseProcess(sess, cmd.Process.Pid, s.hangupGrace)
 	defer stop()
 	go func() {
 		for win := range winCh {
 			ptmxMu.Lock()
 			if !ptmxClosed {
-				_ = pty.Setsize(ptmx, &pty.Winsize{
-					Rows: uint16(win.Height),
-					Cols: uint16(win.Width),
-				})
+				_ = setWinsize(ptmx, uint16(win.Height), uint16(win.Width))
 			}
 			ptmxMu.Unlock()
 		}
@@ -308,10 +309,63 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 	go func() {
 		_, _ = io.Copy(ptmx, sess)
 	}()
-	_, _ = io.Copy(sess, ptmx)
+	copied := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(sess, ptmx)
+		close(copied)
+	}()
 
-	exitSession(sess, cmd.Wait())
+	// The session ends with its command. Reading the terminal only stops
+	// once every process holding it has closed it, so a background job
+	// left running would keep the session open forever: after the command
+	// exits, drain what it wrote for a moment, then close the terminal
+	// (which hangs up the job, as closing an ssh session does).
+	waitErr := cmd.Wait()
+	select {
+	case <-copied:
+	case <-time.After(ptyDrainTimeout):
+		closePTY()
+		<-copied
+	}
+	exitSession(sess, waitErr)
 }
+
+// pollable returns f re-opened in non-blocking mode, so Go's poller serves
+// its reads and Close interrupts a pending one. pty.Open leaves the master
+// in blocking mode (its ioctls go through File.Fd), where a read blocked on
+// a terminal another process still holds can never be cancelled.
+func pollable(f *os.File) (*os.File, error) {
+	fd, err := unix.FcntlInt(f.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("dup pty: %w", err)
+	}
+	if err := unix.SetNonblock(fd, true); err != nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("pty non-blocking: %w", err)
+	}
+	_ = f.Close()
+	return os.NewFile(uintptr(fd), f.Name()), nil
+}
+
+// setWinsize resizes the terminal without File.Fd, which would put the
+// master back into blocking mode.
+func setWinsize(f *os.File, rows, cols uint16) error {
+	sc, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var ioctlErr error
+	if err := sc.Control(func(fd uintptr) {
+		ioctlErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, &unix.Winsize{Row: rows, Col: cols})
+	}); err != nil {
+		return err
+	}
+	return ioctlErr
+}
+
+// ptyDrainTimeout bounds how long a PTY session keeps copying output after
+// its command exited while something else still holds the terminal.
+const ptyDrainTimeout = 250 * time.Millisecond
 
 // startPTY starts cmd on a new pseudo-terminal as a session leader
 // (Setsid), so the whole job can be signalled through its process group.
@@ -319,13 +373,18 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 // session user: tools that reopen /dev/tty (sudo, ssh, gpg pinentry) fail
 // on a root-owned terminal.
 func startPTY(cmd *exec.Cmd, size *pty.Winsize) (*os.File, error) {
-	ptmx, tty, err := pty.Open()
+	opened, tty, err := pty.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tty.Close() }()
+	ptmx, err := pollable(opened)
+	if err != nil {
+		_ = opened.Close()
+		return nil, err
+	}
 
-	if err := pty.Setsize(ptmx, size); err != nil {
+	if err := setWinsize(ptmx, size.Rows, size.Cols); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to set PTY size: %v\n", err)
 	}
 	if cmd.SysProcAttr == nil {

@@ -1,5 +1,7 @@
 # dcx audit and refactor plan
 
+> **Historical.** All of this is done and later superseded by the [second](second-audit.md) and [third](third-audit.md) audits. The code may have changed since. For the current architecture and rules, see [CLAUDE.md](../CLAUDE.md).
+
 _Audit date: 2026-11-13, commit `d8e5673`._
 
 ## How this was produced

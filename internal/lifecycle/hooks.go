@@ -94,8 +94,12 @@ func (r *HookRunner) shouldBlock(cmd WaitFor) bool {
 // Markers records which once-per-container lifecycle phases have completed,
 // so an interrupted or failed setup resumes where it stopped instead of
 // re-running finished hooks (or never running the rest).
+//
+// Done fails closed: when it cannot tell (the container did not answer)
+// it returns an error rather than "not done", which would re-run a
+// once-only hook.
 type Markers interface {
-	Done(ctx context.Context, phase string) bool
+	Done(ctx context.Context, phase string) (bool, error)
 	Mark(ctx context.Context, phase string) error
 }
 
@@ -133,11 +137,17 @@ func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error 
 			r.report.Infof("Container is ready (remaining hooks running...)")
 			readyPrinted = true
 		}
-		if markers != nil && markers.Done(ctx, p.name) {
-			if len(p.hooks) > 0 {
-				r.report.Infof("Skipping %s (already completed)", p.name)
+		if markers != nil {
+			done, err := markers.Done(ctx, p.name)
+			if err != nil {
+				return fmt.Errorf("cannot tell whether %s already ran: %w", p.name, err)
 			}
-			continue
+			if done {
+				if len(p.hooks) > 0 {
+					r.report.Infof("Skipping %s (already completed)", p.name)
+				}
+				continue
+			}
 		}
 		if err := r.runPhase(ctx, p.name, p.hooks, r.execContainer); err != nil {
 			return err

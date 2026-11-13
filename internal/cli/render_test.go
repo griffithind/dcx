@@ -62,6 +62,9 @@ func runningReport() *service.StatusReport {
 		},
 		ConfigHash: "0123456789abcdef0123",
 		Shortcuts:  2,
+		PlanType:   devcontainer.PlanTypeImage,
+		BaseImage:  "mcr.microsoft.com/devcontainers/go:1",
+		Features:   []string{"ghcr.io/devcontainers/features/docker-in-docker:2", "ghcr.io/devcontainers/features/node:1"},
 		Image:      "dcx/abcd1234efgh:uid-0123",
 		StartedAt:  "2026-11-13T10:00:00Z",
 	}
@@ -77,6 +80,18 @@ func TestRenderStatus(t *testing.T) {
 		State:         state.StateAbsent,
 	}
 	golden(t, "status_absent", captureUI(t, func() { renderStatus(absent, true) }))
+
+	stale := runningReport()
+	stale.State, stale.ConfigHash = state.StateStale, "fedcba9876543210fedc"
+	golden(t, "status_stale", captureUI(t, func() { renderStatus(stale, false) }))
+
+	broken := &service.StatusReport{
+		WorkspacePath: "/home/dev/broken",
+		Identity:      &devcontainer.Identity{WorkspaceID: "bbbb1111cccc"},
+		State:         state.StateAbsent,
+		ConfigError:   "failed to load configuration: invalid character '}' looking for beginning of object key string",
+	}
+	golden(t, "status_config_error", captureUI(t, func() { renderStatus(broken, false) }))
 }
 
 func TestRenderList(t *testing.T) {
@@ -109,12 +124,15 @@ func marshal(t *testing.T, v any) string {
 // The --json outputs are a contract for scripts and tests; golden files
 // make any change to them deliberate.
 func TestStatusAndListJSON(t *testing.T) {
-	golden(t, "status_running.json", marshal(t, statusToJSON(runningReport())))
+	golden(t, "status_running.json", marshal(t, statusToJSON(runningReport(), false)))
+	detailed := statusToJSON(runningReport(), true)
+	detailed.Detail.DCXVersion, detailed.Detail.Platform = "VERSION", "OS/ARCH"
+	golden(t, "status_detailed.json", marshal(t, detailed))
 	golden(t, "status_absent.json", marshal(t, statusToJSON(&service.StatusReport{
 		WorkspacePath: "/home/dev/empty",
 		Identity:      &devcontainer.Identity{WorkspaceID: "zzzz9999yyyy", Name: "empty", ResourceName: "empty-zzzz9999"},
 		State:         state.StateAbsent,
-	})))
+	}, false)))
 	created := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
 	golden(t, "list.json", marshal(t, listToJSON([]service.Environment{{
 		WorkspaceID: "abcd1234efgh", Name: "myapp", WorkspacePath: "/home/dev/myapp", State: state.StateRunning,

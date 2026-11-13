@@ -1,5 +1,7 @@
 # dcx second audit (after the Phase 0–8 refactor)
 
+> **Historical.** All of this is done and later superseded by the [third audit](third-audit.md). The code may have changed since. For the current architecture and rules, see [CLAUDE.md](../CLAUDE.md).
+
 **Question:** should dcx be re-engineered or re-architected? Is it a clean codebase? How much naming and structure is left over from the past, and should it be cleaned up aggressively?
 
 **Short answer:** no rewrite and no new architecture. The layering (cli → service → container → domain) is real. The import graph has no cycles and points the right way. The packages refactored in Phases 2–8 are clean. What remains falls into three groups:

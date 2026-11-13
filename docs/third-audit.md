@@ -257,6 +257,34 @@ Regression tests: unit tests for the endpoint (published/recorded, port collisio
 
 Tests added: the hash pin; `lifecyclecmd` parse, steps, round-trip and substitution tests; GPU form and validation tests; feature option substitution; entrypoint spec tests, including the chain script run under a real `sh`; a golden case for image-metadata hooks and hook order. The new e2e test runs a local feature's entrypoint and its postCreateCommand before devcontainer.json's (127 e2e tests).
 
+**Step 6 (UX, docs and hardening): done.** With it, all six steps of this audit are complete.
+- **Output:**
+  - `ui.Printf`/`Println`/tables are data, printed even with `--quiet`. `ui.Info` and the reporter are progress, which `--quiet` silences. Cobra help and version always print.
+  - Colour and styling are off with `--no-color`, `NO_COLOR`, `TERM=dumb` or a non-terminal stdout. Off a terminal the spinner prints its message once instead of `\r` frames.
+  - `lock` no longer prints its failure twice.
+- **R18:** every `docker` call in `container/docker.go` that captures output goes through `runOutput`, which puts docker's stderr in the error. That includes the daemon check, which no longer says just "exit status 1".
+- **status:**
+  - `status` no longer needs a reachable daemon up front. A config that can't be resolved shows as `Config: <error>`, and without any config that error leads, not Docker's.
+  - Stale containers say why ("config changed (container …, now …)").
+  - `debug` is deleted; `status --detailed --json` adds a `detail` object (dcx version, platform, plan type, base image, resolved features in order, stale reason, labels), with golden tests.
+- **JSON:** `config --json` and `ssh info --json` use camelCase keys and the image/dockerfile/compose plan vocabulary (no more `single`). All JSON goes through `printJSON`, without HTML escaping.
+- **Help:**
+  - `up --pull`/`build --pull` say they re-pull the base image (and that `up --pull` applies on create);
+  - `lock --update` is deprecated;
+  - `debug -p` is gone with `debug`.
+- **R12:** a PTY session ends when its command exits, even with a background job holding the terminal. The master is made pollable (pty.Open had left it blocking, so `Close` couldn't interrupt the read), output is drained for 250ms, then the terminal is closed. The regression test hung on the old code.
+- **R13, R17, D8:** the probe runs the user's login shell (getent, `/etc/passwd`, then `/bin/sh`) with the probe flags as positional arguments. It prints a marker and then `/proc/self/environ`, so startup noise and multi-line values (bash functions) can't corrupt it. Unset `userEnvProbe` now means `loginInteractiveShell`, as in the spec.
+- **R14, R15:** `/etc/environment` is read with "missing file reads empty", and any other read error aborts instead of rewriting without the user's lines. Values with `"` or `\` are skipped (sessions still get them).
+- **R16:** `Markers.Done` returns an error when the container can't be asked. The runner, `setupComplete` and `stepHooks` fail instead of re-running once-only hooks.
+- **R19:** values written to `~/.ssh/dcx/config` (user, container name, alias) are rejected if they contain whitespace, quotes, `#`, `\` or control characters.
+- **R20:** `Up` holds `~/.dcx/locks/<workspace>.lock` (a second `up` waits and says so). `EnsureHostKey` writes a unique temp file and links it into place, so concurrent creators agree on one key. `writeAtomic` uses unique temp names.
+- **R21:** `/run/secrets` is 16 MiB (a cap; tmpfs uses only what it holds). Runtime secrets that don't fit fail upfront with a clear message.
+- **D7:** `ResolveWorkspace` validates the local config, so more than one of image/build/dockerComposeFile is an error that names them.
+- **D9:** OCI features fetched by tag are re-checked after 24h, with the cached copy as fallback when the registry is unreachable. Digest references and lockfile pins are not re-checked.
+- **Docs:** CLAUDE.md's Up data flow is rewritten from the code, and its package list now matches `ls internal`. The README's naming, hooks example, flags, make target and upgrade notes are fixed. The earlier audits carry a "historical" banner.
+
+Tests added: PTY with a background job, a real probe script run, probe parsing, `/etc/environment` read failure and value escaping, fail-closed markers (runner and service), the SSH config injection, the workspace lock, oversized secrets, ambiguous config, the feature cache TTL, and status goldens (stale, config error, detailed JSON).
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

@@ -109,7 +109,12 @@ make build
 **`dcx up` flags:**
 - `--rebuild` - Force rebuild images
 - `--recreate` - Force recreate containers
-- `--pull` - Re-fetch remote features (useful when `:latest` tags update)
+- `--pull` - Re-pull the base image and re-fetch features (for moving tags like `:latest`); applies when the container is created, so add `--recreate` for an existing one
+- `--hosts` - Allow SSH from more than loopback (`--hosts=10.0.0.0/24`, `--hosts=any`, `--hosts=loopback`). It is recorded on the container and kept by `up`, `restart` and `--recreate`; changing it needs `--recreate`
+
+**`dcx down` flags:** `--volumes` (also remove named volumes), `--remove-orphans`
+
+**`dcx stop` / `dcx restart` flags:** `--force` (ignore `shutdownAction: "none"`); `restart --rebuild`
 
 ### Execution
 
@@ -123,8 +128,8 @@ make build
 
 | Command | Description |
 |---------|-------------|
-| `dcx status` | Show devcontainer status |
-| `dcx list` | List all managed devcontainers |
+| `dcx status` | Show devcontainer status (`--detailed`, `--json`) |
+| `dcx list` | List all managed devcontainers (`--all`, `--json`) |
 | `dcx logs` | View container logs |
 | `dcx config` | Show resolved configuration |
 
@@ -134,11 +139,15 @@ make build
 |---------|-------------|
 | `dcx build` | Build images without starting |
 | `dcx lock` | Generate or verify lockfile for reproducible builds |
-| `dcx clean` | Remove orphaned dcx images |
+| `dcx clean` | Remove unused dcx images (`--current`, `--all`, `--dangling`, `--dry-run`) |
 | `dcx doctor` | Check system requirements |
-| `dcx debug` | Show detailed debugging information |
 | `dcx upgrade` | Update dcx to latest version |
-| `dcx ssh info` | SSH alias, host key and connection details |
+| `dcx ssh info` | SSH alias, host key and connection details (`--json`, `--doctor`) |
+
+`dcx status --detailed --json` shows what the old hidden `dcx debug` did:
+the resolved plan and features, why a container is stale, and its labels.
+JSON output (`status`, `list`, `config`, `ssh info`) uses stable camelCase
+keys.
 
 ### Global Flags
 
@@ -146,8 +155,8 @@ make build
 -w, --workspace   Workspace directory (default: current directory)
 -c, --config      Path to devcontainer.json
 -v, --verbose     Enable verbose output
--q, --quiet       Minimal output (errors only)
-    --no-color    Disable colored output
+-q, --quiet       No progress output (data you asked for, errors and warnings still print)
+    --no-color    Disable colored output (also off with NO_COLOR or when not on a terminal)
 ```
 
 ## Configuration
@@ -174,12 +183,16 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
 
 ### Project Naming
 
-Project name resolution order:
-1. **Compose projects**: `name` field in compose.yaml (preferred)
-2. `name` field in devcontainer.json
-3. Workspace directory name (fallback)
-
-The resolved name is used for container naming, SSH host (`myproject.dcx`), and display in `dcx status`.
+- **Name:** `name` in devcontainer.json, or the workspace directory name.
+  It is what `dcx status` and `dcx list` show.
+- **SSH alias:** `<sanitized name>.dcx` (`My App` → `my_app.dcx`); with no
+  `name` it is `<workspace id>.dcx`. When another workspace already uses
+  the alias, this one is reached as `<container>.dcx` (`dcx ssh info`
+  shows it).
+- **Container / compose project:** `<sanitized name>-<first 8 characters
+  of the workspace id>`, so two checkouts with the same `name` never
+  collide. A top-level `name:` in your compose files sets the compose
+  project instead.
 
 ### Shortcuts
 
@@ -369,9 +382,16 @@ Commands run at specific points in the container lifecycle:
 {
   "onCreateCommand": "npm install",
   "postCreateCommand": "npm run setup",
-  "postStartCommand": "npm run dev"
+  "postStartCommand": "nohup npm run dev > /tmp/dev.log 2>&1 &"
 }
 ```
+
+Hooks run in the foreground and `dcx up` waits for them, so start
+long-running processes in the background (as above) or with your compose
+file. A hook can be a string (run with `sh -c`), an array (run directly)
+or an object of named commands (run in parallel). Hooks from the base
+image's metadata run first, then those of features (in install order),
+then devcontainer.json's.
 
 | Hook | When | Runs |
 |------|------|------|
@@ -422,7 +442,16 @@ Changes since 0.7 that affect existing setups:
 - Shortcuts run through `sh -c`, so shell syntax in `command`/`prefix`
   works; extra arguments are passed unchanged as `"$@"`.
 - `dcx plan` is gone; `dcx status` shows the state and whether the config
-  changed.
+  changed. The hidden `dcx debug` is gone too: use `dcx status --detailed --json`.
+- `--quiet` silences progress only; status, lists and other output you
+  asked for still print. Colour is off when output is not a terminal.
+- The agent runs as root and switches to the session user per session.
+- `userEnvProbe` defaults to `loginInteractiveShell` (the spec default) and
+  uses the user's login shell, so nvm/asdf PATH entries reach hooks and
+  sessions. Set `"userEnvProbe": "none"` to turn it off.
+- JSON keys of `config --json` and `ssh info --json` are camelCase.
+- A config that sets more than one of `image`, `build` and
+  `dockerComposeFile` is rejected instead of silently picking one.
 - Containers from older versions keep working; run `dcx up --recreate` to
   pick up every change.
 
@@ -449,7 +478,7 @@ make build
 make test
 
 # Build release binaries
-make build-release
+make release
 
 # Run with verbose output
 ./bin/dcx -v up

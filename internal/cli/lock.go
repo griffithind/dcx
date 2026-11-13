@@ -37,7 +37,8 @@ Per the devcontainer specification:
 }
 
 func init() {
-	lockCmd.Flags().BoolVar(&lockUpdate, "update", false, "update existing lockfile with new features (same as no flags)")
+	lockCmd.Flags().BoolVar(&lockUpdate, "update", false, "")
+	_ = lockCmd.Flags().MarkDeprecated("update", "it is the default; run 'dcx lock'")
 	lockCmd.Flags().BoolVar(&lockVerify, "verify", false, "verify lockfile matches resolved features without updating")
 	lockCmd.Flags().BoolVar(&lockFrozen, "frozen", false, "fail if lockfile doesn't exist or doesn't match (CI mode)")
 	lockCmd.GroupID = "maintenance"
@@ -72,9 +73,9 @@ func runLock(cmd *cobra.Command, args []string) error {
 		Mode: mode,
 	})
 
-	// Stop spinner with appropriate message
+	// The error itself is printed once, by Execute.
 	if err != nil {
-		spinner.Fail("Lockfile operation failed")
+		spinner.Stop()
 		return err
 	}
 

@@ -264,7 +264,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	if skipped, err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
 		s.report.Warnf("Failed to patch /etc/environment: %v", err)
 	} else if len(skipped) > 0 {
-		s.report.Warnf("Not written to /etc/environment (invalid name or multi-line value): %s", strings.Join(skipped, ", "))
+		s.report.Warnf("Not written to /etc/environment (name or value it cannot express; sessions still get them): %s", strings.Join(skipped, ", "))
 	}
 
 	// Patch /etc/profile to preserve PATH from features
@@ -275,11 +275,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		s.report.Warnf("Failed to patch /etc/profile: %v", err)
 	}
 
-	// Probe user environment if configured
-	if resolved.UserEnvProbe == "" || resolved.UserEnvProbe == "none" {
-		return nil, remoteEnv, nil
-	}
-
+	// Probe the user environment (loginInteractiveShell unless configured).
 	probeType := env.ParseProbeType(resolved.UserEnvProbe)
 	if probeType == env.ProbeNone {
 		return nil, remoteEnv, nil
@@ -290,7 +286,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	user := resolved.EffectiveUser
 
 	if s.verbose {
-		s.report.Infof("  [env] Probing user environment (mode: %s)...", resolved.UserEnvProbe)
+		s.report.Infof("  [env] Probing user environment (mode: %s)...", probeType)
 	}
 
 	probedEnv, err := prober.Probe(ctx, containerInfo.ID, probeType, user)

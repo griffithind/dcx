@@ -1,0 +1,13 @@
+Workspace: /home/dev/myapp
+Project: myapp-abcd1234
+Workspace ID: abcd1234efgh
+State: stale
+SSH: ssh myapp.dcx
+Shortcuts: 2 defined (use 'dcx run --list' to view)
+Stale: config changed (container 0123456789ab, now fedcba987654); 'dcx up' recreates it
+
+Primary Container
+  ID: f00dfeedbeef
+  Name: myapp-abcd1234
+  Status: running
+  Config: 0123456789ab

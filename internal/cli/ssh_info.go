@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/griffithind/dcx/internal/report"
 
@@ -38,12 +37,12 @@ func init() {
 type sshInfo struct {
 	Workspace   string   `json:"workspace"`
 	Host        string   `json:"host"` // the ~/.ssh/config Host alias (workspace.dcx)
-	BindAddress string   `json:"bind_address"`
+	BindAddress string   `json:"bindAddress"`
 	Port        int      `json:"port"`
-	HostKey     string   `json:"host_key_fingerprint"`
-	HostKeyFile string   `json:"host_key_file"`
-	AllowedIPs  []string `json:"allowed_ips"`
-	KnownPinned bool     `json:"known_hosts_pinned"`
+	HostKey     string   `json:"hostKeyFingerprint"`
+	HostKeyFile string   `json:"hostKeyFile"`
+	AllowedIPs  []string `json:"allowedIPs"`
+	KnownPinned bool     `json:"knownHostsPinned"`
 }
 
 func runSSHInfo(cmd *cobra.Command, args []string) error {
@@ -88,9 +87,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	if sshInfoJSON {
-		data, _ := json.MarshalIndent(info, "", "  ")
-		fmt.Println(string(data))
-		return nil
+		return printJSON(info)
 	}
 
 	ui.Printf("Workspace:  %s", info.Workspace)

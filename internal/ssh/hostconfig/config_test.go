@@ -415,3 +415,19 @@ func TestSSHDirOverride(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "~/.ssh must not be touched")
 	assert.Equal(t, filepath.Join(dir, "config"), ConfigFileOverride())
 }
+
+// Values reach ssh_config lines verbatim (R19): one with a newline could
+// inject directives (e.g. ProxyCommand).
+func TestAddSSHConfigRejectsUnsafeValues(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(SSHDirEnv, t.TempDir())
+	for _, user := range []string{"dev\n  ProxyCommand touch /tmp/pwned", "a b", `a"b`, "#x"} {
+		_, err := AddSSHConfig(Entry{HostName: "x.dcx", ContainerName: "x-1234", User: user, Port: 40000})
+		if err == nil {
+			t.Errorf("user %q was accepted", user)
+		}
+	}
+	if _, err := AddSSHConfig(Entry{HostName: "x.dcx", ContainerName: "x-1234", User: "dev-user_1", Port: 40000}); err != nil {
+		t.Errorf("a normal user was rejected: %v", err)
+	}
+}

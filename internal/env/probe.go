@@ -2,7 +2,6 @@
 package env
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"strings"
@@ -17,41 +16,60 @@ type ProbeType string
 const (
 	// ProbeNone disables environment probing.
 	ProbeNone ProbeType = "none"
-	// ProbeLoginShell probes using a login shell (sh -l -c).
+	// ProbeLoginShell probes using the user's login shell as a login shell.
 	ProbeLoginShell ProbeType = "loginShell"
-	// ProbeLoginInteractiveShell probes using a login interactive shell (sh -l -i -c).
+	// ProbeLoginInteractiveShell probes using the user's shell as a login,
+	// interactive shell (the spec default).
 	ProbeLoginInteractiveShell ProbeType = "loginInteractiveShell"
-	// ProbeInteractiveShell probes using an interactive shell (sh -i -c).
+	// ProbeInteractiveShell probes using the user's shell as an
+	// interactive shell.
 	ProbeInteractiveShell ProbeType = "interactiveShell"
 )
 
-// ProbeCommand returns the shell command arguments to use for probing.
+// probeScript runs the user's login shell (from the passwd database,
+// /bin/sh when there is none) with the probe's flags ("$@") and prints its
+// environment: a marker, then /proc/self/environ. The environment is
+// NUL-separated, so multi-line values (exported bash functions) survive,
+// and the marker separates it from anything the shell's startup files
+// print. Nothing is interpolated into the script.
+const probeScript = `user=$(id -un)
+shell=$(getent passwd "$user" 2>/dev/null | cut -d: -f7)
+[ -n "$shell" ] || shell=$(awk -F: -v u="$user" '$1 == u { print $7 }' /etc/passwd 2>/dev/null)
+[ -n "$shell" ] && [ -x "$shell" ] || shell=/bin/sh
+exec "$shell" "$@" -c 'printf "\n` + probeMarker + `\0"; cat /proc/self/environ'`
+
+// probeMarker precedes the environment in the probe's output.
+const probeMarker = "__DCX_ENV__"
+
+// ProbeCommand returns the command that probes the environment, or nil
+// for ProbeNone.
 func ProbeCommand(probeType ProbeType) []string {
+	var flags []string
 	switch probeType {
 	case ProbeLoginShell:
-		return []string{"sh", "-l", "-c", "env"}
+		flags = []string{"-l"}
 	case ProbeLoginInteractiveShell:
-		return []string{"sh", "-l", "-i", "-c", "env"}
+		flags = []string{"-l", "-i"}
 	case ProbeInteractiveShell:
-		return []string{"sh", "-i", "-c", "env"}
+		flags = []string{"-i"}
 	default:
 		return nil
 	}
+	return append([]string{"sh", "-c", probeScript, "dcx-probe"}, flags...)
 }
 
-// ParseProbeType parses a string into a ProbeType.
+// ParseProbeType parses userEnvProbe. Unset (and unknown values) mean
+// loginInteractiveShell, the spec's default.
 func ParseProbeType(s string) ProbeType {
 	switch s {
+	case "none":
+		return ProbeNone
 	case "loginShell":
 		return ProbeLoginShell
-	case "loginInteractiveShell":
-		return ProbeLoginInteractiveShell
 	case "interactiveShell":
 		return ProbeInteractiveShell
-	case "none", "":
-		return ProbeNone
 	default:
-		return ProbeNone
+		return ProbeLoginInteractiveShell
 	}
 }
 
@@ -94,16 +112,16 @@ func (p *Prober) Probe(ctx context.Context, containerID string, probeType ProbeT
 	return env, nil
 }
 
-// parseEnvOutput parses the output of 'env' command into a map.
+// parseEnvOutput parses the probe's output: whatever the shell printed,
+// the marker, then NUL-separated KEY=VALUE entries.
 func parseEnvOutput(output string) map[string]string {
 	env := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if idx := strings.Index(line, "="); idx > 0 {
-			key := line[:idx]
-			value := line[idx+1:]
-			env[key] = value
+	if i := strings.LastIndex(output, probeMarker+"\x00"); i >= 0 {
+		output = output[i+len(probeMarker)+1:]
+	}
+	for _, entry := range strings.Split(output, "\x00") {
+		if idx := strings.Index(entry, "="); idx > 0 {
+			env[entry[:idx]] = entry[idx+1:]
 		}
 	}
 	return env

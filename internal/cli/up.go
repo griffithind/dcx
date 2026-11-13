@@ -34,7 +34,7 @@ Lifecycle hooks run as appropriate based on the action taken.`,
 func init() {
 	upCmd.Flags().BoolVar(&recreate, "recreate", false, "force recreate containers")
 	upCmd.Flags().BoolVar(&rebuild, "rebuild", false, "force rebuild images")
-	upCmd.Flags().BoolVar(&pull, "pull", false, "force re-fetch remote features (useful when feature tags like :latest are updated)")
+	upCmd.Flags().BoolVar(&pull, "pull", false, "re-pull the base image and re-fetch features (for moving tags like :latest); applies when the container is created, so add --recreate for an existing one")
 	upCmd.Flags().StringVar(&hostsArg, "hosts", "", "widen SSH access beyond loopback when creating the container (e.g. --hosts=10.0.0.0/24, --hosts=any, --hosts=loopback); kept until changed with --recreate")
 }
 

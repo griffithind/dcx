@@ -43,12 +43,15 @@ func NewPatcher(engine container.Engine) *Patcher {
 //
 // The file content is built here and written through the engine (stdin to
 // a fixed command): values are never spliced into a shell script.
-// Variables whose value contains a newline cannot be expressed in the
-// file format and are returned as skipped.
+// Variables whose value the file format cannot express (newlines, quotes,
+// backslashes) are returned as skipped; sessions still get them through
+// the agent's session configuration.
 func (p *Patcher) PatchEtcEnvironment(ctx context.Context, containerName string, env map[string]string) (skipped []string, err error) {
-	current, err := p.engine.ExecOutput(ctx, containerName, []string{"cat", etcEnvironment})
+	// Only a missing file reads as empty: any other failure must not make
+	// the rewrite drop the lines that are there.
+	current, err := p.engine.ExecOutput(ctx, containerName, readIfExists)
 	if err != nil {
-		current = nil // a missing file is fine
+		return nil, fmt.Errorf("read %s: %w", etcEnvironment, err)
 	}
 	content, skipped := renderEtcEnvironment(string(current), env)
 	if content == string(current) {
@@ -63,6 +66,9 @@ func (p *Patcher) PatchEtcEnvironment(ctx context.Context, containerName string,
 	_, _ = p.engine.ExecAsRoot(ctx, containerName, []string{"rm", "-f", legacyMarkerEtcEnvironment})
 	return skipped, nil
 }
+
+// readIfExists prints /etc/environment, or nothing when it does not exist.
+var readIfExists = []string{"sh", "-c", `if [ -e "$1" ]; then cat "$1"; fi`, "dcx-read", etcEnvironment}
 
 // renderEtcEnvironment returns current with dcx's block replaced by one
 // holding env (sorted), or removed when env is empty.
@@ -89,7 +95,9 @@ func renderEtcEnvironment(current string, env map[string]string) (string, []stri
 	var block, skipped []string
 	for _, k := range keys {
 		v := env[k]
-		if !validEnvKey(k) || strings.ContainsAny(v, "\n\r") {
+		// pam_env reads KEY="value" without escapes: a quote or backslash
+		// would end or alter the value.
+		if !validEnvKey(k) || strings.ContainsAny(v, "\n\r\"\\") {
 			skipped = append(skipped, k)
 			continue
 		}

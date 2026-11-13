@@ -2,6 +2,7 @@ package devcontainer
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -63,8 +64,15 @@ func Validate(cfg *DevContainerConfig) error {
 			Message: "must specify one of: image, build, or dockerComposeFile",
 		})
 	} else if count > 1 {
+		set := []string{}
+		for name, ok := range map[string]bool{"image": hasImage, "build": hasBuild, "dockerComposeFile": hasCompose} {
+			if ok {
+				set = append(set, name)
+			}
+		}
+		sort.Strings(set)
 		errs = append(errs, ValidationError{
-			Message: "cannot specify both image/build and dockerComposeFile",
+			Message: "set only one of image, build or dockerComposeFile (found " + strings.Join(set, ", ") + ")",
 		})
 	}
 

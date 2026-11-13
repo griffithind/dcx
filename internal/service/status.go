@@ -27,7 +27,15 @@ type StatusReport struct {
 	// ConfigHash is the current staleness key, "" when the config could not
 	// be fully resolved (then staleness is not judged).
 	ConfigHash string
-	Shortcuts  int
+	// ConfigError says why the config could not be resolved ("" when it
+	// was).
+	ConfigError string
+	Shortcuts   int
+
+	// From the resolved config, when it could be resolved.
+	PlanType  devcontainer.PlanType
+	BaseImage string
+	Features  []string // resolved, in install order
 
 	// Filled in only when detailed output was requested.
 	Image     string
@@ -45,14 +53,24 @@ func (s *DevContainerService) Status(ctx context.Context, detailed bool) (*Statu
 	var err error
 	if resolved, rerr := s.Load(ctx); rerr == nil {
 		r.Config, r.ConfigHash = resolved.Config, resolved.ConfigHash
+		r.PlanType, r.BaseImage = resolved.Plan.Type(), resolved.BaseImage
+		for _, f := range resolved.Features {
+			r.Features = append(r.Features, f.ID)
+		}
 		r.State, r.Container, err = s.stateManager.StateWithHash(ctx, ids.WorkspaceID, resolved.ConfigHash)
 	} else {
+		r.ConfigError = rerr.Error()
 		if cfg, _, lerr := devcontainer.Load(s.workspacePath, s.configPath); lerr == nil {
 			r.Config = cfg
 		}
 		r.State, r.Container, err = s.stateManager.State(ctx, ids.WorkspaceID)
 	}
 	if err != nil {
+		// Without a config there is nothing to report on: say that rather
+		// than leading with why Docker couldn't be asked.
+		if r.Config == nil && r.ConfigError != "" {
+			return nil, fmt.Errorf("%s (and the container state is unavailable: %w)", r.ConfigError, err)
+		}
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
 

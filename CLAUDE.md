@@ -174,7 +174,12 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
 - `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
 - `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only)
-- `internal/compose/` - Docker Compose override file generation
+- `internal/env/` - `/etc/environment` and `/etc/profile` patching; `userEnvProbe` (the user's login shell, NUL-separated output)
+- `internal/secrets/` - Fetching runtime and build secrets (commands run on the host)
+- `internal/lockfile/` - `devcontainer-lock.json` read/write
+- `internal/selinux/` - SELinux detection for bind-mount labels
+- `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data (shown with `--quiet`), `Info` is progress; colour off with `NO_COLOR`, `--no-color` or a non-terminal
+- `internal/version/` - Build version
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
@@ -246,28 +251,31 @@ DevContainerConfig (substituted)               — Local
     ↓
 ResolvedDevContainer
 ```
-All of it is `devcontainer.ResolveWorkspace`; up, status, build, lock, debug and the golden tests resolve through it. Commands that must not resolve (stop, down, ssh) use `LoadIdentity`, which the golden test checks against resolution.
+All of it is `devcontainer.ResolveWorkspace`; up, status, build, lock, config and the golden tests resolve through it. Commands that must not resolve (stop, down, ssh) use `LoadIdentity`, which the golden test checks against resolution.
 
 ### Container Lifecycle (Up)
 ```
-CLI: dcx up
-    ↓ NewCLIContext()
-CLIContext (Docker, Service, Identity)
-    ↓ Service.Up()
-    ├─ Load() → ResolvedDevContainer
-    ├─ StateManager.State() → check labels
-    ├─ If stale: Down() first
-    ├─ Provisioner.Up()
-    │   ├─ ImagePlan: Pull image
-    │   ├─ DockerfilePlan: docker buildx build
-    │   └─ ComposePlan: docker compose up with override
-    ├─ BuildWithFeatures() → derived image
-    ├─ ApplyUIDUpdate() → final image
-    ├─ CreateContainer() with labels
-    ├─ agentctl.Provision() → install dcx-agent, SSH secrets, launch
-    ├─ MountSecretsToContainer() (runtime secrets)
-    ├─ RunLifecycleHooks() (onCreate, postStart, etc.)
-    └─ setupSSHAccess() → ~/.ssh/dcx/config block
+CLI: dcx up [--recreate] [--rebuild] [--pull] [--hosts]
+    ↓ NewCLIContext() → Service.Up(UpOptions)
+Service.Up (internal/service/up.go)
+    ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
+    ├─ lockWorkspace (~/.dcx/locks/<id>.lock; a concurrent up waits)
+    ├─ StateWithHash + setupComplete + agentctl.Listening
+    ├─ decideUp → none | resume | start | create | recreate
+    ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
+    └─ steps, each idempotent:
+        initialize   host initializeCommand (lifecycle.HookRunner)
+        container    start: startExisting
+                     create/recreate: Provisioner.BuildImages (recreate builds first),
+                       DownWithIDs (recreate), Provisioner.Up:
+                       base image → features layer → UID layer (layerImages),
+                       planSSH (port, listen address, network mode), prepareCommand
+                       (feature entrypoints), CreateContainer / compose up with override
+        agent        agentctl.Provision: install, root-owned SSH secrets, setup, launch as root
+        secrets      runtime secrets on the /run/secrets tmpfs
+        environment  /etc/environment, userEnvProbe, /run/dcx/session.json
+        hooks        onCreate/updateContent/postCreate once (markers), postStart per start
+        ssh config   ~/.ssh/dcx/config block, known_hosts pin
 ```
 
 ### State Detection

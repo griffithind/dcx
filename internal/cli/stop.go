@@ -35,12 +35,12 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 	switch outcome {
 	case service.StopNotFound:
-		ui.Println("No devcontainer found")
+		ui.Info("No devcontainer found")
 	case service.StopAlreadyStopped:
-		ui.Println("Devcontainer is already stopped")
+		ui.Info("Devcontainer is already stopped")
 	case service.StopSkipped:
-		ui.Println("Skipping stop: shutdownAction is set to 'none'")
-		ui.Println("Use --force to stop anyway")
+		ui.Info("Skipping stop: shutdownAction is set to 'none'")
+		ui.Info("Use --force to stop anyway")
 	case service.StopDone:
 		ui.Success("Devcontainer stopped")
 	}

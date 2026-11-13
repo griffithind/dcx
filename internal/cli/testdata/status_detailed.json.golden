@@ -1,0 +1,38 @@
+{
+  "workspacePath": "/home/dev/myapp",
+  "workspaceID": "abcd1234efgh",
+  "name": "",
+  "resourceName": "myapp-abcd1234",
+  "state": "running",
+  "sshAlias": "myapp.dcx",
+  "configHash": "0123456789abcdef0123",
+  "shortcuts": 2,
+  "container": {
+    "id": "f00dfeedbeef0123456789",
+    "name": "myapp-abcd1234",
+    "status": "running",
+    "running": true,
+    "configHash": "0123456789abcdef0123",
+    "image": "dcx/abcd1234efgh:uid-0123",
+    "startedAt": "2026-11-13T10:00:00Z"
+  },
+  "detail": {
+    "dcxVersion": "VERSION",
+    "platform": "OS/ARCH",
+    "planType": "image",
+    "baseImage": "mcr.microsoft.com/devcontainers/go:1",
+    "features": [
+      "ghcr.io/devcontainers/features/docker-in-docker:2",
+      "ghcr.io/devcontainers/features/node:1"
+    ],
+    "labels": {
+      "com.griffithind.dcx.build.method": "image",
+      "com.griffithind.dcx.container.primary": "true",
+      "com.griffithind.dcx.hash.config": "0123456789abcdef0123",
+      "com.griffithind.dcx.managed": "true",
+      "com.griffithind.dcx.schema.version": "2",
+      "com.griffithind.dcx.workspace.id": "abcd1234efgh",
+      "com.griffithind.dcx.workspace.name": "myapp"
+    }
+  }
+}

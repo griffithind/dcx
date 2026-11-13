@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/container"
@@ -29,7 +30,9 @@ func (h *fakeHooks) RunInitialize(context.Context) error { h.initialize++; retur
 func (h *fakeHooks) RunCreateHooks(ctx context.Context, m lifecycle.Markers) error {
 	h.create++
 	if m != nil { // like the real runner
-		m.Done(ctx, lifecycle.PhaseOnCreate)
+		if _, err := m.Done(ctx, lifecycle.PhaseOnCreate); err != nil {
+			return err
+		}
 	}
 	if h.failCreate != nil {
 		err := h.failCreate
@@ -58,15 +61,7 @@ func newUpHarness(t *testing.T, config string) *upHarness {
 	h.writeConfig(config)
 
 	h.engine = &containertest.Fake{Registry: map[string]map[string]string{"alpine:3": {}}}
-	h.engine.ExecFunc = func(name string, argv []string) error {
-		// Marker files exist once written.
-		if len(argv) == 3 && argv[0] == "test" && argv[1] == "-f" {
-			if _, ok := h.engine.Files[name+":"+argv[2]]; !ok {
-				return errors.New("no such file")
-			}
-		}
-		return nil
-	}
+	h.engine.FileMarkers() // marker files exist once written
 	return h
 }
 
@@ -163,15 +158,36 @@ func TestUpResumesAPreMarkerContainerWhoseAgentIsDown(t *testing.T) {
 	labels := state.ContainerLabelsFromMap(h.engine.Containers[0].Labels)
 	labels.LifecycleMarkers = false
 	h.engine.Containers[0].Labels = labels.ToMap()
-	agentDown := h.engine.ExecFunc
 	h.engine.ExecFunc = func(name string, argv []string) error {
 		if len(argv) > 1 && argv[1] == "ping" {
 			return errors.New("connection refused")
 		}
-		return agentDown(name, argv)
+		return nil
 	}
 
 	require.NoError(t, h.up(UpOptions{}))
 	assert.Equal(t, 2, h.agents, "the agent is relaunched")
 	assert.Equal(t, 2, h.hooks.create)
+}
+
+// A second Up on the same workspace waits for the first (R20) instead of
+// racing it to create the container.
+func TestUpWaitsForTheWorkspaceLock(t *testing.T) {
+	h := newUpHarness(t, upTestConfig)
+	svc := NewDevContainerService(h.engine, report.Discard, h.workspace, "", false)
+	unlock, err := svc.lockWorkspace(context.Background(), svc.Identity().WorkspaceID)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- h.up(UpOptions{}) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Up ran while the workspace was locked: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	assert.Empty(t, h.engine.CallsTo("CreateContainer"))
+
+	unlock()
+	require.NoError(t, <-done)
+	assert.Len(t, h.engine.CallsTo("CreateContainer"), 1)
 }

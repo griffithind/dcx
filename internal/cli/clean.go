@@ -58,7 +58,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// Clean derived images (unless only dangling is requested)
 	if !cleanDangling {
-		ui.Println("Cleaning derived images...")
+		ui.Info("Cleaning derived images...")
 		scope := ""
 		if cleanCurrent {
 			scope = newService(docker, ui.Reporter()).Identity().WorkspaceID
@@ -69,9 +69,9 @@ func runClean(cmd *cobra.Command, args []string) error {
 		}
 
 		if result.ImagesRemoved > 0 {
-			ui.Printf("  Removed %d derived image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
+			ui.Info("  Removed %d derived image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
 		} else {
-			ui.Println("  No derived images to clean")
+			ui.Info("  No derived images to clean")
 		}
 
 		totalImages += result.ImagesRemoved
@@ -80,27 +80,27 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// Clean dangling images if requested
 	if cleanAll || cleanDangling {
-		ui.Println("Cleaning dangling images...")
+		ui.Info("Cleaning dangling images...")
 		result, err := docker.CleanupDanglingImages(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to clean dangling images: %w", err)
 		}
 
 		if result.ImagesRemoved > 0 {
-			ui.Printf("  Removed %d dangling image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
+			ui.Info("  Removed %d dangling image(s), reclaimed %s", result.ImagesRemoved, formatBytes(result.SpaceReclaimed))
 		} else {
-			ui.Println("  No dangling images to clean")
+			ui.Info("  No dangling images to clean")
 		}
 
 		totalImages += result.ImagesRemoved
 		totalSpace += result.SpaceReclaimed
 	}
 
-	ui.Println("")
+	ui.Info("")
 	if totalImages > 0 {
 		ui.Success("Total: %d image(s) removed, %s reclaimed", totalImages, formatBytes(totalSpace))
 	} else {
-		ui.Println("Nothing to clean")
+		ui.Info("Nothing to clean")
 	}
 
 	return nil

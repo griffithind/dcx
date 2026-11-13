@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -187,15 +188,32 @@ func lineMatchesAlias(line, alias string) bool {
 	return false
 }
 
-// writeAtomic writes data to path via a tempfile + rename.
+// writeAtomic writes data to path via a unique tempfile + rename.
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return fmt.Errorf("write tmp: %w", err)
+	tmp, err := writeTemp(path, data, mode)
+	if err != nil {
+		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
+}
+
+// writeTemp writes data to a new, uniquely named file next to path (so a
+// rename or link into place stays on one filesystem) and returns its name.
+func writeTemp(path string, data []byte, mode os.FileMode) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	name := f.Name()
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if err := errors.Join(werr, cerr, os.Chmod(name, mode)); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	return name, nil
 }

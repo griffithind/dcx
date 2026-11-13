@@ -27,7 +27,7 @@ This command may require network access for pulling base images.`,
 
 func init() {
 	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "build without using cache")
-	buildCmd.Flags().BoolVar(&pullBuild, "pull", false, "force re-fetch remote features (useful when feature tags like :latest are updated)")
+	buildCmd.Flags().BoolVar(&pullBuild, "pull", false, "re-pull base images and re-fetch features (for moving tags like :latest)")
 	buildCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(buildCmd)
 }

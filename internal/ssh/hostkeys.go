@@ -90,14 +90,19 @@ func EnsureHostKey(workspaceID string) (path string, signer gossh.Signer, err er
 	}
 	pemBytes := pem.EncodeToMemory(pemBlock)
 
-	// Write atomically: write to .tmp, rename into place.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, pemBytes, 0600); err != nil {
-		return "", nil, fmt.Errorf("write tmp host key: %w", err)
+	// Write to a unique temp file and link it into place: the link fails
+	// if another process created the key meanwhile, and then that key
+	// wins (replacing it would break the other process's pins).
+	tmp, err := writeTemp(path, pemBytes, 0600)
+	if err != nil {
+		return "", nil, fmt.Errorf("write host key: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", nil, fmt.Errorf("rename host key: %w", err)
+	defer func() { _ = os.Remove(tmp) }()
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return LoadHostKey(workspaceID)
+		}
+		return "", nil, fmt.Errorf("install host key: %w", err)
 	}
 	signer, err = gossh.ParsePrivateKey(pemBytes)
 	if err != nil {

@@ -576,7 +576,7 @@ func (r *Provisioner) buildLabels() map[string]string {
 // container's writable layer (visible to docker commit/export/diff).
 func (r *Provisioner) buildMounts() ([]devcontainer.Mount, map[string]string) {
 	var mounts []devcontainer.Mount
-	tmpfs := map[string]string{agentproto.SecretsDir: "rw,noexec,nosuid,size=1m"}
+	tmpfs := map[string]string{agentproto.SecretsDir: "rw,noexec,nosuid,size=" + strconv.Itoa(SecretsTmpfsMiB) + "m"}
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {
 			tmpfs[m.Target] = ""

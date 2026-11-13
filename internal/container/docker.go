@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/griffithind/dcx/internal/build"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -27,8 +28,7 @@ type Docker struct{}
 // NewDocker returns a Docker CLI engine after checking that the daemon is
 // reachable.
 func NewDocker() (*Docker, error) {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	if err := cmd.Run(); err != nil {
+	if _, err := runOutput(exec.Command("docker", "version", "--format", "{{.Server.Version}}")); err != nil {
 		return nil, fmt.Errorf("docker not accessible: %w", err)
 	}
 	return &Docker{}, nil
@@ -51,7 +51,7 @@ func (d *Docker) Ping(ctx context.Context) error {
 // ServerVersion returns the Docker server version.
 func (d *Docker) ServerVersion(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Docker version: %w", err)
 	}
@@ -74,7 +74,7 @@ type SystemInfo struct {
 // actual resources (e.g., Docker Desktop VM limits, cgroup limits).
 func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 	cmd := exec.CommandContext(ctx, "docker", "info", "--format", "json")
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Docker info: %w", err)
 	}
@@ -111,7 +111,7 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", k, v))
 	}
 
-	output, err := exec.CommandContext(ctx, "docker", args...).Output()
+	output, err := runOutput(exec.CommandContext(ctx, "docker", args...))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -121,7 +121,7 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 	}
 
 	inspectArgs := append([]string{"inspect", "--type", "container", "--format", "json"}, ids...)
-	inspectOut, inspectErr := exec.CommandContext(ctx, "docker", inspectArgs...).Output()
+	inspectOut, inspectErr := runOutput(exec.CommandContext(ctx, "docker", inspectArgs...))
 	summaries, parseErr := parseContainerSummaries(inspectOut)
 	if parseErr != nil {
 		if inspectErr != nil {
@@ -174,7 +174,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 // Implements state.ContainerClient.
 func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error) {
 	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "json", containerID)
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)
 	}
@@ -238,7 +238,7 @@ var _ state.ContainerClient = (*Docker)(nil)
 func (d *Docker) PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error) {
 	target := fmt.Sprintf("%d/%s", containerPort, proto)
 	cmd := exec.CommandContext(ctx, "docker", "port", containerName, target)
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return 0, fmt.Errorf("docker port %s %s: %w", containerName, target, err)
 	}
@@ -285,7 +285,7 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 // ImageLabels returns the labels for an image.
 // ImageCommand returns an image's configured ENTRYPOINT and CMD.
 func (d *Docker) ImageCommand(ctx context.Context, imageRef string) (entrypoint, cmd []string, err error) {
-	output, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef).Output()
+	output, err := runOutput(exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -306,7 +306,7 @@ func (d *Docker) ImageCommand(ctx context.Context, imageRef string) (entrypoint,
 
 func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -329,7 +329,7 @@ func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]s
 // ImageID returns the ID of an image.
 func (d *Docker) ImageID(ctx context.Context, imageRef string) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect image: %w", err)
 	}
@@ -397,7 +397,7 @@ func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (strin
 	cmd := exec.CommandContext(ctx, "docker", dockerRunArgs(spec)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
+	stdout, err := runOutput(cmd)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %s", strings.TrimSpace(stderr.String()))
 	}
@@ -547,7 +547,7 @@ func (d *Docker) listImages(ctx context.Context, filters ...string) ([]imageInfo
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.Output()
+	output, err := runOutput(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
 	}
@@ -762,7 +762,7 @@ func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []st
 // its stdout.
 func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error) {
 	args := append([]string{"exec", containerName}, argv...)
-	return exec.CommandContext(ctx, "docker", args...).Output()
+	return runOutput(exec.CommandContext(ctx, "docker", args...))
 }
 
 // ExecOutputAs runs argv in the container as user ("" = the container's
@@ -773,7 +773,7 @@ func (d *Docker) ExecOutputAs(ctx context.Context, containerName, user string, a
 		args = append(args, "--user", user)
 	}
 	args = append(append(args, containerName), argv...)
-	return exec.CommandContext(ctx, "docker", args...).Output()
+	return runOutput(exec.CommandContext(ctx, "docker", args...))
 }
 
 // ChmodInContainer changes file permissions inside a container.
@@ -920,14 +920,27 @@ func (d *Docker) Compose(ctx context.Context, p ComposeProject, args ...string) 
 func (d *Docker) ComposeOutput(ctx context.Context, p ComposeProject, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "docker", p.args(args...)...)
 	cmd.Dir = p.Dir
-	return cmd.Output()
+	return runOutput(cmd)
 }
 
 // ComposeVersion returns the version of the docker compose plugin.
 func (d *Docker) ComposeVersion(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "docker", "compose", "version", "--short").Output()
+	out, err := runOutput(exec.CommandContext(ctx, "docker", "compose", "version", "--short"))
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// runOutput runs cmd and returns its stdout. On failure the error includes
+// what docker printed on stderr ("exit status 1" alone explains nothing).
+func runOutput(cmd *exec.Cmd) ([]byte, error) {
+	out, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
+			return out, fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return out, err
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/griffithind/dcx/internal/report"
 	"github.com/stretchr/testify/assert"
@@ -60,7 +61,7 @@ func TestUseCache(t *testing.T) {
 	t.Run("incomplete entry is removed", func(t *testing.T) {
 		path := filepath.Join(cacheDir, "incomplete")
 		writeFeature(t, path, nil)
-		hit, err := r.useCache(&Feature{}, path, "", "f")
+		hit, err := r.useCache(&Feature{}, path, "", "f", 0)
 		require.NoError(t, err)
 		assert.False(t, hit)
 		assert.NoDirExists(t, path)
@@ -69,7 +70,7 @@ func TestUseCache(t *testing.T) {
 		path := filepath.Join(cacheDir, "complete")
 		writeFeature(t, path, &DigestInfo{ManifestDigest: "sha256:m", Integrity: "sha256:i"})
 		f := &Feature{}
-		hit, err := r.useCache(f, path, "sha256:i", "f")
+		hit, err := r.useCache(f, path, "sha256:i", "f", 0)
 		require.NoError(t, err)
 		assert.True(t, hit)
 		assert.Equal(t, path, f.CachePath)
@@ -79,16 +80,29 @@ func TestUseCache(t *testing.T) {
 	t.Run("integrity mismatch is removed", func(t *testing.T) {
 		path := filepath.Join(cacheDir, "mismatch")
 		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
-		hit, err := r.useCache(&Feature{}, path, "sha256:other", "f")
+		hit, err := r.useCache(&Feature{}, path, "sha256:other", "f", 0)
 		require.NoError(t, err)
 		assert.False(t, hit)
 		assert.NoDirExists(t, path)
+	})
+	t.Run("an expired tag entry is re-checked but kept", func(t *testing.T) {
+		path := filepath.Join(cacheDir, "expired")
+		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
+		old := time.Now().Add(-2 * ociTagTTL)
+		require.NoError(t, os.Chtimes(filepath.Join(path, digestFileName), old, old))
+		hit, err := r.useCache(&Feature{}, path, "", "f", ociTagTTL)
+		require.NoError(t, err)
+		assert.False(t, hit, "a moving tag is checked again after the TTL")
+		assert.DirExists(t, path, "kept as the fallback when the registry is unreachable")
+		hit, err = r.useCache(&Feature{}, path, "", "f", 0)
+		require.NoError(t, err)
+		assert.True(t, hit)
 	})
 	t.Run("force pull ignores the cache", func(t *testing.T) {
 		path := filepath.Join(cacheDir, "forced")
 		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
 		forced := &Resolver{cacheDir: cacheDir, report: report.Discard, forcePull: true}
-		hit, err := forced.useCache(&Feature{}, path, "", "f")
+		hit, err := forced.useCache(&Feature{}, path, "", "f", 0)
 		require.NoError(t, err)
 		assert.False(t, hit)
 	})

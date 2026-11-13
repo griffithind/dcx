@@ -22,11 +22,24 @@ type memMarkers struct {
 	done map[string]bool
 }
 
-func (m *memMarkers) Done(_ context.Context, p string) bool {
+func (m *memMarkers) Done(_ context.Context, p string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.done[p]
+	return m.done[p], nil
 }
+
+func (m *memMarkers) is(p string) bool {
+	done, _ := m.Done(context.Background(), p)
+	return done
+}
+
+// unreachableMarkers cannot answer (the container did not respond).
+type unreachableMarkers struct{}
+
+func (unreachableMarkers) Done(context.Context, string) (bool, error) {
+	return false, errors.New("container not responding")
+}
+func (unreachableMarkers) Mark(context.Context, string) error { return nil }
 
 func (m *memMarkers) Mark(_ context.Context, p string) error {
 	m.mu.Lock()
@@ -87,14 +100,24 @@ func TestRunCreateHooksResumesAfterFailure(t *testing.T) {
 	err := r.RunCreateHooks(context.Background(), markers)
 	require.Error(t, err)
 	assert.Equal(t, []string{"on-create", "update-content", "post-create"}, *ran)
-	assert.True(t, markers.Done(context.Background(), PhaseOnCreate))
-	assert.True(t, markers.Done(context.Background(), PhaseUpdateContent))
-	assert.False(t, markers.Done(context.Background(), PhasePostCreate))
+	assert.True(t, markers.is(PhaseOnCreate))
+	assert.True(t, markers.is(PhaseUpdateContent))
+	assert.False(t, markers.is(PhasePostCreate))
 
 	r2, ran2 := testRunner(hookConfig(t), "")
 	require.NoError(t, r2.RunCreateHooks(context.Background(), markers))
 	assert.Equal(t, []string{"post-create"}, *ran2, "completed phases must not rerun")
-	assert.True(t, markers.Done(context.Background(), PhasePostCreate))
+	assert.True(t, markers.is(PhasePostCreate))
+}
+
+// When markers cannot be read, no once-only hook runs (R16): "can't tell"
+// used to count as "not done" and re-ran onCreateCommand.
+func TestRunCreateHooksFailsClosedOnUnreadableMarkers(t *testing.T) {
+	r, ran := testRunner(hookConfig(t), "")
+	err := r.RunCreateHooks(context.Background(), unreachableMarkers{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot tell whether onCreateCommand already ran")
+	assert.Empty(t, *ran)
 }
 
 // Each phase runs its hooks in the resolved order (image metadata, then

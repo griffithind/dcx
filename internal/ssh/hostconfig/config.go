@@ -98,6 +98,13 @@ func wantedInclude() string {
 // entry.HostName ("<name>.dcx") unless another workspace's block already
 // claims that alias. Safe for concurrent use from multiple dcx invocations.
 func AddSSHConfig(entry Entry) ([]string, error) {
+	// Every value lands in an ssh_config line: one with whitespace, quotes
+	// or a newline could add directives of its own.
+	for name, v := range map[string]string{"user": entry.User, "container name": entry.ContainerName, "host name": entry.HostName} {
+		if !safeConfigToken(v) {
+			return nil, fmt.Errorf("invalid SSH %s %q", name, v)
+		}
+	}
 	var aliases []string
 	err := withConfigLock(func() error {
 		dcxPath := getDCXConfigPath()
@@ -267,6 +274,17 @@ func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string 
 	fmt.Fprintln(&b, "  LogLevel ERROR")
 	fmt.Fprintf(&b, "%s%s\n\n", sshConfigMarkerEnd, e.ContainerName)
 	return b.String()
+}
+
+// safeConfigToken reports whether v can be written as a single ssh_config
+// value: no whitespace, quotes, control characters or '#'.
+func safeConfigToken(v string) bool {
+	for _, r := range v {
+		if r <= ' ' || r == 0x7f || r == '"' || r == '\'' || r == '#' || r == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveSSHConfig removes the SSH config entry for a container, from the

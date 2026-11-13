@@ -2,12 +2,16 @@ package cli
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
+	"github.com/griffithind/dcx/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +28,9 @@ var statusCmd = &cobra.Command{
 This command queries Docker for containers managed by dcx and displays
 their current state (ABSENT, CREATED, RUNNING, STALE, or BROKEN).
 
-Use --detailed for comprehensive container and configuration information.
+Use --detailed for container details, the resolved plan and features, why
+a container is stale, and its dcx labels; --json prints the same as stable
+JSON (--detailed --json replaces the old hidden 'debug' command).
 
 This is an offline-safe command that does not require network access.`,
 	RunE: runStatus,
@@ -36,20 +42,24 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
+	// No daemon check up front: Status reports a missing or broken config
+	// before (or instead of) a Docker error.
+	ctx, stop := commandContext()
+	defer stop()
+	rep := ui.Reporter()
+	if statusJSONOut {
+		rep = report.Discard
 	}
-	defer cliCtx.Close()
+	svc := newService(container.NewDockerCLI(), rep)
 
-	report, err := cliCtx.Service.Status(cliCtx.Ctx, statusDetailed || statusJSONOut)
+	status, err := svc.Status(ctx, statusDetailed || statusJSONOut)
 	if err != nil {
 		return err
 	}
 	if statusJSONOut {
-		return printJSON(statusToJSON(report))
+		return printJSON(statusToJSON(status, statusDetailed))
 	}
-	renderStatus(report, statusDetailed)
+	renderStatus(status, statusDetailed)
 	return nil
 }
 
@@ -71,6 +81,12 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 	}
 	if r.Shortcuts > 0 {
 		label("", "Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", r.Shortcuts))
+	}
+	if r.ConfigError != "" {
+		label("", "Config", ui.Dim(r.ConfigError))
+	}
+	if reason := staleReason(r); reason != "" {
+		label("", "Stale", reason)
 	}
 
 	if c := r.Container; c != nil {
@@ -110,12 +126,8 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 		optional("Service", cfg.Service)
 		optional("Remote User", cfg.RemoteUser)
 		optional("Workspace Folder", cfg.WorkspaceFolder)
-		features := make([]string, 0, len(cfg.Features))
-		for f := range cfg.Features {
-			features = append(features, f)
-		}
-		sort.Strings(features)
-		optional("Features", strings.Join(features, ", "))
+		optional("Plan", string(r.PlanType))
+		optional("Features", strings.Join(r.Features, ", "))
 		if r.ConfigHash != "" {
 			optional("Config Hash", shortID(r.ConfigHash))
 		}
@@ -149,6 +161,15 @@ func shortID(s string) string {
 	return s
 }
 
+// staleReason explains a stale state ("" otherwise).
+func staleReason(r *service.StatusReport) string {
+	if r.State != state.StateStale || r.Container == nil {
+		return ""
+	}
+	return fmt.Sprintf("config changed (container %s, now %s); 'dcx up' recreates it",
+		shortID(r.Container.ConfigHash), shortID(r.ConfigHash))
+}
+
 // statusJSON is the `dcx status --json` contract: stable, camelCase keys,
 // for scripts and tests (the human output may change).
 type statusJSON struct {
@@ -160,7 +181,20 @@ type statusJSON struct {
 	SSHAlias      string         `json:"sshAlias,omitempty"`
 	ConfigHash    string         `json:"configHash,omitempty"`
 	Shortcuts     int            `json:"shortcuts"`
+	ConfigError   string         `json:"configError,omitempty"`
 	Container     *containerJSON `json:"container"`
+	// Detail is set with --detailed (what the old hidden `debug` showed).
+	Detail *statusDetailJSON `json:"detail,omitempty"`
+}
+
+type statusDetailJSON struct {
+	DCXVersion  string            `json:"dcxVersion"`
+	Platform    string            `json:"platform"`
+	PlanType    string            `json:"planType,omitempty"`
+	BaseImage   string            `json:"baseImage,omitempty"`
+	Features    []string          `json:"features,omitempty"`
+	StaleReason string            `json:"staleReason,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type containerJSON struct {
@@ -173,7 +207,7 @@ type containerJSON struct {
 	StartedAt  string `json:"startedAt,omitempty"`
 }
 
-func statusToJSON(r *service.StatusReport) statusJSON {
+func statusToJSON(r *service.StatusReport, detailed bool) statusJSON {
 	out := statusJSON{
 		WorkspacePath: r.WorkspacePath,
 		WorkspaceID:   r.Identity.WorkspaceID,
@@ -183,6 +217,20 @@ func statusToJSON(r *service.StatusReport) statusJSON {
 		SSHAlias:      r.SSHAlias,
 		ConfigHash:    r.ConfigHash,
 		Shortcuts:     r.Shortcuts,
+		ConfigError:   r.ConfigError,
+	}
+	if detailed {
+		out.Detail = &statusDetailJSON{
+			DCXVersion:  version.Version,
+			Platform:    runtime.GOOS + "/" + runtime.GOARCH,
+			PlanType:    string(r.PlanType),
+			BaseImage:   r.BaseImage,
+			Features:    r.Features,
+			StaleReason: staleReason(r),
+		}
+		if r.Container != nil && r.Container.Labels != nil {
+			out.Detail.Labels = r.Container.Labels.ToMap()
+		}
 	}
 	if c := r.Container; c != nil {
 		out.Container = &containerJSON{

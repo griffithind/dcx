@@ -1,0 +1,4 @@
+Workspace: /home/dev/broken
+Workspace ID: bbbb1111cccc
+State: absent
+Config: failed to load configuration: invalid character '}' looking for beginning of object key string

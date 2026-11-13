@@ -56,6 +56,11 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
+	// Ambiguous configs (image and dockerComposeFile, …) used to resolve
+	// silently by an internal precedence.
+	if err := Validate(local); err != nil {
+		return nil, fmt.Errorf("invalid configuration %s: %w", configPath, err)
+	}
 	imageConfigs := imageMetadata(ctx, local, opts.Images, rep)
 	cfg := MergeMetadata(local, imageConfigs)
 

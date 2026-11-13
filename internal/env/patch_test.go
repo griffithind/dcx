@@ -30,17 +30,20 @@ func TestRenderEtcEnvironmentReplacesOwnBlock(t *testing.T) {
 // inject a command used to run as root.
 func TestRenderEtcEnvironmentRejectsUnrepresentableValues(t *testing.T) {
 	got, skipped := renderEtcEnvironment("", map[string]string{
-		"OK":        `a'b"c $(id) ; rm -rf /`,
+		"OK":        `a'b c $(id) ; rm -rf /`,
+		"QUOTE":     `a"b`,
+		"BACKSLASH": `a\b`,
 		"MULTILINE": "x\nDCXEOF\ntouch /pwned",
 		"BAD-NAME":  "v",
 		"1LEADING":  "v",
 	})
-	assert.ElementsMatch(t, []string{"MULTILINE", "BAD-NAME", "1LEADING"}, skipped)
-	assert.Equal(t, blockBegin+"\nOK=\"a'b\"c $(id) ; rm -rf /\"\n"+blockEnd+"\n", got)
+	assert.ElementsMatch(t, []string{"QUOTE", "BACKSLASH", "MULTILINE", "BAD-NAME", "1LEADING"}, skipped)
+	assert.Equal(t, blockBegin+"\nOK=\"a'b c $(id) ; rm -rf /\"\n"+blockEnd+"\n", got)
 }
 
 func TestPatchEtcEnvironmentWritesThroughEngine(t *testing.T) {
-	fake := &containertest.Fake{Outputs: map[string]string{"cat /etc/environment": "LANG=C\n"}}
+	read := strings.Join(readIfExists, " ")
+	fake := &containertest.Fake{Outputs: map[string]string{read: "LANG=C\n"}}
 	skipped, err := NewPatcher(fake).PatchEtcEnvironment(context.Background(), "c1", map[string]string{"FOO": "bar"})
 	require.NoError(t, err)
 	assert.Empty(t, skipped)
@@ -53,10 +56,16 @@ func TestPatchEtcEnvironmentWritesThroughEngine(t *testing.T) {
 	}
 
 	// Unchanged content is not rewritten.
-	fake2 := &containertest.Fake{Outputs: map[string]string{"cat /etc/environment": string(fake.Files["c1:/etc/environment"])}}
+	fake2 := &containertest.Fake{Outputs: map[string]string{read: string(fake.Files["c1:/etc/environment"])}}
 	_, err = NewPatcher(fake2).PatchEtcEnvironment(context.Background(), "c1", map[string]string{"FOO": "bar"})
 	require.NoError(t, err)
 	assert.Empty(t, fake2.CallsTo("WriteFileInContainer"))
+
+	// A failed read (R14) must not rewrite the file without its lines.
+	fake3 := &containertest.Fake{}
+	_, err = NewPatcher(fake3).PatchEtcEnvironment(context.Background(), "c1", map[string]string{"FOO": "bar"})
+	require.Error(t, err)
+	assert.Empty(t, fake3.CallsTo("WriteFileInContainer"))
 }
 
 func TestPatchEtcProfilePassesMarkerAsArgument(t *testing.T) {

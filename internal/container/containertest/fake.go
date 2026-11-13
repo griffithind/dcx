@@ -44,6 +44,8 @@ type Fake struct {
 	ExecFunc func(containerName string, argv []string) error
 	// Outputs maps a space-joined argv to ExecOutput's result.
 	Outputs map[string]string
+	// OutputFunc answers ExecOutput calls Outputs does not match.
+	OutputFunc func(containerName string, argv []string) ([]byte, error)
 	// Files records WriteFileInContainer content by "<container>:<path>".
 	Files map[string][]byte
 	// ComposeOutputs maps space-joined compose arguments (after the
@@ -307,12 +309,35 @@ func (f *Fake) ExecInContainer(_ context.Context, name string, argv []string) er
 
 func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.record("ExecOutput", append([]string{name}, argv...)...)
-	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
+	out, ok := f.Outputs[strings.Join(argv, " ")]
+	fn := f.OutputFunc
+	f.mu.Unlock()
+	if ok {
 		return []byte(out), nil
 	}
+	if fn != nil {
+		return fn(name, argv)
+	}
 	return nil, fmt.Errorf("exec failed")
+}
+
+// FileMarkers makes marker queries (`sh -c … <path>` printing "done")
+// answer from Files, so lifecycle markers written with WriteFileInContainer
+// are found again.
+func (f *Fake) FileMarkers() {
+	f.OutputFunc = func(name string, argv []string) ([]byte, error) {
+		if len(argv) == 5 && argv[0] == "sh" && argv[3] == "dcx-marker" {
+			f.mu.Lock()
+			_, ok := f.Files[name+":"+argv[4]]
+			f.mu.Unlock()
+			if ok {
+				return []byte("done\n"), nil
+			}
+			return nil, nil
+		}
+		return nil, fmt.Errorf("exec failed")
+	}
 }
 
 func (f *Fake) ExecOutputAs(_ context.Context, name, user string, argv []string) ([]byte, error) {

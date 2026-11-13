@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/griffithind/dcx/internal/report"
-	"os"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -34,11 +32,11 @@ Examples:
 
 // ConfigOutput represents the output of the config command.
 type ConfigOutput struct {
-	ConfigPath      string                           `json:"config_path"`
+	ConfigPath      string                           `json:"configPath"`
 	WorkspaceID     string                           `json:"workspaceID"`
-	ConfigHash      string                           `json:"config_hash,omitempty"`
-	WorkspaceFolder string                           `json:"workspace_folder"`
-	PlanType        string                           `json:"plan_type"`
+	ConfigHash      string                           `json:"configHash,omitempty"`
+	WorkspaceFolder string                           `json:"workspaceFolder"`
+	PlanType        string                           `json:"planType"`
 	Config          *devcontainer.DevContainerConfig `json:"config"`
 }
 
@@ -87,14 +85,6 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		configHash = resolved.ConfigHash
 	}
 
-	// Determine plan type
-	planType := "unknown"
-	if cfg.IsComposePlan() {
-		planType = "compose"
-	} else if cfg.IsSinglePlan() {
-		planType = "single"
-	}
-
 	// Determine workspace folder
 	wsFolder := devcontainer.DetermineContainerWorkspaceFolder(cfg, workspacePath)
 
@@ -104,14 +94,11 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		WorkspaceID:     ids.WorkspaceID,
 		ConfigHash:      configHash,
 		WorkspaceFolder: wsFolder,
-		PlanType:        planType,
+		PlanType:        string(cfg.PlanType()), // image, dockerfile or compose
 		Config:          cfg,
 	}
 
-	// Output as JSON
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	return printJSON(output)
 }
 
 func init() {

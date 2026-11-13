@@ -20,6 +20,7 @@ Configuration
   Image: mcr.microsoft.com/devcontainers/go:1
   Remote User: vscode
   Workspace Folder: /workspaces/myapp
+  Plan: image
   Features: ghcr.io/devcontainers/features/docker-in-docker:2, ghcr.io/devcontainers/features/node:1
   Config Hash: 0123456789ab
 

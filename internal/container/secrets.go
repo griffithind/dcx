@@ -22,6 +22,28 @@ func DCXSecretsDir() string {
 	return agentproto.DCXSecretsDir
 }
 
+// SecretsTmpfsMiB is the size of the /run/secrets tmpfs. It only caps what
+// can be stored (tmpfs uses memory for what it holds), so it is generous;
+// dcx's own SSH files need a few KiB of it.
+const SecretsTmpfsMiB = 16
+
+// secretsReserve is kept free for dcx's own files in /run/secrets/dcx.
+const secretsReserve = 256 << 10
+
+// checkSecretsFit fails with a clear message when the runtime secrets
+// cannot fit the /run/secrets tmpfs, instead of a write error halfway.
+func checkSecretsFit(list []secrets.Secret) error {
+	total := 0
+	for _, s := range list {
+		total += len(s.Value)
+	}
+	if limit := SecretsTmpfsMiB<<20 - secretsReserve; total > limit {
+		return fmt.Errorf("runtime secrets total %d KiB, more than the %d MiB /run/secrets tmpfs holds; mount large files with \"mounts\" instead",
+			total>>10, SecretsTmpfsMiB)
+	}
+	return nil
+}
+
 // MountSecretsToContainer copies secrets to /run/secrets in the specified container.
 // Secrets are written as files with mode 0400 (read-only by owner).
 // The owner parameter specifies the user who should own the secrets (e.g., "node", "root").
@@ -29,6 +51,9 @@ func DCXSecretsDir() string {
 func MountSecretsToContainer(ctx context.Context, engine Engine, containerName string, secretList []secrets.Secret, owner string) error {
 	if len(secretList) == 0 {
 		return nil
+	}
+	if err := checkSecretsFit(secretList); err != nil {
+		return err
 	}
 
 	if containerName == "" {

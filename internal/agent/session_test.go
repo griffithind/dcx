@@ -333,3 +333,35 @@ func TestSessionCredentialRefusesUnknownUser(t *testing.T) {
 		t.Fatalf("numeric UID without a passwd entry runs as that UID: cred=%v err=%v", cred, err)
 	}
 }
+
+// A PTY session ends when its command exits, even if a background job
+// still holds the terminal open (R12): copying the PTY output used to wait
+// for every terminal file descriptor to close.
+func TestPTYSessionEndsWithBackgroundJob(t *testing.T) {
+	client, _ := startTestServer(t, nil)
+	sess, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sess.Close() }()
+	if err := sess.RequestPty("xterm", 24, 80, gossh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	sess.Stdout = &out
+	done := make(chan error, 1)
+	// set -m gives the job its own process group, as in an interactive
+	// shell, so it survives the shell exiting with the terminal open.
+	go func() { done <- sess.Run("set -m; sleep 30 & echo started") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("session failed: %v (output %q)", err, out.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("PTY session did not end after its command exited")
+	}
+	if !strings.Contains(out.String(), "started") {
+		t.Errorf("output before exit was lost: %q", out.String())
+	}
+}

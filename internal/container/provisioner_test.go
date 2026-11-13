@@ -60,7 +60,7 @@ func TestBuildMounts(t *testing.T) {
 				Mounts: nil,
 			},
 			wantMounts: nil,
-			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 		{
 			name: "single bind mount",
@@ -72,7 +72,7 @@ func TestBuildMounts(t *testing.T) {
 			wantMounts: []devcontainer.Mount{
 				{Source: "/host/path", Target: "/container/path", Type: "bind"},
 			},
-			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 		{
 			name: "readonly bind mount",
@@ -84,7 +84,7 @@ func TestBuildMounts(t *testing.T) {
 			wantMounts: []devcontainer.Mount{
 				{Source: "/host/path", Target: "/container/path", Type: "bind", ReadOnly: true},
 			},
-			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 		{
 			name: "tmpfs mount",
@@ -94,7 +94,7 @@ func TestBuildMounts(t *testing.T) {
 				},
 			},
 			wantMounts: nil,
-			wantTmpfs:  map[string]string{"/tmp/test": "", "/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs:  map[string]string{"/tmp/test": "", "/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 		{
 			name: "mixed mounts",
@@ -109,7 +109,7 @@ func TestBuildMounts(t *testing.T) {
 				{Source: "/path1", Target: "/target1", Type: "bind"},
 				{Source: "/path2", Target: "/target2", Type: "bind", ReadOnly: true},
 			},
-			wantTmpfs: map[string]string{"/run": "", "/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs: map[string]string{"/run": "", "/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 		{
 			name: "with runtime secrets keeps /run/secrets tmpfs",
@@ -119,7 +119,7 @@ func TestBuildMounts(t *testing.T) {
 				},
 			},
 			wantMounts: nil,
-			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
+			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=16m"},
 		},
 	}
 
