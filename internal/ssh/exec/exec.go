@@ -258,14 +258,12 @@ func connect(ctx context.Context, ports PortResolver, containerName, workspaceID
 // hostKeyCallbackForWorkspace returns a ssh.HostKeyCallback that pins the
 // workspace's stored host key. The key is the same one the agent loads from
 // its bind-mounted /run/secrets/dcx/ssh_host_ed25519_key.
+//
+// The policy matches the agent's: the key is loaded, never generated or
+// skipped. Without a workspace ID or a stored key there is nothing to pin,
+// so the connection is refused rather than trusted blindly.
 func hostKeyCallbackForWorkspace(workspaceID string) (ssh.HostKeyCallback, error) {
-	if workspaceID == "" {
-		// No workspace ID known (e.g. stray lifecycle hook) — trust on first
-		// use. Safe because we're dialing 127.0.0.1 and the agent already
-		// authenticates our pubkey.
-		return ssh.InsecureIgnoreHostKey(), nil
-	}
-	_, signer, err := dcxssh.EnsureHostKey(workspaceID)
+	_, signer, err := dcxssh.LoadHostKey(workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("load workspace host key: %w", err)
 	}

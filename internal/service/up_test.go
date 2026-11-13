@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container/containertest"
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,4 +56,22 @@ func TestSetupComplete(t *testing.T) {
 
 	fake.ExecFunc = nil // every `test -f` succeeds
 	assert.True(t, svc.setupComplete(ctx, markerInfo(true)))
+}
+
+func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {
+	resolved := &devcontainer.ResolvedDevContainer{
+		RawConfig: &devcontainer.DevContainerConfig{PostAttachCommand: "echo hi"},
+	}
+	cfg := sessionConfig(resolved,
+		map[string]string{"PATH": "/probed/bin", "NVM_DIR": "/nvm"},
+		map[string]string{"PATH": "/remote/bin"},
+	)
+	assert.Equal(t, map[string]string{"PATH": "/remote/bin", "NVM_DIR": "/nvm"}, cfg.Env, "remoteEnv overrides the probed environment")
+	assert.Equal(t, []agentproto.AttachStep{
+		{Label: "devcontainer.json", Commands: []agentproto.AttachCommand{{Shell: "echo hi"}}},
+	}, cfg.PostAttach)
+
+	empty := sessionConfig(&devcontainer.ResolvedDevContainer{}, nil, nil)
+	assert.Nil(t, empty.Env)
+	assert.Empty(t, empty.PostAttach)
 }

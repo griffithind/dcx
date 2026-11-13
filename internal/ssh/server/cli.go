@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -28,6 +29,8 @@ func Execute() error {
 		return runPingCmd(os.Args[2:])
 	case "sftp-server":
 		return runSFTPServerCmd(os.Args[2:])
+	case "setup":
+		return runSetupCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		printUsage()
 		return nil
@@ -47,6 +50,7 @@ Commands:
   listen  Run SSH server listening on a TCP address
   ping    Probe whether a listener is live (used by host for health checks)
   sftp-server  Serve SFTP on stdin/stdout (spawned by listen to drop privileges)
+  setup   Prepare root-owned dirs, shell integration and log (run as root by dcx)
 
 Use "dcx-agent <command> --help" for more information about a command.
 `)
@@ -185,6 +189,84 @@ func runPingCmd(args []string) error {
 		return err
 	}
 	return pingAddr(*addr)
+}
+
+// runSetupCmd prepares the root-owned directories and files the listener
+// uses. dcx runs it as root before each launch, because the listener
+// itself runs as the container's default user, which is often not root:
+//
+//   - /var/lib/dcx and /run/dcx, root-owned (0755), so no container user can
+//     plant symlinks or swap files the agent reads;
+//   - the shell integration scripts;
+//   - the agent log, owned by --log-owner (the listener's uid:gid) so the
+//     listener can write it without the directory being writable.
+func runSetupCmd(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	logOwner := fs.String("log-owner", "", "uid:gid that owns the agent log")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("setup must run as root")
+	}
+	for _, dir := range []string{agentproto.StateDir, agentproto.RunDir, agentproto.ShellIntegrationDir} {
+		if err := ensureRootDir(dir); err != nil {
+			return err
+		}
+	}
+	if err := WriteShellIntegration(agentproto.ShellIntegrationDir); err != nil {
+		return fmt.Errorf("write shell integration: %w", err)
+	}
+
+	uid, gid := 0, 0
+	if *logOwner != "" {
+		var err error
+		if uid, gid, err = parseOwner(*logOwner); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(agentproto.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("create agent log: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	return f.Chown(uid, gid)
+}
+
+// ensureRootDir creates dir if needed and makes sure it is a real directory
+// (not a symlink) owned by root with mode 0755.
+func ensureRootDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	st, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	if err := os.Chown(dir, 0, 0); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o755)
+}
+
+// parseOwner parses "uid:gid".
+func parseOwner(s string) (int, int, error) {
+	u, g, ok := strings.Cut(s, ":")
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid owner %q: want uid:gid", s)
+	}
+	uid, err := strconv.Atoi(u)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid owner %q: %w", s, err)
+	}
+	gid, err := strconv.Atoi(g)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid owner %q: %w", s, err)
+	}
+	return uid, gid, nil
 }
 
 // runSFTPServerCmd serves SFTP over stdin/stdout. The listener spawns it

@@ -10,6 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func addSSHConfig(t *testing.T, e Entry) []string {
+	t.Helper()
+	aliases, err := AddSSHConfig(e)
+	require.NoError(t, err)
+	return aliases
+}
+
 func sampleEntry() Entry {
 	return Entry{
 		HostName:      "test.dcx",
@@ -105,10 +112,10 @@ func TestAddSSHConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("create new config", func(t *testing.T) {
-		err := AddSSHConfig(sampleEntry())
+		_, err := AddSSHConfig(sampleEntry())
 		require.NoError(t, err)
 
-		content, err := os.ReadFile(filepath.Join(sshDir, "config"))
+		content, err := os.ReadFile(filepath.Join(sshDir, "dcx", "config"))
 		require.NoError(t, err)
 		s := string(content)
 
@@ -127,10 +134,10 @@ func TestAddSSHConfig(t *testing.T) {
 	t.Run("update existing config", func(t *testing.T) {
 		e := sampleEntry()
 		e.User = "vscode"
-		err := AddSSHConfig(e)
+		_, err := AddSSHConfig(e)
 		require.NoError(t, err)
 
-		content, err := os.ReadFile(filepath.Join(sshDir, "config"))
+		content, err := os.ReadFile(filepath.Join(sshDir, "dcx", "config"))
 		require.NoError(t, err)
 
 		count := strings.Count(string(content), "# DCX managed - test-container")
@@ -147,9 +154,9 @@ func TestAddSSHConfigStrictHostKeyCheckingWhenKnownHostsSet(t *testing.T) {
 
 	e := sampleEntry()
 	e.KnownHostsPath = filepath.Join(tmpDir, ".dcx", "known_hosts")
-	require.NoError(t, AddSSHConfig(e))
+	addSSHConfig(t, e)
 
-	content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
+	content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "dcx", "config"))
 	assert.Contains(t, string(content), "StrictHostKeyChecking yes")
 	assert.Contains(t, string(content), "UserKnownHostsFile "+e.KnownHostsPath)
 }
@@ -166,13 +173,15 @@ func TestRemoveSSHConfig(t *testing.T) {
 	})
 
 	t.Run("remove existing entry", func(t *testing.T) {
-		require.NoError(t, AddSSHConfig(sampleEntry()))
+		addSSHConfig(t, sampleEntry())
 
 		err := RemoveSSHConfig("test-container")
 		require.NoError(t, err)
 
-		content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
-		assert.NotContains(t, string(content), "test-container")
+		for _, f := range []string{"config", "dcx/config"} {
+			content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", f))
+			assert.NotContains(t, string(content), "test-container", f)
+		}
 	})
 }
 
@@ -187,7 +196,7 @@ func TestHasSSHConfig(t *testing.T) {
 	})
 
 	t.Run("config exists", func(t *testing.T) {
-		require.NoError(t, AddSSHConfig(sampleEntry()))
+		addSSHConfig(t, sampleEntry())
 
 		assert.True(t, HasSSHConfig("test-container"))
 		assert.False(t, HasSSHConfig("other-container"))
@@ -225,11 +234,15 @@ Host test.dcx
 `
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".ssh", "config"), []byte(legacy), 0600))
 
-	require.NoError(t, AddSSHConfig(sampleEntry()))
+	addSSHConfig(t, sampleEntry())
 
-	content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
+	main, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "config"))
+	assert.NotContains(t, string(main), "ProxyCommand", "legacy block should move out of ~/.ssh/config")
+	assert.NotContains(t, string(main), "test-container")
+	assert.True(t, strings.HasPrefix(string(main), "# Added by dcx"), "include goes at the top")
+
+	content, _ := os.ReadFile(filepath.Join(tmpDir, ".ssh", "dcx", "config"))
 	s := string(content)
-	assert.NotContains(t, s, "ProxyCommand", "legacy ProxyCommand should be removed")
 	assert.Contains(t, s, "HostName 127.0.0.1")
 	assert.Contains(t, s, "Port 53412")
 }
@@ -272,7 +285,7 @@ func TestHasSSHConfigExactMatch(t *testing.T) {
 
 	entry := sampleEntry()
 	entry.ContainerName = "api-v2"
-	require.NoError(t, AddSSHConfig(entry))
+	addSSHConfig(t, entry)
 
 	assert.True(t, HasSSHConfig("api-v2"))
 	assert.False(t, HasSSHConfig("api"))
@@ -290,7 +303,7 @@ func TestAddSSHConfigPreservesSymlinkAndMode(t *testing.T) {
 	require.NoError(t, os.WriteFile(real, []byte("Host mine\n  User me\n"), 0640))
 	require.NoError(t, os.Symlink(real, filepath.Join(sshDir, "config")))
 
-	require.NoError(t, AddSSHConfig(sampleEntry()))
+	addSSHConfig(t, sampleEntry())
 
 	info, err := os.Lstat(filepath.Join(sshDir, "config"))
 	require.NoError(t, err)
@@ -303,7 +316,7 @@ func TestAddSSHConfigPreservesSymlinkAndMode(t *testing.T) {
 	data, err := os.ReadFile(real)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "Host mine")
-	assert.Contains(t, string(data), "# DCX managed - test-container")
+	assert.Contains(t, string(data), includeLine)
 }
 
 // An unreadable config must produce an error, not be overwritten with only
@@ -319,10 +332,73 @@ func TestAddSSHConfigFailsOnUnreadableConfig(t *testing.T) {
 	cfg := filepath.Join(sshDir, "config")
 	require.NoError(t, os.WriteFile(cfg, []byte("Host mine\n"), 0000))
 
-	assert.Error(t, AddSSHConfig(sampleEntry()))
+	_, err := AddSSHConfig(sampleEntry())
+	assert.Error(t, err)
 
 	require.NoError(t, os.Chmod(cfg, 0600))
 	data, err := os.ReadFile(cfg)
 	require.NoError(t, err)
 	assert.Equal(t, "Host mine\n", string(data))
+}
+
+// The include must come first: OpenSSH takes the first value of each
+// option, so a user `Host *` block above it would override dcx settings.
+func TestAddSSHConfigIncludesAtTopOnce(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	sshDir := filepath.Join(tmpDir, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	user := "Host *\n  User someone-else\n  StrictHostKeyChecking ask\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "config"), []byte(user), 0600))
+
+	addSSHConfig(t, sampleEntry())
+	e := sampleEntry()
+	e.ContainerName, e.HostName = "other-1234", "other.dcx"
+	addSSHConfig(t, e)
+
+	main, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(string(main), includeLine))
+	assert.Less(t, strings.Index(string(main), includeLine), strings.Index(string(main), "Host *"))
+	assert.True(t, strings.HasSuffix(string(main), user), "the user's config is otherwise unchanged")
+}
+
+func TestAddSSHConfigLeavesUserConfigUntouchedWhenIncluded(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	sshDir := filepath.Join(tmpDir, ".ssh")
+	require.NoError(t, os.MkdirAll(sshDir, 0700))
+	user := includeLine + "\n\nHost mine\n  User me\n\n\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sshDir, "config"), []byte(user), 0600))
+
+	addSSHConfig(t, sampleEntry())
+	require.NoError(t, RemoveSSHConfig("test-container"))
+
+	main, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	require.NoError(t, err)
+	assert.Equal(t, user, string(main))
+}
+
+// Two checkouts with the same name: the first keeps "<name>.dcx", the
+// second is reachable by its unique "<container>.dcx" only.
+func TestAddSSHConfigAliasCollision(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	first := sampleEntry()
+	first.ContainerName = "test-aaaa1111"
+	assert.Equal(t, []string{"test.dcx", "test-aaaa1111.dcx"}, addSSHConfig(t, first))
+
+	second := sampleEntry()
+	second.ContainerName = "test-bbbb2222"
+	assert.Equal(t, []string{"test-bbbb2222.dcx"}, addSSHConfig(t, second))
+
+	// Rewriting the first keeps its short alias.
+	assert.Equal(t, []string{"test.dcx", "test-aaaa1111.dcx"}, addSSHConfig(t, first))
+	assert.Equal(t, []string{"test.dcx", "test-aaaa1111.dcx"}, Aliases("test-aaaa1111"))
+	assert.Equal(t, []string{"test-bbbb2222.dcx"}, Aliases("test-bbbb2222"))
+
+	// Once the first is gone, the second can take the short alias.
+	require.NoError(t, RemoveSSHConfig("test-aaaa1111"))
+	assert.Equal(t, []string{"test.dcx", "test-bbbb2222.dcx"}, addSSHConfig(t, second))
 }

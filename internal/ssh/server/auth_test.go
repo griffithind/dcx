@@ -147,24 +147,42 @@ func TestSetupHostKeyRefusesCorruptFile(t *testing.T) {
 	}
 }
 
-func TestSetupHostKeyGeneratesWhenMissing(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "host-key")
-
+func TestSetupHostKeyRefusesMissingKey(t *testing.T) {
+	// No silent generation: the client pins the key dcx wrote, so a key
+	// generated here could never be trusted.
+	path := filepath.Join(t.TempDir(), "host-key")
 	s := &Server{cfg: Config{HostKeyPath: path}}
-	srv := &gsh.Server{}
-	if err := s.setupHostKey(srv); err != nil {
+	if err := s.setupHostKey(&gsh.Server{}); err == nil {
+		t.Fatal("setupHostKey should refuse a missing host key")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("setupHostKey must not create a host key")
+	}
+}
+
+func TestSetupHostKeyLoadsKey(t *testing.T) {
+	s := &Server{cfg: Config{HostKeyPath: writeTestHostKey(t, t.TempDir())}}
+	if err := s.setupHostKey(&gsh.Server{}); err != nil {
 		t.Fatalf("setupHostKey: %v", err)
 	}
+}
 
-	// Key should have been persisted.
-	data, err := os.ReadFile(path)
+// writeTestHostKey writes an ed25519 host key in OpenSSH PEM form.
+func writeTestHostKey(t *testing.T, dir string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatalf("read persisted key: %v", err)
+		t.Fatal(err)
 	}
-	if block, _ := pem.Decode(data); block == nil {
-		t.Error("persisted key is not valid PEM")
+	block, err := gossh.MarshalPrivateKey(priv, "test host key")
+	if err != nil {
+		t.Fatal(err)
 	}
+	path := filepath.Join(dir, "host-key")
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // fakeSSHContext satisfies just enough of ssh.Context for authorize's needs.

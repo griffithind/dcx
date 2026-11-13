@@ -21,7 +21,7 @@ func TestListenAcceptsAuthorizedKey(t *testing.T) {
 	srv, err := NewServer(Config{
 		Shell:               "/bin/sh",
 		WorkDir:             dir,
-		HostKeyPath:         filepath.Join(dir, "host-key"),
+		HostKeyPath:         writeTestHostKey(t, dir),
 		AuthorizedKeysPaths: []string{authKeysPath},
 		Gate:                Loopback(),
 		ReadyFile:           readyFile,
@@ -88,7 +88,7 @@ func TestListenRejectsUnauthorizedKey(t *testing.T) {
 	srv, err := NewServer(Config{
 		Shell:               "/bin/sh",
 		WorkDir:             dir,
-		HostKeyPath:         filepath.Join(dir, "host-key"),
+		HostKeyPath:         writeTestHostKey(t, dir),
 		AuthorizedKeysPaths: []string{authKeysPath},
 		Gate:                Loopback(),
 		ReadyFile:           readyFile,

@@ -100,6 +100,23 @@ func (s *DevContainerService) GetIdentifiers() (*Identifiers, error) {
 	}, nil
 }
 
+// SSHAlias returns the alias `ssh` reaches this workspace by: the first
+// Host of its SSH config block (normally "<name>.dcx", or the unique
+// "<container>.dcx" when another workspace already uses that name), or the
+// default alias when no block exists yet.
+func (s *DevContainerService) SSHAlias(ctx context.Context) string {
+	ids, err := s.GetIdentifiers()
+	if err != nil {
+		return ""
+	}
+	if _, info, err := s.stateManager.GetStateWithProject(ctx, ids.ProjectName, ids.WorkspaceID); err == nil && info != nil {
+		if aliases := hostconfig.Aliases(info.Name); len(aliases) > 0 {
+			return aliases[0]
+		}
+	}
+	return ids.SSHHost
+}
+
 // GetStateManager returns the state manager for direct access when needed.
 func (s *DevContainerService) GetStateManager() *state.StateManager {
 	return s.stateManager
@@ -382,13 +399,25 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	if len(allowedCIDRs) > 0 {
 		argv = append(argv, "--allow-cidrs", strings.Join(allowedCIDRs, ","))
 	}
-	// The agent inherits the container's default user (typically the image's
-	// USER or remoteUser after UID remap). mountSSHSecrets chowns the host
-	// key and authorized_keys to that same user so the agent can read them.
+	// The agent runs as the container's default user (the image's USER, or
+	// remoteUser after UID remap); mountSSHSecrets chowns the host key and
+	// authorized_keys to match. That user is often not root, so the
+	// root-owned directories, shell integration and log file the agent uses
+	// are prepared first by `dcx-agent setup` as root.
+	owner, err := s.engine.ExecOutput(ctx, containerInfo.Name, agentOwnerQuery)
+	if err != nil {
+		return fmt.Errorf("determine agent user: %w", err)
+	}
+	if _, err := s.engine.ExecAsRoot(ctx, containerInfo.Name, []string{
+		agentproto.BinaryPath, "setup", "--log-owner", strings.TrimSpace(string(owner)),
+	}); err != nil {
+		return fmt.Errorf("prepare agent: %w", err)
+	}
+
 	// Keep the agent's output in a log so a failed start can be explained
 	// (`docker exec -d` discards it). argv is passed as positional
 	// arguments, never interpolated into the script.
-	wrapped := append([]string{"sh", "-c", `exec "$0" "$@" >` + agentLogPath + ` 2>&1`}, argv...)
+	wrapped := append([]string{"sh", "-c", `exec "$0" "$@" >` + agentproto.LogPath + ` 2>&1`}, argv...)
 	if err := s.engine.ExecDetached(ctx, containerInfo.Name, wrapped); err != nil {
 		return err
 	}
@@ -408,7 +437,7 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 		}
 	}
 	msg := fmt.Sprintf("dcx agent did not start listening within %s", agentReadyTimeout)
-	if out, err := s.engine.ExecOutput(ctx, containerInfo.Name, []string{"tail", "-n", "20", agentLogPath}); err == nil {
+	if out, err := s.engine.ExecOutput(ctx, containerInfo.Name, []string{"tail", "-n", "20", agentproto.LogPath}); err == nil {
 		if log := strings.TrimSpace(string(out)); log != "" {
 			msg += "; agent log:\n" + log
 		}
@@ -416,9 +445,8 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	return errors.New(msg)
 }
 
-// agentLogPath receives the agent's stdout/stderr (world-writable /tmp so
-// it works whatever user the agent runs as).
-const agentLogPath = "/tmp/dcx-agent.log"
+// agentOwnerQuery prints the container default user's "uid:gid".
+var agentOwnerQuery = []string{"sh", "-c", `printf '%s:%s' "$(id -u)" "$(id -g)"`}
 
 // agentReadyTimeout bounds how long Up waits for a freshly launched agent.
 var agentReadyTimeout = 15 * time.Second
@@ -486,11 +514,12 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 }
 
 // setupContainerEnvironment applies patches and probes the user environment.
-// Returns the probed environment variables to be injected into lifecycle hooks.
-func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) (map[string]string, error) {
+// It returns the probed environment (injected into lifecycle hooks and
+// sessions) and remoteEnv with ${containerEnv:…} resolved.
+func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) (probed, remoteEnv map[string]string, err error) {
 	cfg := resolved.RawConfig
 	if cfg == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	patcher := env.NewPatcher()
@@ -501,7 +530,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	for k, v := range cfg.ContainerEnv {
 		envToPatch[k] = v
 	}
-	remoteEnv := cfg.RemoteEnv
+	remoteEnv = cfg.RemoteEnv
 	if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
 		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, devcontainer.EnvListToMap(details.Env))
 	}
@@ -529,12 +558,12 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 
 	// Probe user environment if configured
 	if cfg.UserEnvProbe == "" || cfg.UserEnvProbe == "none" {
-		return nil, nil
+		return nil, remoteEnv, nil
 	}
 
 	probeType := env.ParseProbeType(cfg.UserEnvProbe)
 	if probeType == env.ProbeNone {
-		return nil, nil
+		return nil, remoteEnv, nil
 	}
 
 	// Determine user for probing
@@ -552,14 +581,14 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 
 	probedEnv, err := prober.ProbeWithCache(ctx, containerInfo.ID, probeType, user, imageHash)
 	if err != nil {
-		return nil, fmt.Errorf("environment probe failed: %w", err)
+		return nil, remoteEnv, fmt.Errorf("environment probe failed: %w", err)
 	}
 
 	if s.verbose && probedEnv != nil {
 		s.report.Infof("  [env] Captured %d environment variables", len(probedEnv))
 	}
 
-	return probedEnv, nil
+	return probedEnv, remoteEnv, nil
 }
 
 // setupSSHAccess configures SSH access to the container.
@@ -592,7 +621,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 
 	// Pin the workspace's host key into ~/.dcx/known_hosts so plain `ssh`
 	// clients can verify it via HostKeyAlias without TOFU.
-	_, signer, err := dcxssh.EnsureHostKey(ids.WorkspaceID)
+	_, signer, err := dcxssh.LoadHostKey(ids.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("load host key: %w", err)
 	}
@@ -602,7 +631,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 
 	knownHosts, _ := dcxssh.KnownHostsPath()
 
-	if err := hostconfig.AddSSHConfig(hostconfig.Entry{
+	aliases, err := hostconfig.AddSSHConfig(hostconfig.Entry{
 		HostName:       ids.SSHHost,
 		ContainerName:  containerInfo.Name,
 		WorkspaceID:    ids.WorkspaceID,
@@ -610,11 +639,14 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		BindHost:       "127.0.0.1",
 		Port:           port,
 		KnownHostsPath: knownHosts,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
-
-	s.report.Infof("SSH configured: ssh %s  (127.0.0.1:%d)", ids.SSHHost, port)
+	if aliases[0] != ids.SSHHost {
+		s.report.Warnf("SSH alias %s is used by another workspace; this one is %s", ids.SSHHost, aliases[0])
+	}
+	s.report.Infof("SSH configured: ssh %s  (127.0.0.1:%d)", aliases[0], port)
 	return nil
 }
 

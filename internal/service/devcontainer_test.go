@@ -134,10 +134,10 @@ func TestUpOptions(t *testing.T) {
 
 func TestDownOptions(t *testing.T) {
 	tests := []struct {
-		name          string
-		opts          DownOptions
-		wantVolumes   bool
-		wantOrphans   bool
+		name        string
+		opts        DownOptions
+		wantVolumes bool
+		wantOrphans bool
 	}{
 		{
 			name:        "default options",

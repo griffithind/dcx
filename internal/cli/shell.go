@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"github.com/griffithind/dcx/internal/ui"
 	"os"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -42,12 +41,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
 
-	// postAttachCommand runs each time a user attaches an interactive
-	// session. A failing hook is reported but does not block the shell.
-	if err := cliCtx.Service.RunAttachHooks(cliCtx.Ctx); err != nil {
-		ui.Warning("postAttachCommand failed: %v", err)
-	}
-
+	// postAttachCommand is run by the agent for every interactive session.
 	// Open interactive shell via unified SSH path
 	tty := true
 	exitCode, err := sshexec.ExecInContainer(cliCtx.Ctx, sshexec.ContainerExecOptions{

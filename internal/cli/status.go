@@ -88,8 +88,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
 
 	// Show SSH status
-	if containerInfo != nil && hostconfig.HasSSHConfig(containerInfo.Name) {
-		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", ids.SSHHost))))
+	if aliases := sshAliases(containerInfo); len(aliases) > 0 {
+		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", aliases[0]))))
 	} else if currentState != state.StateAbsent {
 		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (run 'dcx up' to configure)")))
 	}
@@ -184,4 +184,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// sshAliases returns the SSH aliases configured for a container.
+func sshAliases(info *state.ContainerInfo) []string {
+	if info == nil {
+		return nil
+	}
+	return hostconfig.Aliases(info.Name)
 }

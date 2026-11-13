@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/griffithind/dcx/internal/agentproto"
 )
 
 //go:embed shell/bash.sh
@@ -16,7 +18,9 @@ var zshIntegration string
 //go:embed shell/fish.fish
 var fishIntegration string
 
-const shellIntegrationDir = "/tmp/.dcx-shell"
+// shellIntegrationDir is root-owned; `dcx-agent setup` (run as root by
+// dcx) writes the scripts, the listener only reads them.
+var shellIntegrationDir = agentproto.ShellIntegrationDir
 
 // ShellConfig contains shell-specific configuration for integration.
 type ShellConfig struct {
@@ -26,78 +30,73 @@ type ShellConfig struct {
 	Env []string
 }
 
-// SetupShellIntegration creates integration files and returns shell configuration.
-// This enables terminal title updates showing the typed command (like Kitty/Ghostty).
-func SetupShellIntegration(shell string) ShellConfig {
-	shellBase := filepath.Base(shell)
-	config := ShellConfig{}
-
-	// Skip if no project name
-	if os.Getenv("DCX_PROJECT_NAME") == "" {
-		return config
+// WriteShellIntegration writes the integration scripts for every supported
+// shell into dir. It runs at setup time as root, so dir must already be a
+// root-owned directory (see runSetupCmd).
+func WriteShellIntegration(dir string) error {
+	zdotdir := filepath.Join(dir, "zsh")
+	fishConf := filepath.Join(dir, "fish", "vendor_conf.d")
+	for _, d := range []string{dir, zdotdir, fishConf} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
 	}
-
-	_ = os.MkdirAll(shellIntegrationDir, 0755)
-
-	switch shellBase {
-	case "bash":
-		// Write our init script (sources user's bashrc at the end)
-		initPath := filepath.Join(shellIntegrationDir, "bash-init.sh")
-		_ = os.WriteFile(initPath, []byte(bashIntegration), 0644)
-		// Use --rcfile to load our init script instead of default -l
-		config.Args = []string{"--rcfile", initPath}
-
-	case "zsh":
-		// Write integration script
-		integrationPath := filepath.Join(shellIntegrationDir, "zsh.zsh")
-		_ = os.WriteFile(integrationPath, []byte(zshIntegration), 0644)
-
-		// Create ZDOTDIR with startup files that source our integration then user's
-		zdotdir := filepath.Join(shellIntegrationDir, "zsh")
-		_ = os.MkdirAll(zdotdir, 0755)
-
-		// .zshenv - always sourced first
-		zshenv := fmt.Sprintf(`# DCX shell integration
+	zshIntegrationPath := filepath.Join(dir, "zsh.zsh")
+	files := map[string]string{
+		filepath.Join(dir, "bash-init.sh"): bashIntegration,
+		zshIntegrationPath:                 zshIntegration,
+		filepath.Join(zdotdir, ".zshenv"): fmt.Sprintf(`# DCX shell integration
 source "%s"
 # Source user's .zshenv
 [[ -f "${ZDOTDIR_ORIG:-$HOME}/.zshenv" ]] && source "${ZDOTDIR_ORIG:-$HOME}/.zshenv"
-`, integrationPath)
-		_ = os.WriteFile(filepath.Join(zdotdir, ".zshenv"), []byte(zshenv), 0644)
-
-		// .zshrc - for interactive shells
-		zshrc := `# Source user's .zshrc
+`, zshIntegrationPath),
+		filepath.Join(zdotdir, ".zshrc"): `# Source user's .zshrc
 [[ -f "${ZDOTDIR_ORIG:-$HOME}/.zshrc" ]] && source "${ZDOTDIR_ORIG:-$HOME}/.zshrc"
-`
-		_ = os.WriteFile(filepath.Join(zdotdir, ".zshrc"), []byte(zshrc), 0644)
-
-		// .zprofile - for login shells
-		zprofile := `# Source user's .zprofile
+`,
+		filepath.Join(zdotdir, ".zprofile"): `# Source user's .zprofile
 [[ -f "${ZDOTDIR_ORIG:-$HOME}/.zprofile" ]] && source "${ZDOTDIR_ORIG:-$HOME}/.zprofile"
-`
-		_ = os.WriteFile(filepath.Join(zdotdir, ".zprofile"), []byte(zprofile), 0644)
+`,
+		filepath.Join(fishConf, "dcx.fish"): fishIntegration,
+	}
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-		// Preserve original ZDOTDIR and set ours
+// SetupShellIntegration returns how to start an interactive shell so it
+// sources dcx's integration (terminal titles showing the typed command).
+// It only reads: when the scripts were not installed, or the workspace has
+// no project name, the shell starts normally.
+func SetupShellIntegration(shell string) ShellConfig {
+	config := ShellConfig{}
+	if os.Getenv("DCX_PROJECT_NAME") == "" {
+		return config
+	}
+	if _, err := os.Stat(filepath.Join(shellIntegrationDir, "bash-init.sh")); err != nil {
+		return config
+	}
+
+	switch filepath.Base(shell) {
+	case "bash":
+		// --rcfile loads our init script, which sources the user's bashrc.
+		config.Args = []string{"--rcfile", filepath.Join(shellIntegrationDir, "bash-init.sh")}
+	case "zsh":
 		if orig := os.Getenv("ZDOTDIR"); orig != "" {
 			config.Env = append(config.Env, "ZDOTDIR_ORIG="+orig)
 		}
-		config.Env = append(config.Env, "ZDOTDIR="+zdotdir)
-		// Still use -l for login shell behavior
+		config.Env = append(config.Env, "ZDOTDIR="+filepath.Join(shellIntegrationDir, "zsh"))
 		config.Args = []string{"-l"}
-
 	case "fish":
-		// Fish uses vendor_conf.d for additional config
-		confDir := filepath.Join(shellIntegrationDir, "fish/vendor_conf.d")
-		_ = os.MkdirAll(confDir, 0755)
-		_ = os.WriteFile(filepath.Join(confDir, "dcx.fish"), []byte(fishIntegration), 0644)
-
-		// Set XDG_DATA_DIRS to include our config
 		xdgData := os.Getenv("XDG_DATA_DIRS")
 		if xdgData == "" {
 			xdgData = "/usr/local/share:/usr/share"
 		}
+		// fish reads $XDG_DATA_DIRS/fish/vendor_conf.d.
 		config.Env = append(config.Env, "XDG_DATA_DIRS="+shellIntegrationDir+":"+xdgData)
 		config.Args = []string{"-l"}
 	}
-
 	return config
 }

@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,26 +90,54 @@ func TestEnsureHostKeyRepairsDriftedPerms(t *testing.T) {
 	}
 }
 
-func TestEnsureHostKeyHandlesCorruptFile(t *testing.T) {
+func TestEnsureHostKeyRefusesCorruptFile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	path, _, err := EnsureHostKey("wk_test")
 	if err != nil {
 		t.Fatalf("first EnsureHostKey: %v", err)
 	}
-
-	// Corrupt the file.
 	if err := os.WriteFile(path, []byte("garbage"), 0600); err != nil {
 		t.Fatalf("write garbage: %v", err)
 	}
 
-	// Should regenerate silently.
-	_, signer, err := EnsureHostKey("wk_test")
-	if err != nil {
-		t.Fatalf("regen EnsureHostKey: %v", err)
+	// No silent regeneration: that would break every pinned client.
+	if _, _, err := EnsureHostKey("wk_test"); err == nil {
+		t.Fatal("EnsureHostKey must refuse a corrupt key")
 	}
-	if signer == nil {
-		t.Fatal("signer nil after regen")
+	data, _ := os.ReadFile(path)
+	if string(data) != "garbage" {
+		t.Error("corrupt key was overwritten")
+	}
+}
+
+func TestLoadHostKeyNeverCreates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	path, _, err := LoadHostKey("wk_missing")
+	if !errors.Is(err, ErrNoHostKey) {
+		t.Fatalf("want ErrNoHostKey, got %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("LoadHostKey created a key")
+	}
+	if _, _, err := LoadHostKey(""); err == nil {
+		t.Error("LoadHostKey without a workspace ID must fail")
+	}
+
+	created, _, err := EnsureHostKey("wk_missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, signer, err := LoadHostKey("wk_missing")
+	if err != nil || signer == nil || loaded != created {
+		t.Fatalf("LoadHostKey after EnsureHostKey: %v", err)
+	}
+	if err := RemoveHostKey("wk_missing"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadHostKey("wk_missing"); !errors.Is(err, ErrNoHostKey) {
+		t.Errorf("key still present after RemoveHostKey: %v", err)
 	}
 }
 

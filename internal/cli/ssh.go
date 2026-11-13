@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,9 +40,9 @@ func runSSH(cmd *cobra.Command, args []string) error {
 	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
 	defer svc.Close()
 
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
+	alias := svc.SSHAlias(context.Background())
+	if alias == "" {
+		return fmt.Errorf("failed to determine the workspace's SSH alias")
 	}
 
 	if sshConnect {
@@ -49,9 +50,9 @@ func runSSH(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("ssh not found in PATH")
 		}
-		return syscall.Exec(sshPath, []string{"ssh", ids.SSHHost}, os.Environ())
+		return syscall.Exec(sshPath, []string{"ssh", alias}, os.Environ())
 	}
 
-	ui.Printf("ssh %s", ids.SSHHost)
+	ui.Printf("ssh %s", alias)
 	return nil
 }

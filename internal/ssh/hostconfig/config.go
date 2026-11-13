@@ -1,6 +1,12 @@
-// Package hostconfig manages the ~/.ssh/config block dcx writes for each
-// workspace. The block is delimited by begin/end markers so subsequent
-// dcx invocations can locate and replace it cleanly.
+// Package hostconfig manages the SSH config block dcx writes for each
+// workspace. Blocks live in ~/.ssh/dcx/config, which an `Include` line at
+// the very top of ~/.ssh/config pulls in: OpenSSH uses the first value it
+// finds for each option, so the include must precede the user's own
+// `Host *` blocks or those would override dcx's settings. Each block is
+// delimited by begin/end markers so dcx can locate and replace it.
+//
+// Blocks written to ~/.ssh/config by older dcx versions are moved into the
+// include file the next time that workspace's block is written.
 //
 // Before the TCP transport, the block used `ProxyCommand dcx ssh --stdio …`
 // which only worked for clients that shelled out to OpenSSH. This file now
@@ -64,17 +70,28 @@ type Entry struct {
 	KnownHostsPath string // usually ~/.dcx/known_hosts
 }
 
-// AddSSHConfig writes or replaces the ssh_config block for a container.
-// Safe for concurrent use from multiple dcx invocations.
-func AddSSHConfig(entry Entry) error {
-	return withConfigLock(func() error {
-		configPath := getSSHConfigPath()
+// includeLine is the directive dcx adds to the top of ~/.ssh/config.
+const includeLine = "Include ~/.ssh/dcx/config"
 
-		content, err := os.ReadFile(configPath)
+// AddSSHConfig writes or replaces the ssh_config block for a container and
+// returns the aliases it can be reached by. The block always answers to
+// "<container>.dcx", which is unique per checkout; it also answers to
+// entry.HostName ("<name>.dcx") unless another workspace's block already
+// claims that alias. Safe for concurrent use from multiple dcx invocations.
+func AddSSHConfig(entry Entry) ([]string, error) {
+	var aliases []string
+	err := withConfigLock(func() error {
+		dcxPath := getDCXConfigPath()
+		content, err := os.ReadFile(dcxPath)
 		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("read ssh config: %w", err)
+			return fmt.Errorf("read dcx ssh config: %w", err)
 		}
 		content = removeSSHConfigEntry(content, entry.ContainerName)
+
+		aliases = []string{entry.ContainerName + ".dcx"}
+		if entry.HostName != "" && entry.HostName != aliases[0] && !aliasTaken(content, entry.HostName) {
+			aliases = append([]string{entry.HostName}, aliases...)
+		}
 
 		bindHost := entry.BindHost
 		if bindHost == "" {
@@ -82,27 +99,126 @@ func AddSSHConfig(entry Entry) error {
 		}
 		knownHosts := entry.KnownHostsPath
 		if knownHosts == "" {
-			// Best-effort; knownhosts.Path returns an absolute path we can use.
 			if p, err := dcxssh.KnownHostsPath(); err == nil {
 				knownHosts = p
 			}
 		}
+		content = append(content, []byte(renderBlock(entry, aliases, bindHost, knownHosts))...)
 
-		block := renderBlock(entry, bindHost, knownHosts)
-		newContent := append(content, []byte(block)...)
-
-		if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-			return fmt.Errorf("create .ssh dir: %w", err)
+		if err := os.MkdirAll(filepath.Dir(dcxPath), 0700); err != nil {
+			return fmt.Errorf("create %s: %w", filepath.Dir(dcxPath), err)
 		}
-		return writeFileAtomic(configPath, newContent)
+		if err := writeFileAtomic(dcxPath, content); err != nil {
+			return err
+		}
+		return updateMainConfig(func(main []byte) []byte {
+			// Move this workspace's legacy block out, then include ours.
+			return ensureInclude(removeIfPresent(main, entry.ContainerName))
+		})
 	})
+	return aliases, err
+}
+
+// Aliases returns the host aliases of a container's block, or nil when it
+// has none.
+func Aliases(containerName string) []string {
+	for _, path := range []string{getDCXConfigPath(), getSSHConfigPath()} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if hosts := blockHosts(content, containerName); hosts != nil {
+			return hosts
+		}
+	}
+	return nil
+}
+
+// blockHosts returns the Host patterns of containerName's block.
+func blockHosts(content []byte, containerName string) []string {
+	start := sshConfigMarkerStart + containerName
+	end := sshConfigMarkerEnd + containerName
+	inBlock := false
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimRight(line, " \t\r")
+		switch {
+		case trimmed == start:
+			inBlock = true
+		case trimmed == end:
+			inBlock = false
+		case inBlock:
+			if fields := strings.Fields(trimmed); len(fields) > 1 && strings.EqualFold(fields[0], "Host") {
+				return fields[1:]
+			}
+		}
+	}
+	return nil
+}
+
+// aliasTaken reports whether any block in content already lists alias as a
+// Host pattern.
+func aliasTaken(content []byte, alias string) bool {
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && strings.EqualFold(fields[0], "Host") {
+			for _, h := range fields[1:] {
+				if h == alias {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// removeIfPresent removes containerName's block from the user's own config,
+// leaving the file byte-for-byte untouched when there is none.
+func removeIfPresent(content []byte, containerName string) []byte {
+	if blockHosts(content, containerName) == nil && !strings.Contains(string(content), sshConfigMarkerStart+containerName) {
+		return content
+	}
+	return removeSSHConfigEntry(content, containerName)
+}
+
+// ensureInclude puts the dcx Include line at the top of the main config,
+// unless it is already present.
+func ensureInclude(main []byte) []byte {
+	abs := "Include " + getDCXConfigPath()
+	for _, line := range strings.Split(string(main), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == includeLine || trimmed == abs {
+			return main
+		}
+	}
+	header := "# Added by dcx: per-workspace hosts. Must stay above any Host block.\n" + includeLine + "\n"
+	if len(main) > 0 {
+		header += "\n"
+	}
+	return append([]byte(header), main...)
+}
+
+// updateMainConfig rewrites ~/.ssh/config with fn, only when it changes.
+func updateMainConfig(fn func([]byte) []byte) error {
+	path := getSSHConfigPath()
+	content, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read ssh config: %w", err)
+	}
+	updated := fn(content)
+	if string(updated) == string(content) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create .ssh dir: %w", err)
+	}
+	return writeFileAtomic(path, updated)
 }
 
 // renderBlock formats the config stanza dcx writes.
-func renderBlock(e Entry, bindHost, knownHosts string) string {
+func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s%s\n", sshConfigMarkerStart, e.ContainerName)
-	fmt.Fprintf(&b, "Host %s\n", e.HostName)
+	fmt.Fprintf(&b, "Host %s\n", strings.Join(aliases, " "))
 	fmt.Fprintf(&b, "  HostName %s\n", bindHost)
 	fmt.Fprintf(&b, "  Port %d\n", e.Port)
 	if e.User != "" {
@@ -134,45 +250,40 @@ func renderBlock(e Entry, bindHost, knownHosts string) string {
 	return b.String()
 }
 
-// RemoveSSHConfig removes the SSH config entry for a container.
-// Safe for concurrent use from multiple processes.
+// RemoveSSHConfig removes the SSH config entry for a container, from the
+// include file and from a legacy block in ~/.ssh/config. Safe for
+// concurrent use from multiple processes.
 func RemoveSSHConfig(containerName string) error {
 	return withConfigLock(func() error {
-		configPath := getSSHConfigPath()
-		content, err := os.ReadFile(configPath)
-		if os.IsNotExist(err) {
-			return nil // No config file, nothing to remove
+		dcxPath := getDCXConfigPath()
+		content, err := os.ReadFile(dcxPath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read dcx ssh config: %w", err)
 		}
-		if err != nil {
-			return fmt.Errorf("read ssh config: %w", err)
+		if err == nil {
+			if updated := removeSSHConfigEntry(content, containerName); string(updated) != string(content) {
+				if err := writeFileAtomic(dcxPath, updated); err != nil {
+					return err
+				}
+			}
 		}
-
-		newContent := removeSSHConfigEntry(content, containerName)
-
-		// Only write if content changed
-		if string(newContent) != string(content) {
-			return writeFileAtomic(configPath, newContent)
+		if _, err := os.Stat(getSSHConfigPath()); os.IsNotExist(err) {
+			return nil
 		}
-
-		return nil
+		return updateMainConfig(func(main []byte) []byte {
+			return removeIfPresent(main, containerName)
+		})
 	})
 }
 
 // HasSSHConfig checks if an SSH config entry exists for a container.
 func HasSSHConfig(containerName string) bool {
-	configPath := getSSHConfigPath()
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		return false
-	}
+	return Aliases(containerName) != nil
+}
 
-	start := sshConfigMarkerStart + containerName
-	for _, line := range strings.Split(string(content), "\n") {
-		if strings.TrimRight(line, " \t\r") == start {
-			return true
-		}
-	}
-	return false
+// getDCXConfigPath returns the path of the include file holding dcx's blocks.
+func getDCXConfigPath() string {
+	return filepath.Join(filepath.Dir(getSSHConfigPath()), "dcx", "config")
 }
 
 // getSSHConfigPath returns the path to the SSH config file.

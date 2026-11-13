@@ -809,6 +809,17 @@ func (d *Docker) ExecDetached(ctx context.Context, containerName string, argv []
 	return nil
 }
 
+// ExecAsRoot runs argv in the container as root and returns its combined
+// output.
+func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error) {
+	args := append([]string{"exec", "--user", "root", containerName}, argv...)
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("docker exec as root failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
 // ExecOutput runs argv in the container (as its default user) and returns
 // its stdout.
 func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error) {

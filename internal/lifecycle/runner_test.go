@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"github.com/griffithind/dcx/internal/agentproto"
 	"strings"
 	"sync"
 	"testing"
@@ -91,16 +92,31 @@ func TestFeatureHooksRunBeforeConfigHooks(t *testing.T) {
 		[]features.FeatureHook{{FeatureName: "f", Command: "feature-on-create"}},
 		nil, nil,
 		[]features.FeatureHook{{FeatureName: "f", Command: "feature-post-start"}},
-		[]features.FeatureHook{{FeatureName: "f", Command: "feature-post-attach"}},
 	)
 	require.NoError(t, r.RunCreateHooks(context.Background(), nil))
 	require.NoError(t, r.RunStartHooks(context.Background()))
-	require.NoError(t, r.RunAttachHooks(context.Background()))
 	assert.Equal(t, []string{
 		"feature-on-create", "on-create", "update-content", "post-create",
 		"feature-post-start", "post-start",
-		"feature-post-attach", "post-attach",
 	}, *ran)
+}
+
+func TestAttachSteps(t *testing.T) {
+	steps := AttachSteps(
+		[]features.FeatureHook{
+			{FeatureName: "f", Command: "feature-post-attach"},
+			{FeatureName: "empty", Command: ""},
+		},
+		map[string]interface{}{"b": []interface{}{"echo", "b c"}, "a": "echo a"},
+	)
+	assert.Equal(t, []agentproto.AttachStep{
+		{Label: "feature f", Commands: []agentproto.AttachCommand{{Shell: "feature-post-attach"}}},
+		{Label: "devcontainer.json", Commands: []agentproto.AttachCommand{
+			{Name: "a", Shell: "echo a"},
+			{Name: "b", Argv: []string{"echo", "b c"}},
+		}},
+	}, steps)
+	assert.Empty(t, AttachSteps(nil, nil))
 }
 
 func TestRunInitializeUsesHost(t *testing.T) {

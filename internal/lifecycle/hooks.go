@@ -4,6 +4,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/agentproto"
 	"os"
 	"os/exec"
 	"sort"
@@ -81,7 +82,6 @@ type HookRunner struct {
 	featureUpdateContentHooks []features.FeatureHook
 	featurePostCreateHooks    []features.FeatureHook
 	featurePostStartHooks     []features.FeatureHook
-	featurePostAttachHooks    []features.FeatureHook
 
 	// Command executors; default to the real host/container execution and
 	// are replaced in tests.
@@ -106,12 +106,14 @@ func NewHookRunner(ports sshexec.PortResolver, rep report.Reporter, containerID 
 }
 
 // SetFeatureHooks sets the feature lifecycle hooks to be executed.
-func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postStart, postAttach []features.FeatureHook) {
+//
+// postAttachCommand is not run here: the agent runs it for every
+// interactive session (see AttachSteps).
+func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postStart []features.FeatureHook) {
 	r.featureOnCreateHooks = onCreate
 	r.featureUpdateContentHooks = updateContent
 	r.featurePostCreateHooks = postCreate
 	r.featurePostStartHooks = postStart
-	r.featurePostAttachHooks = postAttach
 }
 
 // SetProbedEnv sets the probed environment from userEnvProbe.
@@ -212,12 +214,6 @@ func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error 
 // time the container starts.
 func (r *HookRunner) RunStartHooks(ctx context.Context) error {
 	return r.runPhase(ctx, "postStartCommand", r.featurePostStartHooks, r.cfg.PostStartCommand)
-}
-
-// RunAttachHooks runs postAttachCommand (feature hooks first). It runs each
-// time a user attaches an interactive session.
-func (r *HookRunner) RunAttachHooks(ctx context.Context) error {
-	return r.runPhase(ctx, "postAttachCommand", r.featurePostAttachHooks, r.cfg.PostAttachCommand)
 }
 
 func (r *HookRunner) hasHooks(featureHooks []features.FeatureHook, command interface{}) bool {
@@ -433,4 +429,33 @@ func stringItems(items []interface{}) []string {
 		}
 	}
 	return out
+}
+
+// AttachSteps converts postAttachCommand (feature hooks first, in install
+// order, then devcontainer.json) into the steps the agent runs at the start
+// of each interactive session. It uses ParseCommand, so commands mean the
+// same as in every other lifecycle phase.
+func AttachSteps(featureHooks []features.FeatureHook, command interface{}) []agentproto.AttachStep {
+	var steps []agentproto.AttachStep
+	add := func(label string, cmds Command) {
+		if len(cmds) == 0 {
+			return
+		}
+		step := agentproto.AttachStep{Label: label}
+		for _, c := range cmds {
+			ac := agentproto.AttachCommand{Name: c.Name}
+			if c.UseShell {
+				ac.Shell = c.Args[0]
+			} else {
+				ac.Argv = c.Args
+			}
+			step.Commands = append(step.Commands, ac)
+		}
+		steps = append(steps, step)
+	}
+	for _, hook := range featureHooks {
+		add("feature "+hook.FeatureName, ParseCommand(hook.Command))
+	}
+	add("devcontainer.json", ParseCommand(command))
+	return steps
 }

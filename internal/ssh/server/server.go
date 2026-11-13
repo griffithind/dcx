@@ -10,9 +10,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -21,11 +18,10 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/gliderlabs/ssh"
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/pkg/sftp"
 	gossh "golang.org/x/crypto/ssh"
@@ -59,6 +55,9 @@ type Server struct {
 	server      *ssh.Server
 	cfg         Config
 	shellConfig ShellConfig // Cached shell integration config
+
+	sessionConfigPath string        // agentproto.SessionConfigPath (tests override)
+	hangupGrace       time.Duration // see defaultHangupGrace
 }
 
 // NewServer builds a server from a Config.
@@ -68,8 +67,10 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:         cfg,
-		shellConfig: SetupShellIntegration(cfg.Shell),
+		cfg:               cfg,
+		shellConfig:       SetupShellIntegration(cfg.Shell),
+		sessionConfigPath: agentproto.SessionConfigPath,
+		hangupGrace:       defaultHangupGrace,
 	}
 
 	server := &ssh.Server{
@@ -172,7 +173,6 @@ func writeReadyFile(path, listenAddr string) {
 	_ = os.WriteFile(path, []byte(listenAddr+"\n"), 0644)
 }
 
-
 // authorize returns true if the presented public key appears in any of the
 // configured AuthorizedKeysPaths. Reads are performed per-attempt because
 // authorized_keys can be rewritten at any time via runtime secret re-mount.
@@ -209,106 +209,6 @@ func matchAuthorizedKey(authorizedKeys []byte, presented ssh.PublicKey) bool {
 		rest = next
 	}
 	return false
-}
-
-// sessionHandler handles SSH session requests.
-func (s *Server) sessionHandler(sess ssh.Session) {
-	// Setup agent forwarding if requested
-	var agentSock string
-	if ssh.AgentRequested(sess) {
-		ln, err := ssh.NewAgentListener()
-		if err == nil {
-			defer func() { _ = ln.Close() }()
-			go ssh.ForwardAgentConnections(ln, sess)
-			agentSock = ln.Addr().String()
-		}
-	}
-
-	ptyReq, winCh, isPty := sess.Pty()
-
-	cmd := s.buildCommand(sess, isPty)
-	cmd.Env = append(cmd.Env, sess.Environ()...)
-	if agentSock != "" {
-		cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+agentSock)
-	}
-
-	if isPty {
-		cmd.Env = append(cmd.Env, "TERM="+ptyReq.Term)
-		s.runWithPTY(sess, cmd, ptyReq, winCh)
-	} else {
-		s.runWithoutPTY(sess, cmd)
-	}
-}
-
-// buildCommand creates an exec.Cmd for the session.
-func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
-	var cmd *exec.Cmd
-
-	// Check if there's a specific command to run.
-	// Use RawCommand() to get the exact command string as sent by the client,
-	// preserving quotes and special characters. This matches OpenSSH behavior
-	// where the command is passed as-is to the shell via -c.
-	rawCmd := sess.RawCommand()
-	if rawCmd != "" {
-		cmd = exec.Command(s.cfg.Shell, "-c", rawCmd)
-	} else {
-		// Start an interactive shell with integration
-		cmd = exec.Command(s.cfg.Shell)
-		if isPty {
-			// Use cached shell integration config
-			if len(s.shellConfig.Args) > 0 {
-				cmd.Args = append(cmd.Args, s.shellConfig.Args...)
-			} else {
-				// Default: login shell
-				cmd.Args = append(cmd.Args, "-l")
-			}
-		}
-	}
-
-	cmd.Dir = s.resolveWorkDir()
-	cmd.Env = s.buildEnvironment()
-	s.applyUserCredentials(cmd)
-
-	return cmd
-}
-
-// applyUserCredentials configures cmd to run as s.cfg.User when the agent
-// process itself has a different effective UID (the common case: agent runs
-// as root, session should drop privs to the devcontainer's remoteUser).
-// Without this, every session would run with the agent's UID, defeating
-// remoteUser.
-//
-// No-op when the target already matches the current euid, when user lookup
-// fails, or when the uid/gid cannot be parsed — in all those cases the
-// command inherits the agent's credentials.
-func (s *Server) applyUserCredentials(cmd *exec.Cmd) {
-	if cred := s.sessionCredential(); cred != nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
-	}
-}
-
-// sessionCredential returns the credential sessions must run with, or nil
-// when no privilege change is needed (or possible).
-func (s *Server) sessionCredential() *syscall.Credential {
-	if s.cfg.User == "" {
-		return nil
-	}
-	u, err := user.Lookup(s.cfg.User)
-	if err != nil {
-		return nil
-	}
-	uid, err := parseUint32(u.Uid)
-	if err != nil {
-		return nil
-	}
-	gid, err := parseUint32(u.Gid)
-	if err != nil {
-		return nil
-	}
-	if uid == uint32(os.Geteuid()) {
-		return nil
-	}
-	return &syscall.Credential{Uid: uid, Gid: gid}
 }
 
 // parseUint32 parses a decimal uid/gid string into a uint32.
@@ -368,91 +268,6 @@ func (s *Server) buildEnvironment() []string {
 	return env
 }
 
-// runWithPTY runs a command with a pseudo-terminal.
-func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, winCh <-chan ssh.Window) {
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start PTY: %v\n", err)
-		_ = sess.Exit(1)
-		return
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	// Set initial window size
-	if err := pty.Setsize(ptmx, &pty.Winsize{
-		Rows: uint16(ptyReq.Window.Height),
-		Cols: uint16(ptyReq.Window.Width),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to set PTY size: %v\n", err)
-	}
-
-	// Handle window resize
-	go func() {
-		for win := range winCh {
-			_ = pty.Setsize(ptmx, &pty.Winsize{
-				Rows: uint16(win.Height),
-				Cols: uint16(win.Width),
-			})
-		}
-	}()
-
-	// Bidirectional copy
-	go func() {
-		_, _ = io.Copy(ptmx, sess)
-	}()
-	_, _ = io.Copy(sess, ptmx)
-
-	// Wait for command to finish
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				_ = sess.Exit(status.ExitStatus())
-				return
-			}
-		}
-		_ = sess.Exit(1)
-		return
-	}
-	_ = sess.Exit(0)
-}
-
-// runWithoutPTY runs a command without a pseudo-terminal.
-func (s *Server) runWithoutPTY(sess ssh.Session, cmd *exec.Cmd) {
-	// Use pipes for proper stdin handling - this ensures stdin is closed
-	// when the session's stdin is closed, preventing commands from hanging.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		_ = sess.Exit(1)
-		return
-	}
-
-	cmd.Stdout = sess
-	cmd.Stderr = sess.Stderr()
-
-	if err := cmd.Start(); err != nil {
-		_ = sess.Exit(1)
-		return
-	}
-
-	// Copy stdin in a goroutine and close when done
-	go func() {
-		_, _ = io.Copy(stdin, sess)
-		_ = stdin.Close()
-	}()
-
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				_ = sess.Exit(status.ExitStatus())
-				return
-			}
-		}
-		_ = sess.Exit(1)
-		return
-	}
-	_ = sess.Exit(0)
-}
-
 // sftpHandler handles SFTP subsystem requests.
 //
 // When sessions drop privileges (agent runs as root, cfg.User is not root),
@@ -506,48 +321,23 @@ func serveSFTP(rwc io.ReadWriteCloser, workDir string) {
 	}
 }
 
-// setupHostKey loads the persistent host key, or generates and persists a
-// fresh one if the file is missing. A corrupt/unparseable file is treated
-// as a hard error — silently regenerating would invalidate every pinned
-// client's known_hosts entry.
-//
-// The path normally points at a bind-mounted
-// /run/secrets/dcx/ssh_host_ed25519_key sourced from the host's
-// ~/.dcx/hostkeys/ directory.
+// setupHostKey loads the persistent host key. dcx writes it to the
+// container from ~/.dcx/hostkeys/ before launching the agent, and its
+// client pins exactly that key, so a missing or corrupt file is a hard
+// error: generating a key here would only produce a host key no client
+// trusts.
 func (s *Server) setupHostKey(server *ssh.Server) error {
 	if s.cfg.HostKeyPath == "" {
 		return fmt.Errorf("HostKeyPath is required")
 	}
-
-	if keyBytes, err := os.ReadFile(s.cfg.HostKeyPath); err == nil {
-		signer, perr := gossh.ParsePrivateKey(keyBytes)
-		if perr != nil {
-			return fmt.Errorf("host key at %s is unparseable: %w", s.cfg.HostKeyPath, perr)
-		}
-		server.AddHostKey(signer)
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read host key at %s: %w", s.cfg.HostKeyPath, err)
-	}
-
-	// Missing file — generate and persist.
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	keyBytes, err := os.ReadFile(s.cfg.HostKeyPath)
 	if err != nil {
-		return fmt.Errorf("generate host key: %w", err)
+		return fmt.Errorf("read host key: %w", err)
 	}
-	signer, err := gossh.NewSignerFromKey(privateKey)
+	signer, err := gossh.ParsePrivateKey(keyBytes)
 	if err != nil {
-		return fmt.Errorf("create signer: %w", err)
+		return fmt.Errorf("host key at %s is unparseable: %w", s.cfg.HostKeyPath, err)
 	}
 	server.AddHostKey(signer)
-
-	pemBlock, err := gossh.MarshalPrivateKey(privateKey, "dcx-agent host key")
-	if err != nil {
-		return fmt.Errorf("marshal host key: %w", err)
-	}
-	if err := os.WriteFile(s.cfg.HostKeyPath, pem.EncodeToMemory(pemBlock), 0600); err != nil {
-		return fmt.Errorf("persist host key: %w", err)
-	}
-
 	return nil
 }

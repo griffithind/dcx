@@ -73,13 +73,19 @@ func TestSSHServerE2E(t *testing.T) {
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
 
-		configPath := filepath.Join(home, ".ssh", "config")
+		// Blocks live in ~/.ssh/dcx/config, included from ~/.ssh/config.
+		mainConfig, err := os.ReadFile(filepath.Join(home, ".ssh", "config"))
+		require.NoError(t, err)
+		assert.Contains(t, string(mainConfig), "Include ~/.ssh/dcx/config")
+		assert.NotContains(t, string(mainConfig), "# DCX managed - "+containerName)
+
+		configPath := filepath.Join(home, ".ssh", "dcx", "config")
 		content, err := os.ReadFile(configPath)
 		require.NoError(t, err)
 
 		configStr := string(content)
 		assert.Contains(t, configStr, "# DCX managed - "+containerName)
-		assert.Contains(t, configStr, "Host "+hostname)
+		assert.Contains(t, configStr, "Host "+hostname+" "+containerName+".dcx")
 		// TCP transport: config points at 127.0.0.1:<ephemeral port>, never
 		// a ProxyCommand stdio tunnel.
 		assert.Contains(t, configStr, "HostName 127.0.0.1")
@@ -139,14 +145,13 @@ func TestSSHServerE2E(t *testing.T) {
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
 
-		configPath := filepath.Join(home, ".ssh", "config")
-		content, err := os.ReadFile(configPath)
-		if err == nil {
-			configStr := string(content)
-			assert.NotContains(t, configStr, "# DCX managed - "+containerName,
-				"SSH config entry should be removed after down")
+		for _, f := range []string{"config", filepath.Join("dcx", "config")} {
+			content, err := os.ReadFile(filepath.Join(home, ".ssh", f))
+			if err == nil {
+				assert.NotContains(t, string(content), "# DCX managed - "+containerName,
+					"SSH config entry should be removed after down (%s)", f)
+			}
 		}
-		// If file doesn't exist, that's also fine
 	})
 }
 

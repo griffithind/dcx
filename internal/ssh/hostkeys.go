@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,41 +37,53 @@ func HostKeyPath(workspaceID string) (string, error) {
 	return filepath.Join(dir, workspaceID+".key"), nil
 }
 
-// EnsureHostKey loads the existing host key for the workspace, or generates
-// a new ed25519 key and persists it. Returns the filesystem path and the
-// parsed signer.
-//
-// The key file is written with mode 0600. If an existing file has loose
-// perms, EnsureHostKey repairs them to 0600 — drift can happen when users
-// back up and restore dotfiles without preserving modes.
-func EnsureHostKey(workspaceID string) (path string, signer gossh.Signer, err error) {
+// ErrNoHostKey means the workspace has no host key yet (`dcx up` creates it).
+var ErrNoHostKey = errors.New("no SSH host key for this workspace; run `dcx up`")
+
+// LoadHostKey loads the workspace's existing host key. It never creates or
+// replaces one: clients pin exactly the key `dcx up` put in the container,
+// so a missing key is ErrNoHostKey and a corrupt one is an error.
+func LoadHostKey(workspaceID string) (path string, signer gossh.Signer, err error) {
+	if workspaceID == "" {
+		return "", nil, fmt.Errorf("workspace ID is required to load its host key")
+	}
 	path, err = HostKeyPath(workspaceID)
 	if err != nil {
 		return "", nil, err
 	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return path, nil, ErrNoHostKey
+	}
+	if err != nil {
+		return path, nil, fmt.Errorf("read host key: %w", err)
+	}
+	// Repair perms if they drifted (dotfile restores often lose modes).
+	_ = os.Chmod(path, 0600)
+	signer, err = gossh.ParsePrivateKey(data)
+	if err != nil {
+		return path, nil, fmt.Errorf("host key %s is unreadable (remove it and run `dcx up --recreate`): %w", path, err)
+	}
+	return path, signer, nil
+}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+// EnsureHostKey returns the workspace's host key, generating and persisting
+// a new ed25519 key only when none exists. Only `dcx up` calls it, before
+// the key is written into the container. A corrupt key is an error rather
+// than silently replaced, which would break every pinned client.
+func EnsureHostKey(workspaceID string) (path string, signer gossh.Signer, err error) {
+	path, signer, err = LoadHostKey(workspaceID)
+	if !errors.Is(err, ErrNoHostKey) {
+		return path, signer, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return "", nil, fmt.Errorf("create host key dir: %w", err)
 	}
-
-	// Try to load an existing key.
-	if data, rerr := os.ReadFile(path); rerr == nil {
-		// Repair perms if they drifted.
-		_ = os.Chmod(path, 0600)
-		s, perr := gossh.ParsePrivateKey(data)
-		if perr == nil {
-			return path, s, nil
-		}
-		// Corrupt or unrecognized key — regenerate.
-	}
-
-	// Generate a new ed25519 key.
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", nil, fmt.Errorf("generate ed25519: %w", err)
 	}
-
 	pemBlock, err := gossh.MarshalPrivateKey(priv, "dcx-agent host key")
 	if err != nil {
 		return "", nil, fmt.Errorf("marshal private key: %w", err)
@@ -86,12 +99,27 @@ func EnsureHostKey(workspaceID string) (path string, signer gossh.Signer, err er
 		_ = os.Remove(tmp)
 		return "", nil, fmt.Errorf("rename host key: %w", err)
 	}
-
-	s, err := gossh.ParsePrivateKey(pemBytes)
+	signer, err = gossh.ParsePrivateKey(pemBytes)
 	if err != nil {
 		return "", nil, fmt.Errorf("parse generated key: %w", err)
 	}
-	return path, s, nil
+	return path, signer, nil
+}
+
+// RemoveHostKey deletes the workspace's host key (on `dcx down`), so keys of
+// removed environments do not accumulate under ~/.dcx/hostkeys.
+func RemoveHostKey(workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	path, err := HostKeyPath(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // Fingerprint returns the SHA256 fingerprint of the signer's public key, in

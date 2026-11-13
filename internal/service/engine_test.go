@@ -102,6 +102,11 @@ func TestLaunchSSHAgentSkipsWhenAlreadyListening(t *testing.T) {
 	assert.Empty(t, fake.CallsTo("ExecDetached"))
 }
 
+// agentOwner answers the agent owner query launchSSHAgent runs.
+func agentOwner() map[string]string {
+	return map[string]string{strings.Join(agentOwnerQuery, " "): "1000:1000"}
+}
+
 func TestLaunchSSHAgentStartsAndWaitsForReadiness(t *testing.T) {
 	var pings atomic.Int32
 	fake := &containertest.Fake{ExecFunc: func(_ string, argv []string) error {
@@ -111,7 +116,7 @@ func TestLaunchSSHAgentStartsAndWaitsForReadiness(t *testing.T) {
 			return errors.New("connection refused")
 		}
 		return nil
-	}}
+	}, Outputs: agentOwner()}
 	svc, _ := newTestService(t, fake)
 
 	err := svc.launchSSHAgent(context.Background(), agentResolved(), &state.ContainerInfo{Name: "c1"}, []string{"10.0.0.0/24"})
@@ -140,7 +145,7 @@ func TestLaunchSSHAgentFailsWhenAgentNeverListens(t *testing.T) {
 			return errors.New("connection refused")
 		}
 		return nil
-	}}
+	}, Outputs: agentOwner()}
 	svc, _ := newTestService(t, fake)
 
 	err := svc.launchSSHAgent(context.Background(), agentResolved(), &state.ContainerInfo{Name: "c1"}, nil)
@@ -231,7 +236,10 @@ func TestLaunchSSHAgentTimeoutIncludesAgentLog(t *testing.T) {
 			}
 			return nil
 		},
-		Outputs: map[string]string{"tail -n 20 " + agentLogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n"},
+		Outputs: map[string]string{
+			strings.Join(agentOwnerQuery, " "): "1000:1001",
+			"tail -n 20 " + agentproto.LogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n",
+		},
 	}
 	svc, _ := newTestService(t, fake)
 
@@ -240,5 +248,11 @@ func TestLaunchSSHAgentTimeoutIncludesAgentLog(t *testing.T) {
 	assert.Contains(t, err.Error(), "address already in use")
 
 	launch := strings.Join(fake.CallsTo("ExecDetached")[0].Args, " ")
-	assert.Contains(t, launch, agentLogPath, "agent output must be captured")
+	assert.Contains(t, launch, agentproto.LogPath, "agent output must be captured")
+
+	// Root-owned dirs and the log are prepared as root first, with the log
+	// handed to the agent's own user.
+	setup := fake.CallsTo("ExecAsRoot")
+	require.Len(t, setup, 1)
+	assert.Equal(t, []string{"c1", agentproto.BinaryPath, "setup", "--log-owner", "1000:1001"}, setup[0].Args)
 }

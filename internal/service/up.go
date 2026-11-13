@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -264,15 +265,54 @@ func (s *DevContainerService) stepRuntimeSecrets(ctx context.Context, r *upRun) 
 	return nil
 }
 
-// stepEnvironment patches /etc/environment and probes the user environment
-// used by lifecycle hooks.
+// stepEnvironment patches /etc/environment, probes the user environment
+// used by lifecycle hooks, and writes the session configuration every SSH
+// session gets (environment and postAttachCommand).
 func (s *DevContainerService) stepEnvironment(ctx context.Context, r *upRun) error {
-	env, err := s.setupContainerEnvironment(ctx, r.resolved, r.info)
+	probed, remoteEnv, err := s.setupContainerEnvironment(ctx, r.resolved, r.info)
 	if err != nil {
 		s.report.Warnf("Environment setup failed: %v", err)
 	}
-	r.probedEnv = env
+	r.probedEnv = probed
+	if err := s.writeSessionConfig(ctx, r, sessionConfig(r.resolved, probed, remoteEnv)); err != nil {
+		return fmt.Errorf("write session configuration: %w", err)
+	}
 	return nil
+}
+
+// sessionConfig is what every SSH session gets: the probed user
+// environment overlaid with remoteEnv, and postAttachCommand.
+func sessionConfig(resolved *devcontainer.ResolvedDevContainer, probed, remoteEnv map[string]string) agentproto.SessionConfig {
+	cfg := agentproto.SessionConfig{}
+	if len(probed)+len(remoteEnv) > 0 {
+		cfg.Env = make(map[string]string, len(probed)+len(remoteEnv))
+		for k, v := range probed {
+			cfg.Env[k] = v
+		}
+		for k, v := range remoteEnv {
+			cfg.Env[k] = v
+		}
+	}
+	var postAttach interface{}
+	if resolved.RawConfig != nil {
+		postAttach = resolved.RawConfig.PostAttachCommand
+	}
+	cfg.PostAttach = lifecycle.AttachSteps(features.CollectPostAttachCommands(resolved.Features), postAttach)
+	return cfg
+}
+
+// writeSessionConfig writes cfg where the agent reads it for every session.
+// It is world-readable because the agent may run as a non-root user; it
+// holds nothing a session would not see anyway.
+func (s *DevContainerService) writeSessionConfig(ctx context.Context, r *upRun, cfg agentproto.SessionConfig) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	if err := s.engine.WriteFileInContainer(ctx, r.info.Name, agentproto.SessionConfigPath, data, "root"); err != nil {
+		return err
+	}
+	return s.engine.ChmodInContainer(ctx, r.info.Name, agentproto.SessionConfigPath, "0644", "root")
 }
 
 // stepHooks runs the once-per-container hooks that have not completed yet,
@@ -320,7 +360,6 @@ func (s *DevContainerService) hookRunner(r *upRun, containerID string) *lifecycl
 			features.CollectUpdateContentCommands(r.resolved.Features),
 			features.CollectPostCreateCommands(r.resolved.Features),
 			features.CollectPostStartCommands(r.resolved.Features),
-			features.CollectPostAttachCommands(r.resolved.Features),
 		)
 	}
 	return runner
@@ -364,23 +403,4 @@ func (m *containerMarkers) Mark(ctx context.Context, phase string) error {
 	}
 	stamp := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
 	return m.engine.WriteFileInContainer(ctx, m.container, markerPath(phase), stamp, "root")
-}
-
-// RunAttachHooks runs postAttachCommand (feature hooks first) for the
-// running environment. `dcx shell` calls it before opening the session.
-func (s *DevContainerService) RunAttachHooks(ctx context.Context) error {
-	resolved, err := s.Load(ctx)
-	if err != nil {
-		return err
-	}
-	ids, _ := s.GetIdentifiers()
-	_, info, err := s.stateManager.GetStateWithProject(ctx, ids.ProjectName, resolved.ID)
-	if err != nil {
-		return err
-	}
-	if info == nil || !info.Running {
-		return nil
-	}
-	r := &upRun{resolved: resolved, ids: ids, info: info}
-	return s.hookRunner(r, info.ID).RunAttachHooks(ctx)
 }

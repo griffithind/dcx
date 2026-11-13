@@ -295,27 +295,23 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 
 ### Phase 7: agent hardening (3–4 days)
 
-- [ ] Per-session privilege drop for exec, PTY, SFTP and agent-forward sockets (chown the socket dir to the target user; clean it up).
-- [ ] Handle `sess.Signals` and context done. Send `exit-signal` / 128+n. Forward Ctrl-C in non-TTY mode on the client.
-- [ ] Shell integration files go in a root-owned dir (`/run/dcx`), not `/tmp`.
-- [ ] Client host-key policy matches the server's (no silent regeneration). Clean up stale host keys on `down`.
-- [ ] `~/.ssh/dcx/config` pulled in via `Include` at the top of `~/.ssh/config`, so user `Host *` blocks don't override dcx's settings.
-- [ ] Plain `ssh` reaches parity with `dcx shell`/`exec`, so Phase 8 can delete them (see "Making ssh the only way in" below).
+- [x] Privilege drop, when the agent runs as root and the session user is not. Sessions keep the user's supplementary groups (they were dropped before, so for example docker or sudo membership was lost). The PTY device is chowned to the session user (sudo, ssh and gpg reopen `/dev/tty`). The forwarded SSH-agent socket gets a private directory handed to the session user and removed afterwards (before, it was root-only, so agent forwarding silently failed for a non-root `remoteUser`). SFTP already re-executed under the user's credentials.
+- [x] Signals. The server forwards `signal` requests to the command's process group. When the client disconnects it sends SIGHUP, then SIGKILL after 5s (before, commands outlived their client). It reports `exit-signal`, so clients see 128+n. The client already sends SIGTERM and closes on Ctrl-C/cancel (Phase 5), which the server now acts on.
+- [x] Nothing the root agent touches lives in `/tmp`. The binary is in `/var/lib/dcx/bin` (root-owned, installed with `install -d -o root`), the log in `/var/lib/dcx/agent.log`, and the shell integration and session config in `/run/dcx`. Since the listener runs as the container's default user (often not root), dcx first runs `dcx-agent setup` as root. It creates the root-owned directories, writes the scripts and hands the log file to the listener's uid. The old `/tmp/dcx-agent.log` let a container user make root truncate any file through a symlink. Agents still running from the legacy `/tmp/dcx-agent` are stopped on upgrade.
+- [x] Host keys are never generated or replaced silently. The agent refuses to start without the key dcx wrote. The client and `dcx ssh info` only load keys (`LoadHostKey`), and so does SSH-config pinning. Only `up` creates one (`EnsureHostKey`), and a corrupt key is an error instead of being regenerated. There is no more `InsecureIgnoreHostKey` path. `dcx down` removes the workspace's host key; a recreate inside `up` keeps it.
+- [x] Workspace blocks live in `~/.ssh/dcx/config`, pulled in by an `Include` at the top of `~/.ssh/config` (added once). Legacy blocks are moved out the next time a workspace's block is written. The user's file is otherwise left byte-for-byte untouched.
+- [x] Plain `ssh` matches `dcx shell`/`exec` (details below).
 
 #### Making ssh the only way in
 
-Goal: `ssh <alias>` (terminal, editor, scp/sftp, git) gives the same session as `dcx shell`/`dcx exec`. dcx then needs no SSH client of its own for user sessions. Today the agent already handles user, workdir, login shell, agent forwarding and SFTP. These are the gaps:
+Goal: `ssh <alias>` (terminal, editor, scp/sftp, git) gives the same session as `dcx shell`/`dcx exec`. Done in Phase 7:
 
-| Gap | Today | Change |
-|---|---|---|
-| `remoteEnv` (with `${containerEnv:…}`) | Only the dcx client sends it (`buildExecEnvironment`). The agent uses its own process environment. `/etc/environment` is patched, but nothing reads it (no PAM). | `Up` writes the resolved session env (remoteEnv + userEnvProbe result) to a root-owned file at an `agentproto` path (`/run/dcx/session.env`). The agent loads it for every session. One source for shells, editors and hooks. |
-| `postAttachCommand` | Run by `dcx shell` only, since Phase 5. | `Up` writes the parsed command next to `session.env`. The agent runs it at the start of each interactive (PTY, no command) session, as the session user, with output on the session's stderr. Failure warns and does not block. Matches current `dcx shell` behaviour. |
-| Finding the container from the cwd | `dcx shell` looks up the workspace. With ssh you need the alias. `<name>.dcx` collides for two checkouts with the same `name`. | Keep `<name>.dcx` when it is unique. On a collision `up` uses `<slug>-<id8>.dcx` and says so. `dcx ssh info` prints the alias. |
-| Friendly errors | "container not running, run `dcx up`" | ssh just says "connection refused". The thin launcher below can preflight. |
-| Exit codes / signals | The client maps them. | Covered by the `exit-signal` item above. |
-| Host dependency | Built-in Go client, so no OpenSSH is needed. | Requires OpenSSH on the host. Acceptable: it is what editors use anyway. |
+- **Session environment.** `up` writes `agentproto.SessionConfig` to `/run/dcx/session.json`: the userEnvProbe result overlaid with remoteEnv (with `${containerEnv:…}` resolved). The agent applies it to every session, whatever the client. The client-sent env still comes last.
+- **postAttachCommand.** Feature hooks come first, then devcontainer.json, converted with `lifecycle.AttachSteps` (same parser as every phase). The agent runs it at the start of each interactive session (PTY, no command), as the session user, with output on the terminal. A failure is reported and the shell still starts. `dcx shell` no longer runs it itself, so it runs exactly once per attach.
+- **Alias collisions.** Every block answers to the unique `<container>.dcx`. It also answers to `<name>.dcx` unless another workspace's block already claims that alias; `up` then warns and prints the unique alias. `dcx ssh`, `dcx ssh info` and `dcx status` show the alias actually configured.
+- **Still open, for Phase 8:** a friendly "not running" error (a thin `dcx ssh` launcher can preflight), and OpenSSH becomes a host requirement.
 
-Lifecycle hooks still need an in-process client, to stream output and run as a specific user. `internal/ssh/exec` stays as a library for them, renamed `internal/ssh/client`. It reads env from `session.env` like any other session instead of building its own.
+Lifecycle hooks still need an in-process client, to stream output and run as a specific user. `internal/ssh/exec` stays as a library for them; it is shrunk and renamed `internal/ssh/client` in Phase 8.
 
 ### Phase 8: thin CLI and cleanup (2–3 days)
 

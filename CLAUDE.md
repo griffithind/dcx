@@ -164,7 +164,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agent/` - Agent CLI and SSH server implementation
-- `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths)
+- `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
 - `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
 
@@ -343,9 +343,13 @@ Stored in `customizations.dcx` within devcontainer.json:
 
 ## Agent Binary
 
-The `dcx-agent` binary is embedded (gzip-compressed) and deployed to containers:
-- `ssh-server` - SSH server in stdio mode for editor connections
-- `ssh-agent-proxy` - TCP↔Unix socket proxy for SSH agent forwarding
+The `dcx-agent` binary is embedded (gzip-compressed) and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned; never `/tmp`). It runs as the container's default user; dcx first runs `dcx-agent setup` as root to create `/var/lib/dcx` and `/run/dcx`, the shell integration and the log. Every SSH session (dcx, OpenSSH, editors) gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. SSH host blocks live in `~/.ssh/dcx/config`, included from the top of `~/.ssh/config`.
+
+Subcommands:
+- `listen` - TCP SSH server (sessions, SFTP, agent forwarding, loopback port forwarding)
+- `ping` - readiness probe used by dcx
+- `setup` - root-time preparation of dirs, shell integration and log
+- `sftp-server` - SFTP on stdio, re-executed under the session user's credentials
 
 Uses stdlib `flag` (no Cobra) to minimize binary size.
 

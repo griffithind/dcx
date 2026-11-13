@@ -252,6 +252,19 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 	return nil, fmt.Errorf("exec failed")
 }
 
+func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ExecAsRoot", append([]string{name}, argv...)...)
+	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
+		return []byte(out), nil
+	}
+	if f.ExecFunc != nil {
+		return nil, f.ExecFunc(name, argv)
+	}
+	return nil, nil
+}
+
 func (f *Fake) ExecDetached(_ context.Context, name string, argv []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

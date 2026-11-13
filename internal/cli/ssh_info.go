@@ -62,7 +62,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("identifiers: %w", err)
 	}
 
-	hostKeyPath, signer, err := dcxssh.EnsureHostKey(ids.WorkspaceID)
+	hostKeyPath, signer, err := dcxssh.LoadHostKey(ids.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("host key: %w", err)
 	}
@@ -71,7 +71,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 
 	info := sshInfo{
 		Workspace:   ids.WorkspaceID,
-		Host:        ids.SSHHost,
+		Host:        svc.SSHAlias(ctx),
 		HostKey:     dcxssh.Fingerprint(signer),
 		HostKeyFile: hostKeyPath,
 		KnownPinned: pinned,

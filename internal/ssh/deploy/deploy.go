@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -53,6 +54,15 @@ func DeployToContainer(ctx context.Context, containerName, binaryPath string) (b
 		return false, fmt.Errorf("write temp agent binary: %w", err)
 	}
 
+	// The binary directory must be root-owned so no container user can
+	// swap the binary the root agent executes. install -d fixes ownership
+	// and mode even when the directory already exists.
+	mkdir := exec.CommandContext(ctx, "docker", "exec", "--user", "root", containerName,
+		"install", "-d", "-o", "root", "-g", "root", "-m", "0755", filepath.Dir(binaryPath))
+	if out, err := mkdir.CombinedOutput(); err != nil {
+		return false, fmt.Errorf("failed to create agent directory: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+
 	staging := binaryPath + ".new"
 	if out, err := exec.CommandContext(ctx, "docker", "cp", tmpFile.Name(), containerName+":"+staging).CombinedOutput(); err != nil {
 		return false, fmt.Errorf("failed to copy agent to container: %w: %s", err, strings.TrimSpace(string(out)))
@@ -60,7 +70,7 @@ func DeployToContainer(ctx context.Context, containerName, binaryPath string) (b
 
 	// chmod, atomic rename, then record the digest. Paths are positional
 	// arguments, never interpolated into the script.
-	script := `chmod 0755 "$1" && mv -f "$1" "$2" && printf '%s\n' "$3" > "$2.sha256"`
+	script := `chown root:root "$1" && chmod 0755 "$1" && mv -f "$1" "$2" && printf '%s\n' "$3" > "$2.sha256"`
 	install := exec.CommandContext(ctx, "docker", "exec", "--user", "root", containerName,
 		"sh", "-c", script, "dcx-deploy", staging, binaryPath, want)
 	if out, err := install.CombinedOutput(); err != nil {
@@ -82,15 +92,19 @@ func installedDigest(ctx context.Context, containerName, binaryPath string) stri
 }
 
 // StopOutdatedAgent terminates agent processes still running a binary that
-// has been replaced on disk (their /proc/<pid>/exe is "<path> (deleted)"),
-// then waits for the listener port to be released so a fresh agent can bind.
+// has been replaced on disk (their /proc/<pid>/exe is "<path> (deleted)")
+// or running from the legacy /tmp location, then waits for the listener
+// port to be released so a fresh agent can bind.
 func StopOutdatedAgent(ctx context.Context, containerName, binaryPath string, listenAddr string) error {
 	script := `for d in /proc/[0-9]*; do
-  if [ "$(readlink "$d/exe" 2>/dev/null)" = "$1 (deleted)" ]; then kill "${d#/proc/}" 2>/dev/null; fi
+  exe="$(readlink "$d/exe" 2>/dev/null)"
+  case "$exe" in
+    "$1 (deleted)"|"$2"|"$2 (deleted)") kill "${d#/proc/}" 2>/dev/null ;;
+  esac
 done
 exit 0`
 	kill := exec.CommandContext(ctx, "docker", "exec", "--user", "root", containerName,
-		"sh", "-c", script, "dcx-deploy", binaryPath)
+		"sh", "-c", script, "dcx-deploy", binaryPath, agentproto.LegacyBinaryPath)
 	if out, err := kill.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to stop outdated agent: %w: %s", err, strings.TrimSpace(string(out)))
 	}
