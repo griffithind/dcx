@@ -36,6 +36,8 @@ type Fake struct {
 	Images map[string]bool
 	// LocalImageLabels maps image refs to their labels (local images).
 	LocalImageLabels map[string]map[string]string
+	// ImageCommands maps image refs to their [ENTRYPOINT, CMD].
+	ImageCommands map[string][2][]string
 	// Registry maps image refs to the labels they get once pulled.
 	Registry map[string]map[string]string
 	// ExecFunc decides the result of ExecInContainer (nil = success).
@@ -219,6 +221,14 @@ func (f *Fake) ImageLabels(_ context.Context, ref string) (map[string]string, er
 		return labels, nil
 	}
 	return nil, fmt.Errorf("image not found: %s", ref)
+}
+
+func (f *Fake) ImageCommand(_ context.Context, ref string) ([]string, []string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ImageCommand", ref)
+	c := f.ImageCommands[ref]
+	return c[0], c[1], nil
 }
 
 func (f *Fake) PullImageWithProgress(_ context.Context, ref string, _ io.Writer) error {

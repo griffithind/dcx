@@ -62,3 +62,22 @@ func TestParseMemoryString_Values(t *testing.T) {
 		})
 	}
 }
+
+func TestGPURequirementAgainstDockerRuntime(t *testing.T) {
+	required := &HostRequirements{GPU: &GPURequirement{Mode: GPURequired}}
+	optional := &HostRequirements{GPU: &GPURequirement{Mode: GPUOptional}}
+	none := &HostRequirements{GPU: &GPURequirement{Mode: GPUNone}}
+
+	if r := ValidateHostRequirementsWithDocker(required, &DockerResources{}); r.Satisfied {
+		t.Error("a required GPU without a GPU runtime must fail")
+	}
+	if r := ValidateHostRequirementsWithDocker(required, &DockerResources{GPU: true}); !r.Satisfied {
+		t.Errorf("a GPU runtime satisfies a required GPU: %v", r.Errors)
+	}
+	if r := ValidateHostRequirementsWithDocker(optional, &DockerResources{}); !r.Satisfied || len(r.Warnings) != 1 {
+		t.Errorf("an optional GPU only warns: %+v", r)
+	}
+	if r := ValidateHostRequirementsWithDocker(none, &DockerResources{}); !r.Satisfied || len(r.Warnings) != 0 {
+		t.Errorf("gpu: false asks for nothing: %+v", r)
+	}
+}

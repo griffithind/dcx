@@ -30,6 +30,7 @@ type Engine interface {
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
 	ImageID(ctx context.Context, imageRef string) (string, error)
 	ImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
+	ImageCommand(ctx context.Context, imageRef string) (entrypoint, cmd []string, err error)
 	PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error
 	BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error
 

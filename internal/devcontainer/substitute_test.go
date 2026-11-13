@@ -204,3 +204,30 @@ func TestLoadSubstitutesWithExplicitConfigPath(t *testing.T) {
 		t.Errorf("workspaceFolder = %q", cfg.WorkspaceFolder)
 	}
 }
+
+// Feature options are substituted once, with the full context (D4): they
+// used to get a second, localEnv-only pass at Dockerfile time, so
+// ${devcontainerId} reached install scripts unexpanded.
+func TestSubstituteConfigFeatureOptions(t *testing.T) {
+	t.Setenv("DCX_TEST_VERSION", "20")
+	cfg := &DevContainerConfig{Features: map[string]interface{}{
+		"ghcr.io/devcontainers/features/node:1": map[string]interface{}{
+			"version": "${localEnv:DCX_TEST_VERSION}",
+			"cache":   "/cache/${devcontainerId}",
+			"enabled": true,
+		},
+		"ghcr.io/devcontainers/features/git:1": true,
+	}}
+	ws := t.TempDir()
+	SubstituteConfig(cfg, NewSubstitutionContext(ws, cfg))
+	opts := cfg.Features["ghcr.io/devcontainers/features/node:1"].(map[string]interface{})
+	if opts["version"] != "20" {
+		t.Errorf("version = %v", opts["version"])
+	}
+	if opts["cache"] != "/cache/"+ComputeID(ws) {
+		t.Errorf("cache = %v, want the devcontainer ID substituted", opts["cache"])
+	}
+	if opts["enabled"] != true || cfg.Features["ghcr.io/devcontainers/features/git:1"] != true {
+		t.Error("non-string options are left alone")
+	}
+}

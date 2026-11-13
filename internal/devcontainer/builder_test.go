@@ -2,6 +2,7 @@ package devcontainer
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func TestBuilderBuild(t *testing.T) {
 	t.Run("populates ForwardPorts correctly", func(t *testing.T) {
 		cfg := &DevContainerConfig{
 			Image:        "alpine:latest",
-			ForwardPorts: []interface{}{float64(8080), "9000:9000"},
+			ForwardPorts: PortList{{Spec: "8080"}, {Spec: "9000:9000"}},
 		}
 
 		builder := NewBuilder(slog.Default(), nil)
@@ -131,18 +132,30 @@ func TestBuilderBuild(t *testing.T) {
 	})
 }
 
-func TestParseGPURequirementsOptional(t *testing.T) {
-	opt := parseGPURequirements(&HostRequirements{GPU: "optional"})
-	if opt == nil || !opt.Enabled || !opt.Optional {
-		t.Fatalf("optional: %+v", opt)
+func TestGPURequirementForms(t *testing.T) {
+	tests := []struct {
+		json  string
+		mode  GPUMode
+		count int
+	}{
+		{`true`, GPURequired, 0},
+		{`false`, GPUNone, 0},
+		{`"optional"`, GPUOptional, 0},
+		{`"true"`, GPURequired, 0},
+		{`{}`, GPUNone, 0}, // an empty object states no requirement
+		{`{"count": 2, "memory": "8gb"}`, GPURequired, 2},
 	}
-	req := parseGPURequirements(&HostRequirements{GPU: true})
-	if req == nil || !req.Enabled || req.Optional {
-		t.Fatalf("required: %+v", req)
+	for _, tt := range tests {
+		var g GPURequirement
+		require.NoError(t, json.Unmarshal([]byte(tt.json), &g), tt.json)
+		assert.Equal(t, tt.mode, g.Mode, tt.json)
+		assert.Equal(t, tt.count, g.Count, tt.json)
+		out, err := json.Marshal(g)
+		require.NoError(t, err)
+		assert.JSONEq(t, tt.json, string(out), "marshals back as written")
 	}
-	if empty := parseGPURequirements(&HostRequirements{GPU: map[string]interface{}{}}); empty == nil || empty.Enabled {
-		t.Fatalf("an empty object states no requirement: %+v", empty)
-	}
+	var g GPURequirement
+	assert.Error(t, json.Unmarshal([]byte(`42`), &g))
 }
 
 func TestOverrideCommandDefault(t *testing.T) {

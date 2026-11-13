@@ -56,7 +56,8 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
-	cfg := mergeImageMetadata(ctx, local, opts.Images, rep)
+	imageConfigs := imageMetadata(ctx, local, opts.Images, rep)
+	cfg := MergeMetadata(local, imageConfigs)
 
 	var lf *lockfile.Lockfile
 	if opts.Lockfile == LockfileUse && len(cfg.Features) > 0 {
@@ -71,6 +72,7 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		WorkspaceRoot: opts.WorkspacePath,
 		Config:        cfg,
 		Local:         local,
+		ImageMetadata: imageConfigs,
 		Lockfile:      lf,
 		ForcePull:     opts.ForcePull,
 	})
@@ -80,25 +82,22 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	return resolved, nil
 }
 
-// mergeImageMetadata merges the image's devcontainer.metadata into cfg
-// (local values win, per the spec). Dockerfile and compose bases are not
-// read yet: their image is only known after a build.
-func mergeImageMetadata(ctx context.Context, cfg *DevContainerConfig, images ImageMetadataSource, rep report.Reporter) *DevContainerConfig {
+// imageMetadata returns the devcontainer.metadata entries of the config's
+// image. Dockerfile and compose bases are not read yet: their image is only
+// known after a build.
+func imageMetadata(ctx context.Context, cfg *DevContainerConfig, images ImageMetadataSource, rep report.Reporter) []DevContainerConfig {
 	if images == nil || cfg.Image == "" {
-		return cfg
+		return nil
 	}
 	label, err := images.ImageMetadata(ctx, cfg.Image)
 	if err != nil || label == "" {
 		// Not available locally (and not pulled): resolve without it.
-		return cfg
+		return nil
 	}
 	imageConfigs, err := ParseImageMetadata(label)
 	if err != nil {
 		rep.Warnf("Ignoring invalid devcontainer.metadata of %s: %v", cfg.Image, err)
-		return cfg
+		return nil
 	}
-	if len(imageConfigs) == 0 {
-		return cfg
-	}
-	return MergeMetadata(cfg, imageConfigs)
+	return imageConfigs
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/secrets"
 	"github.com/griffithind/dcx/internal/state"
@@ -201,12 +200,11 @@ func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolve
 	}
 	// "gpu": "optional" asks for GPUs only when the host has them;
 	// `--gpus` on a host without the NVIDIA runtime fails container start.
-	if gpu := resolved.GPURequirements; gpu != nil && gpu.Optional && !info.GPU {
-		s.report.Infof("No GPU runtime on the Docker host; starting without GPUs (optional requirement)")
-		resolved.GPURequirements = nil
+	if gpu := resolved.GPU; gpu != nil && gpu.Mode == devcontainer.GPUOptional && !info.GPU {
+		resolved.GPU = nil
 	}
 	result := devcontainer.ValidateHostRequirementsWithDocker(resolved.HostRequirements,
-		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal})
+		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal, GPU: info.GPU})
 	for _, w := range result.Warnings {
 		s.report.Warnf("%s", w)
 	}
@@ -377,11 +375,7 @@ func sessionConfig(resolved *devcontainer.ResolvedDevContainer, probed, remoteEn
 			cfg.Env[k] = v
 		}
 	}
-	var postAttach interface{}
-	if resolved.Config != nil {
-		postAttach = resolved.Config.PostAttachCommand
-	}
-	cfg.PostAttach = lifecycle.AttachSteps(features.CollectPostAttachCommands(resolved.Features), postAttach)
+	cfg.PostAttach = lifecycle.AttachSteps(resolved.Hooks.PostAttach)
 	return cfg
 }
 
@@ -459,16 +453,7 @@ func (s *DevContainerService) hookRunner(r *upRun, sshPort int) lifecycleHooks {
 
 // newHookRunner builds the real hook runner for the resolved config.
 func newHookRunner(s *DevContainerService, resolved *devcontainer.ResolvedDevContainer, sshPort int) *lifecycle.HookRunner {
-	runner := lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, resolved.Config, resolved.WorkspaceID)
-	if len(resolved.Features) > 0 {
-		runner.SetFeatureHooks(
-			features.CollectOnCreateCommands(resolved.Features),
-			features.CollectUpdateContentCommands(resolved.Features),
-			features.CollectPostCreateCommands(resolved.Features),
-			features.CollectPostStartCommands(resolved.Features),
-		)
-	}
-	return runner
+	return lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, resolved.Hooks, resolved.WorkspaceID)
 }
 
 // setupComplete reports whether a running container finished its setup.

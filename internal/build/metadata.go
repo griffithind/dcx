@@ -153,13 +153,7 @@ func featureToConfig(f *features.Feature) devcontainer.DevContainerConfig {
 	}
 
 	// Mounts (per pickFeatureProperties)
-	for _, fm := range f.Metadata.Mounts {
-		cfg.Mounts = append(cfg.Mounts, devcontainer.Mount{
-			Source: fm.Source,
-			Target: fm.Target,
-			Type:   fm.Type,
-		})
-	}
+	cfg.Mounts = append(cfg.Mounts, f.Metadata.Mounts...)
 
 	// Lifecycle commands (per pickFeatureProperties)
 	cfg.OnCreateCommand = f.Metadata.OnCreateCommand

@@ -132,7 +132,10 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 |------|---------|
 | `parser.go` | Parse devcontainer.json with JSONC support |
 | `config.go` | `DevContainerConfig` struct with custom unmarshalers |
-| `types.go` | `StringOrSlice`, `LifecycleCommand`, `Mount`, `PortSpec` |
+| `types.go` | `StringOrSlice` |
+| `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json) |
+| `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` |
+| `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
 | `substitute.go` | Variable substitution (`${localEnv:VAR}`, `${containerWorkspaceFolder}`) |
 | `resolve.go` | `ResolveWorkspace()` - the one resolution pipeline (load, image metadata via `ImageMetadataSource`, lockfile, build) |
 | `builder.go` | `Builder.Build()` - the build step of `ResolveWorkspace` |
@@ -165,7 +168,9 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `uid.go` | UID update layer for host/container user matching |
 
 ### Supporting Packages
-- `internal/lifecycle/` - Hook execution; `ParseCommand` is the only lifecycle command parser; `Markers` records completed once-per-container phases
+- `internal/lifecycle/` - Hook execution from `devcontainer.Hooks`; `Markers` records completed once-per-container phases
+- `internal/lifecyclecmd/` - `Command`, the typed lifecycle command (string / array / named) used by devcontainer.json, image and feature metadata, and its only parser
+- `internal/mount/` - `Mount` and `Parse`, the only mount string parser (devcontainer.json, image and feature metadata)
 - `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
 - `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
 - `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only)
@@ -412,5 +417,6 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Agent paths, ports and secret locations come from `agentproto`.
 - Variable substitution happens once, in `devcontainer.Load` (`NewSubstitutionContext` + `SubstituteConfig`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
 - Container runtime settings live in `container.ContainerSpec`, rendered by both engines; run `docker compose` only through `container.ComposeProject`.
-- Parse mounts with `ParseMountString` and ports with `ParsePortSpec`; don't add new parsers.
+- Parse mounts with `mount.Parse` (`devcontainer.ParseMountString`) and ports with `ParsePortSpec`; lifecycle commands are `*lifecyclecmd.Command`; don't add new parsers or `interface{}` config fields.
+- Typed config fields must marshal back to the JSON they were read from: the config hash (`TestConfigHashEncodingIsStable`) is the staleness key.
 - Resolution changes are covered by golden files in `internal/devcontainer/testdata/resolve`; review the diff of `go test ./internal/devcontainer -run TestResolveGolden -args -update`.

@@ -238,6 +238,25 @@ Regression tests: unit tests for the endpoint (published/recorded, port collisio
 
   The last one found a panic: a nil `*containerMarkers` was passed as a non-nil `lifecycle.Markers`, and the hook runner dereferenced it. That is fixed, and confirmed by running the test against the old code. The fake now gives unique container IDs.
 
+**Step 5 (typed config): done.** `TestConfigHashEncodingIsStable` pinned the config-hash encoding before any type changed. Every typed field marshals back to the JSON it was read from, so no existing container turns stale.
+- **Lifecycle commands:** `lifecyclecmd.Command` (string, array or named) is used by devcontainer.json, image metadata and feature metadata. `Steps()` and `Parallel()` replace `ParseCommand`, and `Substitute` replaces `substituteAny` for commands.
+- **Per-phase hook lists:** resolution builds `devcontainer.Hooks`, each phase in spec order: image metadata entries, then features in install order, then devcontainer.json.
+  - The image-metadata hooks, previously dropped, now run first.
+  - `HookRunner` and `AttachSteps` take the lists.
+  - The five `Collect*Commands` wrappers, `CollectHooks`, `FeatureHook`, `HookType` and `SetFeatureHooks` are deleted.
+- **Feature entrypoints:** they run, in install order, before the keep-alive, or before the image or service command when `overrideCommand` is false.
+  - That command is read with the new `Engine.ImageCommand` and from the compose service's `entrypoint`/`command`.
+  - The paths are positional arguments, never interpolated into the script.
+  - `dockerRunArgs` now appends `Cmd` after the entrypoint arguments, as compose does.
+- **Ports:** `PortList`/`Port` for `forwardPorts` and `appPort`, plus typed `PortsAttributes`/`OtherPortsAttributes`. Deleted: `portValues`, `unionInterfaces`, and `PortAttributeFor` with its type switch.
+- **GPU:** `GPURequirement{Mode, Count, Cores, Memory}` is read by both the builder and host-requirement validation, replacing the resolved `GPURequirements`.
+  - Validation checks Docker's GPU runtime instead of probing the host (`nvidia-smi`, `/dev/dri`, sysctl), which is what decides whether `--gpus` works.
+  - That removed the last `os/exec` from `devcontainer` and its depguard exception.
+- **Mounts:** `Mount` and its parser moved to the leaf package `internal/mount`, so feature mounts use them too. `FeatureMount` and its string parser are deleted, and `parseMounts` no longer re-parses.
+- **D4:** feature options are substituted once, in `SubstituteConfig`, with the full context. The localEnv-only second pass in features is gone, and the staleness key sees the substituted options.
+
+Tests added: the hash pin; `lifecyclecmd` parse, steps, round-trip and substitution tests; GPU form and validation tests; feature option substitution; entrypoint spec tests, including the chain script run under a real `sh`; a golden case for image-metadata hooks and hook order. The new e2e test runs a local feature's entrypoint and its postCreateCommand before devcontainer.json's (127 e2e tests).
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

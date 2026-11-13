@@ -4,7 +4,6 @@ package conformance
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -118,32 +117,27 @@ func TestSpecPropertyParsing(t *testing.T) {
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
-		specs := func(values []interface{}) []string {
+		specs := func(ports devcontainer.PortList) []string {
 			var out []string
-			for _, v := range values {
-				s, ok := v.(string)
-				if !ok {
-					s = fmt.Sprint(v)
-				}
-				pf, err := devcontainer.ParsePortSpec(s)
+			for _, p := range ports {
+				pf, err := devcontainer.ParsePortSpec(p.Spec)
 				require.NoError(t, err)
 				out = append(out, pf.DockerSpec())
 			}
 			return out
 		}
 		assert.Equal(t, []string{"3000:3000", "8080:80"}, specs(cfg.ForwardPorts))
+		assert.Equal(t, []string{"3000:3000", "5000:5000"}, specs(cfg.AppPort))
 
-		appPorts, ok := cfg.AppPort.([]interface{})
+		attr, ok := cfg.PortsAttributes["3000"]
 		require.True(t, ok)
-		assert.Equal(t, []string{"3000:3000", "5000:5000"}, specs(appPorts))
-
-		attr := cfg.PortAttributeFor("3000")
-		require.NotNil(t, attr)
 		assert.Equal(t, "Web", attr.Label)
 		assert.Equal(t, "http", attr.Protocol)
 		assert.Equal(t, "notify", attr.OnAutoForward)
 		assert.True(t, attr.RequireLocalPort)
 		assert.True(t, attr.ElevateIfNeeded)
+		require.NotNil(t, cfg.OtherPortsAttributes)
+		assert.Equal(t, "silent", cfg.OtherPortsAttributes.OnAutoForward)
 	})
 
 	t.Run("mount properties - string format", func(t *testing.T) {
@@ -222,12 +216,13 @@ func TestSpecPropertyParsing(t *testing.T) {
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
-		assert.Equal(t, "echo init", cfg.InitializeCommand)
-		assert.NotNil(t, cfg.OnCreateCommand)
-		assert.NotNil(t, cfg.UpdateContentCommand)
-		assert.Equal(t, "echo postCreate", cfg.PostCreateCommand)
-		assert.Equal(t, "echo postStart", cfg.PostStartCommand)
-		assert.Equal(t, "echo postAttach", cfg.PostAttachCommand)
+		assert.Equal(t, "echo init", cfg.InitializeCommand.Shell)
+		assert.True(t, cfg.OnCreateCommand.Parallel(), "the object form runs in parallel")
+		assert.Len(t, cfg.OnCreateCommand.Steps(), 2)
+		assert.Equal(t, []string{"echo", "update"}, cfg.UpdateContentCommand.Argv)
+		assert.Equal(t, "echo postCreate", cfg.PostCreateCommand.Shell)
+		assert.Equal(t, "echo postStart", cfg.PostStartCommand.Shell)
+		assert.Equal(t, "echo postAttach", cfg.PostAttachCommand.Shell)
 		assert.Equal(t, "postCreateCommand", cfg.WaitFor)
 	})
 
@@ -248,7 +243,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 		assert.Equal(t, 4, cfg.HostRequirements.CPUs)
 		assert.Equal(t, "8gb", cfg.HostRequirements.Memory)
 		assert.Equal(t, "32gb", cfg.HostRequirements.Storage)
-		assert.Equal(t, true, cfg.HostRequirements.GPU)
+		assert.Equal(t, devcontainer.GPURequired, cfg.HostRequirements.GPU.Mode)
 	})
 
 	t.Run("userEnvProbe property", func(t *testing.T) {

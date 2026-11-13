@@ -6,6 +6,8 @@ import (
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/lifecyclecmd"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMetadataBuilder_Empty(t *testing.T) {
@@ -298,7 +300,7 @@ func TestMetadataBuilder_FeatureMounts(t *testing.T) {
 			ID: "mount-feature",
 			Metadata: &features.FeatureMetadata{
 				ID: "mount-feature",
-				Mounts: []features.FeatureMount{
+				Mounts: []devcontainer.Mount{
 					{
 						Source: "/var/run/docker.sock",
 						Target: "/var/run/docker.sock",
@@ -378,9 +380,9 @@ func TestMetadataBuilder_FeatureLifecycleCommands(t *testing.T) {
 			ID: "lifecycle-feature",
 			Metadata: &features.FeatureMetadata{
 				ID:                "lifecycle-feature",
-				OnCreateCommand:   "echo 'onCreate from feature'",
-				PostCreateCommand: "echo 'postCreate from feature'",
-				PostStartCommand:  []string{"echo", "postStart from feature"},
+				OnCreateCommand:   &lifecyclecmd.Command{Shell: "echo 'onCreate from feature'"},
+				PostCreateCommand: &lifecyclecmd.Command{Shell: "echo 'postCreate from feature'"},
+				PostStartCommand:  &lifecyclecmd.Command{Argv: []string{"echo", "postStart from feature"}},
 			},
 		},
 	})
@@ -399,32 +401,24 @@ func TestMetadataBuilder_FeatureLifecycleCommands(t *testing.T) {
 		t.Fatalf("expected 1 config, got %d", len(configs))
 	}
 
-	// Check lifecycle commands are preserved
-	if configs[0].OnCreateCommand != "echo 'onCreate from feature'" {
-		t.Errorf("expected onCreateCommand, got %v", configs[0].OnCreateCommand)
-	}
-	if configs[0].PostCreateCommand != "echo 'postCreate from feature'" {
-		t.Errorf("expected postCreateCommand, got %v", configs[0].PostCreateCommand)
-	}
-	// PostStartCommand is an array
-	arr, ok := configs[0].PostStartCommand.([]interface{})
-	if !ok {
-		t.Errorf("expected postStartCommand to be array, got %T", configs[0].PostStartCommand)
-	} else if len(arr) != 2 {
-		t.Errorf("expected postStartCommand array length 2, got %d", len(arr))
-	}
+	// Lifecycle commands are preserved, in their original form.
+	assert.Equal(t, "echo 'onCreate from feature'", configs[0].OnCreateCommand.Shell)
+	assert.Equal(t, "echo 'postCreate from feature'", configs[0].PostCreateCommand.Shell)
+	assert.Equal(t, []string{"echo", "postStart from feature"}, configs[0].PostStartCommand.Argv)
 }
 
 func TestMetadataBuilder_LocalConfigLifecycleCommands(t *testing.T) {
 	builder := NewMetadataBuilder()
 
 	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
-		OnCreateCommand:      "npm install",
-		UpdateContentCommand: "npm run build",
-		PostCreateCommand:    map[string]interface{}{"server": "npm start", "client": "npm run dev"},
-		PostStartCommand:     "echo 'started'",
-		PostAttachCommand:    "echo 'attached'",
-		WaitFor:              "postCreateCommand",
+		OnCreateCommand:      &lifecyclecmd.Command{Shell: "npm install"},
+		UpdateContentCommand: &lifecyclecmd.Command{Shell: "npm run build"},
+		PostCreateCommand: &lifecyclecmd.Command{Named: map[string]lifecyclecmd.Command{
+			"server": {Shell: "npm start"}, "client": {Shell: "npm run dev"},
+		}},
+		PostStartCommand:  &lifecyclecmd.Command{Shell: "echo 'started'"},
+		PostAttachCommand: &lifecyclecmd.Command{Shell: "echo 'attached'"},
+		WaitFor:           "postCreateCommand",
 	})
 
 	result, err := builder.Build()
@@ -441,12 +435,9 @@ func TestMetadataBuilder_LocalConfigLifecycleCommands(t *testing.T) {
 		t.Fatalf("expected 1 config, got %d", len(configs))
 	}
 
-	if configs[0].OnCreateCommand != "npm install" {
-		t.Errorf("expected onCreateCommand='npm install', got %v", configs[0].OnCreateCommand)
-	}
-	if configs[0].UpdateContentCommand != "npm run build" {
-		t.Errorf("expected updateContentCommand='npm run build', got %v", configs[0].UpdateContentCommand)
-	}
+	assert.Equal(t, "npm install", configs[0].OnCreateCommand.Shell)
+	assert.Equal(t, "npm run build", configs[0].UpdateContentCommand.Shell)
+	assert.True(t, configs[0].PostCreateCommand.Parallel())
 	if configs[0].WaitFor != "postCreateCommand" {
 		t.Errorf("expected waitFor='postCreateCommand', got %s", configs[0].WaitFor)
 	}
@@ -456,16 +447,11 @@ func TestMetadataBuilder_LocalConfigPortForwarding(t *testing.T) {
 	builder := NewMetadataBuilder()
 
 	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
-		ForwardPorts: []interface{}{3000, "8080:80"},
-		PortsAttributes: map[string]interface{}{
-			"3000": map[string]interface{}{
-				"label":         "Frontend",
-				"onAutoForward": "notify",
-			},
+		ForwardPorts: devcontainer.PortList{{Spec: "3000"}, {Spec: "8080:80"}},
+		PortsAttributes: map[string]devcontainer.PortAttribute{
+			"3000": {Label: "Frontend", OnAutoForward: "notify"},
 		},
-		OtherPortsAttributes: map[string]interface{}{
-			"onAutoForward": "silent",
-		},
+		OtherPortsAttributes: &devcontainer.PortAttribute{OnAutoForward: "silent"},
 	})
 
 	result, err := builder.Build()
@@ -500,7 +486,7 @@ func TestMetadataBuilder_LocalConfigHostRequirements(t *testing.T) {
 		HostRequirements: &devcontainer.HostRequirements{
 			CPUs:   4,
 			Memory: "8gb",
-			GPU:    true,
+			GPU:    &devcontainer.GPURequirement{Mode: devcontainer.GPURequired},
 		},
 	})
 

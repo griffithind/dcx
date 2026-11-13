@@ -1,9 +1,11 @@
 package devcontainer
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -112,32 +114,11 @@ func (p PortForward) DockerSpec() string {
 	return s
 }
 
-// portValues flattens a JSON port value (number, string or array of them).
-func portValues(v interface{}) []string {
-	switch t := v.(type) {
-	case nil:
-		return nil
-	case float64:
-		return []string{strconv.Itoa(int(t))}
-	case int:
-		return []string{strconv.Itoa(t)}
-	case string:
-		return []string{t}
-	case []interface{}:
-		var out []string
-		for _, item := range t {
-			out = append(out, portValues(item)...)
-		}
-		return out
-	default:
-		return []string{fmt.Sprint(t)}
-	}
-}
-
-// parsePorts parses JSON port values, reporting entries it cannot publish.
-func (b *Builder) parsePorts(field string, v interface{}) []PortForward {
+// parsePorts parses port entries, reporting entries it cannot publish.
+func (b *Builder) parsePorts(field string, ports PortList) []PortForward {
 	var out []PortForward
-	for _, spec := range portValues(v) {
+	for _, p := range ports {
+		spec := p.Spec
 		pf, err := ParsePortSpec(spec)
 		if err != nil {
 			if errors.Is(err, errRemoteHostPort) {
@@ -150,4 +131,100 @@ func (b *Builder) parsePorts(field string, v interface{}) []PortForward {
 		out = append(out, pf)
 	}
 	return out
+}
+
+// Port is one forwardPorts/appPort entry: a port number or a port spec
+// ("8080:80", "127.0.0.1::90", "db:5432"; see ParsePortSpec).
+type Port struct {
+	Spec string
+	// number and bare record how the entry was written (a JSON number; a
+	// value rather than an array) so it marshals back unchanged: the
+	// config hash covers forwardPorts and appPort.
+	number bool
+	bare   bool
+}
+
+// PortList is forwardPorts or appPort: a number, a string or an array of
+// them.
+type PortList []Port
+
+// UnmarshalJSON accepts a number, a string or an array of either.
+func (l *PortList) UnmarshalJSON(data []byte) error {
+	var raw interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if items, ok := raw.([]interface{}); ok {
+		out := make(PortList, 0, len(items))
+		for _, item := range items {
+			p, err := portFromValue(item)
+			if err != nil {
+				return err
+			}
+			out = append(out, p)
+		}
+		*l = out
+		return nil
+	}
+	p, err := portFromValue(raw)
+	if err != nil {
+		return err
+	}
+	p.bare = true
+	*l = PortList{p}
+	return nil
+}
+
+func portFromValue(v interface{}) (Port, error) {
+	switch t := v.(type) {
+	case float64:
+		return Port{Spec: strconv.Itoa(int(t)), number: true}, nil
+	case string:
+		return Port{Spec: t}, nil
+	}
+	return Port{}, fmt.Errorf("port: expected a number or a string, got %v", v)
+}
+
+// MarshalJSON writes the list in the form it was read in.
+func (l PortList) MarshalJSON() ([]byte, error) {
+	if len(l) == 1 && l[0].bare {
+		return l[0].MarshalJSON()
+	}
+	return json.Marshal([]Port(l))
+}
+
+// MarshalJSON writes a number entry as a number and a spec as a string.
+func (p Port) MarshalJSON() ([]byte, error) {
+	if p.number {
+		if n, err := strconv.Atoi(p.Spec); err == nil {
+			return json.Marshal(n)
+		}
+	}
+	return json.Marshal(p.Spec)
+}
+
+// substitute applies sub to the string entries.
+func (l PortList) substitute(sub func(string) string) PortList {
+	if l == nil {
+		return nil
+	}
+	out := make(PortList, len(l))
+	for i, p := range l {
+		if !p.number {
+			p.Spec = sub(p.Spec)
+		}
+		out[i] = p
+	}
+	return out
+}
+
+// union appends the entries of b not already in l (by spec).
+func (l PortList) union(b PortList) PortList {
+	for _, p := range b {
+		if !slices.ContainsFunc(l, func(q Port) bool { return q.Spec == p.Spec }) {
+			p.bare = false
+			l = append(l, p)
+		}
+	}
+	return l
 }

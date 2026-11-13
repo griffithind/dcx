@@ -259,19 +259,21 @@ func SubstituteConfig(cfg *DevContainerConfig, ctx *SubstitutionContext) {
 		m.Target = sub(m.Target)
 	}
 
-	for i, p := range cfg.ForwardPorts {
-		if s, ok := p.(string); ok {
-			cfg.ForwardPorts[i] = sub(s)
-		}
+	// Feature options, once, with the full context (they reach the feature
+	// install scripts and the staleness key).
+	for ref, opts := range cfg.Features {
+		cfg.Features[ref] = substituteAny(opts, sub)
 	}
-	cfg.AppPort = substituteAny(cfg.AppPort, sub)
 
-	cfg.InitializeCommand = substituteAny(cfg.InitializeCommand, sub)
-	cfg.OnCreateCommand = substituteAny(cfg.OnCreateCommand, sub)
-	cfg.UpdateContentCommand = substituteAny(cfg.UpdateContentCommand, sub)
-	cfg.PostCreateCommand = substituteAny(cfg.PostCreateCommand, sub)
-	cfg.PostStartCommand = substituteAny(cfg.PostStartCommand, sub)
-	cfg.PostAttachCommand = substituteAny(cfg.PostAttachCommand, sub)
+	cfg.ForwardPorts = cfg.ForwardPorts.substitute(sub)
+	cfg.AppPort = cfg.AppPort.substitute(sub)
+
+	cfg.InitializeCommand = cfg.InitializeCommand.Substitute(sub)
+	cfg.OnCreateCommand = cfg.OnCreateCommand.Substitute(sub)
+	cfg.UpdateContentCommand = cfg.UpdateContentCommand.Substitute(sub)
+	cfg.PostCreateCommand = cfg.PostCreateCommand.Substitute(sub)
+	cfg.PostStartCommand = cfg.PostStartCommand.Substitute(sub)
+	cfg.PostAttachCommand = cfg.PostAttachCommand.Substitute(sub)
 }
 
 // substituteAny substitutes strings inside a JSON-decoded value (string,

@@ -283,6 +283,27 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 }
 
 // ImageLabels returns the labels for an image.
+// ImageCommand returns an image's configured ENTRYPOINT and CMD.
+func (d *Docker) ImageCommand(ctx context.Context, imageRef string) (entrypoint, cmd []string, err error) {
+	output, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef).Output()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to inspect image: %w", err)
+	}
+	var results []struct {
+		Config struct {
+			Entrypoint []string `json:"Entrypoint"`
+			Cmd        []string `json:"Cmd"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse image inspect output: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, nil, fmt.Errorf("image not found: %s", imageRef)
+	}
+	return results[0].Config.Entrypoint, results[0].Config.Cmd, nil
+}
+
 func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
 	output, err := cmd.Output()
@@ -472,13 +493,12 @@ func dockerRunArgs(s ContainerSpec) []string {
 	}
 	args = append(args, s.Image)
 	// docker takes only the entrypoint executable as a flag; the rest of
-	// the entrypoint becomes the command (replacing the image's CMD).
+	// the entrypoint, then Cmd, become the arguments (as compose does with
+	// entrypoint + command).
 	if len(s.Entrypoint) > 1 {
 		args = append(args, s.Entrypoint[1:]...)
-	} else {
-		args = append(args, s.Cmd...)
 	}
-	return args
+	return append(args, s.Cmd...)
 }
 
 // formatMount formats a devcontainer.Mount as a --mount flag value.

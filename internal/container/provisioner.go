@@ -37,6 +37,8 @@ type Provisioner struct {
 	ssh *sshEndpoint
 	// composeInfo caches composeService.
 	composeInfo *composeServiceInfo
+	// command is what a chained feature entrypoint execs (prepareCommand).
+	command []string
 }
 
 // NewProvisioner creates a new runtime for a resolved devcontainer.
@@ -81,6 +83,9 @@ func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, plan *devco
 		return err
 	}
 	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
+		return err
+	}
+	if err := r.prepareCommand(ctx, image); err != nil {
 		return err
 	}
 
@@ -137,6 +142,9 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 		return err
 	}
 	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
+		return err
+	}
+	if err := r.prepareCommand(ctx, finalImage); err != nil {
 		return err
 	}
 
@@ -428,7 +436,7 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 
 	r.applyFeatureRequirements(&s)
 
-	if gpu := res.GPURequirements; gpu != nil && gpu.Enabled {
+	if gpu := res.GPU; gpu.Wanted() {
 		if gpu.Count > 0 {
 			s.GPUs = strconv.Itoa(gpu.Count)
 		} else {
@@ -436,8 +444,12 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 		}
 	}
 
-	if r.resolved.OverrideCommand {
-		s.Entrypoint = append([]string(nil), keepAliveEntrypoint...)
+	switch entrypoints := r.featureEntrypoints(); {
+	case r.resolved.OverrideCommand:
+		s.Entrypoint = keepAlive(entrypoints)
+	case len(entrypoints) > 0:
+		s.Entrypoint = chainEntrypoints(entrypoints)
+		s.Cmd = r.command
 	}
 	return s
 }
@@ -781,6 +793,23 @@ func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontaine
 	return fmt.Sprintf("%s-%s", projectName, plan.Service), true, nil
 }
 
+// composeArgv reads a compose entrypoint/command: a list, or a string in
+// shell form; nil when unset.
+func composeArgv(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var argv []string
+	if json.Unmarshal(raw, &argv) == nil {
+		return argv
+	}
+	var shell string
+	if json.Unmarshal(raw, &shell) == nil {
+		return []string{"/bin/sh", "-c", shell}
+	}
+	return nil
+}
+
 // composeServiceInfo is what dcx reads from the user's compose files about
 // the primary service.
 type composeServiceInfo struct {
@@ -788,6 +817,9 @@ type composeServiceInfo struct {
 	Built       bool // the service has a build: section
 	NetworkMode string
 	ProjectName string // the compose files' top-level name
+	// Entrypoint and Command are the service's own (nil: not set).
+	Entrypoint []string
+	Command    []string
 }
 
 // composeService reads the primary service from the user's compose files
@@ -812,6 +844,8 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 			Image       string          `json:"image"`
 			Build       json.RawMessage `json:"build"`
 			NetworkMode string          `json:"network_mode"`
+			Entrypoint  json.RawMessage `json:"entrypoint"`
+			Command     json.RawMessage `json:"command"`
 		} `json:"services"`
 		Name string `json:"name"`
 	}
@@ -827,6 +861,8 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 		Built:       len(svc.Build) > 0 && string(svc.Build) != "null",
 		NetworkMode: svc.NetworkMode,
 		ProjectName: config.Name,
+		Entrypoint:  composeArgv(svc.Entrypoint),
+		Command:     composeArgv(svc.Command),
 	}
 	return r.composeInfo, nil
 }

@@ -191,12 +191,12 @@ func TestComposeOverrideIsDeterministic(t *testing.T) {
 }
 
 func TestDockerRunArgsEntrypoint(t *testing.T) {
-	args := dockerRunArgs(ContainerSpec{Image: "img", Entrypoint: keepAliveEntrypoint, Cmd: []string{"ignored"}})
+	args := dockerRunArgs(ContainerSpec{Image: "img", Entrypoint: keepAliveEntrypoint, Cmd: []string{"cmd"}})
 	i := slices.Index(args, "--entrypoint")
 	require.GreaterOrEqual(t, i, 0)
 	assert.Equal(t, "/bin/sh", args[i+1])
 	// Image, then the rest of the entrypoint as the command.
-	assert.Equal(t, append([]string{"img"}, keepAliveEntrypoint[1:]...), args[len(args)-4:])
+	assert.Equal(t, append(append([]string{"img"}, keepAliveEntrypoint[1:]...), "cmd"), args[len(args)-5:])
 
 	args = dockerRunArgs(ContainerSpec{Image: "img", Cmd: []string{"a", "b"}})
 	assert.Equal(t, []string{"img", "a", "b"}, args[len(args)-3:])
@@ -214,7 +214,7 @@ func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
 		Privileged:      true,
 		Init:            true,
 		AppPorts:        []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}},
-		GPURequirements: &devcontainer.GPURequirements{Enabled: true},
+		GPU:             &devcontainer.GPURequirement{Mode: devcontainer.GPURequired},
 		RunArgs:         &devcontainer.ParsedRunArgs{IpcMode: "host", Passthrough: []string{"--hostname=x"}},
 		Features: []*features.Feature{{ID: "dind", Metadata: &features.FeatureMetadata{
 			ID: "dind", CapAdd: []string{"NET_ADMIN"}, SecurityOpt: []string{"seccomp=unconfined"},

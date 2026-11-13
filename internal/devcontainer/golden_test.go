@@ -17,28 +17,52 @@ var updateGolden = flag.Bool("update", false, "rewrite resolve golden files")
 // goldenView is the deterministic projection of a ResolvedDevContainer that
 // golden files record. Host-specific values are replaced by placeholders.
 type goldenView struct {
-	Name            string            `json:"name"`
-	Plan            any               `json:"plan"`
-	BaseImage       string            `json:"baseImage,omitempty"`
-	ResourceName    string            `json:"resourceName"`
-	SSHHost         string            `json:"sshHost"`
-	OverrideCommand bool              `json:"overrideCommand"`
-	WorkspaceFolder string            `json:"workspaceFolder"`
-	WorkspaceMount  string            `json:"workspaceMount,omitempty"`
-	RemoteUser      string            `json:"remoteUser,omitempty"`
-	ContainerUser   string            `json:"containerUser,omitempty"`
-	EffectiveUser   string            `json:"effectiveUser,omitempty"`
-	ContainerEnv    map[string]string `json:"containerEnv,omitempty"`
-	RemoteEnv       map[string]string `json:"remoteEnv,omitempty"`
-	Mounts          []Mount           `json:"mounts,omitempty"`
-	CapAdd          []string          `json:"capAdd,omitempty"`
-	SecurityOpt     []string          `json:"securityOpt,omitempty"`
-	Privileged      bool              `json:"privileged,omitempty"`
-	Init            bool              `json:"init,omitempty"`
-	RunArgs         *ParsedRunArgs    `json:"runArgs,omitempty"`
-	ForwardPorts    []PortForward     `json:"forwardPorts,omitempty"`
-	AppPorts        []PortForward     `json:"appPorts,omitempty"`
-	Features        []string          `json:"features,omitempty"`
+	Name            string              `json:"name"`
+	Plan            any                 `json:"plan"`
+	BaseImage       string              `json:"baseImage,omitempty"`
+	ResourceName    string              `json:"resourceName"`
+	SSHHost         string              `json:"sshHost"`
+	OverrideCommand bool                `json:"overrideCommand"`
+	WorkspaceFolder string              `json:"workspaceFolder"`
+	WorkspaceMount  string              `json:"workspaceMount,omitempty"`
+	RemoteUser      string              `json:"remoteUser,omitempty"`
+	ContainerUser   string              `json:"containerUser,omitempty"`
+	EffectiveUser   string              `json:"effectiveUser,omitempty"`
+	ContainerEnv    map[string]string   `json:"containerEnv,omitempty"`
+	RemoteEnv       map[string]string   `json:"remoteEnv,omitempty"`
+	Mounts          []Mount             `json:"mounts,omitempty"`
+	CapAdd          []string            `json:"capAdd,omitempty"`
+	SecurityOpt     []string            `json:"securityOpt,omitempty"`
+	Privileged      bool                `json:"privileged,omitempty"`
+	Init            bool                `json:"init,omitempty"`
+	RunArgs         *ParsedRunArgs      `json:"runArgs,omitempty"`
+	ForwardPorts    []PortForward       `json:"forwardPorts,omitempty"`
+	AppPorts        []PortForward       `json:"appPorts,omitempty"`
+	Features        []string            `json:"features,omitempty"`
+	Hooks           map[string][]string `json:"hooks,omitempty"`
+}
+
+// hooksView lists each phase's hooks as "<source>: <step>".
+func hooksView(h Hooks) map[string][]string {
+	out := map[string][]string{}
+	for phase, hooks := range map[string][]Hook{
+		"initialize": h.Initialize, "onCreate": h.OnCreate, "updateContent": h.UpdateContent,
+		"postCreate": h.PostCreate, "postStart": h.PostStart, "postAttach": h.PostAttach,
+	} {
+		for _, hook := range hooks {
+			src := string(hook.Source)
+			if hook.Feature != "" {
+				src += " " + hook.Feature
+			}
+			for _, step := range hook.Command.Steps() {
+				out[phase] = append(out[phase], src+": "+step.String())
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func planView(p ExecutionPlan) any {
@@ -151,6 +175,7 @@ func TestResolveGolden(t *testing.T) {
 				Privileged: resolved.Privileged, Init: resolved.Init, RunArgs: resolved.RunArgs,
 				ForwardPorts: resolved.ForwardPorts, AppPorts: resolved.AppPorts,
 			}
+			view.Hooks = hooksView(resolved.Hooks)
 			for _, f := range resolved.Features {
 				view.Features = append(view.Features, f.ID)
 			}

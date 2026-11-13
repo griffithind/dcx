@@ -2,11 +2,12 @@
 package features
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
+
+	"github.com/griffithind/dcx/internal/lifecyclecmd"
+	"github.com/griffithind/dcx/internal/mount"
 )
 
 // Feature represents a resolved devcontainer feature.
@@ -126,22 +127,22 @@ type FeatureMetadata struct {
 	Entrypoint string `json:"entrypoint,omitempty"`
 
 	// Mounts specifies additional mounts (can be strings or objects)
-	Mounts []FeatureMount `json:"mounts,omitempty"`
+	Mounts []mount.Mount `json:"mounts,omitempty"`
 
 	// OnCreateCommand runs after feature installation
-	OnCreateCommand interface{} `json:"onCreateCommand,omitempty"`
+	OnCreateCommand *lifecyclecmd.Command `json:"onCreateCommand,omitempty"`
 
 	// UpdateContentCommand runs after onCreateCommand
-	UpdateContentCommand interface{} `json:"updateContentCommand,omitempty"`
+	UpdateContentCommand *lifecyclecmd.Command `json:"updateContentCommand,omitempty"`
 
 	// PostCreateCommand runs after all features installed
-	PostCreateCommand interface{} `json:"postCreateCommand,omitempty"`
+	PostCreateCommand *lifecyclecmd.Command `json:"postCreateCommand,omitempty"`
 
 	// PostStartCommand runs on each container start
-	PostStartCommand interface{} `json:"postStartCommand,omitempty"`
+	PostStartCommand *lifecyclecmd.Command `json:"postStartCommand,omitempty"`
 
 	// PostAttachCommand runs when attaching to the container
-	PostAttachCommand interface{} `json:"postAttachCommand,omitempty"`
+	PostAttachCommand *lifecyclecmd.Command `json:"postAttachCommand,omitempty"`
 
 	// Customizations contains tool-specific configuration
 	Customizations map[string]interface{} `json:"customizations,omitempty"`
@@ -163,63 +164,6 @@ type OptionDefinition struct {
 
 	// Proposals suggests values for string types
 	Proposals []string `json:"proposals,omitempty"`
-}
-
-// FeatureMount represents a mount specification that can be either a string or an object.
-type FeatureMount struct {
-	Source string `json:"source,omitempty"`
-	Target string `json:"target,omitempty"`
-	Type   string `json:"type,omitempty"`
-	// Raw holds the original string if mount was specified as a string
-	Raw string `json:"-"`
-}
-
-// UnmarshalJSON handles both string and object forms of mount specifications.
-func (m *FeatureMount) UnmarshalJSON(data []byte) error {
-	// Try string first
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		m.Raw = s
-		// Parse the mount string: "source=...,target=...,type=..."
-		parts := strings.Split(s, ",")
-		for _, part := range parts {
-			kv := strings.SplitN(part, "=", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(kv[0])
-			value := strings.TrimSpace(kv[1])
-			switch key {
-			case "source", "src":
-				m.Source = value
-			case "target", "dst", "destination":
-				m.Target = value
-			case "type":
-				m.Type = value
-			}
-		}
-		return nil
-	}
-
-	// Try object form
-	type mountAlias FeatureMount
-	var obj mountAlias
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return err
-	}
-	*m = FeatureMount(obj)
-	return nil
-}
-
-// String returns the mount as a docker-style string.
-func (m FeatureMount) String() string {
-	if m.Raw != "" {
-		return m.Raw
-	}
-	if m.Type == "" {
-		m.Type = "bind"
-	}
-	return fmt.Sprintf("type=%s,source=%s,target=%s", m.Type, m.Source, m.Target)
 }
 
 // String returns the original feature ID.
@@ -324,9 +268,8 @@ func (f *Feature) EnvVars() map[string]string {
 		if val != nil {
 			// Normalize option name per devcontainer spec
 			envName := NormalizeOptionName(name)
-			strVal := fmt.Sprintf("%v", val)
-			// Apply environment variable substitution
-			env[envName] = substituteEnvVars(strVal)
+			// Options were substituted with the rest of devcontainer.json.
+			env[envName] = fmt.Sprintf("%v", val)
 		}
 	}
 
@@ -349,24 +292,4 @@ func NormalizeOptionName(name string) string {
 	name = optionNameLeadingInvalid.ReplaceAllString(name, "_")
 	// Convert to uppercase
 	return strings.ToUpper(name)
-}
-
-// envVarPattern matches ${localEnv:VAR} and ${env:VAR} patterns with optional defaults.
-var envVarPattern = regexp.MustCompile(`\$\{(?:localEnv|env):([^}:]+)(?::([^}]*))?\}`)
-
-// substituteEnvVars substitutes environment variable references in a string.
-// This is a simplified version that only handles ${localEnv:VAR} and ${env:VAR} patterns.
-func substituteEnvVars(s string) string {
-	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := envVarPattern.FindStringSubmatch(match)
-		if len(parts) < 2 {
-			return match
-		}
-		varName := parts[1]
-		value := os.Getenv(varName)
-		if value == "" && len(parts) >= 3 {
-			value = parts[2] // default value
-		}
-		return value
-	})
 }

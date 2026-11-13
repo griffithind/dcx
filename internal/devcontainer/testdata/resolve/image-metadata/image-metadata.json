@@ -1,1 +1,1 @@
-[{"remoteUser": "dev", "containerEnv": {"FROM_IMAGE": "1", "SHARED": "image"}, "capAdd": ["SYS_PTRACE"], "overrideCommand": false}]
+[{"remoteUser": "dev", "containerEnv": {"FROM_IMAGE": "1", "SHARED": "image"}, "capAdd": ["SYS_PTRACE"], "overrideCommand": false, "postCreateCommand": "echo from-image", "postAttachCommand": ["image-attach"]}]

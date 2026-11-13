@@ -124,6 +124,10 @@ type ResolvedDevContainer struct {
 	// AppPorts are application ports to expose.
 	AppPorts []PortForward
 
+	// Hooks are the lifecycle commands of every phase (image metadata,
+	// features, devcontainer.json).
+	Hooks Hooks
+
 	// === Features ===
 
 	// Features are the resolved and ordered features for installation.
@@ -138,8 +142,8 @@ type ResolvedDevContainer struct {
 
 	// === GPU ===
 
-	// GPURequirements specifies GPU requirements.
-	GPURequirements *GPURequirements
+	// GPU is the GPU requirement (nil: no GPUs).
+	GPU *GPURequirement
 
 	// === Secrets ===
 
@@ -167,17 +171,6 @@ type PortForward struct {
 	// EphemeralHostPort asks Docker to assign the host port itself (the
 	// `host::container` syntax).
 	EphemeralHostPort bool
-}
-
-// GPURequirements specifies GPU requirements for the container.
-type GPURequirements struct {
-	Enabled bool
-	// Optional means the container should get GPUs only when the host has
-	// them ("gpu": "optional"); without one it starts without GPUs.
-	Optional bool
-	Count    int
-	Memory   string
-	Cores    int
 }
 
 // ParsedRunArgs contains parsed values from devcontainer.json runArgs.

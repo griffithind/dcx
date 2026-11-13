@@ -2,8 +2,6 @@ package devcontainer
 
 import (
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -20,6 +18,7 @@ type HostRequirementsResult struct {
 type DockerResources struct {
 	CPUs   int    // Number of CPUs available to Docker
 	Memory uint64 // Total memory available to Docker in bytes
+	GPU    bool   // Docker has a GPU (NVIDIA) runtime, so --gpus works
 }
 
 // ValidateHostRequirementsWithDocker checks if Docker's configured resources meet the requirements.
@@ -59,29 +58,13 @@ func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *Docke
 		}
 	}
 
-	// Check GPU (GPU detection is still host-based as Docker doesn't report GPU info in system info)
-	if reqs.GPU != nil {
-		needsGPU := false
-		switch v := reqs.GPU.(type) {
-		case bool:
-			needsGPU = v
-		case string:
-			needsGPU = v == "true" || v == "optional"
-		case map[string]interface{}:
-			needsGPU = len(v) > 0
-		}
-
-		if needsGPU && !hasGPU() {
-			optional := false
-			if s, ok := reqs.GPU.(string); ok && s == "optional" {
-				optional = true
-			}
-			if optional {
-				result.Warnings = append(result.Warnings, "No GPU detected (optional requirement)")
-			} else {
-				result.Satisfied = false
-				result.Errors = append(result.Errors, "GPU requirement not met: no GPU detected")
-			}
+	// Check GPU against Docker's GPU runtime: without it --gpus fails.
+	if reqs.GPU.Wanted() && !dockerRes.GPU {
+		if reqs.GPU.Mode == GPUOptional {
+			result.Warnings = append(result.Warnings, "No GPU runtime on the Docker host; starting without GPUs (optional requirement)")
+		} else {
+			result.Satisfied = false
+			result.Errors = append(result.Errors, "GPU requirement not met: the Docker host has no GPU runtime")
 		}
 	}
 
@@ -173,32 +156,4 @@ func formatBytes(b uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-// hasGPU checks if a GPU is available.
-func hasGPU() bool {
-	// Try nvidia-smi first
-	if _, err := exec.LookPath("nvidia-smi"); err == nil {
-		if err := exec.Command("nvidia-smi").Run(); err == nil {
-			return true
-		}
-	}
-
-	// Check for Apple Silicon GPU (macOS)
-	if runtime.GOOS == "darwin" {
-		// Apple Silicon always has GPU
-		out, err := exec.Command("sysctl", "-n", "machdep.cpu.brand_string").Output()
-		if err == nil && strings.Contains(string(out), "Apple") {
-			return true
-		}
-	}
-
-	// Check for /dev/dri on Linux (GPU devices)
-	if runtime.GOOS == "linux" {
-		if isDir("/dev/dri") {
-			return true
-		}
-	}
-
-	return false
 }

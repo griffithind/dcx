@@ -9,6 +9,7 @@ import (
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,7 +62,9 @@ func TestSetupComplete(t *testing.T) {
 
 func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {
 	resolved := &devcontainer.ResolvedDevContainer{
-		Config: &devcontainer.DevContainerConfig{PostAttachCommand: "echo hi"},
+		Hooks: devcontainer.Hooks{PostAttach: []devcontainer.Hook{
+			{Source: devcontainer.HookFromConfig, Command: &lifecyclecmd.Command{Shell: "echo hi"}},
+		}},
 	}
 	cfg := sessionConfig(resolved,
 		map[string]string{"PATH": "/probed/bin", "NVM_DIR": "/nvm"},
@@ -104,11 +107,11 @@ func TestDecideUp(t *testing.T) {
 func TestOptionalGPUDroppedWithoutRuntime(t *testing.T) {
 	svc, _ := newTestService(t, &containertest.Fake{}) // fake Info reports no GPU
 	resolved := &devcontainer.ResolvedDevContainer{
-		HostRequirements: &devcontainer.HostRequirements{GPU: "optional"},
-		GPURequirements:  &devcontainer.GPURequirements{Enabled: true, Optional: true},
+		HostRequirements: &devcontainer.HostRequirements{GPU: &devcontainer.GPURequirement{Mode: devcontainer.GPUOptional}},
+		GPU:              &devcontainer.GPURequirement{Mode: devcontainer.GPUOptional},
 	}
 	require.NoError(t, svc.checkHostRequirements(context.Background(), resolved))
-	assert.Nil(t, resolved.GPURequirements)
+	assert.Nil(t, resolved.GPU)
 }
 
 func TestSSHAccessIsKeptUnlessChangedWithACreate(t *testing.T) {

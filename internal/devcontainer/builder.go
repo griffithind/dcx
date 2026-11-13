@@ -43,6 +43,10 @@ type BuilderOptions struct {
 	// ForcePull forces re-fetching features from the registry
 	ForcePull bool
 
+	// ImageMetadata are the base image's devcontainer.metadata entries
+	// (already merged into Config); their lifecycle hooks run first.
+	ImageMetadata []DevContainerConfig
+
 	// Local is the substituted devcontainer.json before image-metadata
 	// merging; the staleness key is computed from it. Defaults to Config.
 	Local *DevContainerConfig
@@ -146,7 +150,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	}
 
 	// Forward ports
-	resolved.ForwardPorts = b.parsePorts("forwardPorts", []interface{}(opts.Config.ForwardPorts))
+	resolved.ForwardPorts = b.parsePorts("forwardPorts", opts.Config.ForwardPorts)
 
 	// App ports (bound to localhost for security)
 	resolved.AppPorts = b.parsePorts("appPort", opts.Config.AppPort)
@@ -160,7 +164,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	// GPU requirements
 	if opts.Config.HostRequirements != nil {
-		resolved.GPURequirements = parseGPURequirements(opts.Config.HostRequirements)
+		if gpu := opts.Config.HostRequirements.GPU; gpu.Wanted() {
+			resolved.GPU = gpu
+		}
 	}
 
 	// Extract secrets from DCX customizations
@@ -179,6 +185,8 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 			return nil, err
 		}
 	}
+
+	resolved.Hooks = resolveHooks(opts.Config, opts.ImageMetadata, resolved.Features, opts.Config.WaitFor)
 
 	// Compute the staleness key from the local (pre-merge) config
 	if err := b.computeHashes(resolved, resolved.Local); err != nil {
@@ -269,17 +277,18 @@ func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feat
 	}
 }
 
-// featureMount converts a feature-declared mount, applying the same variable
-// substitution and parser as devcontainer.json mounts.
-func featureMount(fm features.FeatureMount, subCtx *SubstitutionContext) (Mount, error) {
+// featureMount applies variable substitution to a feature-declared mount
+// (a string is re-parsed with the one mount parser afterwards).
+func featureMount(fm Mount, subCtx *SubstitutionContext) (Mount, error) {
 	if fm.Raw != "" {
-		return ParseMountString(Substitute(fm.Raw, subCtx))
+		raw := Substitute(fm.Raw, subCtx)
+		m, err := ParseMountString(raw)
+		m.Raw = raw
+		return m, err
 	}
-	m := Mount{
-		Source: Substitute(fm.Source, subCtx),
-		Target: Substitute(fm.Target, subCtx),
-		Type:   fm.Type,
-	}
+	m := fm
+	m.Source = Substitute(m.Source, subCtx)
+	m.Target = Substitute(m.Target, subCtx)
 	if m.Type == "" {
 		m.Type = "bind"
 	}
@@ -344,38 +353,8 @@ func (b *Builder) populateBuildDecisions(resolved *ResolvedDevContainer, cfg *De
 	}
 }
 
-// parseGPURequirements parses GPU requirements from host requirements.
-func parseGPURequirements(hr *HostRequirements) *GPURequirements {
-	if hr == nil || hr.GPU == nil {
-		return nil
-	}
-
-	gpu := &GPURequirements{}
-
-	switch v := hr.GPU.(type) {
-	case bool:
-		gpu.Enabled = v
-	case string:
-		gpu.Enabled = v == "true" || v == "optional"
-		gpu.Optional = v == "optional"
-	case map[string]interface{}:
-		// An empty object states no requirement (as in hostreqs.go).
-		gpu.Enabled = len(v) > 0
-		if count, ok := v["count"].(float64); ok {
-			gpu.Count = int(count)
-		}
-		if memory, ok := v["memory"].(string); ok {
-			gpu.Memory = memory
-		}
-		if cores, ok := v["cores"].(float64); ok {
-			gpu.Cores = int(cores)
-		}
-	}
-
-	return gpu
-}
-
-// parseMounts validates config mounts and defaults the Type field.
+// parseMounts validates config mounts (parsed when the config was read and
+// again after substitution) and defaults the Type field.
 func (b *Builder) parseMounts(mounts []Mount) []Mount {
 	if len(mounts) == 0 {
 		return nil
@@ -383,17 +362,12 @@ func (b *Builder) parseMounts(mounts []Mount) []Mount {
 
 	result := make([]Mount, 0, len(mounts))
 	for _, m := range mounts {
-		if m.Target == "" && m.Raw != "" {
-			parsed, err := ParseMountString(m.Raw)
-			if err != nil {
-				b.report.Warnf("Ignoring mount: %v", err)
-				continue
-			}
-			parsed.Raw = m.Raw
-			m = parsed
-		}
 		if m.Target == "" {
-			b.report.Warnf("Ignoring mount without a target: %q", m.Raw)
+			if _, err := ParseMountString(m.Raw); err != nil {
+				b.report.Warnf("Ignoring mount: %v", err)
+			} else {
+				b.report.Warnf("Ignoring mount without a target: %q", m.Raw)
+			}
 			continue
 		}
 		if m.Type == "" {

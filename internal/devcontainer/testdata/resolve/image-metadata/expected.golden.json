@@ -18,5 +18,18 @@
   },
   "capAdd": [
     "SYS_PTRACE"
-  ]
+  ],
+  "hooks": {
+    "initialize": [
+      "devcontainer.json: echo on-host"
+    ],
+    "postAttach": [
+      "image: image-attach"
+    ],
+    "postCreate": [
+      "image: echo from-image",
+      "devcontainer.json: [a] echo a",
+      "devcontainer.json: [b] echo b"
+    ]
+  }
 }

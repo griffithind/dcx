@@ -2,7 +2,6 @@ package devcontainer
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // DevcontainerMetadataLabel is the image label containing devcontainer metadata.
@@ -93,14 +92,14 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 		merged.CapAdd = unionStrings(merged.CapAdd, l.CapAdd)
 		merged.SecurityOpt = unionStrings(merged.SecurityOpt, l.SecurityOpt)
 		merged.RunArgs = unionStrings(merged.RunArgs, l.RunArgs)
-		merged.ForwardPorts = unionInterfaces(merged.ForwardPorts, l.ForwardPorts)
+		merged.ForwardPorts = merged.ForwardPorts.union(l.ForwardPorts)
 		for _, m := range l.Mounts {
 			merged.Mounts = mergeMountByTarget(merged.Mounts, m)
 		}
 
 		merged.ContainerEnv = mergeStringMap(merged.ContainerEnv, l.ContainerEnv)
 		merged.RemoteEnv = mergeStringMap(merged.RemoteEnv, l.RemoteEnv)
-		merged.PortsAttributes = mergeAnyMap(merged.PortsAttributes, l.PortsAttributes)
+		merged.PortsAttributes = mergeMap(merged.PortsAttributes, l.PortsAttributes)
 		merged.Features = mergeAnyMap(merged.Features, l.Features)
 	}
 
@@ -120,6 +119,20 @@ func mergeStringMap(dst, src map[string]string) map[string]string {
 	}
 	if dst == nil {
 		dst = make(map[string]string, len(src))
+	}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// mergeMap copies src's entries into dst (allocated when needed).
+func mergeMap[V any](dst, src map[string]V) map[string]V {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]V, len(src))
 	}
 	for k, v := range src {
 		dst[k] = v
@@ -249,23 +262,6 @@ func unionStrings(a, b []string) []string {
 		if !seen[s] {
 			seen[s] = true
 			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// unionInterfaces is unionStrings for JSON arrays (compared by value).
-func unionInterfaces(a, b interface{}) []interface{} {
-	seen := make(map[string]bool)
-	result := []interface{}{}
-	for _, items := range []interface{}{a, b} {
-		arr, _ := items.([]interface{})
-		for _, item := range arr {
-			key := fmt.Sprint(item)
-			if !seen[key] {
-				seen[key] = true
-				result = append(result, item)
-			}
 		}
 	}
 	return result

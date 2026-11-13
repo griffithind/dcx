@@ -1,5 +1,7 @@
 {
   "name": "Metadata Image",
   "image": "example.com/prebuilt:1",
-  "containerEnv": {"LOCAL": "1", "SHARED": "local"}
+  "containerEnv": {"LOCAL": "1", "SHARED": "local"},
+  "initializeCommand": "echo on-host",
+  "postCreateCommand": {"b": "echo b", "a": ["echo", "a"]}
 }
