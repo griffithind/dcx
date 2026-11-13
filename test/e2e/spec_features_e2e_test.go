@@ -136,34 +136,20 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Test with impossible CPU requirement (should fail)
-	t.Run("fails_with_impossible_cpu", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 10000`)
+	// CPU and memory minimums the host can't meet warn and start anyway:
+	// many repositories set Codespaces-sized ones.
+	t.Run("warns_for_unmet_cpu_and_memory", func(t *testing.T) {
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 10000, "memory": "10000gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 		t.Cleanup(func() {
 			helpers.RunDCXInDir(t, workspace, "down")
 		})
 
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-		assert.Error(t, err, "should fail with impossible CPU requirement")
-		// Error messages go to stderr via ui.Error
-		assert.Contains(t, stderr, "CPU requirement not met")
-	})
-
-	// Test with impossible memory requirement (should fail)
-	t.Run("fails_with_impossible_memory", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"memory": "10000gb"`)
-		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
-
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-		assert.Error(t, err, "should fail with impossible memory requirement")
-		// Error messages go to stderr via ui.Error
-		assert.Contains(t, stderr, "Memory requirement not met")
+		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		require.NoError(t, err, "unmet cpu/memory must not block up: stdout=%s stderr=%s", stdout, stderr)
+		assert.Contains(t, stderr, "10000 CPUs recommended")
+		assert.Contains(t, stderr, "10000gb of memory recommended")
 	})
 
 	// Test with achievable requirements (should succeed)
@@ -179,8 +165,8 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 	})
 
-	// Test with storage requirement (should warn but succeed)
-	t.Run("warns_for_storage_requirement", func(t *testing.T) {
+	// A storage requirement can't be checked and is not reported.
+	t.Run("ignores_storage_requirement", func(t *testing.T) {
 		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"storage": "10gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
@@ -190,10 +176,8 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 
 		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		require.NoError(t, err, "should succeed with storage requirement")
-		// Success message goes to stdout
 		assert.Contains(t, stdout, "Devcontainer started successfully")
-		// Warning goes to stderr via ui.Warning
-		assert.Contains(t, stderr, "cannot be validated")
+		assert.NotContains(t, stderr, "torage")
 	})
 }
 

@@ -171,6 +171,19 @@
   - `DownWithIDs` stays unlocked for `Up`'s recreate.
 - **F17:** the fallback client key is created with a unique temp file plus a link, so the first writer wins. The public key is always derived from the private one, and a missing or mismatched `.pub` is rewritten.
 
+**Step 3 (image metadata done properly): done.**
+- **S1:** `metadataImage` finds the image whose metadata applies without Docker.
+  - Image plans use the image.
+  - Dockerfile plans use the target stage's `FROM`, following stage names and substituting ARG defaults and build args.
+  - Compose plans use the primary service's `image`, or the `FROM` of its build, across all compose files with `${VAR}` interpolation.
+  - `up` pulls that image for its metadata on the first run, and the golden view pins `metadataImage` for every case.
+  - Built images are labelled with the FROM image's metadata plus the local config. The features layer uses the metadata resolution read (no duplicate local entry).
+- **F6:** image metadata entries are substituted like devcontainer.json. `id` and `entrypoint` are modelled and written for features. `resolved.Entrypoints` (image metadata, then features, deduplicated) is what runs at start.
+- **S9:** a single-object `devcontainer.metadata` label is accepted.
+- **S3:** image metadata's `hostRequirements` merge max-wise (the stronger GPU requirement wins). CPU and memory shortfalls warn, `storage` is no longer reported, and a missing GPU runtime still fails.
+- **S2:** the `waitFor` machinery only timed a misleading "Container is ready" message, so it is removed. All hooks finish before `up` returns, which is documented.
+- **Tests:** unit tests for FROM and compose base images, Dockerfile-base metadata, substitution and entrypoints, single-object labels, and host requirements. A new e2e test builds a local base image whose label sets `remoteUser`, a hook and an entrypoint, then builds `FROM` it.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

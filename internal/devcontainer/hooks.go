@@ -48,10 +48,6 @@ type Hooks struct {
 	PostCreate    []Hook
 	PostStart     []Hook
 	PostAttach    []Hook
-
-	// WaitFor is the last phase `up` waits for (spec default
-	// updateContentCommand when empty).
-	WaitFor string
 }
 
 // lifecycleCommands is the per-phase view of a config or feature.
@@ -78,8 +74,8 @@ func configCommands(c *DevContainerConfig) lifecycleCommands {
 
 // resolveHooks collects the hooks of image metadata, features and the
 // local config.
-func resolveHooks(local *DevContainerConfig, imageConfigs []DevContainerConfig, feats []*features.Feature, waitFor string) Hooks {
-	h := Hooks{WaitFor: waitFor}
+func resolveHooks(local *DevContainerConfig, imageConfigs []DevContainerConfig, feats []*features.Feature) Hooks {
+	var h Hooks
 	for i := range imageConfigs {
 		h.add(HookFromImage, "", configCommands(&imageConfigs[i]))
 	}

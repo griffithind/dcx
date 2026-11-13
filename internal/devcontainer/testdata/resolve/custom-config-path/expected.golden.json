@@ -5,6 +5,7 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
+  "metadataImage": "alpine:3.20",
   "resourceName": "subst-demo-<id8>",
   "sshHost": "subst-demo.dcx",
   "overrideCommand": true,

@@ -31,30 +31,21 @@ func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *Docke
 		return result
 	}
 
-	// Check CPU cores against Docker's available CPUs
-	if reqs.CPUs > 0 {
-		availCPUs := dockerRes.CPUs
-		if availCPUs < reqs.CPUs {
-			result.Satisfied = false
-			result.Errors = append(result.Errors,
-				fmt.Sprintf("CPU requirement not met: need %d cores, Docker has %d", reqs.CPUs, availCPUs))
-		}
+	// CPU and memory minimums are advice: many repositories set
+	// Codespaces-sized ones, and refusing to start on a laptop helps no
+	// one. They warn; a missing GPU runtime fails (--gpus would).
+	if reqs.CPUs > 0 && dockerRes.CPUs < reqs.CPUs {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("hostRequirements: %d CPUs recommended, Docker has %d", reqs.CPUs, dockerRes.CPUs))
 	}
-
-	// Check memory against Docker's available memory
 	if reqs.Memory != "" {
 		reqBytes, err := parseMemoryString(reqs.Memory)
 		if err != nil {
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("Could not parse memory requirement '%s': %v", reqs.Memory, err))
-		} else {
-			availMemory := dockerRes.Memory
-			if availMemory > 0 && availMemory < reqBytes {
-				result.Satisfied = false
-				result.Errors = append(result.Errors,
-					fmt.Sprintf("Memory requirement not met: need %s, Docker has %s",
-						reqs.Memory, formatBytes(availMemory)))
-			}
+		} else if dockerRes.Memory > 0 && dockerRes.Memory < reqBytes {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("hostRequirements: %s of memory recommended, Docker has %s", reqs.Memory, formatBytes(dockerRes.Memory)))
 		}
 	}
 
@@ -68,11 +59,7 @@ func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *Docke
 		}
 	}
 
-	// Storage cannot be validated meaningfully
-	if reqs.Storage != "" {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("Storage requirement (%s) cannot be validated automatically", reqs.Storage))
-	}
+	// storage can't be checked meaningfully; it is not reported.
 
 	return result
 }

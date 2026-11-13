@@ -53,8 +53,26 @@ func TestParseImageMetadata(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "not an array",
+			// A single object is accepted, as by the reference implementation (S9).
+			name:       "single object",
 			labelValue: `{"remoteUser": "vscode"}`,
+			wantCount:  1,
+			check: func(t *testing.T, configs []DevContainerConfig) {
+				assert.Equal(t, "vscode", configs[0].RemoteUser)
+			},
+		},
+		{
+			name:       "feature entry with id and entrypoint",
+			labelValue: `[{"id": "ghcr.io/devcontainers/features/docker-in-docker:2", "entrypoint": "/usr/local/share/docker-init.sh"}]`,
+			wantCount:  1,
+			check: func(t *testing.T, configs []DevContainerConfig) {
+				assert.Equal(t, "ghcr.io/devcontainers/features/docker-in-docker:2", configs[0].ID)
+				assert.Equal(t, "/usr/local/share/docker-init.sh", configs[0].Entrypoint)
+			},
+		},
+		{
+			name:       "neither array nor object",
+			labelValue: `42`,
 			wantErr:    true,
 		},
 	}

@@ -16,32 +16,6 @@ import (
 	sshclient "github.com/griffithind/dcx/internal/ssh/client"
 )
 
-// WaitFor represents the lifecycle command to wait for before considering
-// the container ready. Commands after this point run in the background.
-type WaitFor string
-
-const (
-	// WaitForInitializeCommand waits only for initializeCommand.
-	WaitForInitializeCommand WaitFor = "initializeCommand"
-	// WaitForOnCreateCommand waits for onCreateCommand (and earlier).
-	WaitForOnCreateCommand WaitFor = "onCreateCommand"
-	// WaitForUpdateContentCommand waits for updateContentCommand (and earlier).
-	WaitForUpdateContentCommand WaitFor = "updateContentCommand"
-	// WaitForPostCreateCommand waits for postCreateCommand (and earlier).
-	WaitForPostCreateCommand WaitFor = "postCreateCommand"
-	// WaitForPostStartCommand waits for all commands (default behavior).
-	WaitForPostStartCommand WaitFor = "postStartCommand"
-)
-
-// waitForOrder defines the order of lifecycle commands for comparison.
-var waitForOrder = map[WaitFor]int{
-	WaitForInitializeCommand:    0,
-	WaitForOnCreateCommand:      1,
-	WaitForUpdateContentCommand: 2,
-	WaitForPostCreateCommand:    3,
-	WaitForPostStartCommand:     4,
-}
-
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
 	sshPort       int
@@ -72,25 +46,6 @@ func NewHookRunner(sshPort int, rep report.Reporter, workspacePath string, hooks
 	return r
 }
 
-// getWaitFor returns the WaitFor value from config, defaulting to updateContentCommand per spec.
-func (r *HookRunner) getWaitFor() WaitFor {
-	if r.hooks.WaitFor == "" {
-		return WaitForUpdateContentCommand // Spec default
-	}
-	wf := WaitFor(r.hooks.WaitFor)
-	if _, ok := waitForOrder[wf]; !ok {
-		// Invalid value, use default
-		return WaitForUpdateContentCommand
-	}
-	return wf
-}
-
-// shouldBlock returns true if the given command should block (wait for completion).
-func (r *HookRunner) shouldBlock(cmd WaitFor) bool {
-	waitFor := r.getWaitFor()
-	return waitForOrder[cmd] <= waitForOrder[waitFor]
-}
-
 // Markers records which once-per-container lifecycle phases have completed,
 // so an interrupted or failed setup resumes where it stopped instead of
 // re-running finished hooks (or never running the rest).
@@ -118,25 +73,21 @@ func (r *HookRunner) RunInitialize(ctx context.Context) error {
 
 // RunCreateHooks runs the once-per-container hooks (onCreateCommand,
 // updateContentCommand, postCreateCommand), each phase's hooks in order
-// (image metadata, features, devcontainer.json). Phases recorded as done in markers
+// (image metadata, features, devcontainer.json). All of them finish before
+// `dcx up` returns: waitFor (when an editor may connect) does not apply to
+// a command-line tool. Phases recorded as done in markers
 // are skipped, and each completed phase is recorded. markers may be nil.
 func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error {
 	phases := []struct {
-		name    string
-		waitFor WaitFor
-		hooks   []devcontainer.Hook
+		name  string
+		hooks []devcontainer.Hook
 	}{
-		{PhaseOnCreate, WaitForOnCreateCommand, r.hooks.OnCreate},
-		{PhaseUpdateContent, WaitForUpdateContentCommand, r.hooks.UpdateContent},
-		{PhasePostCreate, WaitForPostCreateCommand, r.hooks.PostCreate},
+		{PhaseOnCreate, r.hooks.OnCreate},
+		{PhaseUpdateContent, r.hooks.UpdateContent},
+		{PhasePostCreate, r.hooks.PostCreate},
 	}
 
-	readyPrinted := false
 	for _, p := range phases {
-		if !readyPrinted && !r.shouldBlock(p.waitFor) {
-			r.report.Infof("Container is ready (remaining hooks running...)")
-			readyPrinted = true
-		}
 		if markers != nil {
 			done, err := markers.Done(ctx, p.name)
 			if err != nil {

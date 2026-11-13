@@ -387,9 +387,10 @@ Commands run at specific points in the container lifecycle:
 }
 ```
 
-Hooks run in the foreground and `dcx up` waits for them, so start
-long-running processes in the background (as above) or with your compose
-file. A hook can be a string (run with `sh -c`), an array (run directly)
+Hooks run in the foreground and `dcx up` waits for all of them (`waitFor`,
+which tells editors when they may connect, has no effect on a
+command-line `up`), so start long-running processes in the background (as
+above) or with your compose file. A hook can be a string (run with `sh -c`), an array (run directly)
 or an object of named commands (run in parallel). Hooks from the base
 image's metadata run first, then those of features (in install order),
 then devcontainer.json's.
@@ -466,6 +467,13 @@ Changes since 0.7 that affect existing setups:
   workspace.
 - `dcx restart --rebuild` is no longer skipped by `shutdownAction: "none"`.
 - `dcx down --volumes` also removes a single container's named volumes.
+- The base image's `devcontainer.metadata` now also applies to Dockerfile
+  and compose configs (read from the image they build `FROM`), so e.g.
+  `remoteUser` from an mcr devcontainers image is honoured. Image metadata
+  is variable-substituted, and the entrypoints recorded in it (features of
+  a prebuilt image, such as docker-in-docker) run.
+- `hostRequirements` CPU and memory minimums warn instead of failing `up`;
+  image metadata's requirements merge by taking the larger value.
 - Changed inputs that are not edits (a `${localEnv:...}` value that differs
   between logins, a feature tag that moved to a new release) no longer
   recreate the container: `dcx up` and `dcx status` report the drift, and

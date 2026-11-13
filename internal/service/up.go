@@ -114,9 +114,10 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	case action == actionResume:
 		s.report.Infof("The previous setup of this devcontainer did not finish; resuming...")
 	}
-	if action != actionResume && resolved.BaseImage != "" {
+	if action != actionResume && resolved.MetadataImage != "" {
 		// Work to do: reload with the base image pulled if needed, so its
-		// devcontainer.metadata applies on the first run too.
+		// devcontainer.metadata applies on the first run too (for a
+		// Dockerfile or compose build, the image it builds FROM).
 		resolved, err = s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true})
 		if err != nil {
 			return err

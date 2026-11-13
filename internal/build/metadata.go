@@ -138,6 +138,11 @@ func featureToConfig(f *features.Feature) devcontainer.DevContainerConfig {
 	if f.Metadata == nil {
 		return cfg
 	}
+	// The id and entrypoint let tools that read the label (dcx included,
+	// for a prebuilt image) know which features it has and run their
+	// entrypoints.
+	cfg.ID = f.Metadata.ID
+	cfg.Entrypoint = f.Metadata.Entrypoint
 
 	// Container runtime (per pickFeatureProperties)
 	cfg.CapAdd = f.Metadata.CapAdd

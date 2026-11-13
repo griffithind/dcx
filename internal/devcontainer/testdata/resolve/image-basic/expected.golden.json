@@ -5,6 +5,7 @@
     "type": "image"
   },
   "baseImage": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "metadataImage": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "resourceName": "basic_image-<id8>",
   "sshHost": "basic_image.dcx",
   "overrideCommand": true,

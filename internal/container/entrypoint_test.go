@@ -35,6 +35,7 @@ func entrypointRuntime(fake *cmdEngine, plan devcontainer.ExecutionPlan, overrid
 	return &Provisioner{engine: fake, report: report.Discard, resolved: &devcontainer.ResolvedDevContainer{
 		Plan:            plan,
 		OverrideCommand: override,
+		Entrypoints:     []string{"/usr/local/share/docker-init.sh", "/other-init.sh"},
 		Features: []*features.Feature{
 			{ID: "dind", Metadata: &features.FeatureMetadata{ID: "dind", Entrypoint: "/usr/local/share/docker-init.sh"}},
 			{ID: "plain", Metadata: &features.FeatureMetadata{ID: "plain"}},

@@ -304,8 +304,9 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 		buildArgs[k] = v
 	}
 
-	// Generate metadata for the built image (local config only, no base or features yet)
-	metadata, _ := build.GenerateMetadataLabel("", nil, r.resolved.Local)
+	// The built image's label: the FROM image's metadata plus the local
+	// config (a label set here replaces the one the build inherits).
+	metadata, _ := build.GenerateMetadataLabel(r.resolved.MetadataLabel, nil, r.resolved.Local)
 
 	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
@@ -343,9 +344,14 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		tag := r.layerTag("features", baseID, devcontainer.FeaturesKey(r.resolved.Features),
 			r.resolved.RemoteUser, r.resolved.ContainerUser)
 
-		baseImageMetadata := ""
-		if labels, err := r.engine.ImageLabels(ctx, image); err == nil {
-			baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
+		// The base metadata of the features image is the one resolution
+		// read: for a Dockerfile plan the built image's own label already
+		// holds the local config, which would then appear twice.
+		baseImageMetadata := r.resolved.MetadataLabel
+		if r.resolved.MetadataImage == "" {
+			if labels, err := r.engine.ImageLabels(ctx, image); err == nil {
+				baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
+			}
 		}
 		image, err = r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
 			BaseImage:         image,

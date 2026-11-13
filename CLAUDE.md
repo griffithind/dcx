@@ -133,7 +133,8 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `parser.go` | Parse devcontainer.json with JSONC support |
 | `config.go` | `DevContainerConfig` struct with custom unmarshalers |
 | `types.go` | `StringOrSlice` |
-| `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json) |
+| `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json); all run before `up` returns (`waitFor` has no effect) |
+| `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
 | `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
 | `substitute.go` | Variable substitution (`${localEnv:VAR}`, `${containerWorkspaceFolder}`) |
@@ -240,7 +241,9 @@ devcontainer.json (JSONC)
 DevContainerConfig
     ↓ SubstituteConfig() — exactly once, in devcontainer.Load (also with --config)
 DevContainerConfig (substituted)               — Local
-    ↓ MergeMetadata(image devcontainer.metadata)  — Config (ImageMetadataSource)
+    ↓ metadataImage: the image, or the FROM of a Dockerfile / compose build (baseimage.go)
+    ↓ its devcontainer.metadata (ImageMetadataSource), variable-substituted
+    ↓ MergeMetadata                                — Config
     ↓ lockfile (LockfileUse)
     ↓ Builder.Build()
     ├─ NewIdentity (name, resource name / compose project, SSH alias)
@@ -327,6 +330,8 @@ Base Image → Features Layer → UID Update Layer → Final Image
 ```
 - Base: pulled, or built from the Dockerfile on every create (BuildKit's cache makes this cheap) as `dcx/<workspace>:base`.
 - Features install as root (`USER root`); the base image's `USER` (`Engine.ImageConfig`) is restored after them.
+- Entrypoints (`resolved.Entrypoints`): those recorded in the base image's metadata, then the features', run before the keep-alive or the original command.
+- Labels: a built image carries the FROM image's metadata plus the local config; the features layer adds the features to the metadata resolution read (`resolved.MetadataLabel`).
 - Ports: `forwardPorts`/`appPort` without a host address publish on `127.0.0.1`; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 

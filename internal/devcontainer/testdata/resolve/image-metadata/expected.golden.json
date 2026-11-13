@@ -5,6 +5,7 @@
     "type": "image"
   },
   "baseImage": "example.com/prebuilt:1",
+  "metadataImage": "example.com/prebuilt:1",
   "resourceName": "metadata_image-<id8>",
   "sshHost": "metadata_image.dcx",
   "overrideCommand": false,

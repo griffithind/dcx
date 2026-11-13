@@ -20,6 +20,7 @@ type goldenView struct {
 	Name            string              `json:"name"`
 	Plan            any                 `json:"plan"`
 	BaseImage       string              `json:"baseImage,omitempty"`
+	MetadataImage   string              `json:"metadataImage,omitempty"`
 	ResourceName    string              `json:"resourceName"`
 	SSHHost         string              `json:"sshHost"`
 	OverrideCommand bool                `json:"overrideCommand"`
@@ -166,7 +167,7 @@ func TestResolveGolden(t *testing.T) {
 			}
 
 			view := goldenView{
-				Name: resolved.Name, Plan: planView(resolved.Plan), BaseImage: resolved.BaseImage,
+				Name: resolved.Name, Plan: planView(resolved.Plan), BaseImage: resolved.BaseImage, MetadataImage: resolved.MetadataImage,
 				ResourceName: resolved.ResourceName, SSHHost: resolved.SSHHost, OverrideCommand: resolved.OverrideCommand, WorkspaceFolder: resolved.WorkspaceFolder,
 				WorkspaceMount: resolved.WorkspaceMount, RemoteUser: resolved.RemoteUser,
 				ContainerUser: resolved.ContainerUser, EffectiveUser: resolved.EffectiveUser,

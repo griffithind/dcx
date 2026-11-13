@@ -81,3 +81,27 @@ func TestGPURequirementAgainstDockerRuntime(t *testing.T) {
 		t.Errorf("gpu: false asks for nothing: %+v", r)
 	}
 }
+
+// CPU and memory minimums warn instead of refusing to start (S3); storage
+// is not reported.
+func TestHostRequirementShortfallsWarn(t *testing.T) {
+	r := ValidateHostRequirementsWithDocker(&HostRequirements{CPUs: 8, Memory: "32gb", Storage: "64gb"},
+		&DockerResources{CPUs: 4, Memory: 8 << 30})
+	assert.True(t, r.Satisfied)
+	assert.Len(t, r.Warnings, 2, "%v", r.Warnings)
+	assert.Empty(t, r.Errors)
+}
+
+// Image metadata's hostRequirements merge by taking the larger of each.
+func TestMergeMetadataTakesLargerHostRequirements(t *testing.T) {
+	local := &DevContainerConfig{HostRequirements: &HostRequirements{CPUs: 2, Memory: "4gb"}}
+	image := []DevContainerConfig{{HostRequirements: &HostRequirements{CPUs: 4, Memory: "2gb", Storage: "32gb",
+		GPU: &GPURequirement{Mode: GPUOptional}}}}
+	merged := MergeMetadata(local, image)
+	require.NotNil(t, merged.HostRequirements)
+	assert.Equal(t, 4, merged.HostRequirements.CPUs)
+	assert.Equal(t, "4gb", merged.HostRequirements.Memory)
+	assert.Equal(t, "32gb", merged.HostRequirements.Storage)
+	assert.Equal(t, GPUOptional, merged.HostRequirements.GPU.Mode)
+	assert.Equal(t, 2, local.HostRequirements.CPUs, "inputs are not modified")
+}

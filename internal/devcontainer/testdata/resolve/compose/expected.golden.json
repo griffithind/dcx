@@ -13,6 +13,7 @@
     "service": "app",
     "type": "compose"
   },
+  "metadataImage": "alpine:3.20",
   "resourceName": "compose_app-<id8>",
   "sshHost": "compose_app.dcx",
   "overrideCommand": false,

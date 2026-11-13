@@ -132,6 +132,17 @@ type ResolvedDevContainer struct {
 	// features, devcontainer.json).
 	Hooks Hooks
 
+	// Entrypoints are the scripts run when the container starts (image
+	// metadata, then features; see resolveEntrypoints).
+	Entrypoints []string
+
+	// MetadataImage is the image whose devcontainer.metadata applies: the
+	// image, or the base image a Dockerfile or compose service builds FROM
+	// ("" when unknown). MetadataLabel is that label as read ("" when the
+	// image has none or was not available).
+	MetadataImage string
+	MetadataLabel string
+
 	// === Features ===
 
 	// Features are the resolved and ordered features for installation.

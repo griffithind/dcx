@@ -61,7 +61,14 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	if err := Validate(local); err != nil {
 		return nil, fmt.Errorf("invalid configuration %s: %w", configPath, err)
 	}
-	imageConfigs := imageMetadata(ctx, local, opts.Images, rep)
+	metaImage := metadataImage(local, configPath)
+	metaLabel, imageConfigs := imageMetadata(ctx, metaImage, opts.Images, rep)
+	// Image metadata gets the same substitution as devcontainer.json: a
+	// prebuilt image's feature mounts name volumes with ${devcontainerId}.
+	subCtx := NewSubstitutionContext(opts.WorkspacePath, configPath, local)
+	for i := range imageConfigs {
+		SubstituteConfig(&imageConfigs[i], subCtx)
+	}
 	cfg := MergeMetadata(local, imageConfigs)
 
 	var lf *lockfile.Lockfile
@@ -85,6 +92,8 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		Config:        cfg,
 		Local:         local,
 		ImageMetadata: imageConfigs,
+		MetadataImage: metaImage,
+		MetadataLabel: metaLabel,
 		Lockfile:      lf,
 		ForcePull:     opts.ForcePull,
 	})
@@ -94,22 +103,22 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	return resolved, nil
 }
 
-// imageMetadata returns the devcontainer.metadata entries of the config's
-// image. Dockerfile and compose bases are not read yet: their image is only
-// known after a build.
-func imageMetadata(ctx context.Context, cfg *DevContainerConfig, images ImageMetadataSource, rep report.Reporter) []DevContainerConfig {
-	if images == nil || cfg.Image == "" {
-		return nil
+// imageMetadata returns the devcontainer.metadata label of image (see
+// metadataImage: the image, or the base image a Dockerfile or compose
+// service builds FROM) and its parsed entries.
+func imageMetadata(ctx context.Context, image string, images ImageMetadataSource, rep report.Reporter) (string, []DevContainerConfig) {
+	if images == nil || image == "" {
+		return "", nil
 	}
-	label, err := images.ImageMetadata(ctx, cfg.Image)
+	label, err := images.ImageMetadata(ctx, image)
 	if err != nil || label == "" {
 		// Not available locally (and not pulled): resolve without it.
-		return nil
+		return "", nil
 	}
 	imageConfigs, err := ParseImageMetadata(label)
 	if err != nil {
-		rep.Warnf("Ignoring invalid devcontainer.metadata of %s: %v", cfg.Image, err)
-		return nil
+		rep.Warnf("Ignoring invalid devcontainer.metadata of %s: %v", image, err)
+		return "", nil
 	}
-	return imageConfigs
+	return label, imageConfigs
 }

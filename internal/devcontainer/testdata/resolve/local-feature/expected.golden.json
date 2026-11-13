@@ -5,6 +5,7 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
+  "metadataImage": "alpine:3.20",
   "resourceName": "proj-<id8>",
   "sshHost": "<id>.dcx",
   "overrideCommand": true,

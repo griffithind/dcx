@@ -12,6 +12,7 @@
     "target": "dev",
     "type": "dockerfile"
   },
+  "metadataImage": "alpine:3.20",
   "resourceName": "df-<id8>",
   "sshHost": "df.dcx",
   "overrideCommand": true,

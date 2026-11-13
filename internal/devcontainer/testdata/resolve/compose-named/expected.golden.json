@@ -9,6 +9,7 @@
     "service": "app",
     "type": "compose"
   },
+  "metadataImage": "alpine:3.20",
   "resourceName": "my_stack-<id8>",
   "sshHost": "named_project.dcx",
   "overrideCommand": false,

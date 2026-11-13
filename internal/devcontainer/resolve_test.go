@@ -96,3 +96,66 @@ func TestStalenessKeyIgnoresSubstitutedValues(t *testing.T) {
 		t.Error("editing devcontainer.json must change the staleness key")
 	}
 }
+
+// Image metadata is substituted like devcontainer.json, and the entrypoints
+// recorded in it run (F6): a prebuilt docker-in-docker image's volume name
+// used ${devcontainerId} literally and its dockerd init never ran.
+func TestImageMetadataIsSubstitutedAndItsEntrypointsRun(t *testing.T) {
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".devcontainer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(`{"image": "prebuilt:1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	label := `[{"id": "ghcr.io/devcontainers/features/docker-in-docker:2",
+		"entrypoint": "/usr/local/share/docker-init.sh",
+		"mounts": [{"source": "dind-var-lib-docker-${devcontainerId}", "target": "/var/lib/docker", "type": "volume"}]}]`
+	resolved, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws, Images: metadataImages(label)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source string
+	for _, m := range resolved.Mounts {
+		if m.Target == "/var/lib/docker" {
+			source = m.Source
+		}
+	}
+	if want := "dind-var-lib-docker-" + resolved.WorkspaceID; source != want {
+		t.Errorf("volume source = %q, want %q", source, want)
+	}
+	if len(resolved.Entrypoints) != 1 || resolved.Entrypoints[0] != "/usr/local/share/docker-init.sh" {
+		t.Errorf("Entrypoints = %v", resolved.Entrypoints)
+	}
+}
+
+// imagesByRef serves one label per image reference.
+type imagesByRef map[string]string
+
+func (m imagesByRef) ImageMetadata(_ context.Context, ref string) (string, error) { return m[ref], nil }
+
+// The metadata of the image a Dockerfile builds FROM applies (S1): a
+// "FROM …/typescript-node" config used to lose remoteUser: node, so
+// sessions ran as root and the UID layer was skipped.
+func TestDockerfileBaseImageMetadataApplies(t *testing.T) {
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".devcontainer")
+	writeFile(t, filepath.Join(dir, "Dockerfile"), "ARG VARIANT=1-20\nFROM mcr.microsoft.com/devcontainers/typescript-node:${VARIANT}\n")
+	writeFile(t, filepath.Join(dir, "devcontainer.json"), `{"build": {"dockerfile": "Dockerfile", "args": {"VARIANT": "1-22"}}}`)
+
+	images := imagesByRef{"mcr.microsoft.com/devcontainers/typescript-node:1-22": `[{"remoteUser": "node", "postCreateCommand": "echo base"}]`}
+	resolved, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws, Images: images})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.MetadataImage != "mcr.microsoft.com/devcontainers/typescript-node:1-22" {
+		t.Errorf("MetadataImage = %q", resolved.MetadataImage)
+	}
+	if resolved.RemoteUser != "node" || resolved.EffectiveUser != "node" {
+		t.Errorf("remoteUser from the base image's metadata was lost: %q", resolved.RemoteUser)
+	}
+	if len(resolved.Hooks.PostCreate) != 1 || resolved.Hooks.PostCreate[0].Source != HookFromImage {
+		t.Errorf("the base image's hooks were lost: %+v", resolved.Hooks.PostCreate)
+	}
+}

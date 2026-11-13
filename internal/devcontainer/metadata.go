@@ -2,23 +2,29 @@ package devcontainer
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // DevcontainerMetadataLabel is the image label containing devcontainer metadata.
 const DevcontainerMetadataLabel = "devcontainer.metadata"
 
-// ParseImageMetadata parses the devcontainer.metadata label value.
-// The label contains a JSON array of configuration objects.
+// ParseImageMetadata parses the devcontainer.metadata label value: a JSON
+// array of configuration objects, or (as the reference implementation also
+// accepts) a single object.
 func ParseImageMetadata(labelValue string) ([]DevContainerConfig, error) {
-	if labelValue == "" {
+	if strings.TrimSpace(labelValue) == "" {
 		return nil, nil
 	}
-
 	var configs []DevContainerConfig
-	if err := json.Unmarshal([]byte(labelValue), &configs); err != nil {
-		return nil, err
+	arrErr := json.Unmarshal([]byte(labelValue), &configs)
+	if arrErr == nil {
+		return configs, nil
 	}
-	return configs, nil
+	var single DevContainerConfig
+	if err := json.Unmarshal([]byte(labelValue), &single); err == nil {
+		return []DevContainerConfig{single}, nil
+	}
+	return nil, arrErr
 }
 
 // MergeMetadata merges image metadata (devcontainer.metadata label entries,
@@ -54,6 +60,7 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 	merged.CapAdd, merged.SecurityOpt, merged.RunArgs = nil, nil, nil
 	merged.ForwardPorts, merged.Mounts = nil, nil
 	merged.Init, merged.Privileged = nil, nil
+	merged.HostRequirements = nil
 
 	lastString := func(dst *string, v string) {
 		if v != "" {
@@ -97,6 +104,7 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 			merged.Mounts = mergeMountByTarget(merged.Mounts, m)
 		}
 
+		merged.HostRequirements = maxHostRequirements(merged.HostRequirements, l.HostRequirements)
 		merged.ContainerEnv = mergeStringMap(merged.ContainerEnv, l.ContainerEnv)
 		merged.RemoteEnv = mergeStringMap(merged.RemoteEnv, l.RemoteEnv)
 		merged.PortsAttributes = mergeMap(merged.PortsAttributes, l.PortsAttributes)
@@ -111,6 +119,51 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 	}
 
 	return &merged
+}
+
+// maxHostRequirements merges host requirements by taking the larger of
+// each (the spec's rule for image metadata): CPUs, memory, storage, and the
+// stronger GPU requirement.
+func maxHostRequirements(a, b *HostRequirements) *HostRequirements {
+	if b == nil {
+		return a
+	}
+	if a == nil {
+		c := *b
+		return &c
+	}
+	out := *a
+	if b.CPUs > out.CPUs {
+		out.CPUs = b.CPUs
+	}
+	out.Memory = largerSize(out.Memory, b.Memory)
+	out.Storage = largerSize(out.Storage, b.Storage)
+	if b.GPU != nil && (out.GPU == nil || gpuStrength(b.GPU.Mode) > gpuStrength(out.GPU.Mode)) {
+		out.GPU = b.GPU
+	}
+	return &out
+}
+
+func largerSize(a, b string) string {
+	if a == "" {
+		return b
+	}
+	av, aerr := parseMemoryString(a)
+	bv, berr := parseMemoryString(b)
+	if b != "" && aerr == nil && berr == nil && bv > av {
+		return b
+	}
+	return a
+}
+
+func gpuStrength(m GPUMode) int {
+	switch m {
+	case GPURequired:
+		return 2
+	case GPUOptional:
+		return 1
+	}
+	return 0
 }
 
 func mergeStringMap(dst, src map[string]string) map[string]string {

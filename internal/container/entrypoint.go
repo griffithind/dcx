@@ -37,16 +37,11 @@ func chainEntrypoints(entrypoints []string) []string {
 	}, entrypoints...)
 }
 
-// featureEntrypoints returns the entrypoints features declare, in install
-// order (e.g. docker-in-docker starts dockerd from its entrypoint).
+// featureEntrypoints returns the entrypoint scripts to run at start: those
+// recorded in the base image's metadata, then those of the features dcx
+// installs (resolved.Entrypoints).
 func (r *Provisioner) featureEntrypoints() []string {
-	var out []string
-	for _, f := range r.resolved.Features {
-		if f.Metadata != nil && f.Metadata.Entrypoint != "" {
-			out = append(out, f.Metadata.Entrypoint)
-		}
-	}
-	return out
+	return r.resolved.Entrypoints
 }
 
 // prepareCommand records the command a chained entrypoint must exec: what

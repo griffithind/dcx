@@ -94,6 +94,12 @@ type DevContainerConfig struct {
 
 	// Customizations for tools like VS Code
 	Customizations map[string]interface{} `json:"customizations,omitempty"`
+
+	// ID and Entrypoint appear in devcontainer.metadata entries a feature
+	// contributed (the feature's id and its entrypoint script); they are
+	// not devcontainer.json properties.
+	ID         string `json:"id,omitempty"`
+	Entrypoint string `json:"entrypoint,omitempty"`
 }
 
 // PlanType returns the execution plan type for this configuration.

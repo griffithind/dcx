@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
@@ -46,6 +47,11 @@ type BuilderOptions struct {
 	// ImageMetadata are the base image's devcontainer.metadata entries
 	// (already merged into Config); their lifecycle hooks run first.
 	ImageMetadata []DevContainerConfig
+
+	// MetadataImage is the image ImageMetadata was read from, and
+	// MetadataLabel its raw label.
+	MetadataImage string
+	MetadataLabel string
 
 	// Raw is devcontainer.json as written (no substitution), the input of
 	// the staleness key. Defaults to Local.
@@ -192,7 +198,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		}
 	}
 
-	resolved.Hooks = resolveHooks(opts.Config, opts.ImageMetadata, resolved.Features, opts.Config.WaitFor)
+	resolved.Hooks = resolveHooks(opts.Config, opts.ImageMetadata, resolved.Features)
+	resolved.Entrypoints = resolveEntrypoints(opts.ImageMetadata, resolved.Features)
+	resolved.MetadataImage, resolved.MetadataLabel = opts.MetadataImage, opts.MetadataLabel
 
 	// Compute the staleness key from the local (pre-merge) config
 	if err := b.computeHashes(resolved, resolved.Local); err != nil {
@@ -203,6 +211,28 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	b.populateBuildDecisions(resolved, opts.Config)
 
 	return resolved, nil
+}
+
+// resolveEntrypoints lists the entrypoint scripts that run when the
+// container starts: those recorded in the base image's metadata (features
+// a prebuilt image installed, e.g. docker-in-docker's dockerd init), then
+// those of the features dcx installs, each once.
+func resolveEntrypoints(imageConfigs []DevContainerConfig, feats []*features.Feature) []string {
+	var out []string
+	add := func(ep string) {
+		if ep != "" && !slices.Contains(out, ep) {
+			out = append(out, ep)
+		}
+	}
+	for _, c := range imageConfigs {
+		add(c.Entrypoint)
+	}
+	for _, f := range feats {
+		if f.Metadata != nil {
+			add(f.Metadata.Entrypoint)
+		}
+	}
+	return out
 }
 
 // overrideCommand applies the spec's default for overrideCommand: true for
