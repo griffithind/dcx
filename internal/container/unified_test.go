@@ -260,7 +260,7 @@ func TestBuildMounts(t *testing.T) {
 				Mounts: nil,
 			},
 			wantMounts: nil,
-			wantTmpfs:  map[string]string{},
+			wantTmpfs:  map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
 		},
 		{
 			name: "single bind mount",
@@ -272,7 +272,7 @@ func TestBuildMounts(t *testing.T) {
 			wantMounts: []devcontainer.Mount{
 				{Source: "/host/path", Target: "/container/path", Type: "bind"},
 			},
-			wantTmpfs: map[string]string{},
+			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
 		},
 		{
 			name: "readonly bind mount",
@@ -284,7 +284,7 @@ func TestBuildMounts(t *testing.T) {
 			wantMounts: []devcontainer.Mount{
 				{Source: "/host/path", Target: "/container/path", Type: "bind", ReadOnly: true},
 			},
-			wantTmpfs: map[string]string{},
+			wantTmpfs: map[string]string{"/run/secrets": "rw,noexec,nosuid,size=1m"},
 		},
 		{
 			name: "tmpfs mount",
@@ -294,7 +294,7 @@ func TestBuildMounts(t *testing.T) {
 				},
 			},
 			wantMounts: nil,
-			wantTmpfs:  map[string]string{"/tmp/test": ""},
+			wantTmpfs:  map[string]string{"/tmp/test": "", "/run/secrets": "rw,noexec,nosuid,size=1m"},
 		},
 		{
 			name: "mixed mounts",
@@ -309,10 +309,10 @@ func TestBuildMounts(t *testing.T) {
 				{Source: "/path1", Target: "/target1", Type: "bind"},
 				{Source: "/path2", Target: "/target2", Type: "bind", ReadOnly: true},
 			},
-			wantTmpfs: map[string]string{"/run": ""},
+			wantTmpfs: map[string]string{"/run": "", "/run/secrets": "rw,noexec,nosuid,size=1m"},
 		},
 		{
-			name: "with runtime secrets adds /run/secrets tmpfs",
+			name: "with runtime secrets keeps /run/secrets tmpfs",
 			resolved: &devcontainer.ResolvedDevContainer{
 				RuntimeSecrets: map[string]devcontainer.SecretConfig{
 					"MY_SECRET": "echo secret-value",

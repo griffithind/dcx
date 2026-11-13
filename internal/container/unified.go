@@ -540,11 +540,10 @@ func (r *UnifiedRuntime) buildMounts() mountCollections {
 		Tmpfs: make(map[string]string),
 	}
 
-	// Add tmpfs for /run/secrets only when runtime secrets are configured.
-	// This ensures secrets are stored in memory and not persisted to the container's writable layer.
-	if len(r.resolved.RuntimeSecrets) > 0 {
-		result.Tmpfs[common.SecretsDir] = "rw,noexec,nosuid,size=1m"
-	}
+	// /run/secrets is always a tmpfs: besides user runtime secrets it holds
+	// the dcx-managed SSH host private key, which must never land in the
+	// container's writable layer (visible to docker commit/export/diff).
+	result.Tmpfs[common.SecretsDir] = "rw,noexec,nosuid,size=1m"
 
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {

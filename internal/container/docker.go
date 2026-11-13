@@ -4,6 +4,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -975,14 +976,20 @@ func (d *Docker) ChownInContainer(ctx context.Context, containerName, path, owne
 
 // WriteFileInContainer writes content to a file inside a container using docker exec.
 // This is useful for writing to tmpfs mounts where docker cp doesn't work.
+//
+// The path is passed as a positional argument rather than interpolated into
+// the shell script, so no part of it is ever evaluated by the shell, and the
+// file is created with umask 077 so it is never readable by other users,
+// even before the caller's chmod.
 func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path string, content []byte, user string) error {
 	if user == "" {
 		user = "root"
 	}
-	args := []string{"exec", "-i", "--user", user, containerName, "sh", "-c", fmt.Sprintf("cat > %q", path)}
+	args := []string{"exec", "-i", "--user", user, containerName,
+		"sh", "-c", `umask 077 && cat > "$1"`, "dcx-write", path}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = strings.NewReader(string(content))
+	cmd.Stdin = bytes.NewReader(content)
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("write file failed: %w, output: %s", err, output)

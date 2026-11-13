@@ -5,6 +5,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -75,43 +76,29 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		return runUp(cmd, args)
 	}
 
-	// Start spinner
-	spinner := ui.StartSpinner("Restarting devcontainer...")
-
-	var restartErr error
-
-	// Determine plan type from container labels (single-container vs compose)
-	if containerInfo.IsSingleContainer() {
-		// Single container - use Docker API directly
-		if containerInfo.Running {
-			if err := cliCtx.Docker.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
-				restartErr = fmt.Errorf("failed to stop container: %w", err)
-			}
+	// Stop the container(s), then bring the environment back up through the
+	// service so the full start sequence runs (agent relaunch, secrets,
+	// postStart hooks, SSH config) — a bare `docker start` leaves exec broken.
+	if containerInfo.Running {
+		spinner := ui.StartSpinner("Stopping devcontainer...")
+		var stopErr error
+		if containerInfo.IsSingleContainer() {
+			stopErr = cliCtx.Docker.StopContainer(cliCtx.Ctx, containerInfo.ID, nil)
+		} else {
+			actualProject := containerInfo.GetComposeProject(cliCtx.Identifiers.ProjectName)
+			configDir := containerInfo.GetConfigDir(cliCtx.WorkspacePath())
+			stopErr = container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject).Stop(cliCtx.Ctx)
 		}
-		if restartErr == nil {
-			if err := cliCtx.Docker.StartContainer(cliCtx.Ctx, containerInfo.ID); err != nil {
-				restartErr = fmt.Errorf("failed to start container: %w", err)
-			}
+		if stopErr != nil {
+			spinner.Fail("Failed to stop devcontainer")
+			return fmt.Errorf("failed to stop devcontainer: %w", stopErr)
 		}
-	} else {
-		// Compose plan - use docker compose
-		actualProject := containerInfo.GetComposeProject(cliCtx.Identifiers.ProjectName)
-		configDir := containerInfo.GetConfigDir(cliCtx.WorkspacePath())
-		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
-		// Stop then start (no Restart method available)
-		if err := r.Stop(cliCtx.Ctx); err != nil {
-			restartErr = fmt.Errorf("failed to stop containers: %w", err)
-		} else if err := r.Start(cliCtx.Ctx); err != nil {
-			restartErr = fmt.Errorf("failed to start containers: %w", err)
-		}
+		spinner.Success("Devcontainer stopped")
 	}
 
-	// Stop spinner with appropriate message
-	if restartErr != nil {
-		spinner.Fail("Failed to restart devcontainer")
-	} else {
-		spinner.Success("Devcontainer restarted")
+	if err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{}); err != nil {
+		return err
 	}
-
-	return restartErr
+	ui.Success("Devcontainer restarted")
+	return nil
 }

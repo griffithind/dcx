@@ -27,6 +27,8 @@ func Execute() error {
 		return runListenCmd(os.Args[2:])
 	case "ping":
 		return runPingCmd(os.Args[2:])
+	case "sftp-server":
+		return runSFTPServerCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		printUsage()
 		return nil
@@ -45,6 +47,7 @@ Usage:
 Commands:
   listen  Run SSH server listening on a TCP address
   ping    Probe whether a listener is live (used by host for health checks)
+  sftp-server  Serve SFTP on stdin/stdout (spawned by listen to drop privileges)
 
 Use "dcx-agent <command> --help" for more information about a command.
 `)
@@ -195,6 +198,29 @@ func runPingCmd(args []string) error {
 		return err
 	}
 	return pingAddr(*addr)
+}
+
+// runSFTPServerCmd serves SFTP over stdin/stdout. The listener spawns it
+// with the session user's credentials so file access is not performed as
+// the agent's (typically root) identity.
+func runSFTPServerCmd(args []string) error {
+	fs := flag.NewFlagSet("sftp-server", flag.ContinueOnError)
+	workDir := fs.String("workdir", "", "Initial working directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	serveSFTP(stdioConn{}, *workDir)
+	return nil
+}
+
+// stdioConn adapts the process's stdin/stdout to an io.ReadWriteCloser.
+type stdioConn struct{}
+
+func (stdioConn) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdioConn) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+func (stdioConn) Close() error {
+	_ = os.Stdin.Close()
+	return os.Stdout.Close()
 }
 
 func detectShell() string {

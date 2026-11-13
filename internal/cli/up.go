@@ -50,28 +50,15 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	defer cliCtx.Close()
 
-	// Check if we can do a quick start (smart detection)
-	// Skip smart detection if --rebuild or --recreate or --pull are specified
+	// Fast path: nothing to do when the environment is already running and
+	// up to date. Every other case (including starting a stopped container)
+	// goes through Service.Up, which owns the complete start sequence: agent
+	// relaunch, secret re-mount, postStart hooks and SSH config.
 	if !rebuild && !recreate && !pull {
 		plan, err := cliCtx.Service.Plan(cliCtx.Ctx, service.PlanOptions{})
-		if err == nil {
-			switch plan.Action {
-			case state.PlanActionNone:
-				// Already running, nothing to do
-				ui.Success("Devcontainer is already running")
-				return nil
-
-			case state.PlanActionStart:
-				// Containers exist but stopped, just start them (offline-safe)
-				ui.Printf("Devcontainer exists and is up to date, starting...")
-				if err := cliCtx.Service.QuickStart(cliCtx.Ctx, plan.ContainerInfo, cliCtx.Identifiers.ProjectName, cliCtx.Identifiers.WorkspaceID); err != nil {
-					return err
-				}
-				ui.Success("Devcontainer started")
-				return nil
-
-				// For CREATE, RECREATE, REBUILD - continue to full up
-			}
+		if err == nil && plan.Action == state.PlanActionNone {
+			ui.Success("Devcontainer is already running")
+			return nil
 		}
 	}
 

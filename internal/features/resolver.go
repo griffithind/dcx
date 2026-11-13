@@ -469,6 +469,13 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	// Compute tarball integrity
 	integrity := computeIntegrity(bodyData)
 
+	// The blob is content-addressed: it must hash to the digest the manifest
+	// names, otherwise a tampering mirror or proxy could substitute it.
+	if strings.HasPrefix(featureLayer.Digest, "sha256:") && integrity != featureLayer.Digest {
+		return nil, fmt.Errorf("feature %s/%s/%s: layer digest mismatch: manifest says %s, got %s",
+			ref.Registry, ref.Repository, ref.Resource, featureLayer.Digest, integrity)
+	}
+
 	// Verify integrity against expected if provided
 	if err := verifyIntegrity(bodyData, expectedIntegrity); err != nil {
 		return nil, fmt.Errorf("feature %s/%s/%s: %w", ref.Registry, ref.Repository, ref.Resource, err)
@@ -598,8 +605,16 @@ func extractTarGz(r io.Reader, destPath string) error {
 }
 
 // extractTarReader extracts a tar reader to a directory.
+//
+// Feature archives come from remote registries, so every entry must stay
+// inside destPath: names are cleaned and prefix-checked, entries are never
+// written through a symlink, and symlink targets must resolve inside
+// destPath. Setuid/setgid/sticky bits are dropped.
 func extractTarReader(tr *tar.Reader, destPath string) error {
 	cleanDestPath := filepath.Clean(destPath)
+	if err := os.MkdirAll(cleanDestPath, 0755); err != nil {
+		return fmt.Errorf("failed to create destination: %w", err)
+	}
 	fileCount := 0
 
 	for {
@@ -617,9 +632,12 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 		if cleanName == "." {
 			continue
 		}
-		target := filepath.Join(destPath, cleanName)
-		if !strings.HasPrefix(target, cleanDestPath+string(os.PathSeparator)) && target != cleanDestPath {
+		target := filepath.Join(cleanDestPath, cleanName)
+		if !isWithinDir(cleanDestPath, target) {
 			return fmt.Errorf("invalid tar path: %s", header.Name)
+		}
+		if err := ensureNoSymlinkComponents(cleanDestPath, target); err != nil {
+			return fmt.Errorf("invalid tar path %s: %w", header.Name, err)
 		}
 
 		fileCount++
@@ -635,8 +653,11 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
 
-			// Create file
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			// Create file (refusing to follow a pre-existing symlink)
+			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("invalid tar path %s: refusing to write through symlink", header.Name)
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode).Perm())
 			if err != nil {
 				return fmt.Errorf("failed to create file: %w", err)
 			}
@@ -647,6 +668,16 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 			}
 			_ = f.Close()
 		case tar.TypeSymlink:
+			if filepath.IsAbs(header.Linkname) {
+				return fmt.Errorf("invalid symlink %s: absolute target %q", header.Name, header.Linkname)
+			}
+			resolved := filepath.Join(filepath.Dir(target), header.Linkname)
+			if !isWithinDir(cleanDestPath, resolved) {
+				return fmt.Errorf("invalid symlink %s: target %q escapes the feature directory", header.Name, header.Linkname)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return fmt.Errorf("failed to create parent directory: %w", err)
+			}
 			if err := os.Symlink(header.Linkname, target); err != nil {
 				return fmt.Errorf("failed to create symlink: %w", err)
 			}
@@ -757,4 +788,34 @@ func parseAuthHeader(header string) (realm, service string) {
 		}
 	}
 	return
+}
+
+// isWithinDir reports whether p is dir itself or lies beneath it (lexically).
+func isWithinDir(dir, p string) bool {
+	return p == dir || strings.HasPrefix(p, dir+string(os.PathSeparator))
+}
+
+// ensureNoSymlinkComponents rejects target if any existing path component
+// between root (exclusive) and target (exclusive) is a symlink. Combined with
+// validating symlink targets lexically, this keeps extraction inside root.
+func ensureNoSymlinkComponents(root, target string) error {
+	rel, err := filepath.Rel(root, filepath.Dir(target))
+	if err != nil || rel == "." {
+		return nil
+	}
+	cur := root
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path component %s is a symlink", cur)
+		}
+	}
+	return nil
 }

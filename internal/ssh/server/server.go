@@ -179,16 +179,13 @@ const DefaultReadyFilePath = "/var/lib/dcx/agent-ready"
 // authorize returns true if the presented public key appears in any of the
 // configured AuthorizedKeysPaths. Reads are performed per-attempt because
 // authorized_keys can be rewritten at any time via runtime secret re-mount.
-func (s *Server) authorize(ctx ssh.Context, presented ssh.PublicKey) bool {
-	paths := make([]string, 0, len(s.cfg.AuthorizedKeysPaths)+1)
-	paths = append(paths, s.cfg.AuthorizedKeysPaths...)
-
-	// Also honor the session user's own ~/.ssh/authorized_keys.
-	if u, err := user.Lookup(ctx.User()); err == nil {
-		paths = append(paths, filepath.Join(u.HomeDir, ".ssh", "authorized_keys"))
-	}
-
-	for _, path := range paths {
+//
+// Only the configured, dcx-managed files are consulted. The SSH username the
+// client presents is deliberately ignored: every session runs as cfg.User,
+// so trusting "~<client user>/.ssh/authorized_keys" would let any container
+// user who can write their own authorized_keys obtain a session as cfg.User.
+func (s *Server) authorize(_ ssh.Context, presented ssh.PublicKey) bool {
+	for _, path := range s.cfg.AuthorizedKeysPaths {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -288,28 +285,33 @@ func (s *Server) buildCommand(sess ssh.Session, isPty bool) *exec.Cmd {
 // fails, or when the uid/gid cannot be parsed — in all those cases the
 // command inherits the agent's credentials.
 func (s *Server) applyUserCredentials(cmd *exec.Cmd) {
+	if cred := s.sessionCredential(); cred != nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
+	}
+}
+
+// sessionCredential returns the credential sessions must run with, or nil
+// when no privilege change is needed (or possible).
+func (s *Server) sessionCredential() *syscall.Credential {
 	if s.cfg.User == "" {
-		return
+		return nil
 	}
 	u, err := user.Lookup(s.cfg.User)
 	if err != nil {
-		return
+		return nil
 	}
 	uid, err := parseUint32(u.Uid)
 	if err != nil {
-		return
+		return nil
 	}
 	gid, err := parseUint32(u.Gid)
 	if err != nil {
-		return
+		return nil
 	}
 	if uid == uint32(os.Geteuid()) {
-		return
+		return nil
 	}
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: uid, Gid: gid},
-	}
+	return &syscall.Credential{Uid: uid, Gid: gid}
 }
 
 // parseUint32 parses a decimal uid/gid string into a uint32.
@@ -455,8 +457,49 @@ func (s *Server) runWithoutPTY(sess ssh.Session, cmd *exec.Cmd) {
 }
 
 // sftpHandler handles SFTP subsystem requests.
+//
+// When sessions drop privileges (agent runs as root, cfg.User is not root),
+// SFTP must drop them too, otherwise every authorized key gets root
+// filesystem access and IDE-created files end up owned by root. The agent
+// re-executes itself as `dcx-agent sftp-server` under the target user's
+// credentials and pipes the session through it. Without a privilege drop the
+// server runs in-process.
 func (s *Server) sftpHandler(sess ssh.Session) {
-	server, err := sftp.NewServer(sess)
+	if s.sessionCredential() == nil {
+		serveSFTP(sess, s.resolveWorkDir())
+		return
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sftp: cannot locate agent binary: %v\n", err)
+		_ = sess.Exit(1)
+		return
+	}
+	workDir := s.resolveWorkDir()
+	cmd := exec.Command(self, "sftp-server", "--workdir", workDir)
+	cmd.Dir = workDir
+	cmd.Env = s.buildEnvironment()
+	s.applyUserCredentials(cmd)
+	cmd.Stdin = sess
+	cmd.Stdout = sess
+	cmd.Stderr = sess.Stderr()
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "sftp-server: %v\n", err)
+		_ = sess.Exit(1)
+		return
+	}
+	_ = sess.Exit(0)
+}
+
+// serveSFTP runs an SFTP server over rwc until the client disconnects.
+func serveSFTP(rwc io.ReadWriteCloser, workDir string) {
+	var opts []sftp.ServerOption
+	if workDir != "" {
+		opts = append(opts, sftp.WithServerWorkingDirectory(workDir))
+	}
+	server, err := sftp.NewServer(rwc, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create SFTP server: %v\n", err)
 		return

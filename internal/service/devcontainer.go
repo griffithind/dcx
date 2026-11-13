@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
@@ -315,30 +316,29 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		return nil
 	}
 
-	// Determine if we're creating a new container (affects whether we fetch secrets)
-	// Secrets are only needed when creating new containers, not when starting existing ones
+	// Determine if we're creating a new container (affects whether we fetch build secrets)
 	isCreatingNew := currentState == state.StateAbsent ||
 		currentState == state.StateStale ||
 		currentState == state.StateBroken ||
 		opts.Rebuild || opts.Recreate
 
-	// Fetch secrets only when creating new containers
 	var runtimeSecrets []secrets.Secret
 	var buildSecretPaths map[string]string
 	var secretsCleanup func()
+	fetcher := secrets.NewFetcher(s.logger)
+
+	// Runtime secrets live on the /run/secrets tmpfs, which is emptied every
+	// time the container stops, so they are fetched and mounted on every
+	// start, not only on create.
+	if len(resolved.RuntimeSecrets) > 0 {
+		ui.Println("Fetching runtime secrets...")
+		runtimeSecrets, err = fetcher.FetchSecrets(ctx, resolved.RuntimeSecrets)
+		if err != nil {
+			return fmt.Errorf("failed to fetch secrets: %w", err)
+		}
+	}
 
 	if isCreatingNew {
-		fetcher := secrets.NewFetcher(s.logger)
-
-		// Fetch runtime secrets (mounted after container starts)
-		if len(resolved.RuntimeSecrets) > 0 {
-			ui.Println("Fetching runtime secrets...")
-			runtimeSecrets, err = fetcher.FetchSecrets(ctx, resolved.RuntimeSecrets)
-			if err != nil {
-				return fmt.Errorf("failed to fetch secrets: %w", err)
-			}
-		}
-
 		// Fetch build secrets (passed to docker build)
 		if len(resolved.BuildSecrets) > 0 {
 			ui.Println("Fetching build secrets...")
@@ -366,7 +366,10 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		if s.verbose {
 			ui.Println("Removing existing devcontainer...")
 		}
-		if err := s.DownWithIDs(ctx, ids.ProjectName, resolved.ID, DownOptions{RemoveVolumes: true}); err != nil {
+		// Never remove named volumes when recreating: they hold user data
+		// (databases, caches) that must survive a config change. Only an
+		// explicit `dcx down --volumes` removes them.
+		if err := s.DownWithIDs(ctx, ids.ProjectName, resolved.ID, DownOptions{}); err != nil {
 			return fmt.Errorf("failed to remove existing environment: %w", err)
 		}
 		needsRebuild = true
@@ -393,8 +396,16 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	// Pre-deploy agent binary before lifecycle hooks
 	if containerInfo != nil {
 		ui.Println("Installing dcx agent...")
-		if err := deploy.PreDeployAgent(ctx, containerInfo.Name); err != nil {
+		updated, err := deploy.PreDeployAgent(ctx, containerInfo.Name)
+		if err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
+		}
+		// An agent from an older dcx may still be serving; replace it so
+		// fixes in the new binary actually take effect.
+		if updated {
+			if err := deploy.StopOutdatedAgent(ctx, containerInfo.Name, common.AgentBinaryPath, agentListenAddr); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -502,9 +513,7 @@ func (s *DevContainerService) mountSSHSecrets(ctx context.Context, resolved *dev
 // `dcx up --hosts`).
 func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo, allowedCIDRs []string) error {
 	// Idempotent: skip if a listener is already answering.
-	if err := container.MustDocker().ExecInContainer(ctx, containerInfo.Name, []string{
-		common.AgentBinaryPath, "ping", "--addr", "127.0.0.1:48022",
-	}); err == nil {
+	if s.agentListening(ctx, containerInfo.Name) {
 		return nil
 	}
 
@@ -531,24 +540,38 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	// The agent inherits the container's default user (typically the image's
 	// USER or remoteUser after UID remap). mountSSHSecrets chowns the host
 	// key and authorized_keys to that same user so the agent can read them.
-	return container.MustDocker().ExecDetached(ctx, containerInfo.Name, argv)
-}
+	if err := container.MustDocker().ExecDetached(ctx, containerInfo.Name, argv); err != nil {
+		return err
+	}
 
-// QuickStart attempts to start an existing container without full up sequence.
-func (s *DevContainerService) QuickStart(ctx context.Context, containerInfo *state.ContainerInfo, projectName, workspaceID string) error {
-	if containerInfo.IsSingleContainer() {
-		if err := container.MustDocker().StartContainer(ctx, containerInfo.ID); err != nil {
-			return fmt.Errorf("failed to start container: %w", err)
+	// `docker exec -d` returns as soon as the process is spawned. Wait until
+	// the listener answers so lifecycle hooks (which connect over SSH) don't
+	// race the agent's startup.
+	deadline := time.Now().Add(agentReadyTimeout)
+	for time.Now().Before(deadline) {
+		if s.agentListening(ctx, containerInfo.Name) {
+			return nil
 		}
-	} else {
-		actualProject := containerInfo.GetComposeProject(projectName)
-		configDir := containerInfo.GetConfigDir(s.workspacePath)
-		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
-		if err := r.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start containers: %w", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return nil
+	return fmt.Errorf("dcx agent did not start listening within %s", agentReadyTimeout)
+}
+
+// agentListenAddr is where the in-container agent listens (container side).
+const agentListenAddr = "127.0.0.1:48022"
+
+// agentReadyTimeout bounds how long Up waits for a freshly launched agent.
+const agentReadyTimeout = 15 * time.Second
+
+// agentListening reports whether the in-container agent answers a ping.
+func (s *DevContainerService) agentListening(ctx context.Context, containerName string) bool {
+	return container.MustDocker().ExecInContainer(ctx, containerName, []string{
+		common.AgentBinaryPath, "ping", "--addr", agentListenAddr,
+	}) == nil
 }
 
 // create creates a new environment.
@@ -930,7 +953,10 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
-		if err := container.MustDocker().RemoveContainer(ctx, containerInfo.ID, true, opts.RemoveVolumes); err != nil {
+		// `docker rm -v` only removes the container's anonymous volumes;
+		// named volumes are never touched, so this is always safe and avoids
+		// leaking anonymous volumes on every recreate.
+		if err := container.MustDocker().RemoveContainer(ctx, containerInfo.ID, true, true); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {

@@ -66,8 +66,9 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 
 	// Deploy the agent binary
 	binaryPath := deploy.GetContainerBinaryPath()
-	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
+	updated, err := deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "DeployToContainer should succeed")
+	assert.False(t, updated, "dcx up already installed the current agent")
 
 	// Verify binary exists in container
 	checkCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "test", "-f", binaryPath)
@@ -115,13 +116,14 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	binaryPath := deploy.GetContainerBinaryPath()
 
 	// First deploy
-	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
+	_, err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "first deploy should succeed")
 
 	// Second deploy should also succeed (and be fast since binary exists)
 	start := time.Now()
-	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
+	updated, err := deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err, "second deploy should succeed")
+	assert.False(t, updated, "second deploy of the same binary should be a no-op")
 	elapsed := time.Since(start)
 
 	// Second deploy should be fast (just a test -f check)
@@ -155,7 +157,7 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 	defer cancel()
 
 	// Use PreDeployAgent which is the main entry point
-	err = deploy.PreDeployAgent(ctx, containerName)
+	_, err = deploy.PreDeployAgent(ctx, containerName)
 	require.NoError(t, err, "PreDeployAgent should succeed")
 
 	// Verify binary exists and runs
@@ -201,7 +203,7 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 
 	// Deploy
 	binaryPath := deploy.GetContainerBinaryPath()
-	err = deploy.DeployToContainer(ctx, containerName, binaryPath)
+	_, err = deploy.DeployToContainer(ctx, containerName, binaryPath)
 	require.NoError(t, err)
 
 	// Verify binary can run (which confirms correct architecture)

@@ -72,6 +72,9 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 // writeSecretToContainer writes a secret to the container's /run/secrets.
 // Uses docker exec to write directly (docker cp doesn't work with tmpfs mounts).
 func writeSecretToContainer(ctx context.Context, docker *Docker, containerName string, secret secrets.Secret, owner string) error {
+	if err := secrets.ValidateName(secret.Name); err != nil {
+		return err
+	}
 	destPath := filepath.Join(common.SecretsDir, secret.Name)
 
 	// Write secret content directly to container using docker exec
@@ -145,6 +148,9 @@ func MountDCXSecrets(ctx context.Context, containerName string, mgmt []DCXSecret
 		mode := s.Mode
 		if mode == "" {
 			mode = "0400"
+		}
+		if err := secrets.ValidateName(s.Name); err != nil {
+			return err
 		}
 		destPath := DCXSecretPath(s.Name)
 

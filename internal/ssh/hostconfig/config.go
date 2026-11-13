@@ -70,7 +70,10 @@ func AddSSHConfig(entry Entry) error {
 	return withConfigLock(func() error {
 		configPath := getSSHConfigPath()
 
-		content, _ := os.ReadFile(configPath)
+		content, err := os.ReadFile(configPath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read ssh config: %w", err)
+		}
 		content = removeSSHConfigEntry(content, entry.ContainerName)
 
 		bindHost := entry.BindHost
@@ -91,7 +94,7 @@ func AddSSHConfig(entry Entry) error {
 		if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
 			return fmt.Errorf("create .ssh dir: %w", err)
 		}
-		return os.WriteFile(configPath, newContent, 0600)
+		return writeFileAtomic(configPath, newContent)
 	})
 }
 
@@ -137,15 +140,18 @@ func RemoveSSHConfig(containerName string) error {
 	return withConfigLock(func() error {
 		configPath := getSSHConfigPath()
 		content, err := os.ReadFile(configPath)
-		if err != nil {
+		if os.IsNotExist(err) {
 			return nil // No config file, nothing to remove
+		}
+		if err != nil {
+			return fmt.Errorf("read ssh config: %w", err)
 		}
 
 		newContent := removeSSHConfigEntry(content, containerName)
 
 		// Only write if content changed
 		if string(newContent) != string(content) {
-			return os.WriteFile(configPath, newContent, 0600)
+			return writeFileAtomic(configPath, newContent)
 		}
 
 		return nil
@@ -160,8 +166,13 @@ func HasSSHConfig(containerName string) bool {
 		return false
 	}
 
-	marker := sshConfigMarkerStart + containerName
-	return strings.Contains(string(content), marker)
+	start := sshConfigMarkerStart + containerName
+	for _, line := range strings.Split(string(content), "\n") {
+		if strings.TrimRight(line, " \t\r") == start {
+			return true
+		}
+	}
+	return false
 }
 
 // getSSHConfigPath returns the path to the SSH config file.
@@ -173,24 +184,38 @@ func getSSHConfigPath() string {
 	return filepath.Join(home, ".ssh", "config")
 }
 
-// removeSSHConfigEntry removes a DCX-managed SSH config entry.
+// removeSSHConfigEntry removes every DCX-managed block for containerName.
+//
+// Markers must match a whole line: a prefix match would let removing "api"
+// also hit the block for "api-v2". A start marker without a matching end
+// marker is left untouched rather than deleting the rest of the file.
 func removeSSHConfigEntry(content []byte, containerName string) []byte {
 	lines := strings.Split(string(content), "\n")
-	var result []string
-	inManagedBlock := false
+	start := sshConfigMarkerStart + containerName
+	end := sshConfigMarkerEnd + containerName
+	isLine := func(line, marker string) bool {
+		return strings.TrimRight(line, " \t\r") == marker
+	}
 
-	for _, line := range lines {
-		if strings.HasPrefix(line, sshConfigMarkerStart+containerName) {
-			inManagedBlock = true
-			continue
+	var result []string
+	for i := 0; i < len(lines); i++ {
+		if isLine(lines[i], start) {
+			closing := -1
+			for j := i + 1; j < len(lines); j++ {
+				if isLine(lines[j], end) {
+					closing = j
+					break
+				}
+				if isLine(lines[j], start) {
+					break
+				}
+			}
+			if closing >= 0 {
+				i = closing
+				continue
+			}
 		}
-		if strings.HasPrefix(line, sshConfigMarkerEnd+containerName) {
-			inManagedBlock = false
-			continue
-		}
-		if !inManagedBlock {
-			result = append(result, line)
-		}
+		result = append(result, lines[i])
 	}
 
 	// Remove trailing empty lines that might accumulate
@@ -204,4 +229,51 @@ func removeSSHConfigEntry(content []byte, containerName string) []byte {
 	}
 
 	return []byte{}
+}
+
+// writeFileAtomic replaces path with data via a temp file and rename, so a
+// crash or full disk can never leave a truncated ~/.ssh/config. Symlinks
+// (common with dotfile managers) are resolved so the link itself survives,
+// and the existing file mode is preserved.
+func writeFileAtomic(path string, data []byte) error {
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	mode := os.FileMode(0600)
+	if info, err := os.Stat(target); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".config.dcx-*")
+	if err != nil {
+		return fmt.Errorf("create temp ssh config: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp ssh config: %w", err)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp ssh config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("sync temp ssh config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp ssh config: %w", err)
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		cleanup()
+		return fmt.Errorf("replace ssh config: %w", err)
+	}
+	return nil
 }

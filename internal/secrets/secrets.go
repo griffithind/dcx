@@ -19,6 +19,30 @@ type Secret struct {
 	Value []byte
 }
 
+// reservedSecretNames cannot be used for user secrets: "dcx" is the
+// directory holding dcx-managed secrets (SSH host key, authorized_keys).
+var reservedSecretNames = map[string]bool{"dcx": true}
+
+// ValidateName checks that a secret name is safe to use as a file name
+// directly under /run/secrets. Names come from devcontainer.json, which is
+// repository-controlled, so anything that could escape the directory or be
+// interpreted specially is rejected.
+func ValidateName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("invalid secret name %q", name)
+	}
+	if reservedSecretNames[name] {
+		return fmt.Errorf("invalid secret name %q: reserved for dcx", name)
+	}
+	for _, c := range name {
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.'
+		if !ok {
+			return fmt.Errorf("invalid secret name %q: only letters, digits, '.', '_' and '-' are allowed", name)
+		}
+	}
+	return nil
+}
+
 // Fetcher fetches secrets by executing commands on the host.
 type Fetcher struct {
 	// logger is used for logging secret fetch operations.
@@ -44,6 +68,9 @@ func (f *Fetcher) FetchSecrets(ctx context.Context, configs map[string]devcontai
 	result := make([]Secret, 0, len(configs))
 
 	for name, config := range configs {
+		if err := ValidateName(name); err != nil {
+			return nil, err
+		}
 		f.logger.Debug("Fetching secret", "name", name)
 
 		value, err := f.executeCommand(ctx, string(config))

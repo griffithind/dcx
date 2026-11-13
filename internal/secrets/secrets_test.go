@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -181,4 +182,38 @@ func TestWriteToTempFiles_Empty(t *testing.T) {
 
 	// Cleanup should be a no-op
 	cleanup()
+}
+
+func TestValidateName(t *testing.T) {
+	valid := []string{"API_KEY", "db-password", "token.v2", "a"}
+	for _, name := range valid {
+		if err := ValidateName(name); err != nil {
+			t.Errorf("ValidateName(%q) = %v, want nil", name, err)
+		}
+	}
+
+	invalid := []string{
+		"", ".", "..", "dcx",
+		"../../etc/sudoers.d/x", "a/b",
+		"$(id>/tmp/x)", "`id`", "a b", "name;rm -rf /", "x\ny",
+	}
+	for _, name := range invalid {
+		if err := ValidateName(name); err == nil {
+			t.Errorf("ValidateName(%q) = nil, want error", name)
+		}
+	}
+}
+
+func TestFetchSecretsRejectsUnsafeNameBeforeRunningCommand(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	f := NewFetcher(nil)
+	_, err := f.FetchSecrets(context.Background(), map[string]devcontainer.SecretConfig{
+		"../escape": devcontainer.SecretConfig("touch " + marker),
+	})
+	if err == nil {
+		t.Fatal("expected error for unsafe secret name")
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("secret command must not run when the name is invalid")
+	}
 }
