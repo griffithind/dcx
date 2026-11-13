@@ -1,125 +1,59 @@
 package shortcuts
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolve(t *testing.T) {
 	shortcuts := map[string]devcontainer.Shortcut{
 		"rw":   {Command: "bin/jobs --skip-recurring"},
 		"r":    {Prefix: "rails", PassArgs: true},
-		"rs":   {Command: "rails server -b 0.0.0.0"},
 		"be":   {Prefix: "bundle exec"}, // No passArgs
-		"test": {Prefix: "rails test", PassArgs: true},
+		"pipe": {Command: "cd /src && ls | wc -l"},
 	}
 
 	tests := []struct {
-		name     string
-		args     []string
-		expected ResolvedCommand
+		name string
+		args []string
+		want ResolvedCommand
 	}{
-		{
-			name: "simple command shortcut",
-			args: []string{"rw"},
-			expected: ResolvedCommand{
-				Command: []string{"bin/jobs", "--skip-recurring"},
-				Found:   true,
-			},
-		},
-		{
-			name: "command shortcut with extra args",
-			args: []string{"rw", "--verbose"},
-			expected: ResolvedCommand{
-				Command: []string{"bin/jobs", "--skip-recurring", "--verbose"},
-				Found:   true,
-			},
-		},
-		{
-			name: "prefix with passArgs - single arg",
-			args: []string{"r", "console"},
-			expected: ResolvedCommand{
-				Command: []string{"rails", "console"},
-				Found:   true,
-			},
-		},
-		{
-			name: "prefix with passArgs - multiple args",
-			args: []string{"r", "server", "-p", "3001"},
-			expected: ResolvedCommand{
-				Command: []string{"rails", "server", "-p", "3001"},
-				Found:   true,
-			},
-		},
-		{
-			name: "prefix with passArgs - no extra args",
-			args: []string{"r"},
-			expected: ResolvedCommand{
-				Command: []string{"rails"},
-				Found:   true,
-			},
-		},
-		{
-			name: "prefix without passArgs",
-			args: []string{"be"},
-			expected: ResolvedCommand{
-				Command: []string{"bundle", "exec"},
-				Found:   true,
-			},
-		},
-		{
-			name: "prefix without passArgs ignores extra args",
-			args: []string{"be", "rspec"},
-			expected: ResolvedCommand{
-				Command: []string{"bundle", "exec"},
-				Found:   true,
-			},
-		},
-		{
-			name: "multi-word prefix with passArgs",
-			args: []string{"test", "test/models/"},
-			expected: ResolvedCommand{
-				Command: []string{"rails", "test", "test/models/"},
-				Found:   true,
-			},
-		},
-		{
-			name: "unknown shortcut",
-			args: []string{"unknown", "arg"},
-			expected: ResolvedCommand{
-				Command: []string{"unknown", "arg"},
-				Found:   false,
-			},
-		},
-		{
-			name: "empty args",
-			args: []string{},
-			expected: ResolvedCommand{
-				Command: []string{},
-				Found:   false,
-			},
-		},
+		{"command", []string{"rw"}, ResolvedCommand{`sh -c 'bin/jobs --skip-recurring'`, true}},
+		{"command gets args", []string{"rw", "--verbose"}, ResolvedCommand{`sh -c 'bin/jobs --skip-recurring "$@"' dcx-run --verbose`, true}},
+		{"prefix with passArgs", []string{"r", "server", "-p", "3001"}, ResolvedCommand{`sh -c 'rails "$@"' dcx-run server -p 3001`, true}},
+		{"prefix without passArgs drops args", []string{"be", "rake"}, ResolvedCommand{`sh -c 'bundle exec'`, true}},
+		{"shell syntax is kept", []string{"pipe"}, ResolvedCommand{`sh -c 'cd /src && ls | wc -l'`, true}},
+		{"unknown", []string{"unknown", "arg"}, ResolvedCommand{}},
+		{"empty", nil, ResolvedCommand{}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Resolve(shortcuts, tt.args)
-			assert.Equal(t, tt.expected.Found, result.Found)
-			assert.Equal(t, tt.expected.Command, result.Command)
+			assert.Equal(t, tt.want, Resolve(shortcuts, tt.args))
 		})
 	}
 }
 
-func TestResolveEmptyShortcuts(t *testing.T) {
-	result := Resolve(nil, []string{"rw"})
-	assert.False(t, result.Found)
-	assert.Equal(t, []string{"rw"}, result.Command)
+// The command line is run by the remote user's shell; arguments must reach
+// the shortcut exactly, whatever they contain.
+func TestResolvePreservesArguments(t *testing.T) {
+	shortcuts := map[string]devcontainer.Shortcut{
+		"args": {Prefix: `printf '[%s]'`, PassArgs: true},
+	}
+	args := []string{"a b", "it's", `$HOME`, "*", "--flag=x;y"}
+	resolved := Resolve(shortcuts, append([]string{"args"}, args...))
+	require.True(t, resolved.Found)
 
-	result = Resolve(map[string]devcontainer.Shortcut{}, []string{"rw"})
-	assert.False(t, result.Found)
-	assert.Equal(t, []string{"rw"}, result.Command)
+	out, err := exec.Command("sh", "-c", resolved.CommandLine).Output()
+	require.NoError(t, err)
+	assert.Equal(t, "[a b][it's][$HOME][*][--flag=x;y]", string(out))
+}
+
+func TestResolveEmptyShortcuts(t *testing.T) {
+	assert.False(t, Resolve(nil, []string{"x"}).Found)
 }
 
 func TestListShortcuts(t *testing.T) {
@@ -173,119 +107,4 @@ func TestListShortcutsSorting(t *testing.T) {
 	assert.Equal(t, "a", infos[0].Name)
 	assert.Equal(t, "m", infos[1].Name)
 	assert.Equal(t, "z", infos[2].Name)
-}
-
-func TestResolveWithFlags(t *testing.T) {
-	// Test that flags are passed through correctly
-	shortcuts := map[string]devcontainer.Shortcut{
-		"r": {Prefix: "rails", PassArgs: true},
-	}
-
-	tests := []struct {
-		name     string
-		args     []string
-		expected []string
-	}{
-		{
-			name:     "single dash flag",
-			args:     []string{"r", "-v"},
-			expected: []string{"rails", "-v"},
-		},
-		{
-			name:     "double dash flag",
-			args:     []string{"r", "--version"},
-			expected: []string{"rails", "--version"},
-		},
-		{
-			name:     "flag with value",
-			args:     []string{"r", "-p", "3001"},
-			expected: []string{"rails", "-p", "3001"},
-		},
-		{
-			name:     "equals style flag",
-			args:     []string{"r", "--port=3001"},
-			expected: []string{"rails", "--port=3001"},
-		},
-		{
-			name:     "mixed args and flags",
-			args:     []string{"r", "server", "-b", "0.0.0.0", "--port", "3001"},
-			expected: []string{"rails", "server", "-b", "0.0.0.0", "--port", "3001"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := Resolve(shortcuts, tt.args)
-			assert.True(t, result.Found)
-			assert.Equal(t, tt.expected, result.Command)
-		})
-	}
-}
-
-func TestResolveCommandWithFlags(t *testing.T) {
-	// Test simple command shortcuts with additional args
-	shortcuts := map[string]devcontainer.Shortcut{
-		"rw": {Command: "bin/jobs --skip-recurring"},
-	}
-
-	tests := []struct {
-		name     string
-		args     []string
-		expected []string
-	}{
-		{
-			name:     "command with no extra args",
-			args:     []string{"rw"},
-			expected: []string{"bin/jobs", "--skip-recurring"},
-		},
-		{
-			name:     "command with extra args appended",
-			args:     []string{"rw", "--verbose"},
-			expected: []string{"bin/jobs", "--skip-recurring", "--verbose"},
-		},
-		{
-			name:     "command with multiple extra args",
-			args:     []string{"rw", "--verbose", "--count", "5"},
-			expected: []string{"bin/jobs", "--skip-recurring", "--verbose", "--count", "5"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := Resolve(shortcuts, tt.args)
-			assert.True(t, result.Found)
-			assert.Equal(t, tt.expected, result.Command)
-		})
-	}
-}
-
-func TestResolveSpecialCharacters(t *testing.T) {
-	shortcuts := map[string]devcontainer.Shortcut{
-		"echo": {Prefix: "echo", PassArgs: true},
-	}
-
-	tests := []struct {
-		name     string
-		args     []string
-		expected []string
-	}{
-		{
-			name:     "args with spaces in quotes",
-			args:     []string{"echo", "hello world"},
-			expected: []string{"echo", "hello world"},
-		},
-		{
-			name:     "args with special chars",
-			args:     []string{"echo", "$HOME", "~", "*"},
-			expected: []string{"echo", "$HOME", "~", "*"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := Resolve(shortcuts, tt.args)
-			assert.True(t, result.Found)
-			assert.Equal(t, tt.expected, result.Command)
-		})
-	}
 }

@@ -36,7 +36,7 @@ func TestUserEnvProbeE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Check if the postCreateCommand captured the probed environment
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/probe-result.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/probe-result.txt")
 	require.NoError(t, err)
 
 	// The probed environment should include basic variables like PATH, HOME
@@ -71,7 +71,7 @@ func TestEtcEnvironmentPatchingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Check that /etc/environment contains our variables
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/etc/environment")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/etc/environment")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "MY_CONTAINER_VAR", "/etc/environment should contain containerEnv")
 	assert.Contains(t, stdout, "container-value")
@@ -100,7 +100,7 @@ func TestEtcProfilePatchingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Check that the marker file exists (indicating patching was done)
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "test -f /var/lib/dcx/.patchEtcProfileMarker && echo 'patched' || echo 'not-patched'")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/.patchEtcProfileMarker && echo 'patched' || echo 'not-patched'")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "patched", "/etc/profile should be patched")
 }
@@ -135,7 +135,7 @@ func TestUserEnvProbeWithFeatureE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// The postCreateCommand should have access to the full PATH
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/path-check.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/path-check.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "PATH=", "PATH should be captured")
 }
@@ -161,7 +161,7 @@ func TestUserEnvProbeNoneE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Basic exec should still work
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "hello")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "hello")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "hello")
 }
@@ -188,7 +188,7 @@ func TestEnvProbeCachingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Check cache file exists
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "cached", "Probed environment should be cached")
 
@@ -197,7 +197,7 @@ func TestEnvProbeCachingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Cache should still be there
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "test -f /var/lib/dcx/probed-env.json && echo 'cached' || echo 'not-cached'")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "cached", "Cache should persist across restarts")
 }

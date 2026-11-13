@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -170,31 +169,15 @@ func getDockerInfo(ctx context.Context) DockerInfo {
 }
 
 func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
-	// Find config path
-	cfgPath := configPath
-	if cfgPath == "" {
-		cfgPath = findConfigPath(workspacePath)
-		if cfgPath == "" {
-			return fmt.Errorf("config not found")
-		}
-	}
-
-	// Parse configuration
-	cfg, err := devcontainer.ParseFile(cfgPath)
+	// Resolve exactly as `dcx up` does (discovery, substitution, image
+	// metadata, lockfile), so debug output cannot disagree with up.
+	svc := service.NewDevContainerService(container.NewDockerCLI(), debugReporter(), workspacePath, configPath, verbose)
+	defer svc.Close()
+	resolved, err := svc.Load(ctx)
 	if err != nil {
 		return err
 	}
-
-	// Build resolved devcontainer
-	builder := devcontainer.NewBuilder(nil, debugReporter())
-	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
-		ConfigPath:    cfgPath,
-		WorkspaceRoot: workspacePath,
-		Config:        cfg,
-	})
-	if err != nil {
-		return err
-	}
+	cfg := resolved.RawConfig
 
 	// Populate workspace debug
 	planType := ""

@@ -58,7 +58,7 @@ func (s *Server) sessionHandler(sess ssh.Session) {
 	}
 
 	// postAttachCommand belongs to interactive attaches: a terminal without
-	// a command (`dcx shell`, `ssh <alias>`), not editor exec channels.
+	// a command (`dcx ssh`, `ssh <alias>`), not editor exec channels.
 	if isPty && sess.RawCommand() == "" && len(cfg.PostAttach) > 0 {
 		s.runPostAttach(sess, cfg.PostAttach, env, cred)
 	}

@@ -134,7 +134,7 @@ func TestStaleDetectionE2E(t *testing.T) {
 
 	// Verify new env var exists
 	t.Run("new_config_applied", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "NEW_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "NEW_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "value")
 	})
@@ -179,7 +179,7 @@ func TestExecOnStoppedFailsE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "stop")
 
 	// Exec should fail
-	_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
+	_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
 	assert.Error(t, err, "exec should fail on stopped container")
 }
 
@@ -195,7 +195,7 @@ func TestExecOnAbsentFailsE2E(t *testing.T) {
 	helpers.RunDCXInDir(t, workspace, "down")
 
 	// Exec should fail
-	_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
+	_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
 	assert.Error(t, err, "exec should fail when no container exists")
 }
 

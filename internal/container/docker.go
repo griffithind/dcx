@@ -9,13 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -550,7 +551,7 @@ func (d *Docker) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
 		args = append(args, "--cache-from", cache)
 	}
 
-	if common.IsSSHAgentAvailable() {
+	if sshAgentAvailable() {
 		args = append(args, "--ssh", "default")
 	}
 
@@ -652,7 +653,7 @@ func parseImageSize(sizeStr string) int64 {
 // the dcx/ repository (dcx/<workspace>:base, :features-*, :uid-*), plus the
 // dcx-derived* names older versions used.
 func isDcxImage(img imageInfo) bool {
-	return strings.HasPrefix(img.Repository, common.ImageTagPrefix) ||
+	return strings.HasPrefix(img.Repository, ImageTagPrefix) ||
 		strings.HasPrefix(img.Repository, "dcx-derived")
 }
 
@@ -898,4 +899,22 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 		return fmt.Errorf("write file failed: %w, output: %s", err, output)
 	}
 	return nil
+}
+
+// sshAgentAvailable reports whether $SSH_AUTH_SOCK is a reachable agent
+// socket, so builds can forward it (`--ssh default`).
+func sshAgentAvailable() bool {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return false
+	}
+	if info, err := os.Stat(sock); err != nil || info.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

@@ -1,0 +1,47 @@
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused)
+  # plus depguard, which enforces the package rules in CLAUDE.md.
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # Only internal/cli and internal/ui print; everything else reports
+        # through report.Reporter.
+        no-printing-in-libraries:
+          files:
+            - "$all"
+            - "!**/internal/cli/**"
+            - "!**/internal/ui/**"
+            - "!**/cmd/**"
+          deny:
+            - pkg: github.com/griffithind/dcx/internal/ui
+              desc: library code takes a report.Reporter; only internal/cli prints
+            - pkg: github.com/pterm/pterm
+              desc: library code takes a report.Reporter; only internal/cli prints
+
+        # The agent is compiled into a small static binary that runs in every
+        # container; it must not pull in host-side dcx.
+        agent-stays-small:
+          files:
+            - "**/internal/ssh/server/**"
+            - "**/cmd/dcx-agent/**"
+          deny:
+            - pkg: github.com/spf13/cobra
+              desc: the agent uses the standard flag package
+            - pkg: github.com/griffithind/dcx/internal/container
+              desc: host-side code; share constants through internal/agentproto
+            - pkg: github.com/griffithind/dcx/internal/service
+              desc: host-side code; share constants through internal/agentproto
+            - pkg: github.com/griffithind/dcx/internal/devcontainer
+              desc: host-side code; share constants through internal/agentproto
+
+        # The host/agent contract is compiled into both binaries.
+        agentproto-stdlib-only:
+          list-mode: strict
+          files:
+            - "**/internal/agentproto/**"
+          allow:
+            - $gostd

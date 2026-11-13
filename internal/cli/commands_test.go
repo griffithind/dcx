@@ -73,19 +73,21 @@ func TestStatusCommandMetadata(t *testing.T) {
 	assert.NotNil(t, statusCmd.RunE)
 }
 
-func TestExecCommandFlags(t *testing.T) {
-	flags := execCmd.Flags()
-
-	// Verify removed flag doesn't exist
-	noAgentFlag := flags.Lookup("no-agent")
-	assert.Nil(t, noAgentFlag, "no-agent flag should not exist (SSH agent is always enabled)")
+func TestShellAndExecCommandsAreGone(t *testing.T) {
+	// `dcx ssh` replaced them; plain ssh gives the same session.
+	for _, name := range []string{"shell", "exec"} {
+		cmd, _, err := rootCmd.Find([]string{name})
+		assert.True(t, err != nil || cmd == rootCmd, "%s should not be a command", name)
+	}
 }
 
-func TestExecCommandMetadata(t *testing.T) {
-	assert.Contains(t, execCmd.Use, "exec")
-	assert.NotEmpty(t, execCmd.Short)
-	assert.NotEmpty(t, execCmd.Long)
-	assert.NotNil(t, execCmd.RunE)
+func TestSSHRequiresDashBeforeCommand(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"ssh"})
+	assert.NoError(t, err)
+	assert.Equal(t, sshCmd, cmd)
+	assert.NoError(t, sshCmd.ParseFlags([]string{"ls"}))
+	err = runSSH(sshCmd, []string{"ls"})
+	assert.ErrorContains(t, err, "dcx ssh -- ls")
 }
 
 func TestRootCommandExists(t *testing.T) {

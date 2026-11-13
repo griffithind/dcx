@@ -83,3 +83,10 @@ func sortedKeys(m map[string]string) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// ImageTagPrefix prefixes every image dcx builds: dcx/<workspace>:<kind>.
+const ImageTagPrefix = "dcx/"
+
+// hashTruncationLength is how many hex characters of a layer hash go into
+// its image tag.
+const hashTruncationLength = 12

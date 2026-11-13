@@ -56,7 +56,7 @@ func TestAgentFilesRootOwnedE2E(t *testing.T) {
 }
 
 // TestPlainSSHSessionParityE2E: a plain OpenSSH session gets what
-// `dcx shell`/`dcx exec` give — remoteEnv (with ${containerEnv:…}) and,
+// `dcx ssh` gives — remoteEnv (with ${containerEnv:…}) and,
 // for interactive sessions only, postAttachCommand.
 func TestPlainSSHSessionParityE2E(t *testing.T) {
 	t.Parallel()
@@ -78,19 +78,16 @@ func TestPlainSSHSessionParityE2E(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Equal(t, "remote-base-value", strings.TrimSpace(out))
 
-	_, _, err = helpers.RunDCXInDir(t, ws, "exec", "--", "test", "-f", "/tmp/attach.log")
+	_, _, err = helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-f", "/tmp/attach.log")
 	assert.Error(t, err, "postAttachCommand must not run for exec sessions")
 
 	out, err = plainSSH(t, alias, "exit\n", "-tt")
 	require.NoError(t, err, out)
 	assert.Equal(t, "attached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
 
-	// `dcx shell` gets it from the agent as well, exactly once per attach.
-	cmd := exec.Command(helpers.GetDCXBinary(t), "shell")
-	cmd.Dir = ws
-	cmd.Stdin = strings.NewReader("exit\n")
-	shellOut, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(shellOut))
+	// An interactive `dcx ssh` gets it from the agent as well, once per attach.
+	shellOut, err := helpers.RunDCXInPTY(t, ws, "exit\n", "ssh")
+	require.NoError(t, err, shellOut)
 	assert.Equal(t, "attached\nattached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
 }
 
@@ -120,4 +117,35 @@ func TestNonRootRemoteUserSessionsE2E(t *testing.T) {
 	out, err := plainSSH(t, alias, "", "-tt", `stat -c %U "$(tty)"`)
 	require.NoError(t, err, out)
 	assert.Equal(t, "dev", strings.TrimSpace(out), "the session's terminal must belong to the session user")
+}
+
+// TestSameNameWorkspacesGetDistinctAliasesE2E: two checkouts sharing a
+// "name" each reach their own container — the first by "<name>.dcx", the
+// second by its unique "<container>.dcx" — and `dcx ssh` picks the right
+// one from the current directory.
+func TestSameNameWorkspacesGetDistinctAliasesE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	cfg := helpers.SimpleImageConfig(t, "alpine:latest")
+	first := helpers.CreateTempWorkspace(t, cfg)
+	second := helpers.CreateTempWorkspace(t, cfg)
+	require.NoError(t, os.WriteFile(filepath.Join(first, "marker"), []byte("first"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(second, "marker"), []byte("second"), 0o644))
+	t.Cleanup(func() {
+		helpers.RunDCXInDir(t, first, "down")
+		helpers.RunDCXInDir(t, second, "down")
+	})
+
+	firstAlias := extractSSHHostname(t, helpers.RunDCXInDirSuccess(t, first, "up"))
+	secondAlias := extractSSHHostname(t, helpers.RunDCXInDirSuccess(t, second, "up"))
+	assert.NotEqual(t, firstAlias, secondAlias)
+
+	for alias, want := range map[string]string{firstAlias: "first", secondAlias: "second"} {
+		out, err := plainSSH(t, alias, "", "cat", "/workspace/marker")
+		require.NoError(t, err, out)
+		assert.Equal(t, want, strings.TrimSpace(out), "ssh %s", alias)
+	}
+	assert.Equal(t, "first", dcxExec(t, first, "cat", "/workspace/marker"))
+	assert.Equal(t, "second", dcxExec(t, second, "cat", "/workspace/marker"))
 }

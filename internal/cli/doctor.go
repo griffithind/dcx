@@ -3,9 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
+	"github.com/griffithind/dcx/internal/service"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 
 	"github.com/griffithind/dcx/internal/container"
@@ -41,7 +42,8 @@ Configuration checks (with --config or by default if devcontainer.json exists):
 }
 
 func init() {
-	doctorCmd.Flags().BoolVar(&doctorConfig, "config", false, "only check configuration (skip system checks)")
+	// Not --config: that is the global flag selecting the devcontainer.json.
+	doctorCmd.Flags().BoolVar(&doctorConfig, "config-only", false, "only check configuration (skip system checks)")
 	doctorCmd.Flags().BoolVar(&doctorSystem, "system", false, "only check system requirements (skip config checks)")
 }
 
@@ -60,12 +62,15 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checkSystemReqs := !doctorConfig
 	checkConfig := !doctorSystem
 
-	// If config-only was requested but no config exists, error out
-	if doctorConfig {
-		cfgPath := findConfigPath(workspacePath)
-		if cfgPath == "" {
-			return fmt.Errorf("no devcontainer.json found in %s", workspacePath)
-		}
+	// Config discovery is the same as `up`'s (including
+	// .devcontainer/<folder>/devcontainer.json and --config).
+	hasConfig := configPath != ""
+	if !hasConfig {
+		_, err := devcontainer.Resolve(workspacePath)
+		hasConfig = err == nil
+	}
+	if doctorConfig && !hasConfig {
+		return fmt.Errorf("no devcontainer.json found in %s", workspacePath)
 	}
 
 	var systemResults []CheckResult
@@ -89,9 +94,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Configuration checks (if config exists or --config flag)
 	if checkConfig {
-		cfgPath := findConfigPath(workspacePath)
-		if cfgPath != "" || doctorConfig {
-			configResults = runConfigChecks(ctx, cfgPath)
+		if hasConfig {
+			configResults = runConfigChecks(ctx)
 			for _, r := range configResults {
 				if !r.OK {
 					allOK = false
@@ -149,70 +153,40 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("some checks failed")
 }
 
-func findConfigPath(wsPath string) string {
-	paths := []string{
-		filepath.Join(wsPath, ".devcontainer", "devcontainer.json"),
-		filepath.Join(wsPath, ".devcontainer.json"),
-	}
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
+// runConfigChecks validates the configuration through the same loading
+// and resolution `dcx up` uses, so doctor cannot pass a config up rejects
+// (or report values up would not use).
+func runConfigChecks(ctx context.Context) []CheckResult {
 	var results []CheckResult
 
-	// Check config exists
+	cfg, cfgPath, err := devcontainer.Load(workspacePath, configPath)
 	if cfgPath == "" {
-		results = append(results, CheckResult{
+		return append(results, CheckResult{
 			Name:    "Config File",
 			OK:      false,
-			Message: "devcontainer.json not found",
+			Message: fmt.Sprintf("%v", err),
 			Hint:    "Create a devcontainer.json file in .devcontainer/ directory",
 		})
-		return results
 	}
-
-	results = append(results, CheckResult{
-		Name:    "Config File",
-		OK:      true,
-		Message: cfgPath,
-	})
-
-	// Parse configuration
-	cfg, err := devcontainer.ParseFile(cfgPath)
+	results = append(results, CheckResult{Name: "Config File", OK: true, Message: cfgPath})
 	if err != nil {
-		results = append(results, CheckResult{
+		return append(results, CheckResult{
 			Name:    "Config Syntax",
 			OK:      false,
 			Message: fmt.Sprintf("parse error: %v", err),
 		})
-		return results
 	}
+	results = append(results, CheckResult{Name: "Config Syntax", OK: true, Message: "valid JSON"})
 
-	results = append(results, CheckResult{
-		Name:    "Config Syntax",
-		OK:      true,
-		Message: "valid JSON",
-	})
-
-	// Build resolved devcontainer to validate structure
-	builder := devcontainer.NewBuilder(nil, ui.Reporter())
-	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
-		ConfigPath:    cfgPath,
-		WorkspaceRoot: workspacePath,
-		Config:        cfg,
-	})
+	svc := service.NewDevContainerService(container.NewDockerCLI(), report.Discard, workspacePath, configPath, verbose)
+	defer svc.Close()
+	resolved, err := svc.Load(ctx)
 	if err != nil {
-		results = append(results, CheckResult{
+		return append(results, CheckResult{
 			Name:    "Config Structure",
 			OK:      false,
 			Message: fmt.Sprintf("structure error: %v", err),
 		})
-		return results
 	}
 
 	planType := ""

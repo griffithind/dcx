@@ -33,8 +33,8 @@ func TestErrorMissingConfigE2E(t *testing.T) {
 	})
 
 	t.Run("exec_missing_config", func(t *testing.T) {
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
-		require.Error(t, err, "dcx exec should fail when no config exists")
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
+		require.Error(t, err, "dcx ssh should fail when no config exists")
 		// exec might fail differently (no container), but should still error
 		assert.True(t, len(stderr) > 0 || err != nil, "should produce an error")
 	})

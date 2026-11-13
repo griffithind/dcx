@@ -2,10 +2,9 @@ package state
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/griffithind/dcx/internal/util"
 )
 
 // Label prefix and schema version.
@@ -255,7 +254,7 @@ func NewContainerLabels() *ContainerLabels {
 func (l *ContainerLabels) ToMap() map[string]string {
 	m := map[string]string{
 		LabelSchemaVersion: l.SchemaVersion,
-		LabelManaged:       util.BoolToString(l.Managed),
+		LabelManaged:       strconv.FormatBool(l.Managed),
 	}
 
 	// Identity
@@ -325,7 +324,7 @@ func (l *ContainerLabels) ToMap() map[string]string {
 
 	// SSH
 	if l.SSHHostPort > 0 {
-		m[LabelSSHHostPort] = util.IntToString(l.SSHHostPort)
+		m[LabelSSHHostPort] = strconv.Itoa(l.SSHHostPort)
 	}
 	setIfNotEmpty(m, LabelSSHBindAddress, l.SSHBindAddress)
 	setIfNotEmpty(m, LabelSSHAllowedClientIPs, l.SSHAllowedClientIPs)
@@ -400,7 +399,7 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 
 	// SSH
 	if s := m[LabelSSHHostPort]; s != "" {
-		l.SSHHostPort = util.StringToInt(s)
+		l.SSHHostPort, _ = strconv.Atoi(s)
 	}
 	l.SSHBindAddress = m[LabelSSHBindAddress]
 	l.SSHAllowedClientIPs = m[LabelSSHAllowedClientIPs]

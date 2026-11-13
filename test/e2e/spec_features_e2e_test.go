@@ -41,14 +41,14 @@ func TestOverrideCommandE2E(t *testing.T) {
 
 	// Container should respond to exec commands
 	t.Run("exec_works_with_override", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "override-test")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "override-test")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "override-test")
 	})
 
 	// Verify the container is running a sleep process (our override command)
 	t.Run("sleep_process_running", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ps", "aux")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
 		require.NoError(t, err)
 		// Should have a sleep process running
 		assert.Contains(t, stdout, "sleep")
@@ -85,7 +85,7 @@ func TestOverrideCommandFalseE2E(t *testing.T) {
 
 	// Verify we're running the default command (sh), not the override (sleep loop)
 	t.Run("runs_default_shell_not_sleep_loop", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ps", "aux")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
 		require.NoError(t, err)
 		// Should have /bin/sh as PID 1, not /bin/sh -c "while sleep..."
 		assert.Contains(t, stdout, "/bin/sh")
@@ -259,7 +259,7 @@ func TestRemoteUserE2E(t *testing.T) {
 
 	// Test that exec runs as remoteUser
 	t.Run("exec_runs_as_remote_user", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "whoami")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "whoami")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "node")
 	})
@@ -289,11 +289,11 @@ func TestContainerEnvE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	t.Run("container_env_vars_set", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "MY_CUSTOM_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "MY_CUSTOM_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "custom-value-123")
 
-		stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "ANOTHER_VAR")
+		stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "ANOTHER_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "another-value")
 	})

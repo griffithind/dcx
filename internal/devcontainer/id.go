@@ -5,9 +5,6 @@ import (
 	"encoding/base32"
 	"path/filepath"
 	"strings"
-
-	"github.com/griffithind/dcx/internal/common"
-	"github.com/griffithind/dcx/internal/util"
 )
 
 // DevContainerID is a lightweight identifier for quick lookups.
@@ -37,14 +34,14 @@ type DevContainerID struct {
 // - All workspace lookups
 func ComputeID(workspacePath string) string {
 	// Get the real path (resolve symlinks)
-	realPath, err := util.RealPath(workspacePath)
+	realPath, err := realPath(workspacePath)
 	if err != nil {
 		// Fall back to the original path if we can't resolve
 		realPath = workspacePath
 	}
 
 	// Normalize the path
-	realPath = util.NormalizePath(realPath)
+	realPath = normalizePath(realPath)
 
 	// Compute SHA256
 	hash := sha256.Sum256([]byte(realPath))
@@ -82,11 +79,11 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevCo
 	// to the ID when there is no name.
 	sshHost := id
 	if cfg != nil && cfg.Name != "" {
-		if slug := common.SanitizeProjectName(cfg.Name); slug != "" {
+		if slug := SanitizeProjectName(cfg.Name); slug != "" {
 			sshHost = slug
 		}
 	}
-	sshHost = sshHost + common.SSHHostSuffix
+	sshHost = sshHost + SSHHostSuffix
 
 	return &DevContainerID{
 		ID:          id,
@@ -110,7 +107,7 @@ func ResourceName(displayName, workspaceID string) string {
 	if len(suffix) > resourceIDLength {
 		suffix = suffix[:resourceIDLength]
 	}
-	slug := common.SanitizeProjectName(displayName)
+	slug := SanitizeProjectName(displayName)
 	if slug == "" {
 		slug = "dcx"
 	}
@@ -121,5 +118,20 @@ func ResourceName(displayName, workspaceID string) string {
 }
 
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
-// Deprecated: Use common.SanitizeProjectName instead. This is kept for backward compatibility.
-var SanitizeProjectName = common.SanitizeProjectName
+
+// SSHHostSuffix is appended to a workspace's name to form its SSH alias.
+const SSHHostSuffix = ".dcx"
+
+// realPath returns the absolute path with symlinks resolved.
+func realPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// normalizePath cleans path, uses forward slashes and drops a trailing one.
+func normalizePath(path string) string {
+	return strings.TrimSuffix(filepath.ToSlash(filepath.Clean(path)), "/")
+}

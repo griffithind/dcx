@@ -2,11 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/shortcuts"
-	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -83,8 +81,7 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown shortcut %q; use --list to see available shortcuts", args[0])
 	}
 
-	// Execute the resolved command
-	return executeInContainer(resolved.Command)
+	return sshInto(resolved.CommandLine)
 }
 
 func listShortcuts(dcxCustom *devcontainer.DcxCustomizations) error {
@@ -107,40 +104,4 @@ func listShortcuts(dcxCustom *devcontainer.DcxCustomizations) error {
 	}
 
 	return ui.RenderTable(headers, rows)
-}
-
-func executeInContainer(execArgs []string) error {
-	// Initialize CLI context
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
-	defer cliCtx.Close()
-
-	// Validate container is running
-	containerInfo, err := RequireRunningContainer(cliCtx)
-	if err != nil {
-		return err
-	}
-
-	// Load config
-	cfg, _, _ := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
-
-	// Execute via unified SSH path
-	exitCode, err := sshexec.ExecInContainer(cliCtx.Ctx, sshexec.ContainerExecOptions{
-		ContainerName: containerInfo.Name,
-		WorkspaceID:   containerInfo.Labels.WorkspaceID,
-		Config:        cfg,
-		WorkspacePath: cliCtx.WorkspacePath(),
-		Command:       execArgs,
-		Ports:         cliCtx.Docker,
-	})
-
-	if err != nil {
-		return fmt.Errorf("exec failed: %w", err)
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-	return nil
 }

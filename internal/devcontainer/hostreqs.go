@@ -6,8 +6,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-
-	"github.com/griffithind/dcx/internal/util"
 )
 
 // HostRequirementsResult contains the result of host requirements validation.
@@ -197,7 +195,7 @@ func hasGPU() bool {
 
 	// Check for /dev/dri on Linux (GPU devices)
 	if runtime.GOOS == "linux" {
-		if util.IsDir("/dev/dri") {
+		if isDir("/dev/dri") {
 			return true
 		}
 	}

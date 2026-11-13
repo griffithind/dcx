@@ -20,6 +20,8 @@ go test -v -run TestShouldUpdateRemoteUserUID ./internal/build/...
 make build && go test -v -tags=e2e -run TestSingleImageBasedE2E ./test/e2e/...
 ```
 
+E2E tests run commands with `dcx ssh -- …` (OpenSSH + the generated config); use `helpers.RunDCXInPTY` for interactive sessions. `make lint` includes `depguard` rules (`.golangci.yml`) for the package rules below.
+
 ## Architecture Overview
 
 DCX is a single-binary CLI for running devcontainers with built-in SSH support. It follows a clean layered architecture:
@@ -61,7 +63,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | `context.go` | `CLIContext` - shared init for Docker client, Service, Identifiers |
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
-| `exec.go`, `shell.go`, `run.go` | Execution commands |
+| `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
 | `status.go`, `logs.go`, `plan.go` | Information commands |
 
 **CLI Pattern:**
@@ -160,7 +162,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 
 ### Supporting Packages
 - `internal/lifecycle/` - Hook execution; `ParseCommand` is the only lifecycle command parser; `Markers` records completed once-per-container phases
-- `internal/ssh/` - SSH agent detection, host config management
+- `internal/ssh/` - Host keys, known_hosts, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only), `server` (the agent)
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agent/` - Agent CLI and SSH server implementation
@@ -390,6 +392,7 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 
 ## Package Rules
 
+- Users connect with OpenSSH (`dcx ssh`, `ssh <alias>`); dcx's own SSH client (`internal/ssh/client`) is for lifecycle hooks only.
 - Only `internal/cli` (and `internal/ui`) print. Everything else takes a `report.Reporter`; commands with `--json` output pass `report.Discard`.
 - Library code never constructs a Docker client; it receives a `container.Engine`. Use `containertest.Fake` in unit tests.
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).

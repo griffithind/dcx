@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/features"
 )
 
@@ -131,8 +130,8 @@ func stageFeatures(featureList []*features.Feature, destDir string, containerUse
 // generateBuiltinEnv creates the content for builtin.env file.
 // This file is sourced by feature install scripts to get user/home environment.
 func generateBuiltinEnv(containerUser, remoteUser string) string {
-	containerUserHome := common.GetDefaultHomeDir(containerUser)
-	remoteUserHome := common.GetDefaultHomeDir(remoteUser)
+	containerUserHome := features.DefaultHomeDir(containerUser)
+	remoteUserHome := features.DefaultHomeDir(remoteUser)
 
 	return fmt.Sprintf(`#!/bin/sh
 # Builtin environment for devcontainer features

@@ -38,7 +38,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 
 	// Verify SSH_AUTH_SOCK is set inside the container during exec
 	t.Run("ssh_auth_sock_set", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SSH_AUTH_SOCK")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "SSH_AUTH_SOCK")
 		require.NoError(t, err)
 		sockPath := strings.TrimSpace(stdout)
 		assert.NotEmpty(t, sockPath, "SSH_AUTH_SOCK should be set")
@@ -47,7 +47,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	// Verify the socket file exists during exec
 	t.Run("socket_accessible", func(t *testing.T) {
 		// Use a shell command to get the socket path and test it
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 			"sh", "-c", "test -S \"$SSH_AUTH_SOCK\" && echo ok")
 		require.NoError(t, err, "SSH agent socket should exist during exec")
 		assert.Contains(t, stdout, "ok")
@@ -56,12 +56,12 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	// Try to list SSH keys (this will work if host has keys, or return empty list)
 	t.Run("ssh_add_works", func(t *testing.T) {
 		// Install openssh-client in alpine to use ssh-add
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "apk", "add", "--no-cache", "openssh-client")
+		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
 		require.NoError(t, err, "failed to install openssh-client")
 
 		// Run ssh-add -l - it should either list keys or say "no identities"
 		// Both are valid responses indicating the agent is working
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ssh-add", "-l")
+		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ssh-add", "-l")
 		combined := stdout + stderr
 
 		// ssh-add -l returns:
@@ -79,13 +79,13 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	// Test SSH connection to GitHub
 	t.Run("github_ssh_connection", func(t *testing.T) {
 		// Install openssh-client for ssh command
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "apk", "add", "--no-cache", "openssh-client")
+		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
 		require.NoError(t, err, "failed to install openssh-client")
 
 		// Try to connect to GitHub via SSH
 		// ssh -T git@github.com returns exit code 1 with "successfully authenticated" on success
 		// or exit code 255 with permission denied on failure
-		stdout, stderr, _ := helpers.RunDCXInDir(t, workspace, "exec", "--",
+		stdout, stderr, _ := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 			"ssh", "-T", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "git@github.com")
 		combined := strings.ToLower(stdout + stderr)
 
@@ -129,7 +129,7 @@ func TestSSHAgentAlwaysEnabledE2E(t *testing.T) {
 
 	// Verify SSH_AUTH_SOCK is set inside the container when host has SSH agent
 	t.Run("ssh_auth_sock_set", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SSH_AUTH_SOCK")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "SSH_AUTH_SOCK")
 		require.NoError(t, err)
 		sockPath := strings.TrimSpace(stdout)
 		assert.NotEmpty(t, sockPath, "SSH_AUTH_SOCK should be set when host has SSH agent")
@@ -167,7 +167,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+				stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 					"sh", "-c", "test -S \"$SSH_AUTH_SOCK\" && echo ok")
 				if err != nil {
 					errors <- err
@@ -198,7 +198,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 	// Test that one exec finishing doesn't kill another's agent
 	t.Run("cleanup_doesnt_affect_other_execs", func(t *testing.T) {
 		// Install openssh-client first
-		_, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "apk", "add", "--no-cache", "openssh-client")
+		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
 		require.NoError(t, err, "failed to install openssh-client")
 
 		// Start a long-running exec
@@ -210,7 +210,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// This exec will sleep for 3 seconds then check agent
-			stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+			stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 				"sh", "-c", "sleep 3 && ssh-add -l 2>&1 || echo 'agent-accessible'")
 			if err == nil {
 				longExecResult <- stdout
@@ -222,7 +222,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Run a quick exec that will finish first
-		_, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "quick-exec")
+		_, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "quick-exec")
 		require.NoError(t, err, "quick exec should succeed")
 
 		// Wait for long exec to complete

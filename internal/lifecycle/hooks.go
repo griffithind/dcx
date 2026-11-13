@@ -15,7 +15,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
-	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
+	sshclient "github.com/griffithind/dcx/internal/ssh/client"
 )
 
 // WaitFor represents the lifecycle command to wait for before considering
@@ -67,15 +67,12 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	ports         sshexec.PortResolver
+	ports         sshclient.PortResolver
 	report        report.Reporter
 	containerID   string
 	workspacePath string
 	cfg           *devcontainer.DevContainerConfig
 	workspaceID   string
-
-	// Probed environment from userEnvProbe (optional, set via SetProbedEnv)
-	probedEnv map[string]string
 
 	// Feature hooks (optional, set via SetFeatureHooks)
 	featureOnCreateHooks      []features.FeatureHook
@@ -91,7 +88,7 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
-func NewHookRunner(ports sshexec.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
+func NewHookRunner(ports sshclient.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	r := &HookRunner{
 		ports:         ports,
 		report:        report.OrDiscard(rep),
@@ -114,12 +111,6 @@ func (r *HookRunner) SetFeatureHooks(onCreate, updateContent, postCreate, postSt
 	r.featureUpdateContentHooks = updateContent
 	r.featurePostCreateHooks = postCreate
 	r.featurePostStartHooks = postStart
-}
-
-// SetProbedEnv sets the probed environment from userEnvProbe.
-// These environment variables will be injected into all container commands.
-func (r *HookRunner) SetProbedEnv(env map[string]string) {
-	r.probedEnv = env
 }
 
 // getWaitFor returns the WaitFor value from config, defaulting to updateContentCommand per spec.
@@ -329,27 +320,15 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		execCmd = []string{"sh", "-c", cmdSpec.Args[0]}
 	}
 
-	var env []string
-	for k, v := range r.probedEnv {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	tty := false
-	exitCode, err := sshexec.ExecInContainer(ctx, sshexec.ContainerExecOptions{
+	// The agent gives every session the workspace's remoteEnv and probed
+	// user environment, so hooks see the same environment as shells.
+	exitCode, err := sshclient.Run(ctx, sshclient.RunOptions{
 		ContainerName: r.containerID,
 		WorkspaceID:   r.workspaceID,
-		Config:        r.cfg,
-		WorkspacePath: r.workspacePath,
 		Command:       execCmd,
-		Env:           env,
-		TTY:           &tty,
-		// Hooks are non-interactive. Passing os.Stdin would leave a
-		// goroutine reading the user's terminal after the hook ends,
-		// swallowing input meant for whatever runs next (e.g. dcx shell).
-		Stdin:  strings.NewReader(""),
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-		Ports:  r.ports,
+		Stdout:        os.Stdout,
+		Stderr:        os.Stderr,
+		Ports:         r.ports,
 	})
 	if err != nil {
 		return err

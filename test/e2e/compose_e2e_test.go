@@ -60,9 +60,9 @@ services:
 		assert.Equal(t, "running", state)
 	})
 
-	// Test dcx exec
+	// Test dcx ssh -- <cmd>
 	t.Run("exec_runs_command", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "hello")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "hello")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "hello")
 	})
@@ -138,7 +138,7 @@ services:
 	assert.Equal(t, "running", state)
 
 	// Verify we can exec into the primary service
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "test")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "test")
 }
@@ -368,7 +368,7 @@ func TestComposeLocalFeatureCachingE2E(t *testing.T) {
 
 	// Verify feature is active
 	t.Run("feature_active", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "feature installed")
 	})
@@ -389,7 +389,7 @@ func TestComposeLocalFeatureCachingE2E(t *testing.T) {
 
 	// Verify feature is still active after down/up cycle
 	t.Run("feature_still_active_after_cycle", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "feature installed")
 	})

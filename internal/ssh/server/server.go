@@ -22,7 +22,6 @@ import (
 
 	"github.com/gliderlabs/ssh"
 	"github.com/griffithind/dcx/internal/agentproto"
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/pkg/sftp"
 	gossh "golang.org/x/crypto/ssh"
 )
@@ -256,7 +255,12 @@ func (s *Server) buildEnvironment() []string {
 	if u, err := user.Lookup(s.cfg.User); err == nil {
 		env = append(env, "HOME="+u.HomeDir)
 	} else {
-		env = append(env, "HOME="+common.GetDefaultHomeDir(s.cfg.User))
+		// Conventional fallback when the user is not in /etc/passwd.
+		home := "/home/" + s.cfg.User
+		if s.cfg.User == "" || s.cfg.User == "root" {
+			home = "/root"
+		}
+		env = append(env, "HOME="+home)
 	}
 
 	// Set shell

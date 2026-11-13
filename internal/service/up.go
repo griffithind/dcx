@@ -37,9 +37,8 @@ type upRun struct {
 	existing *state.ContainerInfo // what the state lookup found before any change
 
 	// Set by the steps.
-	info      *state.ContainerInfo // the container after create/start
-	started   bool                 // the container was created or started by this run
-	probedEnv map[string]string
+	info    *state.ContainerInfo // the container after create/start
+	started bool                 // the container was created or started by this run
 }
 
 // upStep is one idempotent step of bringing an environment up. Each step
@@ -273,7 +272,6 @@ func (s *DevContainerService) stepEnvironment(ctx context.Context, r *upRun) err
 	if err != nil {
 		s.report.Warnf("Environment setup failed: %v", err)
 	}
-	r.probedEnv = probed
 	if err := s.writeSessionConfig(ctx, r, sessionConfig(r.resolved, probed, remoteEnv)); err != nil {
 		return fmt.Errorf("write session configuration: %w", err)
 	}
@@ -351,9 +349,6 @@ func (s *DevContainerService) stepSSHConfig(ctx context.Context, r *upRun) error
 // hookRunner builds a lifecycle hook runner for the resolved config.
 func (s *DevContainerService) hookRunner(r *upRun, containerID string) *lifecycle.HookRunner {
 	runner := lifecycle.NewHookRunner(s.engine, s.report, containerID, s.workspacePath, r.resolved.RawConfig, r.resolved.ID)
-	if r.probedEnv != nil {
-		runner.SetProbedEnv(r.probedEnv)
-	}
 	if len(r.resolved.Features) > 0 {
 		runner.SetFeatureHooks(
 			features.CollectOnCreateCommands(r.resolved.Features),

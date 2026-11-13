@@ -63,7 +63,7 @@ const (
 )
 
 // SessionConfig is what every SSH session gets, whether it comes from
-// `dcx shell`, plain `ssh`, an editor or scp: the devcontainer's remote
+// `dcx ssh`, plain `ssh`, an editor or scp: the devcontainer's remote
 // environment and its postAttachCommand.
 type SessionConfig struct {
 	// Env is applied to every session: the userEnvProbe result overlaid

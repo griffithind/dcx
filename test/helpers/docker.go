@@ -2,7 +2,10 @@
 package helpers
 
 import (
+	"bytes"
 	"context"
+	"github.com/creack/pty"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,4 +194,23 @@ func ContainsLabel(output, label, value string) bool {
 		}
 	}
 	return false
+}
+
+// RunDCXInPTY runs dcx in dir with a pseudo-terminal as its stdin/stdout,
+// as an interactive user would, typing input. It returns the terminal
+// output once dcx exits.
+func RunDCXInPTY(t *testing.T, dir, input string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(GetDCXBinary(t), args...)
+	cmd.Dir = dir
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	go func() { _, _ = ptmx.Write([]byte(input)) }()
+	var out bytes.Buffer
+	_, _ = io.Copy(&out, ptmx) // ends with EIO once dcx exits
+	return out.String(), cmd.Wait()
 }

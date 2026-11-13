@@ -47,9 +47,9 @@ func TestFromCIDRs(t *testing.T) {
 		"[::1]:22",
 	}
 	denied := []string{
-		"10.0.1.0:22",      // just outside /24
-		"192.168.1.6:22",   // not the single host
-		"127.0.0.1:22",     // not in any range
+		"10.0.1.0:22",    // just outside /24
+		"192.168.1.6:22", // not the single host
+		"127.0.0.1:22",   // not in any range
 		"[fe80::1]:22",
 	}
 
@@ -143,4 +143,3 @@ func TestAllowNonIPAddr(t *testing.T) {
 		t.Error("Unix addr should not satisfy an IP gate")
 	}
 }
-

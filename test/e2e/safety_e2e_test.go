@@ -38,13 +38,13 @@ func TestStopStartKeepsEnvironmentUsableE2E(t *testing.T) {
 
 	execEcho := func(t *testing.T, marker string) {
 		t.Helper()
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", marker)
+		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", marker)
 		require.NoError(t, err, "exec failed: stdout=%s stderr=%s", stdout, stderr)
 		assert.Contains(t, stdout, marker)
 	}
 	postStartRuns := func(t *testing.T) int {
 		t.Helper()
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/poststart.log")
+		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/poststart.log")
 		require.NoError(t, err, "stdout=%s stderr=%s", stdout, stderr)
 		return strings.Count(stdout, "started")
 	}
@@ -96,7 +96,7 @@ volumes:
 	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down", "--volumes") })
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	_, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo keep-me > /data/marker")
+	_, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "echo keep-me > /data/marker")
 	require.NoError(t, err, stderr)
 
 	// Change the config so the environment becomes stale and is recreated.
@@ -110,7 +110,7 @@ volumes:
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "devcontainer.json"), []byte(changed), 0644))
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/data/marker")
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/data/marker")
 	require.NoError(t, err, "named volume content lost after recreate: stdout=%s stderr=%s", stdout, stderr)
 	assert.Contains(t, stdout, "keep-me")
 }
@@ -126,7 +126,7 @@ func TestSecretsDirIsTmpfsE2E(t *testing.T) {
 	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--",
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 		"awk", `$2=="/run/secrets"{print $3}`, "/proc/mounts")
 	require.NoError(t, err, stderr)
 	assert.Equal(t, "tmpfs", strings.TrimSpace(stdout), "/run/secrets must be a tmpfs mount")
@@ -220,7 +220,7 @@ RUN adduser -D -u 1234 dev && adduser -D -u 1235 other \
 		stdout, stderr, err := runSFTP(t, hostname, fmt.Sprintf("put %s /tmp/sftp-upload.txt", local))
 		require.NoError(t, err, "sftp put failed: stdout=%s stderr=%s", stdout, stderr)
 
-		owner, stderr, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "stat", "-c", "%U", "/tmp/sftp-upload.txt")
+		owner, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "stat", "-c", "%U", "/tmp/sftp-upload.txt")
 		require.NoError(t, err, stderr)
 		assert.Equal(t, "dev", strings.TrimSpace(owner), "SFTP-created files must be owned by remoteUser")
 	})

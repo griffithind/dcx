@@ -315,15 +315,15 @@ Lifecycle hooks still need an in-process client, to stream output and run as a s
 
 ### Phase 8: thin CLI and cleanup (2–3 days)
 
-- [ ] Every command goes through `app`.
-- [ ] Delete `dcx shell` and `dcx exec` (needs the Phase 7 ssh parity). Their replacement is a thin, cwd-aware launcher, `dcx ssh [-- cmd args…]`. It preflights "is it running", then `syscall.Exec`s OpenSSH to the workspace alias: `-t` when interactive, and the command joined with `shell.Join`, because OpenSSH space-joins argv and would otherwise change quoting compared with `dcx exec -- a "b c"`. Printing the command moves to `dcx ssh info`. This is a breaking change, so it gets a release note.
-- [ ] `dcx run <shortcut>` resolves the shortcut on the host as now, then goes through the same OpenSSH launcher.
-- [ ] Shrink `internal/ssh/exec` → `internal/ssh/client` (hooks only): drop TTY, window resize, interactive shell and the remoteEnv builder.
-- [ ] e2e: replace the ~135 `RunDCXInDir(…, "exec", "--", …)` calls with `helpers.SSHExec(t, workspace, args…)`. It runs `ssh` against the generated config, so the suite tests the path users actually take. This is a mechanical rewrite. Add e2e tests for remoteEnv, postAttach and an alias collision over plain ssh.
-- [ ] `doctor`/`debug` → `app.Diagnose` returning check results; the CLI renders them. Reuse the real resolver so debug can't disagree with up.
-- [ ] Flag parsing: drop the early `ParseFlags`; use `PersistentPreRunE` for UI init.
-- [ ] Shortcuts: run string shortcuts with `sh -c` (with args appended as `"$@"`), not `Fields` + quoting.
-- [ ] Delete `common`, `util`, the unused `errors` package and the dead models. Add `depguard` rules.
+- [x] `dcx shell` and `dcx exec` are deleted. `dcx ssh [-- cmd args…]` replaces them. It finds the workspace from the cwd, checks that the container is running and SSH is configured, then `syscall.Exec`s OpenSSH to the configured alias. It passes `-t` when stdin and stdout are terminals (`-T` otherwise) and joins the command with `shell.Join`, so `a "b c"` keeps its quoting. A command must follow `--`. `--connect` is kept as a hidden no-op. Printing the alias moved to `dcx ssh info`. The README has an "Upgrading" section with the breaking changes.
+- [x] `dcx run` resolves the shortcut on the host and goes through the same launcher. Shortcuts are run with `sh -c '<text> "$@"' dcx-run <args…>`, so shell syntax in `command`/`prefix` works and arguments keep their exact value (before, `strings.Fields` split the text and quoted the pieces, which broke `&&`, pipes and quotes).
+- [x] `internal/ssh/exec` became `internal/ssh/client`, which serves hooks only: `Run(ctx, RunOptions)`, non-interactive, with empty stdin, cancellable and with agent forwarding. TTY, window resize, interactive shell and the client-side remoteEnv/probe env are gone, because the agent gives every session `session.json`, hooks included. `HookRunner.SetProbedEnv` is gone too.
+- [x] e2e: all 124 `dcx exec` calls run `dcx ssh --`, so the suite goes through OpenSSH and the generated config, the way users connect. Interactive tests run `dcx ssh` under a real PTY (`helpers.RunDCXInPTY`); a non-terminal `dcx ssh` correctly gets no PTY and no postAttach. New test: two same-name checkouts each reach their own container by their own alias, over plain ssh and `dcx ssh`.
+- [x] `doctor` and `debug` resolve through `DevContainerService.Load`: same discovery (including `.devcontainer/<folder>/`), substitution, image metadata and lockfile as `up`. Before, they parsed the file themselves with no substitution, so they could report a different hash or user. `doctor`'s own `--config` flag shadowed the global `--config <path>`; it is now `--config-only`.
+- [x] UI setup runs in `PersistentPreRunE` after Cobra parses flags; the early `ParseFlags` is gone.
+- [x] `common`, `util` and the never-used `errors` package (`DCXError` was never constructed) are deleted. Their helpers moved to their owners: `devcontainer.SanitizeProjectName`/`SSHHostSuffix`, `container.ImageTagPrefix`, `features.DefaultHomeDir`, and private helpers elsewhere.
+- [x] `.golangci.yml` adds `depguard` rules: no `internal/ui`/pterm outside `cli`/`ui`; the agent (`ssh/server`, `cmd/dcx-agent`) imports no Cobra or host-side packages; `agentproto` is stdlib-only. A probe confirmed the rules fire.
+- [ ] Not done: a separate `app` layer. Commands already delegate to `DevContainerService`; the remaining direct `*Docker` use (`clean`, `list`, `logs`, stop/restart compose paths) is small. Doctor/debug results still render in the CLI, not through a `Diagnose` API. The friendly "not running" error exists only in `dcx ssh` (plain `ssh` reports connection refused).
 
 **Total:** roughly 6–8 focused weeks for one person. Phases 0–1 deliver most of the risk reduction in the first week.
 

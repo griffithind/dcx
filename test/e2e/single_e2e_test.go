@@ -43,9 +43,9 @@ func TestSingleImageBasedE2E(t *testing.T) {
 		assert.Equal(t, "running", state)
 	})
 
-	// Test dcx exec
+	// Test dcx ssh -- <cmd>
 	t.Run("exec_runs_command", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "hello-from-single")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "hello-from-single")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "hello-from-single")
 	})
@@ -125,7 +125,7 @@ RUN echo "built from dockerfile" > /built-marker
 
 	// Test that built content exists
 	t.Run("dockerfile_executed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "exec", "--", "cat", "/built-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/built-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "built from dockerfile")
 	})
@@ -161,7 +161,7 @@ func TestSingleContainerWithEnv(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Test env var is set
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "MY_TEST_VAR")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "MY_TEST_VAR")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "test-value-123")
 }
@@ -192,7 +192,7 @@ func TestSingleContainerWithMounts(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Test workspace mount
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/workspace/test-file.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/workspace/test-file.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "mounted content")
 }
@@ -235,7 +235,7 @@ RUN echo "version1" > /version
 	helpers.RunDCXInDirSuccess(t, tmpDir, "up")
 
 	// Verify version1
-	stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "exec", "--", "cat", "/version")
+	stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/version")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "version1")
 
@@ -250,7 +250,7 @@ RUN echo "version2" > /version
 	helpers.RunDCXInDirSuccess(t, tmpDir, "up", "--rebuild")
 
 	// Verify version2
-	stdout, _, err = helpers.RunDCXInDir(t, tmpDir, "exec", "--", "cat", "/version")
+	stdout, _, err = helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/version")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "version2")
 }

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/shell"
 )
 
@@ -37,8 +36,8 @@ func NewDockerfileGenerator(baseImage string, features []*Feature, buildDir, rem
 
 	// Note: Home directories are resolved dynamically at build time using getent
 	// We set static defaults here that will be overridden by the dynamic resolution
-	containerUserHome := common.GetDefaultHomeDir(containerUser)
-	remoteUserHome := common.GetDefaultHomeDir(remoteUser)
+	containerUserHome := DefaultHomeDir(containerUser)
+	remoteUserHome := DefaultHomeDir(remoteUser)
 
 	return &DockerfileGenerator{
 		baseImage:         baseImage,
@@ -364,4 +363,13 @@ func dockerfileLabelQuote(s string) string {
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	s = strings.ReplaceAll(s, `$`, `\$`)
 	return `"` + s + `"`
+}
+
+// DefaultHomeDir returns the conventional home directory of a user: /root
+// for root, /home/<user> otherwise (_REMOTE_USER_HOME and friends).
+func DefaultHomeDir(user string) string {
+	if user == "" || user == "root" {
+		return "/root"
+	}
+	return "/home/" + user
 }

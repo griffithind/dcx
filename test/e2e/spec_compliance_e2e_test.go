@@ -37,20 +37,20 @@ func TestRemoteEnvE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	t.Run("remoteEnv_is_available_in_exec", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "REMOTE_VAR_1")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "REMOTE_VAR_1")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "remote-value-1")
 	})
 
 	t.Run("multiple_remoteEnv_vars", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "printenv REMOTE_VAR_1 && printenv REMOTE_VAR_2")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "printenv REMOTE_VAR_1 && printenv REMOTE_VAR_2")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "remote-value-1")
 		assert.Contains(t, stdout, "remote-value-2")
 	})
 
 	t.Run("remoteEnv_EDITOR", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "EDITOR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "EDITOR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "vim")
 	})
@@ -85,20 +85,20 @@ func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	t.Run("containerEnv_is_available", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "CONTAINER_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "CONTAINER_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "container-value")
 	})
 
 	t.Run("remoteEnv_is_available", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "REMOTE_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "REMOTE_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "remote-value")
 	})
 
 	t.Run("remoteEnv_can_override_containerEnv", func(t *testing.T) {
 		// Per spec, remoteEnv is applied per session and should override containerEnv
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "printenv", "SHARED_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "SHARED_VAR")
 		require.NoError(t, err)
 		// remoteEnv should take precedence in exec sessions
 		assert.Contains(t, stdout, "from-remote")
@@ -128,7 +128,7 @@ func TestOverrideCommandDefaultImageE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Verify the container is running by executing a command
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "container-is-running")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "container-is-running")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "container-is-running")
 }
@@ -161,7 +161,7 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// PID 1 is the image's own command, not dcx's sleep.
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "/bin/sh")
 	assert.NotContains(t, stdout, "sleep")

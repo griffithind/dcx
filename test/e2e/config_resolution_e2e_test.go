@@ -17,7 +17,7 @@ import (
 
 func dcxExec(t *testing.T, workspace string, args ...string) string {
 	t.Helper()
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, append([]string{"exec", "--"}, args...)...)
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, append([]string{"ssh", "--"}, args...)...)
 	require.NoError(t, err, "exec %v: stdout=%s stderr=%s", args, stdout, stderr)
 	return strings.TrimSpace(stdout)
 }
@@ -118,7 +118,7 @@ func TestExplicitConfigAndContainerEnvRefsE2E(t *testing.T) {
 
 	helpers.RunDCXInDirSuccess(t, workspace, "-c", cfg, "up")
 
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "-c", cfg, "exec", "--", "sh", "-c", "pwd; echo $PATH")
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "-c", cfg, "ssh", "--", "sh", "-c", "pwd; echo $PATH")
 	require.NoError(t, err, "stdout=%s stderr=%s", stdout, stderr)
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
 	require.Len(t, lines, 2, stdout)

@@ -79,9 +79,9 @@ func (b *MetadataBuilder) WithLocalConfig(cfg *devcontainer.DevContainerConfig) 
 
 		// Container runtime
 		CapAdd:          cfg.CapAdd,
-		SecurityOpt:    cfg.SecurityOpt,
-		Privileged:     cfg.Privileged,
-		Init:           cfg.Init,
+		SecurityOpt:     cfg.SecurityOpt,
+		Privileged:      cfg.Privileged,
+		Init:            cfg.Init,
 		OverrideCommand: cfg.OverrideCommand,
 		ShutdownAction:  cfg.ShutdownAction,
 

@@ -2,8 +2,7 @@ package devcontainer
 
 import (
 	"encoding/json"
-
-	"github.com/griffithind/dcx/internal/util"
+	"fmt"
 )
 
 // DevcontainerMetadataLabel is the image label containing devcontainer metadata.
@@ -91,10 +90,10 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 		anyTrue(&merged.Init, l.Init)
 		anyTrue(&merged.Privileged, l.Privileged)
 
-		merged.CapAdd = util.UnionStrings(merged.CapAdd, l.CapAdd)
-		merged.SecurityOpt = util.UnionStrings(merged.SecurityOpt, l.SecurityOpt)
-		merged.RunArgs = util.UnionStrings(merged.RunArgs, l.RunArgs)
-		merged.ForwardPorts = util.UnionInterfaces(merged.ForwardPorts, l.ForwardPorts)
+		merged.CapAdd = unionStrings(merged.CapAdd, l.CapAdd)
+		merged.SecurityOpt = unionStrings(merged.SecurityOpt, l.SecurityOpt)
+		merged.RunArgs = unionStrings(merged.RunArgs, l.RunArgs)
+		merged.ForwardPorts = unionInterfaces(merged.ForwardPorts, l.ForwardPorts)
 		for _, m := range l.Mounts {
 			merged.Mounts = mergeMountByTarget(merged.Mounts, m)
 		}
@@ -235,5 +234,39 @@ func unionExtensions(target, source []interface{}) []interface{} {
 		}
 	}
 
+	return result
+}
+
+// unionStrings returns a followed by the elements of b not in a, without
+// duplicates.
+func unionStrings(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(a)+len(b))
+	result := make([]string, 0, len(a)+len(b))
+	for _, s := range append(append([]string(nil), a...), b...) {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// unionInterfaces is unionStrings for JSON arrays (compared by value).
+func unionInterfaces(a, b interface{}) []interface{} {
+	seen := make(map[string]bool)
+	result := []interface{}{}
+	for _, items := range []interface{}{a, b} {
+		arr, _ := items.([]interface{})
+		for _, item := range arr {
+			key := fmt.Sprint(item)
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, item)
+			}
+		}
+	}
 	return result
 }

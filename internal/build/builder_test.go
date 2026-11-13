@@ -47,4 +47,3 @@ func TestShouldUpdateRemoteUserUID(t *testing.T) {
 		})
 	}
 }
-

@@ -34,9 +34,9 @@ dcx up
 # Connect via SSH (auto-configured)
 ssh myproject.dcx
 
-# Or run commands directly
-dcx exec -- npm install
-dcx shell
+# Or, from the workspace directory
+dcx ssh                    # interactive shell
+dcx ssh -- npm install     # run a command
 ```
 
 ## Editor Integration
@@ -118,8 +118,8 @@ make build
 
 | Command | Description |
 |---------|-------------|
-| `dcx exec -- <cmd>` | Run a command in the container |
-| `dcx shell` | Open an interactive shell |
+| `dcx ssh` | Open an interactive shell (via OpenSSH, same session as `ssh <alias>`) |
+| `dcx ssh -- <cmd>` | Run a command in the container |
 | `dcx run <shortcut>` | Run a command shortcut defined in devcontainer.json |
 
 ### Information
@@ -142,7 +142,7 @@ make build
 | `dcx doctor` | Check system requirements |
 | `dcx debug` | Show detailed debugging information |
 | `dcx upgrade` | Update dcx to latest version |
-| `dcx ssh` | SSH connection info |
+| `dcx ssh info` | SSH alias, host key and connection details |
 
 ### Global Flags
 
@@ -412,6 +412,21 @@ Commands run at specific points in the container lifecycle:
 ```
 
 When `updateRemoteUserUID` is true, DCX updates the container user's UID/GID to match your host user, ensuring file permissions work correctly with mounted volumes.
+
+## Upgrading
+
+Changes since 0.7 that affect existing setups:
+
+- `dcx shell` and `dcx exec` are gone. Use `dcx ssh` and `dcx ssh -- <cmd>`
+  (or plain `ssh <alias>`). `dcx ssh` needs the OpenSSH client.
+- `dcx ssh` connects instead of printing the command; `dcx ssh info` shows
+  the alias and connection details.
+- dcx's SSH host blocks moved to `~/.ssh/dcx/config`, included from the top
+  of `~/.ssh/config`. Existing blocks move there on the next `dcx up`.
+- Shortcuts run through `sh -c`, so shell syntax in `command`/`prefix`
+  works; extra arguments are passed unchanged as `"$@"`.
+- Containers from older versions keep working; run `dcx up --recreate` to
+  pick up every change.
 
 ## Shell Completions
 

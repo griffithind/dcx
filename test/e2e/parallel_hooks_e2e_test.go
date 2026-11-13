@@ -37,15 +37,15 @@ func TestParallelPostCreateCommandE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Verify all three tasks executed
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/task1.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/task1.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "task1", "task1 should have executed")
 
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/task2.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/task2.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "task2", "task2 should have executed")
 
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/task3.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/task3.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "task3", "task3 should have executed")
 }
@@ -78,14 +78,14 @@ func TestParallelPostCreateCommandTimingE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// All commands should have completed
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c",
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c",
 		"cat /tmp/end1.txt /tmp/end2.txt /tmp/end3.txt | wc -l")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "3", "all three commands should have completed")
 
 	// Check that start times overlap (parallel execution)
 	// Get all start times and verify they're within 1 second of each other
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", `
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", `
 		start1=$(cat /tmp/start1.txt)
 		start2=$(cat /tmp/start2.txt)
 		start3=$(cat /tmp/start3.txt)
@@ -130,11 +130,11 @@ func TestParallelOnCreateCommandE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Verify both onCreateCommand tasks executed
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/oncreate1.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/oncreate1.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "oncreate1", "onCreateCommand task1 should have executed")
 
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/oncreate2.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/oncreate2.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "oncreate2", "onCreateCommand task2 should have executed")
 }
@@ -195,21 +195,21 @@ func TestMixedCommandFormatsE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Verify string format worked
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/oncreate.txt")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/oncreate.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "string-format")
 
 	// Verify parallel object format worked
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/parallel1.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/parallel1.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "parallel1")
 
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/parallel2.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/parallel2.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "parallel2")
 
 	// Verify array format worked
-	stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/poststart.txt")
+	stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/poststart.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "array-format")
 }

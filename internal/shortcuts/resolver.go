@@ -3,71 +3,58 @@ package shortcuts
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/shell"
 )
 
-// ResolvedCommand represents a resolved shortcut command.
+// ResolvedCommand is a shortcut expanded into the command line to run in
+// the container.
 type ResolvedCommand struct {
-	// Command is the full command to execute as separate arguments.
-	Command []string
+	// CommandLine is a shell command line for the remote shell.
+	CommandLine string
 
-	// Found indicates whether a shortcut was matched.
+	// Found is false when args[0] is not a shortcut.
 	Found bool
 }
 
-// Resolve resolves a command against configured shortcuts.
-// Returns the resolved command or the original if no shortcut matches.
+// Resolve expands args[0] when it names a shortcut.
 //
-// Examples:
-//
-//   - shortcuts["rw"] = "bin/jobs --skip-recurring"
-//     Resolve(shortcuts, ["rw"]) -> ["bin/jobs", "--skip-recurring"]
-//
-//   - shortcuts["r"] = {prefix: "rails", passArgs: true}
-//     Resolve(shortcuts, ["r", "console"]) -> ["rails", "console"]
-//     Resolve(shortcuts, ["r", "server", "-p", "3001"]) -> ["rails", "server", "-p", "3001"]
+// A shortcut's command or prefix is shell text, run with `sh -c`, so
+// pipes, `&&`, quotes and variables in it work. Remaining arguments are
+// passed to it as positional parameters ("$@") rather than pasted into
+// the text, so they keep their exact value whatever characters they
+// contain. Command shortcuts always receive the remaining arguments;
+// prefix shortcuts only with passArgs.
 func Resolve(shortcuts map[string]devcontainer.Shortcut, args []string) ResolvedCommand {
 	if len(args) == 0 || len(shortcuts) == 0 {
-		return ResolvedCommand{Command: args, Found: false}
+		return ResolvedCommand{}
 	}
-
-	shortcutName := args[0]
-	shortcut, exists := shortcuts[shortcutName]
-	if !exists {
-		return ResolvedCommand{Command: args, Found: false}
+	sc, ok := shortcuts[args[0]]
+	if !ok {
+		return ResolvedCommand{}
 	}
+	rest := args[1:]
 
-	remainingArgs := args[1:]
-
-	// Simple command shortcut - split the command and append remaining args
-	if shortcut.Command != "" {
-		cmdParts := strings.Fields(shortcut.Command)
-		return ResolvedCommand{
-			Command: append(cmdParts, remainingArgs...),
-			Found:   true,
+	switch {
+	case sc.Command != "":
+		return ResolvedCommand{CommandLine: shellCommand(sc.Command, rest), Found: true}
+	case sc.Prefix != "":
+		if !sc.PassArgs {
+			rest = nil
 		}
+		return ResolvedCommand{CommandLine: shellCommand(sc.Prefix, rest), Found: true}
 	}
+	return ResolvedCommand{}
+}
 
-	// Prefix with passthrough
-	if shortcut.Prefix != "" {
-		prefixParts := strings.Fields(shortcut.Prefix)
-		if shortcut.PassArgs {
-			return ResolvedCommand{
-				Command: append(prefixParts, remainingArgs...),
-				Found:   true,
-			}
-		}
-		// No passArgs - just return the prefix
-		return ResolvedCommand{
-			Command: prefixParts,
-			Found:   true,
-		}
+// shellCommand builds `sh -c '<script> "$@"' dcx-run <args…>`, quoted for
+// the remote shell.
+func shellCommand(script string, args []string) string {
+	if len(args) == 0 {
+		return shell.Join([]string{"sh", "-c", script})
 	}
-
-	// No valid shortcut definition
-	return ResolvedCommand{Command: args, Found: false}
+	return shell.Join(append([]string{"sh", "-c", script + ` "$@"`, "dcx-run"}, args...))
 }
 
 // ShortcutInfo contains display information about a shortcut.

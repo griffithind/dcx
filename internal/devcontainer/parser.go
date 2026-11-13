@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/util"
 	"github.com/tidwall/jsonc"
 )
 
@@ -43,20 +42,20 @@ func ParseFile(path string) (*DevContainerConfig, error) {
 // Per spec, supports multi-folder configurations: .devcontainer/<folder>/devcontainer.json
 func Resolve(workspacePath string) (string, error) {
 	// Ensure workspace exists
-	if !util.IsDir(workspacePath) {
+	if !isDir(workspacePath) {
 		return "", fmt.Errorf("workspace directory does not exist: %s", workspacePath)
 	}
 
 	// Try each standard location first
 	for _, loc := range configLocations {
 		configPath := filepath.Join(workspacePath, loc)
-		if util.IsFile(configPath) {
+		if isFile(configPath) {
 			return configPath, nil
 		}
 	}
 
 	devcontainerDir := filepath.Join(workspacePath, ".devcontainer")
-	if !util.IsDir(devcontainerDir) {
+	if !isDir(devcontainerDir) {
 		return "", fmt.Errorf("no devcontainer.json found in %s", workspacePath)
 	}
 
@@ -71,7 +70,7 @@ func Resolve(workspacePath string) (string, error) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			configPath := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
-			if util.IsFile(configPath) {
+			if isFile(configPath) {
 				folderConfigs = append(folderConfigs, configPath)
 				folderNames = append(folderNames, entry.Name())
 			}
@@ -122,4 +121,14 @@ func Load(workspacePath, configPath string) (*DevContainerConfig, string, error)
 
 	SubstituteConfig(cfg, NewSubstitutionContext(workspacePath, cfg))
 	return cfg, configPath, nil
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }

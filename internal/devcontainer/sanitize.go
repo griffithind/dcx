@@ -1,14 +1,11 @@
-// Package common provides shared utilities used across the DCX codebase.
-// This package has no dependencies on other internal packages to avoid import cycles.
-package common
+package devcontainer
 
 import "strings"
 
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.
 // Docker requires lowercase alphanumeric with hyphens/underscores, starting with a letter.
 //
-// This is the SINGLE SOURCE OF TRUTH for project name sanitization.
-// All other packages should import from here.
+// It is the only project name sanitizer in dcx.
 //
 // Rules:
 //   - Converts to lowercase

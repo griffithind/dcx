@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/build"
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
@@ -215,7 +214,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
-		imageTag := fmt.Sprintf("%s%s:base", common.ImageTagPrefix, r.resolved.ID)
+		imageTag := fmt.Sprintf("%s%s:base", ImageTagPrefix, r.resolved.ID)
 		r.report.Infof("Building image: %s", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
@@ -339,8 +338,8 @@ func (r *UnifiedRuntime) layerImages(ctx context.Context, baseImage string, rebu
 // layerTag returns dcx/<workspaceID>:<kind>-<hash of parts>.
 func (r *UnifiedRuntime) layerTag(kind string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return fmt.Sprintf("%s%s:%s-%s", common.ImageTagPrefix, r.resolved.ID, kind,
-		hex.EncodeToString(sum[:])[:common.HashTruncationLength])
+	return fmt.Sprintf("%s%s:%s-%s", ImageTagPrefix, r.resolved.ID, kind,
+		hex.EncodeToString(sum[:])[:hashTruncationLength])
 }
 
 // createContainer creates the primary container from imageRef.

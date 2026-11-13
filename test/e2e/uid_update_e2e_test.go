@@ -51,7 +51,7 @@ func TestUIDUpdateE2E(t *testing.T) {
 
 	// Check the user's UID inside the container
 	t.Run("uid_matches_host", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "id", "-u")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
 		require.NoError(t, err, "failed to get UID inside container")
 
 		containerUID := strings.TrimSpace(stdout)
@@ -70,12 +70,12 @@ func TestUIDUpdateE2E(t *testing.T) {
 		require.NoError(t, err)
 
 		// Read it from inside the container
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/workspace/"+testFile)
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/workspace/"+testFile)
 		require.NoError(t, err, "should be able to read workspace files")
 		assert.Contains(t, stdout, testContent)
 
 		// Write a file from inside the container
-		_, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "touch", "/workspace/created-inside.txt")
+		_, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "touch", "/workspace/created-inside.txt")
 		require.NoError(t, err, "should be able to create files in workspace")
 
 		// Verify the file exists on host
@@ -120,7 +120,7 @@ func TestUIDUpdateDisabledE2E(t *testing.T) {
 
 	// Check the user's UID inside the container - should be original (1000)
 	t.Run("uid_not_updated", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "id", "-u")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
 		require.NoError(t, err)
 
 		containerUID := strings.TrimSpace(stdout)
@@ -155,7 +155,7 @@ func TestUIDUpdateRootUserE2E(t *testing.T) {
 
 	// Check the user's UID inside the container - should be 0 (root)
 	t.Run("root_uid_not_updated", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "id", "-u")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
 		require.NoError(t, err)
 
 		containerUID := strings.TrimSpace(stdout)
@@ -195,7 +195,7 @@ func TestUIDUpdateNoFeaturesE2E(t *testing.T) {
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Verify UID is updated even without features
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "id", "-u")
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
 	require.NoError(t, err)
 
 	containerUID := strings.TrimSpace(stdout)

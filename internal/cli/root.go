@@ -32,6 +32,10 @@ requiring the @devcontainers/cli. Container state is tracked using labels,
 enabling offline-safe operations for start/stop/exec commands.`,
 	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Cobra has parsed the flags by now, so --quiet/--verbose/--no-color
+		// apply to everything the command prints.
+		initUI()
+
 		// Flags parsed successfully, so any error from here on is a runtime
 		// failure: report it without dumping the command's usage text.
 		// (Flag and argument errors happen earlier and still show usage.)
@@ -52,11 +56,6 @@ enabling offline-safe operations for start/stop/exec commands.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	// Parse flags early to configure UI before command execution.
-	// This ensures --no-color and --quiet affect output even for invalid commands.
-	_ = rootCmd.ParseFlags(os.Args[1:])
-	initUI()
-
 	err := rootCmd.Execute()
 	if err != nil {
 		ui.PrintError(err)

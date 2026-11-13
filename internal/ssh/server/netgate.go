@@ -106,4 +106,3 @@ func (g *Gate) Allow(addr net.Addr) bool {
 	}
 	return false
 }
-

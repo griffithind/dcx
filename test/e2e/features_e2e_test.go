@@ -37,7 +37,7 @@ func TestLocalFeatureE2E(t *testing.T) {
 
 	// Verify feature was installed by checking for marker file
 	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "feature installed")
 	})
@@ -59,7 +59,7 @@ func TestLocalFeatureWithOptionsE2E(t *testing.T) {
 
 	// Verify feature options were passed
 	t.Run("feature_options_passed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-options-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
 		require.NoError(t, err)
 		// Our config sets greeting to "CustomHello"
 		assert.Contains(t, stdout, "GREETING=CustomHello")
@@ -84,14 +84,14 @@ func TestLocalFeatureWithDependenciesE2E(t *testing.T) {
 
 	// Verify both features were installed
 	t.Run("simple_marker_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/simple-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/simple-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "simple-marker installed")
 	})
 
 	// Verify the dependent feature found its dependency
 	t.Run("dependent_feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-deps-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-deps-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "MESSAGE=depends")
 	})
@@ -114,12 +114,12 @@ func TestMultipleFeaturesE2E(t *testing.T) {
 	// Verify all features installed
 	t.Run("all_features_installed", func(t *testing.T) {
 		// Check simple-marker
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/simple-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/simple-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "simple-marker installed")
 
 		// Check with-options marker
-		stdout, _, err = helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-options-marker")
+		stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "GREETING")
 	})
@@ -411,7 +411,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Building derived image")
 
 		// Verify new options are in effect
-		execStdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/feature-options-marker")
+		execStdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
 		require.NoError(t, err)
 		assert.Contains(t, execStdout, "GREETING=ChangedHello")
 		assert.Contains(t, execStdout, "COUNT=10")
@@ -437,14 +437,14 @@ func TestFeatureWithMountsE2E(t *testing.T) {
 
 	// Verify the docker socket is mounted
 	t.Run("docker_socket_mounted", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "ls", "-la", "/var/run/docker.sock")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ls", "-la", "/var/run/docker.sock")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "docker.sock")
 	})
 
 	// Verify feature marker was installed
 	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/dcx-features/with-mounts-marker.txt")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/dcx-features/with-mounts-marker.txt")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "with-mounts installed")
 	})
@@ -713,7 +713,7 @@ func TestFeatureSecurityRequirementsE2E(t *testing.T) {
 	// Verify the capability is present by checking /proc/self/status
 	t.Run("capability_applied", func(t *testing.T) {
 		// SYS_PTRACE capability (cap 19) should be in the effective set
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/proc/self/status")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/proc/self/status")
 		require.NoError(t, err)
 		// The CapEff line shows effective capabilities as a hex bitmask
 		// SYS_PTRACE is capability 19, so bit 19 should be set
@@ -722,14 +722,14 @@ func TestFeatureSecurityRequirementsE2E(t *testing.T) {
 
 	// Verify feature env var is present
 	t.Run("feature_env_applied", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "echo $FEATURE_TEST_VAR")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "echo $FEATURE_TEST_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "security-feature-value")
 	})
 
 	// Verify feature marker was installed
 	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "cat", "/tmp/security-feature-marker")
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/security-feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "security feature installed")
 	})

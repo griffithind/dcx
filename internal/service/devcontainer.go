@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
@@ -87,7 +86,7 @@ func (s *DevContainerService) GetIdentifiers() (*Identifiers, error) {
 		workspaceID := devcontainer.ComputeID(s.workspacePath)
 		return &Identifiers{
 			WorkspaceID: workspaceID,
-			SSHHost:     workspaceID + common.SSHHostSuffix,
+			SSHHost:     workspaceID + devcontainer.SSHHostSuffix,
 		}, nil
 	}
 
@@ -218,7 +217,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 	// Project name from devcontainer.json name field
 	var projectName string
 	if cfg.Name != "" {
-		projectName = common.SanitizeProjectName(cfg.Name)
+		projectName = devcontainer.SanitizeProjectName(cfg.Name)
 	}
 
 	// Load lockfile if requested and features exist

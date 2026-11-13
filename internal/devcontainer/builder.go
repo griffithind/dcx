@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/state"
@@ -119,7 +118,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		projectName := ""
 		if explicitName := getExplicitProjectName(absolutePaths); explicitName != "" {
 			// Use explicit compose.yaml name
-			projectName = common.SanitizeProjectName(explicitName)
+			projectName = SanitizeProjectName(explicitName)
 			// Also update resolved.Name so SSH host and identifiers use compose name
 			resolved.Name = explicitName
 		}

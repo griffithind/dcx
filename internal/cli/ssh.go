@@ -1,58 +1,112 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
 
-	containerPkg "github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/ui"
+	"github.com/griffithind/dcx/internal/shell"
+	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var sshCmd = &cobra.Command{
-	Use:   "ssh",
-	Short: "SSH into the container",
-	Long: `SSH into the devcontainer for the current workspace.
+	Use:   "ssh [-- command [args...]]",
+	Short: "Open a shell or run a command in the container",
+	Long: `Open an interactive shell in the workspace's devcontainer, or run a
+command in it.
 
-With no flags, prints the ssh command to use. With --connect, execs ssh
-directly so the running process becomes the ssh session.`,
+dcx finds the workspace from the current directory, checks that its
+container is running, then hands over to OpenSSH using the host alias
+'dcx up' configured. The session is exactly what 'ssh <alias>' gives
+editors and other tools: the remote user, remoteEnv, the probed user
+environment, SSH agent forwarding, and postAttachCommand for interactive
+shells.
+
+Arguments after '--' keep their quoting:
+
+  dcx ssh                          # interactive shell
+  dcx ssh -- npm install
+  dcx ssh -- bash -c "echo hello"
+  dcx ssh -- git clone git@github.com:user/repo.git
+
+'dcx ssh info' prints the alias and connection details.`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runSSH,
 }
 
 var sshConnect bool
 
 func init() {
-	sshCmd.Flags().BoolVar(&sshConnect, "connect", false, "Exec ssh directly instead of printing the command")
-	sshCmd.GroupID = "utilities"
+	// --connect was needed when `dcx ssh` only printed the command; it is
+	// the default now and kept so existing scripts keep working.
+	sshCmd.Flags().BoolVar(&sshConnect, "connect", false, "connect (the default; kept for compatibility)")
+	_ = sshCmd.Flags().MarkHidden("connect")
+	sshCmd.GroupID = "execution"
 	rootCmd.AddCommand(sshCmd)
 }
 
 func runSSH(cmd *cobra.Command, args []string) error {
-	docker, err := containerPkg.NewDocker()
+	if len(args) > 0 && cmd.ArgsLenAtDash() != 0 {
+		return fmt.Errorf("put the command after '--': dcx ssh -- %s", shell.Join(args))
+	}
+
+	var remote string
+	if len(args) > 0 {
+		remote = shell.Join(args)
+	}
+	return sshInto(remote)
+}
+
+// sshInto replaces dcx with an OpenSSH session to the workspace's
+// container: an interactive shell when remote is empty, otherwise remote
+// (a shell command line, run by the remote user's shell). OpenSSH's exit
+// status becomes dcx's.
+func sshInto(remote string) error {
+	alias, err := runningWorkspaceAlias()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
+	}
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return fmt.Errorf("ssh (OpenSSH client) not found in PATH; dcx needs it to connect")
 	}
 
-	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
-	defer svc.Close()
-
-	alias := svc.SSHAlias(context.Background())
-	if alias == "" {
-		return fmt.Errorf("failed to determine the workspace's SSH alias")
-	}
-
-	if sshConnect {
-		sshPath, err := exec.LookPath("ssh")
-		if err != nil {
-			return fmt.Errorf("ssh not found in PATH")
+	argv := []string{"ssh"}
+	if remote != "" {
+		// A terminal only when both ends are one, so interactive commands
+		// (rails console, vim) work and piped output stays clean.
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			argv = append(argv, "-t")
+		} else {
+			argv = append(argv, "-T")
 		}
-		return syscall.Exec(sshPath, []string{"ssh", alias}, os.Environ())
 	}
+	argv = append(argv, alias)
+	if remote != "" {
+		argv = append(argv, "--", remote)
+	}
+	return syscall.Exec(sshPath, argv, os.Environ())
+}
 
-	ui.Printf("ssh %s", alias)
-	return nil
+// runningWorkspaceAlias checks that the workspace's container is running
+// and returns the SSH alias `dcx up` configured for it.
+func runningWorkspaceAlias() (string, error) {
+	cliCtx, err := NewCLIContext()
+	if err != nil {
+		return "", err
+	}
+	defer cliCtx.Close()
+
+	info, err := RequireRunningContainer(cliCtx)
+	if err != nil {
+		return "", err
+	}
+	aliases := hostconfig.Aliases(info.Name)
+	if len(aliases) == 0 {
+		return "", fmt.Errorf("SSH is not configured for this devcontainer; run 'dcx up'")
+	}
+	return aliases[0], nil
 }

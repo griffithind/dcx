@@ -64,7 +64,7 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 		case state.StateAbsent:
 			return nil, fmt.Errorf("no devcontainer found; run 'dcx up' first")
 		case state.StateCreated:
-			return nil, fmt.Errorf("devcontainer is not running; run 'dcx start' first")
+			return nil, fmt.Errorf("devcontainer is not running; run 'dcx up' first")
 		case state.StateBroken:
 			return nil, fmt.Errorf("devcontainer is in broken state; run 'dcx up --recreate'")
 		case state.StateStale:

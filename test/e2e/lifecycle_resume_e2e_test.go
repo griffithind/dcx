@@ -5,7 +5,6 @@ package e2e
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,7 +72,7 @@ func TestInitializeCommandRunsBeforeCreateE2E(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(string(data), "init"), "initializeCommand runs on every start")
 }
 
-// postAttachCommand runs when a user attaches with `dcx shell`.
+// postAttachCommand runs when a user attaches an interactive `dcx ssh`.
 func TestPostAttachRunsOnShellE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -87,14 +86,11 @@ func TestPostAttachRunsOnShellE2E(t *testing.T) {
 	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
-	_, _, err := helpers.RunDCXInDir(t, ws, "exec", "--", "test", "-f", "/tmp/attach.log")
-	assert.Error(t, err, "postAttachCommand must not run on up or exec")
+	_, _, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-f", "/tmp/attach.log")
+	assert.Error(t, err, "postAttachCommand must not run on up or for commands")
 
-	cmd := exec.Command(helpers.GetDCXBinary(t), "shell")
-	cmd.Dir = ws
-	cmd.Stdin = strings.NewReader("exit\n")
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
+	out, err := helpers.RunDCXInPTY(t, ws, "exit\n", "ssh")
+	require.NoError(t, err, out)
 
 	assert.Equal(t, "attached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
 }

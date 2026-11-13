@@ -80,7 +80,7 @@ func TestComposeRuntimeParityE2E(t *testing.T) {
 	assert.Contains(t, inspect(t, c, "{{.HostConfig.SecurityOpt}}"), "no-new-privileges:true")
 	assert.Equal(t, "true", inspect(t, c, "{{.HostConfig.Init}}"))
 
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "exec", "--", "printenv", "PRICE")
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "ssh", "--", "printenv", "PRICE")
 	assert.Equal(t, "costs $DCX_E2E_UNSET-5", strings.TrimSpace(stdout))
 
 	// The named volume keeps its own name (as with docker run), rather than
