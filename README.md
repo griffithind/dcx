@@ -25,9 +25,6 @@ curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | s
 # Navigate to a project with devcontainer.json
 cd myproject
 
-# Preview what will happen
-dcx plan
-
 # Start the devcontainer
 dcx up
 
@@ -127,7 +124,6 @@ make build
 | Command | Description |
 |---------|-------------|
 | `dcx status` | Show devcontainer status |
-| `dcx plan` | Preview execution plan without making changes |
 | `dcx list` | List all managed devcontainers |
 | `dcx logs` | View container logs |
 | `dcx config` | Show resolved configuration |
@@ -425,6 +421,8 @@ Changes since 0.7 that affect existing setups:
   of `~/.ssh/config`. Existing blocks move there on the next `dcx up`.
 - Shortcuts run through `sh -c`, so shell syntax in `command`/`prefix`
   works; extra arguments are passed unchanged as `"$@"`.
+- `dcx plan` is gone; `dcx status` shows the state and whether the config
+  changed.
 - Containers from older versions keep working; run `dcx up --recreate` to
   pick up every change.
 

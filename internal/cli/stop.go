@@ -1,11 +1,7 @@
 package cli
 
 import (
-	"fmt"
-
-	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -27,61 +23,28 @@ will not be stopped unless --force is used.`,
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	// Initialize CLI context
 	cliCtx, err := NewCLIContext()
 	if err != nil {
 		return err
 	}
 	defer cliCtx.Close()
 
-	// Get current state (allow any state)
-	result, err := CheckState(cliCtx)
+	outcome, err := cliCtx.Service.Stop(cliCtx.Ctx, service.StopOptions{Force: stopForce})
 	if err != nil {
 		return err
 	}
-
-	currentState := result.State
-	containerInfo := result.ContainerInfo
-
-	switch currentState {
-	case state.StateAbsent:
+	switch outcome {
+	case service.StopNotFound:
 		ui.Println("No devcontainer found")
-		return nil
-
-	case state.StateCreated:
+	case service.StopAlreadyStopped:
 		ui.Println("Devcontainer is already stopped")
-		return nil
-
-	case state.StateRunning, state.StateStale, state.StateBroken:
-		// Check shutdownAction setting if not forcing
-		if !stopForce {
-			cfg, _, loadErr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
-			if loadErr == nil && cfg.ShutdownAction == "none" {
-				ui.Println("Skipping stop: shutdownAction is set to 'none'")
-				ui.Println("Use --force to stop anyway")
-				return nil
-			}
-		}
-
-		// Determine plan type from container labels (single-container vs compose)
-		if containerInfo.IsSingleContainer() {
-			// Single container - use Docker API directly
-			if err := cliCtx.Docker.StopContainer(cliCtx.Ctx, containerInfo.ID, nil); err != nil {
-				return fmt.Errorf("failed to stop container: %w", err)
-			}
-		} else {
-			// Compose plan - use docker compose
-			r := container.ExistingComposeProject(containerInfo, cliCtx.Identifiers.ProjectName, cliCtx.WorkspacePath())
-			if err := r.Stop(cliCtx.Ctx, cliCtx.Docker); err != nil {
-				return fmt.Errorf("failed to stop containers: %w", err)
-			}
-		}
+	case service.StopSkipped:
+		ui.Println("Skipping stop: shutdownAction is set to 'none'")
+		ui.Println("Use --force to stop anyway")
+	case service.StopDone:
 		ui.Success("Devcontainer stopped")
-		return nil
-
-	default:
-		return fmt.Errorf("unexpected state: %s", currentState)
 	}
+	return nil
 }
 
 func init() {

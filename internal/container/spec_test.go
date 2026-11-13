@@ -203,8 +203,8 @@ func TestDockerRunArgsEntrypoint(t *testing.T) {
 	assert.Equal(t, []string{"create", "-t", "-i"}, args[:3])
 }
 
-func gpuRuntime(plan devcontainer.ExecutionPlan) *UnifiedRuntime {
-	return &UnifiedRuntime{report: report.Discard, resolved: &devcontainer.ResolvedDevContainer{
+func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
+	return &Provisioner{report: report.Discard, resolved: &devcontainer.ResolvedDevContainer{
 		ID:              "1234abcd5678",
 		Name:            "ws",
 		ServiceName:     "ws-1234abcd",

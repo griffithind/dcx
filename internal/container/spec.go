@@ -7,7 +7,7 @@ import (
 )
 
 // ContainerSpec holds every runtime setting of the primary dev container.
-// It is built once from the resolved configuration (UnifiedRuntime.spec) and
+// It is built once from the resolved configuration (Provisioner.spec) and
 // rendered by both engines: dockerRunArgs for single-container plans and
 // composeOverride for compose plans. Settings therefore cannot apply to one
 // plan type and silently not to the other; TestContainerSpecParity fails

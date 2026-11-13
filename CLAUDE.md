@@ -39,7 +39,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
                       │ uses
 ┌─────────────────────▼───────────────────────────────────────┐
 │  Runtime Layer (internal/container/)                        │
-│  UnifiedRuntime handles Image/Dockerfile/Compose uniformly  │
+│  Provisioner handles Image/Dockerfile/Compose uniformly     │
 │  Docker client wraps docker CLI                             │
 └─────────────────────┬───────────────────────────────────────┘
                       │ operates on
@@ -64,7 +64,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
-| `status.go`, `logs.go`, `plan.go` | Information commands |
+| `status.go`, `logs.go`, `list.go` | Information commands |
 
 **CLI Pattern:**
 ```go
@@ -81,7 +81,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 
 **Key Methods:**
 - `Load()` / `LoadWithOptions()` - Resolve devcontainer configuration
-- `Plan()` - Analyze state and determine action (Create/Start/Recreate/Skip)
+- `Stop()` / `Restart()` - Stop (honouring `shutdownAction`), or stop and bring up again through `Up`
 - `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
 - `Down()` / `DownWithIDs()` - Remove containers
 - `Build()` - Build images without starting
@@ -89,7 +89,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 
 **Up() Flow** (`internal/service/up.go`, idempotent steps; a failed or interrupted Up resumes on the next run):
 ```
-Load config → Check state (running + setup complete → done)
+Load config → decideUp(state, setup complete, --recreate/--rebuild) → none | resume | start | create | recreate
     → initialize (host initializeCommand)
     → container (create / recreate / start / resume)
     → agent (versioned deploy, SSH secrets, launch + readiness)
@@ -103,7 +103,7 @@ Load config → Check state (running + setup complete → done)
 ### Runtime Layer (`internal/container/`)
 | File | Purpose |
 |------|---------|
-| `unified.go` | `UnifiedRuntime` - strategy pattern for all plan types |
+| `provisioner.go` | `Provisioner` - builds image layers and creates/starts the environment for all plan types |
 | `engine.go` | `Engine` interface - everything the service/runtime need from the container engine |
 | `docker.go` | `Docker` - the Docker CLI implementation of `Engine` (no singleton; injected) |
 | `containertest/` | `Fake` in-memory `Engine` for unit tests |
@@ -112,7 +112,7 @@ Load config → Check state (running + setup complete → done)
 | `compose_override.go` | `composeOverride` - renders a `ContainerSpec` as compose override YAML (yaml.v3) |
 | `secrets.go` | Secret mounting after container start |
 
-**UnifiedRuntime Plan Dispatch:**
+**Provisioner plan dispatch:**
 ```go
 switch plan := r.resolved.Plan.(type) {
 case *devcontainer.ComposePlan:
@@ -140,7 +140,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | File | Purpose |
 |------|---------|
 | `manager.go` | `StateManager` - detects state via Docker labels |
-| `state.go` | `ContainerState` enum (Absent, Created, Running, Stale, Broken) and `DeterminePlanAction` |
+| `state.go` | `ContainerState` enum (Absent, Created, Running, Stale, Broken) and `ContainerInfo` |
 | `labels.go` | `ContainerLabels` struct, label schema (prefix: `com.griffithind.dcx`) |
 
 #### Features (`internal/features/`)
@@ -237,7 +237,7 @@ CLIContext (Docker, Service, Identifiers)
     ├─ Load() → ResolvedDevContainer
     ├─ StateManager.GetState() → check labels
     ├─ If stale: Down() first
-    ├─ UnifiedRuntime.Up()
+    ├─ Provisioner.Up()
     │   ├─ ImagePlan: Pull image
     │   ├─ DockerfilePlan: docker buildx build
     │   └─ ComposePlan: docker compose up with override
@@ -273,11 +273,11 @@ defer cliCtx.Close()
 // cliCtx.Identifiers - project/workspace IDs
 ```
 
-### Strategy Pattern (UnifiedRuntime)
+### Strategy Pattern (Provisioner)
 Single `Up()` method dispatches to plan-specific implementation internally.
 
 ### ContainerSpec (one source for runtime settings)
-`UnifiedRuntime.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `~/.dcx/compose/<workspace-id>/docker-compose.dcx.yml`; existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
+`Provisioner.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `~/.dcx/compose/<workspace-id>/docker-compose.dcx.yml`; existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
 
 ### Sealed Interface (ExecutionPlan)
 ```go
@@ -296,7 +296,7 @@ No database - all state in Docker container labels. Survives Docker restarts, wo
 Base Image → Features Layer → UID Update Layer → Final Image
 ```
 - Base: pulled, or built from the Dockerfile on every create (BuildKit's cache makes this cheap) as `dcx/<workspace>:base`.
-- Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `UnifiedRuntime.layerImages`), and reused when the tag exists.
+- Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 
 ### Naming and staleness
 - Container / default compose project name: `devcontainer.ResourceName(name, id)` (`<slug>-<id8>`). Never derive Docker names from `name` alone.
@@ -380,7 +380,7 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 |---------|------|
 | CLI entry | `cmd/dcx/main.go` |
 | Main service | `internal/service/devcontainer.go` |
-| Runtime dispatch | `internal/container/unified.go` |
+| Runtime dispatch | `internal/container/provisioner.go` |
 | Config parsing | `internal/devcontainer/parser.go` |
 | Config types | `internal/devcontainer/config.go` |
 | Resolved container | `internal/devcontainer/resolved.go` |

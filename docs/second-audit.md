@@ -223,6 +223,13 @@ Regression tests: env patch (unit), lock modes, feature cache, and two e2e tests
 - **Lint rule:** depguard denies `os/exec` everywhere except `container/docker.go` and packages that run other host programs (lifecycle, secrets, selinux, host-requirement probes, cli, the agent, tests).
 - **Coverage:** build 21% → 50%, env 18% → 93%, ssh/deploy 0% → 75%, container 28% → 35%.
 
+**Step 4 (one reconcile decision): done.**
+- **`dcx plan` is removed** (owner's call: unused). With it go `Service.Plan`, `PlanResult`/`PlanOptions`, `state.DeterminePlanAction`/`PlanAction*` and `displayPlan`, the most complex function in the codebase (cyclomatic 51). `dcx status` still shows state and staleness.
+- **One decision for `up`:** `decideUp(state, setupComplete, opts)` in `service/up.go` returns none, resume, start, create or recreate. `Up` and `stepContainer` both switch on it, and `--recreate`/`--rebuild` now also apply to a stopped container. It has a table test.
+- **`Service.Stop`/`Restart`** own the state check, the `shutdownAction` rule (read without feature resolution, so stop works offline) and the single-vs-compose stop. `DownWithIDs` reuses the same stop. `cli/stop.go` and `cli/restart.go` only render outcomes, and `restart --rebuild` no longer sets `up`'s package globals.
+- **`UnifiedRuntime` → `Provisioner`** (`provisioner.go`): it builds image layers and creates or starts environments.
+- **Also removed:** the unused `cli.CheckState` and `ui.IsVerbose`.
+
 ## 5. Recommended plan
 
 Each step ships on its own, in this order:

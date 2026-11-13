@@ -132,10 +132,3 @@ func RequireExistingContainer(cliCtx *CLIContext) (*state.ContainerInfo, error) 
 	return result.ContainerInfo, nil
 }
 
-// CheckState returns the current state without enforcing requirements.
-// Useful for commands like 'status' that just want to display state.
-func CheckState(cliCtx *CLIContext) (*StateValidationResult, error) {
-	return ValidateState(cliCtx, StateValidationOptions{
-		Requirement: RequireAny,
-	})
-}

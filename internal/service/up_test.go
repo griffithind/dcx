@@ -75,3 +75,26 @@ func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {
 	assert.Nil(t, empty.Env)
 	assert.Empty(t, empty.PostAttach)
 }
+
+func TestDecideUp(t *testing.T) {
+	none, recreate, rebuild := UpOptions{}, UpOptions{Recreate: true}, UpOptions{Rebuild: true}
+	for _, tt := range []struct {
+		state    state.ContainerState
+		complete bool
+		opts     UpOptions
+		want     upAction
+	}{
+		{state.StateAbsent, false, none, actionCreate},
+		{state.StateAbsent, false, recreate, actionCreate},
+		{state.StateRunning, true, none, actionNone},
+		{state.StateRunning, false, none, actionResume},
+		{state.StateRunning, true, recreate, actionRecreate},
+		{state.StateRunning, false, rebuild, actionRecreate},
+		{state.StateCreated, false, none, actionStart},
+		{state.StateCreated, false, recreate, actionRecreate},
+		{state.StateStale, true, none, actionRecreate},
+		{state.StateBroken, false, none, actionRecreate},
+	} {
+		assert.Equal(t, tt.want, decideUp(tt.state, tt.complete, tt.opts), "%s complete=%v opts=%+v", tt.state, tt.complete, tt.opts)
+	}
+}

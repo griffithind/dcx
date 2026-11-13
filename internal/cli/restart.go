@@ -1,12 +1,7 @@
 package cli
 
 import (
-	"fmt"
-
-	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/service"
-	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -39,63 +34,23 @@ func init() {
 }
 
 func runRestart(cmd *cobra.Command, args []string) error {
-	// Initialize CLI context
 	cliCtx, err := NewCLIContext()
 	if err != nil {
 		return err
 	}
 	defer cliCtx.Close()
 
-	// Get current state
-	result, err := CheckState(cliCtx)
+	skipped, err := cliCtx.Service.Restart(cliCtx.Ctx, service.RestartOptions{
+		StopOptions: service.StopOptions{Force: restartForce},
+		Rebuild:     restartRebuild,
+	})
 	if err != nil {
 		return err
 	}
-
-	if result.State == state.StateAbsent {
-		return fmt.Errorf("no devcontainer found, use 'dcx up' to create one")
-	}
-
-	containerInfo := result.ContainerInfo
-
-	// Check shutdownAction setting if not forcing
-	if !restartForce {
-		cfg, _, loadErr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath())
-		if loadErr == nil && cfg.ShutdownAction == "none" {
-			ui.Println("Skipping restart: shutdownAction is set to 'none'")
-			ui.Println("Use --force to restart anyway")
-			return nil
-		}
-	}
-
-	// If rebuild requested, use the up command logic
-	if restartRebuild {
-		// Set flags and call runUp
-		recreate = true
-		rebuild = true
-		return runUp(cmd, args)
-	}
-
-	// Stop the container(s), then bring the environment back up through the
-	// service so the full start sequence runs (agent relaunch, secrets,
-	// postStart hooks, SSH config) — a bare `docker start` leaves exec broken.
-	if containerInfo.Running {
-		spinner := ui.StartSpinner("Stopping devcontainer...")
-		var stopErr error
-		if containerInfo.IsSingleContainer() {
-			stopErr = cliCtx.Docker.StopContainer(cliCtx.Ctx, containerInfo.ID, nil)
-		} else {
-			stopErr = container.ExistingComposeProject(containerInfo, cliCtx.Identifiers.ProjectName, cliCtx.WorkspacePath()).Stop(cliCtx.Ctx, cliCtx.Docker)
-		}
-		if stopErr != nil {
-			spinner.Fail("Failed to stop devcontainer")
-			return fmt.Errorf("failed to stop devcontainer: %w", stopErr)
-		}
-		spinner.Success("Devcontainer stopped")
-	}
-
-	if err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{}); err != nil {
-		return err
+	if skipped {
+		ui.Println("Skipping restart: shutdownAction is set to 'none'")
+		ui.Println("Use --force to restart anyway")
+		return nil
 	}
 	ui.Success("Devcontainer restarted")
 	return nil

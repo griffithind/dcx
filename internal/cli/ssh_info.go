@@ -78,7 +78,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Best-effort: look up the actual mapped port from Docker.
-	if port, perr := docker.PortMapping(ctx, resolveContainerName(ctx, svc), agentproto.ListenPort, "tcp"); perr == nil {
+	if port, perr := docker.PortMapping(ctx, resolveContainerName(ctx, svc, ids.WorkspaceID), agentproto.ListenPort, "tcp"); perr == nil {
 		info.Port = port
 		info.BindAddress = "127.0.0.1"
 	}
@@ -140,12 +140,12 @@ func runSSHDoctor(ctx context.Context, info sshInfo) error {
 	return nil
 }
 
-func resolveContainerName(ctx context.Context, svc *service.DevContainerService) string {
-	plan, err := svc.Plan(ctx, service.PlanOptions{})
-	if err != nil || plan == nil || plan.ContainerInfo == nil {
+func resolveContainerName(ctx context.Context, svc *service.DevContainerService, workspaceID string) string {
+	_, info, err := svc.GetStateManager().GetState(ctx, workspaceID)
+	if err != nil || info == nil {
 		return ""
 	}
-	return plan.ContainerInfo.Name
+	return info.Name
 }
 
 // sshInfoReporter discards progress output in --json mode.

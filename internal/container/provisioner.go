@@ -20,10 +20,11 @@ import (
 	"github.com/griffithind/dcx/internal/state"
 )
 
-// UnifiedRuntime creates and starts the environment for all plan types.
-// It handles image-based, Dockerfile-based, and compose-based devcontainers
-// through a single unified implementation.
-type UnifiedRuntime struct {
+// Provisioner builds the environment's images (base, features, UID layers)
+// and creates or starts its containers from a ContainerSpec, for image,
+// Dockerfile and compose plans alike. Stopping and removing existing
+// environments is the service's job (it works from labels, not config).
+type Provisioner struct {
 	engine   Engine
 	report   report.Reporter
 	resolved *devcontainer.ResolvedDevContainer
@@ -36,8 +37,8 @@ type UnifiedRuntime struct {
 	sshBindHost  string // "" == 127.0.0.1 (the default)
 }
 
-// NewUnifiedRuntime creates a new runtime for a resolved devcontainer.
-func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontainer.ResolvedDevContainer) (*UnifiedRuntime, error) {
+// NewProvisioner creates a new runtime for a resolved devcontainer.
+func NewProvisioner(engine Engine, rep report.Reporter, resolved *devcontainer.ResolvedDevContainer) (*Provisioner, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("resolved devcontainer is required")
 	}
@@ -45,7 +46,7 @@ func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontaine
 	rep = report.OrDiscard(rep)
 	builder := build.NewBuilder(engine, rep)
 
-	return &UnifiedRuntime{
+	return &Provisioner{
 		engine:        engine,
 		report:        rep,
 		resolved:      resolved,
@@ -55,9 +56,9 @@ func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontaine
 }
 
 // Up implements ContainerRuntime.Up.
-func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
+func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
 	if r.resolved == nil {
-		return fmt.Errorf("no resolved configuration - use NewUnifiedRuntime")
+		return fmt.Errorf("no resolved configuration - use NewProvisioner")
 	}
 
 	r.sshBindHost = opts.SSHBindHost
@@ -76,7 +77,7 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 }
 
 // upCompose handles compose-based configurations.
-func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
+func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
 	image, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
@@ -125,7 +126,7 @@ func composeServices(plan *devcontainer.ComposePlan) []string {
 }
 
 // upSingle handles single-container configurations (image or Dockerfile).
-func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions) error {
+func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 	finalImage, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
@@ -156,7 +157,7 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions) error {
 //
 // Up and Build both use this, so `dcx build` produces exactly the image
 // `dcx up` would run.
-func (r *UnifiedRuntime) buildImages(ctx context.Context, opts UpOptions) (string, error) {
+func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, error) {
 	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
 		if len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
 			return "", nil
@@ -193,7 +194,7 @@ func (r *UnifiedRuntime) buildImages(ctx context.Context, opts UpOptions) (strin
 }
 
 // resolveBaseImage determines the base image for single-container configs.
-func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (string, error) {
+func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (string, error) {
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ImagePlan:
 		r.report.Infof("Using image: %s", plan.Image)
@@ -227,7 +228,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 }
 
 // buildDockerfile builds an image from a Dockerfile using the CLI.
-func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan, buildSecrets map[string]string) error {
+func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan *devcontainer.DockerfilePlan, buildSecrets map[string]string) error {
 	buildCtx := plan.Context
 	if buildCtx == "" {
 		buildCtx = r.resolved.ConfigDir
@@ -272,7 +273,7 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 // the ID of the image it is built on plus the layer's own inputs. A new base
 // (pulled or rebuilt) therefore produces new tags instead of reusing stale
 // layers, and a cached features image still gets its UID layer.
-func (r *UnifiedRuntime) layerImages(ctx context.Context, baseImage string, rebuild bool) (string, error) {
+func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild bool) (string, error) {
 	image := baseImage
 
 	if len(r.resolved.Features) > 0 {
@@ -335,14 +336,14 @@ func (r *UnifiedRuntime) layerImages(ctx context.Context, baseImage string, rebu
 }
 
 // layerTag returns dcx/<workspaceID>:<kind>-<hash of parts>.
-func (r *UnifiedRuntime) layerTag(kind string, parts ...string) string {
+func (r *Provisioner) layerTag(kind string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return fmt.Sprintf("%s%s:%s-%s", ImageTagPrefix, r.resolved.ID, kind,
 		hex.EncodeToString(sum[:])[:hashTruncationLength])
 }
 
 // createContainer creates the primary container from imageRef.
-func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (string, error) {
+func (r *Provisioner) createContainer(ctx context.Context, imageRef string) (string, error) {
 	return r.engine.CreateContainer(ctx, r.spec(imageRef))
 }
 
@@ -353,7 +354,7 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 // Settings that only exist for `docker run` are left out for compose: the
 // container name and working directory (compose owns them), the workspace
 // mount (the compose file defines it, per the spec) and runArgs.
-func (r *UnifiedRuntime) spec(image string) ContainerSpec {
+func (r *Provisioner) spec(image string) ContainerSpec {
 	res := r.resolved
 	_, isCompose := res.Plan.(*devcontainer.ComposePlan)
 
@@ -397,7 +398,7 @@ func (r *UnifiedRuntime) spec(image string) ContainerSpec {
 
 // workspaceMount returns the workspace mount of a single-container plan:
 // workspaceMount from the config, or a bind of the local workspace.
-func (r *UnifiedRuntime) workspaceMount() *devcontainer.Mount {
+func (r *Provisioner) workspaceMount() *devcontainer.Mount {
 	if r.resolved.WorkspaceMount != "" {
 		if m := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount); m != nil {
 			return m
@@ -411,7 +412,7 @@ func (r *UnifiedRuntime) workspaceMount() *devcontainer.Mount {
 
 // applyRunArgs applies the runArgs dcx models to s and keeps the rest for
 // verbatim pass-through.
-func (r *UnifiedRuntime) applyRunArgs(s *ContainerSpec) {
+func (r *Provisioner) applyRunArgs(s *ContainerSpec) {
 	ra := r.resolved.RunArgs
 	if ra == nil {
 		return
@@ -449,7 +450,7 @@ func (r *UnifiedRuntime) applyRunArgs(s *ContainerSpec) {
 // Feature containerEnv is baked into the derived image as ENV, so it is not
 // passed again here (that would override user containerEnv and freeze
 // ${VAR} references unexpanded).
-func (r *UnifiedRuntime) applyFeatureRequirements(s *ContainerSpec) {
+func (r *Provisioner) applyFeatureRequirements(s *ContainerSpec) {
 	if len(r.resolved.Features) == 0 {
 		return
 	}
@@ -473,7 +474,7 @@ func (r *UnifiedRuntime) applyFeatureRequirements(s *ContainerSpec) {
 // overrideCommand reports whether the image/service command is replaced by
 // a keep-alive. Per spec it defaults to true for image/Dockerfile plans and
 // false for compose.
-func (r *UnifiedRuntime) overrideCommand() bool {
+func (r *Provisioner) overrideCommand() bool {
 	if r.resolved.RawConfig != nil && r.resolved.RawConfig.OverrideCommand != nil {
 		return *r.resolved.RawConfig.OverrideCommand
 	}
@@ -482,7 +483,7 @@ func (r *UnifiedRuntime) overrideCommand() bool {
 }
 
 // buildLabels builds the container labels.
-func (r *UnifiedRuntime) buildLabels() map[string]string {
+func (r *Provisioner) buildLabels() map[string]string {
 	l := state.NewContainerLabels()
 	l.WorkspaceID = r.resolved.ID
 	l.WorkspaceName = r.resolved.Name
@@ -523,7 +524,7 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 // /run/secrets is always a tmpfs: besides user runtime secrets it holds
 // the dcx-managed SSH host private key, which must never land in the
 // container's writable layer (visible to docker commit/export/diff).
-func (r *UnifiedRuntime) buildMounts() ([]devcontainer.Mount, map[string]string) {
+func (r *Provisioner) buildMounts() ([]devcontainer.Mount, map[string]string) {
 	var mounts []devcontainer.Mount
 	tmpfs := map[string]string{agentproto.SecretsDir: "rw,noexec,nosuid,size=1m"}
 	for _, m := range r.resolved.Mounts {
@@ -538,7 +539,7 @@ func (r *UnifiedRuntime) buildMounts() ([]devcontainer.Mount, map[string]string)
 
 // buildEnvironment builds the container environment: containerEnv plus
 // DCX_PROJECT_NAME (for terminal titles and user scripts).
-func (r *UnifiedRuntime) buildEnvironment() map[string]string {
+func (r *Provisioner) buildEnvironment() map[string]string {
 	env := make(map[string]string, len(r.resolved.ContainerEnv)+1)
 	for k, v := range r.resolved.ContainerEnv {
 		env[k] = v
@@ -553,7 +554,7 @@ func (r *UnifiedRuntime) buildEnvironment() map[string]string {
 // listener into a single slice. AppPorts are bound to localhost for
 // security per the devcontainer spec. The SSH port is always published on
 // 127.0.0.1 with a Docker-assigned ephemeral host port.
-func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
+func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 	var ports []devcontainer.PortForward
 
 	// Add forward ports (bind to all interfaces by default)
@@ -587,7 +588,7 @@ func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
 //
 // The bind address defaults to 127.0.0.1 but can be widened via
 // UpOptions.SSHBindHost (driven by `dcx up --hosts`).
-func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
+func (r *Provisioner) sshPortBinding() devcontainer.PortForward {
 	host := r.sshBindHost
 	if host == "" {
 		host = "127.0.0.1"
@@ -614,7 +615,7 @@ func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
 }
 
 // Start implements ContainerRuntime.Start.
-func (r *UnifiedRuntime) Start(ctx context.Context) error {
+func (r *Provisioner) Start(ctx context.Context) error {
 	if plan, ok := r.composePlan(); ok {
 		return r.composeProject(plan).Start(ctx, r.engine)
 	}
@@ -622,9 +623,9 @@ func (r *UnifiedRuntime) Start(ctx context.Context) error {
 }
 
 // Build implements ContainerRuntime.Build.
-func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
+func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
 	if r.resolved == nil {
-		return fmt.Errorf("no resolved configuration - use NewUnifiedRuntime")
+		return fmt.Errorf("no resolved configuration - use NewProvisioner")
 	}
 
 	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
@@ -650,7 +651,7 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 
 // Compose helper methods
 
-func (r *UnifiedRuntime) composePlan() (*devcontainer.ComposePlan, bool) {
+func (r *Provisioner) composePlan() (*devcontainer.ComposePlan, bool) {
 	if r.resolved == nil {
 		return nil, false
 	}
@@ -660,7 +661,7 @@ func (r *UnifiedRuntime) composePlan() (*devcontainer.ComposePlan, bool) {
 
 // userCompose is the project with only the user's compose files: used to
 // build and inspect the services before dcx's override applies.
-func (r *UnifiedRuntime) userCompose(plan *devcontainer.ComposePlan) ComposeProject {
+func (r *Provisioner) userCompose(plan *devcontainer.ComposePlan) ComposeProject {
 	name := plan.ProjectName
 	if name == "" {
 		name = r.containerName
@@ -674,7 +675,7 @@ func (r *UnifiedRuntime) userCompose(plan *devcontainer.ComposePlan) ComposeProj
 
 // composeProject is the full project: the user's files plus dcx's
 // persistent override, once it has been written.
-func (r *UnifiedRuntime) composeProject(plan *devcontainer.ComposePlan) ComposeProject {
+func (r *Provisioner) composeProject(plan *devcontainer.ComposePlan) ComposeProject {
 	p := r.userCompose(plan)
 	if path, err := ComposeOverridePath(r.resolved.ID); err == nil {
 		if _, err := os.Stat(path); err == nil {
@@ -698,7 +699,7 @@ func ComposeOverridePath(workspaceID string) (string, error) {
 
 // writeComposeOverride renders spec for the primary service and writes it
 // to the workspace's persistent override file.
-func (r *UnifiedRuntime) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
+func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
 	data, err := composeOverride(plan.Service, spec, nil)
 	if err != nil {
 		return err
@@ -733,7 +734,7 @@ func writeTempOverride(service string, spec ContainerSpec, buildSecrets map[stri
 	return f.Name(), nil
 }
 
-func (r *UnifiedRuntime) ensureServicesBuilt(ctx context.Context, plan *devcontainer.ComposePlan, buildSecrets map[string]string) error {
+func (r *Provisioner) ensureServicesBuilt(ctx context.Context, plan *devcontainer.ComposePlan, buildSecrets map[string]string) error {
 	project := r.userCompose(plan)
 	if len(buildSecrets) > 0 {
 		path, err := writeTempOverride(plan.Service, ContainerSpec{}, buildSecrets)
@@ -746,7 +747,7 @@ func (r *UnifiedRuntime) ensureServicesBuilt(ctx context.Context, plan *devconta
 	return r.engine.Compose(ctx, project, "build")
 }
 
-func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
+func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
 	if r.resolved.BaseImage != "" {
 		return r.resolved.BaseImage, nil
 	}

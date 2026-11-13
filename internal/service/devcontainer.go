@@ -135,46 +135,6 @@ type UpOptions struct {
 	SSHAllowedCIDRs []string
 }
 
-// PlanOptions configures the Plan operation.
-type PlanOptions struct {
-	Recreate bool
-	Rebuild  bool
-}
-
-// PlanResult contains the result of planning what action to take.
-type PlanResult struct {
-	Resolved      *devcontainer.ResolvedDevContainer
-	State         state.ContainerState
-	ContainerInfo *state.ContainerInfo
-	Action        state.PlanAction
-	Reason        string
-	Changes       []string
-}
-
-// Plan analyzes the current state and determines what action would be taken.
-func (s *DevContainerService) Plan(ctx context.Context, opts PlanOptions) (*PlanResult, error) {
-	resolved, err := s.Load(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	currentState, containerInfo, err := s.stateManager.GetStateWithHash(ctx, resolved.ID, resolved.ConfigHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get state: %w", err)
-	}
-
-	actionResult := state.DeterminePlanAction(currentState, opts.Rebuild, opts.Recreate)
-
-	return &PlanResult{
-		Resolved:      resolved,
-		State:         currentState,
-		ContainerInfo: containerInfo,
-		Action:        actionResult.Action,
-		Reason:        actionResult.Reason,
-		Changes:       actionResult.Changes,
-	}, nil
-}
-
 // LoadOptions configures the Load operation.
 type LoadOptions struct {
 	// ForcePull forces re-fetching features from the registry
@@ -442,9 +402,9 @@ func (s *DevContainerService) agentListening(ctx context.Context, containerName 
 
 // create creates a new environment.
 func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
-	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
+	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
-		return fmt.Errorf("failed to create runtime: %w", err)
+		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
 
 	if _, ok := resolved.Plan.(*devcontainer.ComposePlan); ok {
@@ -453,7 +413,7 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 		s.report.Infof("Creating single-container devcontainer...")
 	}
 
-	return runtime.Up(ctx, container.UpOptions{
+	return prov.Up(ctx, container.UpOptions{
 		Build:        opts.Rebuild,
 		Rebuild:      opts.Rebuild,
 		Pull:         opts.Pull,
@@ -488,11 +448,11 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 	target := *resolved
 	target.Plan = &project
 
-	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, &target)
+	prov, err := container.NewProvisioner(s.engine, s.report, &target)
 	if err != nil {
-		return fmt.Errorf("failed to create runtime: %w", err)
+		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
-	return runtime.Start(ctx)
+	return prov.Start(ctx)
 }
 
 // setupContainerEnvironment applies patches and probes the user environment.
@@ -783,8 +743,8 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 	// Handle based on plan type (single-container vs compose)
 	if containerInfo.IsSingleContainer() {
 		if containerInfo.Running {
-			if err := s.engine.StopContainer(ctx, containerInfo.ID, nil); err != nil {
-				return fmt.Errorf("failed to stop container: %w", err)
+			if err := s.stopContainers(ctx, containerInfo, projectName); err != nil {
+				return err
 			}
 		}
 		// `docker rm -v` only removes the container's anonymous volumes;
@@ -875,12 +835,12 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		return err
 	}
 
-	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
+	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
-		return fmt.Errorf("failed to create runtime: %w", err)
+		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
 
-	return runtime.Build(ctx, container.BuildOptions{
+	return prov.Build(ctx, container.BuildOptions{
 		NoCache: opts.NoCache,
 		Pull:    opts.Pull,
 	})

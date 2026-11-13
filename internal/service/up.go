@@ -33,6 +33,7 @@ type upRun struct {
 	resolved *devcontainer.ResolvedDevContainer
 	ids      *Identifiers
 
+	action   upAction
 	state    state.ContainerState
 	existing *state.ContainerInfo // what the state lookup found before any change
 
@@ -68,13 +69,15 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		s.report.Infof("Current state: %s", currentState)
 	}
 
-	if currentState == state.StateRunning && !opts.Recreate && !opts.Rebuild {
-		if s.setupComplete(ctx, existing) {
-			s.report.Infof("Devcontainer is already running")
-			return nil
-		}
+	action := decideUp(currentState, currentState == state.StateRunning && s.setupComplete(ctx, existing), opts)
+	switch action {
+	case actionNone:
+		s.report.Infof("Devcontainer is already running")
+		return nil
+	case actionResume:
 		s.report.Infof("The previous setup of this devcontainer did not finish; resuming...")
-	} else if resolved.BaseImage != "" {
+	}
+	if action != actionResume && resolved.BaseImage != "" {
 		// Work to do: reload with the base image pulled if needed, so its
 		// devcontainer.metadata applies on the first run too.
 		resolved, err = s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true})
@@ -91,7 +94,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 	keepComposeProject(resolved, existing)
 
-	run := &upRun{opts: opts, resolved: resolved, ids: ids, state: currentState, existing: existing}
+	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, state: currentState, existing: existing}
 	steps := []upStep{
 		{"initialize", s.stepInitialize},
 		{"container", s.stepContainer},
@@ -110,6 +113,44 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		}
 	}
 	return nil
+}
+
+// upAction is what Up does with the workspace's container.
+type upAction int
+
+const (
+	actionNone     upAction = iota // running and fully set up
+	actionResume                   // running, but the last setup did not finish
+	actionStart                    // exists, not running
+	actionCreate                   // no container yet
+	actionRecreate                 // remove and create again (stale, broken, or forced)
+)
+
+// decideUp is the single place that decides what `dcx up` does, from the
+// container's state, whether its setup completed, and the --recreate /
+// --rebuild flags (which always win).
+func decideUp(st state.ContainerState, setupComplete bool, opts UpOptions) upAction {
+	forced := opts.Recreate || opts.Rebuild
+	switch st {
+	case state.StateAbsent, state.StateUnknown:
+		return actionCreate
+	case state.StateRunning:
+		switch {
+		case forced:
+			return actionRecreate
+		case setupComplete:
+			return actionNone
+		default:
+			return actionResume
+		}
+	case state.StateCreated:
+		if forced {
+			return actionRecreate
+		}
+		return actionStart
+	default: // stale, broken
+		return actionRecreate
+	}
 }
 
 // checkHostRequirements validates hostRequirements against the Docker host.
@@ -160,23 +201,22 @@ func (s *DevContainerService) stepInitialize(ctx context.Context, r *upRun) erro
 // stepContainer makes sure the container exists, matches the config and
 // is running.
 func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error {
-	recreate := r.opts.Recreate || r.opts.Rebuild
-	switch {
-	case r.state == state.StateRunning && !recreate:
-		// Resuming an incomplete setup; nothing to do here.
-	case r.state == state.StateCreated && !recreate:
+	switch r.action {
+	case actionResume:
+		// The container is running; only the setup steps remain.
+	case actionStart:
 		if err := s.startExisting(ctx, r.resolved, r.existing); err != nil {
 			return err
 		}
 		r.started = true
-	default:
+	case actionCreate, actionRecreate:
 		buildSecrets, cleanup, err := s.fetchBuildSecrets(ctx, r.resolved)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
 
-		if r.state != state.StateAbsent {
+		if r.action == actionRecreate {
 			if s.verbose {
 				s.report.Infof("Removing existing devcontainer...")
 			}
@@ -188,7 +228,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 			}
 		}
 		createOpts := r.opts
-		createOpts.Rebuild = r.opts.Rebuild || r.state != state.StateAbsent
+		createOpts.Rebuild = r.opts.Rebuild || r.action == actionRecreate
 		if err := s.create(ctx, r.resolved, createOpts, buildSecrets); err != nil {
 			return err
 		}

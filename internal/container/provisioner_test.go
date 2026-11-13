@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewUnifiedRuntime(t *testing.T) {
+func TestNewProvisioner(t *testing.T) {
 	tests := []struct {
 		name        string
 		resolved    *devcontainer.ResolvedDevContainer
@@ -35,7 +35,7 @@ func TestNewUnifiedRuntime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime, err := NewUnifiedRuntime(NewDockerCLI(), nil, tt.resolved)
+			runtime, err := NewProvisioner(NewDockerCLI(), nil, tt.resolved)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -126,7 +126,7 @@ func TestBuildMounts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := &UnifiedRuntime{resolved: tt.resolved}
+			runtime := &Provisioner{resolved: tt.resolved}
 			mounts, tmpfs := runtime.buildMounts()
 			assert.Equal(t, tt.wantMounts, mounts)
 			assert.Equal(t, tt.wantTmpfs, tmpfs)
@@ -168,7 +168,7 @@ func TestBuildEnvironment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := &UnifiedRuntime{resolved: tt.resolved}
+			runtime := &Provisioner{resolved: tt.resolved}
 			got := runtime.buildEnvironment()
 			assert.Len(t, got, tt.wantLen)
 		})
@@ -223,7 +223,7 @@ func TestBuildPortBindings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := &UnifiedRuntime{resolved: tt.resolved}
+			runtime := &Provisioner{resolved: tt.resolved}
 			got := runtime.buildPortBindings()
 			assert.Len(t, got, tt.wantLen)
 
@@ -298,7 +298,7 @@ func TestOverrideCommandDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := &UnifiedRuntime{resolved: &devcontainer.ResolvedDevContainer{
+			runtime := &Provisioner{resolved: &devcontainer.ResolvedDevContainer{
 				Plan:      tt.plan,
 				RawConfig: &devcontainer.DevContainerConfig{OverrideCommand: tt.overrideCommand},
 			}}

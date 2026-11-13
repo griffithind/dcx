@@ -70,13 +70,6 @@ func IsQuiet() bool {
 	return config.Verbosity == VerbosityQuiet
 }
 
-// IsVerbose returns true if verbose mode is enabled.
-func IsVerbose() bool {
-	configMu.Lock()
-	defer configMu.Unlock()
-	return config.Verbosity == VerbosityVerbose
-}
-
 // Writer returns the configured output writer.
 func Writer() io.Writer {
 	configMu.Lock()
