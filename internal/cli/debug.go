@@ -332,7 +332,7 @@ func outputDebugTable(debug *DebugInfo) error {
 	// Container
 	ui.Println("Container:")
 	if debug.Container.Found {
-		ui.Printf("  ID:      %s", debug.Container.ID[:12])
+		ui.Printf("  ID:      %s", shortID(debug.Container.ID))
 		ui.Printf("  Name:    %s", debug.Container.Name)
 		ui.Printf("  State:   %s", debug.Container.State)
 		ui.Printf("  Running: %v", debug.Container.Running)

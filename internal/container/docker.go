@@ -133,9 +133,10 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 // parseContainerSummaries parses `docker inspect --format json` output.
 func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 	var raw []struct {
-		ID    string `json:"Id"`
-		Name  string `json:"Name"`
-		State struct {
+		ID      string    `json:"Id"`
+		Name    string    `json:"Name"`
+		Created time.Time `json:"Created"`
+		State   struct {
 			Status  string `json:"Status"`
 			Running bool   `json:"Running"`
 		} `json:"State"`
@@ -159,6 +160,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 			State:   c.State.Status,
 			Running: c.State.Running,
 			Labels:  labels,
+			Created: c.Created,
 		})
 	}
 	return result, nil
@@ -174,9 +176,10 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 	}
 
 	var results []struct {
-		ID    string `json:"Id"`
-		Name  string `json:"Name"`
-		State struct {
+		ID      string    `json:"Id"`
+		Name    string    `json:"Name"`
+		Created time.Time `json:"Created"`
+		State   struct {
 			Status    string `json:"Status"`
 			Running   bool   `json:"Running"`
 			StartedAt string `json:"StartedAt"`
@@ -755,11 +758,17 @@ func (d *Docker) GetLogs(ctx context.Context, containerID string, opts LogsOptio
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	pr, pw := io.Pipe()
+	// Both streams go to the reader: `docker logs` replays the container's
+	// stderr on its own stderr. A failure (no such container, daemon gone)
+	// surfaces as the reader's error instead of looking like empty logs.
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 
 	go func() {
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("docker logs: %w", err))
+			return
+		}
 		_ = pw.Close()
 	}()
 

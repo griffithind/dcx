@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -104,11 +105,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		ui.Println("")
 		ui.Println(ui.Bold("Primary Container"))
 
-		ui.Printf("  %s", ui.FormatLabel("ID", containerInfo.ID[:12]))
+		ui.Printf("  %s", ui.FormatLabel("ID", shortID(containerInfo.ID)))
 		ui.Printf("  %s", ui.FormatLabel("Name", containerInfo.Name))
 		ui.Printf("  %s", ui.FormatLabel("Status", containerInfo.Status))
 		if containerInfo.ConfigHash != "" {
-			ui.Printf("  %s", ui.FormatLabel("Config", containerInfo.ConfigHash[:12]))
+			ui.Printf("  %s", ui.FormatLabel("Config", shortID(containerInfo.ConfigHash)))
 		}
 
 		// Detailed mode: show more container info
@@ -161,24 +162,25 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			ui.Printf("  %s", ui.FormatLabel("Features", strings.Join(featureList, ", ")))
 		}
 		if resolved != nil && resolved.ConfigHash != "" {
-			ui.Printf("  %s", ui.FormatLabel("Config Hash", resolved.ConfigHash[:12]))
+			ui.Printf("  %s", ui.FormatLabel("Config Hash", shortID(resolved.ConfigHash)))
 		}
 	}
 
 	// Detailed mode: show labels
 	if statusDetailed && containerInfo != nil {
 		labelMap := containerInfo.Labels.ToMap()
-		dcxLabels := make(map[string]string)
-		for k, v := range labelMap {
-			if strings.HasPrefix(k, "dcx.") {
-				dcxLabels[k] = v
+		var keys []string
+		for k := range labelMap {
+			if strings.HasPrefix(k, state.Prefix+".") {
+				keys = append(keys, k)
 			}
 		}
-		if len(dcxLabels) > 0 {
+		sort.Strings(keys)
+		if len(keys) > 0 {
 			ui.Println("")
 			ui.Println(ui.Bold("Labels"))
-			for k, v := range dcxLabels {
-				ui.Printf("  %s: %s", ui.Dim(k), v)
+			for _, k := range keys {
+				ui.Printf("  %s: %s", ui.Dim(k), labelMap[k])
 			}
 		}
 	}
@@ -192,4 +194,13 @@ func sshAliases(info *state.ContainerInfo) []string {
 		return nil
 	}
 	return hostconfig.Aliases(info.Name)
+}
+
+// shortID shortens a container ID or hash for display. Values that are
+// already short (legacy or hand-edited labels) are shown as they are.
+func shortID(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }

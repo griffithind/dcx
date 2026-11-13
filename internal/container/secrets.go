@@ -2,8 +2,6 @@ package container
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
 
@@ -163,10 +161,3 @@ func MountDCXSecrets(ctx context.Context, engine Engine, containerName string, m
 	return nil
 }
 
-// SHA256Hex returns the hex-encoded SHA256 of the input. Used to stamp
-// LabelSSHAuthorizedKeysSHA256 so later Up()s can detect pubkey drift
-// and silently re-sync.
-func SHA256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
-}

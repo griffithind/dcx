@@ -329,16 +329,9 @@ func (s *DevContainerService) mountSSHSecrets(ctx context.Context, resolved *dev
 		return fmt.Errorf("collect authorized keys: %w", err)
 	}
 
-	// Hash the authorized_keys content so subsequent Up() calls can detect
-	// pubkey drift (user regenerated ~/.ssh/id_ed25519) vs. what's currently
-	// mounted. When the hashes differ we emit a single user-visible line
-	// and proceed to re-mount. Labels are immutable post-create, so the
-	// tracker lives on the ContainerInfo we just refreshed.
-	newHash := container.SHA256Hex(authKeys)
-	if stored := containerInfo.Labels.SSHAuthorizedKeysSHA256; stored != "" && stored != newHash {
-		s.report.Infof("SSH: authorized_keys content changed — re-synced")
-	}
-
+	// authorized_keys is rewritten on every Up, so key changes on the host
+	// (a regenerated ~/.ssh/id_ed25519) take effect on the next `dcx up`.
+	//
 	// Owner for the host key must be the user the agent runs as, since the
 	// key is mode 0400 (readable only by owner). The agent inherits the
 	// container's default user (typically resolved.EffectiveUser after UID
@@ -521,15 +514,15 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		return nil, nil, nil
 	}
 
-	patcher := env.NewPatcher()
+	patcher := env.NewPatcher(s.engine)
 	prober := env.NewProber()
 
 	// Collect environment variables to patch into /etc/environment
 	envToPatch := make(map[string]string)
-	for k, v := range cfg.ContainerEnv {
+	for k, v := range resolved.ContainerEnv {
 		envToPatch[k] = v
 	}
-	remoteEnv = cfg.RemoteEnv
+	remoteEnv = resolved.RemoteEnv
 	if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
 		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, devcontainer.EnvListToMap(details.Env))
 	}
@@ -537,14 +530,14 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		envToPatch[k] = v
 	}
 
-	// Patch /etc/environment if there are env vars to write
-	if len(envToPatch) > 0 {
-		if s.verbose {
-			s.report.Infof("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
-		}
-		if err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
-			s.report.Warnf("Failed to patch /etc/environment: %v", err)
-		}
+	// Always reconcile dcx's block, so removed variables disappear too.
+	if s.verbose {
+		s.report.Infof("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
+	}
+	if skipped, err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
+		s.report.Warnf("Failed to patch /etc/environment: %v", err)
+	} else if len(skipped) > 0 {
+		s.report.Warnf("Not written to /etc/environment (invalid name or multi-line value): %s", strings.Join(skipped, ", "))
 	}
 
 	// Patch /etc/profile to preserve PATH from features
@@ -565,20 +558,15 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		return nil, remoteEnv, nil
 	}
 
-	// Determine user for probing
-	user := cfg.RemoteUser
-	if user == "" {
-		user = cfg.ContainerUser
-	}
-
-	// Use config hash for caching (invalidates when any build input changes)
-	imageHash := resolved.ConfigHash
+	// Probe as the user sessions run as (remoteUser after image metadata
+	// is merged), not the raw config's value.
+	user := resolved.EffectiveUser
 
 	if s.verbose {
 		s.report.Infof("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)
 	}
 
-	probedEnv, err := prober.ProbeWithCache(ctx, containerInfo.ID, probeType, user, imageHash)
+	probedEnv, err := prober.Probe(ctx, containerInfo.ID, probeType, user)
 	if err != nil {
 		return nil, remoteEnv, fmt.Errorf("environment probe failed: %w", err)
 	}
@@ -931,8 +919,12 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 		return nil, fmt.Errorf("failed to load existing lockfile: %w", err)
 	}
 
-	// For frozen mode, require existing lockfile
-	if opts.Mode == LockModeFrozen && existingLockfile == nil && !initMarker {
+	// Verifying needs something to verify against. An empty file (the
+	// spec's "initialize me" marker) is not a lockfile either.
+	if opts.Mode != LockModeGenerate && existingLockfile == nil {
+		if initMarker {
+			return nil, fmt.Errorf("lockfile %s is empty: run 'dcx lock' to generate it", lockfile.GetPath(configPath))
+		}
 		return nil, fmt.Errorf("lockfile not found: run 'dcx lock' to generate one")
 	}
 
@@ -966,29 +958,17 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 
 	// Handle based on mode
 	switch opts.Mode {
-	case LockModeVerify:
-		mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile)
-		if len(mismatches) > 0 {
+	case LockModeVerify, LockModeFrozen:
+		if mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile); len(mismatches) > 0 {
 			changes := make([]string, len(mismatches))
 			for i, m := range mismatches {
 				changes[i] = m.Message
 			}
-			return nil, fmt.Errorf("lockfile verification failed:\n  - %s", joinStrings(changes, "\n  - "))
-		}
-		return &LockResult{
-			Action:       LockActionVerified,
-			LockfilePath: lockfilePath,
-			FeatureCount: len(newLockfile.Features),
-		}, nil
-
-	case LockModeFrozen:
-		mismatches := features.VerifyLockfile(resolvedFeatures, existingLockfile)
-		if len(mismatches) > 0 {
-			changes := make([]string, len(mismatches))
-			for i, m := range mismatches {
-				changes[i] = m.Message
+			what := "lockfile verification failed"
+			if opts.Mode == LockModeFrozen {
+				what = "lockfile mismatch (frozen mode)"
 			}
-			return nil, fmt.Errorf("lockfile mismatch (frozen mode):\n  - %s", joinStrings(changes, "\n  - "))
+			return nil, fmt.Errorf("%s:\n  - %s", what, strings.Join(changes, "\n  - "))
 		}
 		return &LockResult{
 			Action:       LockActionVerified,
@@ -1032,16 +1012,4 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 			Changes:      changes,
 		}, nil
 	}
-}
-
-// joinStrings joins strings with a separator.
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for _, s := range strs[1:] {
-		result += sep + s
-	}
-	return result
 }

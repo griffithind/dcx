@@ -87,7 +87,7 @@ func displayPlan(plan *service.PlanResult) {
 		ui.Printf("  %s", ui.FormatLabel("Status", ui.StateColor(statusStr)))
 		containerInfo := plan.ContainerInfo.Name
 		if len(plan.ContainerInfo.ID) >= 12 {
-			containerInfo += " (" + plan.ContainerInfo.ID[:12] + ")"
+			containerInfo += " (" + shortID(plan.ContainerInfo.ID) + ")"
 		}
 		ui.Printf("  %s", ui.FormatLabel("Container", containerInfo))
 		ui.Println("")

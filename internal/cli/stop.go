@@ -19,7 +19,7 @@ var stopCmd = &cobra.Command{
 
 This is an offline-safe command that only stops running containers.
 The containers and their data are preserved and can be started again
-with 'dcx start'.
+with 'dcx up'.
 
 If the devcontainer.json has shutdownAction set to "none", the container
 will not be stopped unless --force is used.`,

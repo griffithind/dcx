@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/report"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,39 +224,8 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	cacheKey := computeCacheKey(ref.CanonicalID())
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	// Check if already cached (unless force-pull is enabled)
-	if !r.forcePull {
-		if _, err := os.Stat(cachePath); err == nil {
-			feature.CachePath = cachePath
-			metadata, err := r.loadMetadata(cachePath)
-			if err != nil {
-				return fmt.Errorf("failed to load cached feature metadata: %w", err)
-			}
-			feature.Metadata = metadata
-
-			// Load and populate digest info from cache
-			if digestInfo, err := loadDigestInfo(cachePath); err == nil {
-				feature.ManifestDigest = digestInfo.ManifestDigest
-				feature.Integrity = digestInfo.Integrity
-
-				// Verify integrity against lockfile if available
-				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
-					// Cache integrity doesn't match lockfile, need to re-fetch
-					r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", ref.CanonicalID())
-					_ = os.RemoveAll(cachePath)
-				} else {
-					return nil
-				}
-			}
-			// If no digest file exists, continue to use cached version
-			// (backwards compatibility with pre-lockfile caches)
-			if expectedIntegrity == "" {
-				return nil
-			}
-		}
-	} else {
-		// Force-pull: remove existing cache to re-fetch
-		_ = os.RemoveAll(cachePath)
+	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID()); hit || err != nil {
+		return err
 	}
 
 	// Fetch from OCI registry
@@ -264,7 +234,12 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	} else {
 		r.report.Infof("  Fetching feature from registry: %s", ref.CanonicalID())
 	}
-	digestInfo, err := r.fetchOCIWithDigest(ctx, ref, cachePath, lockedManifestDigest, expectedIntegrity)
+	var digestInfo *DigestInfo
+	err := r.fetchInto(cachePath, func(dir string) error {
+		var err error
+		digestInfo, err = r.fetchOCIWithDigest(ctx, ref, dir, lockedManifestDigest, expectedIntegrity)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
@@ -299,41 +274,17 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 	cacheKey := computeCacheKey(ref.URL)
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	// Check if already cached (unless force-pull is enabled)
-	if !r.forcePull {
-		if _, err := os.Stat(cachePath); err == nil {
-			feature.CachePath = cachePath
-			metadata, err := r.loadMetadata(cachePath)
-			if err != nil {
-				return fmt.Errorf("failed to load cached feature metadata: %w", err)
-			}
-			feature.Metadata = metadata
-
-			// Load and populate digest info from cache
-			if digestInfo, err := loadDigestInfo(cachePath); err == nil {
-				feature.Integrity = digestInfo.Integrity
-
-				// Verify integrity against lockfile if available
-				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
-					// Cache integrity doesn't match lockfile, need to re-fetch
-					r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", ref.URL)
-					_ = os.RemoveAll(cachePath)
-				} else {
-					return nil
-				}
-			}
-			// If no digest file exists, continue to use cached version
-			if expectedIntegrity == "" {
-				return nil
-			}
-		}
-	} else {
-		// Force-pull: remove existing cache to re-fetch
-		_ = os.RemoveAll(cachePath)
+	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.URL); hit || err != nil {
+		return err
 	}
 
 	// Fetch from HTTP
-	integrity, err := r.fetchHTTPWithDigest(ctx, ref.URL, cachePath, expectedIntegrity)
+	var integrity string
+	err := r.fetchInto(cachePath, func(dir string) error {
+		var err error
+		integrity, err = r.fetchHTTPWithDigest(ctx, ref.URL, dir, expectedIntegrity)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("failed to fetch HTTP feature: %w", err)
 	}
@@ -351,6 +302,90 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 	return nil
 }
 
+// useCache fills feature from its cache entry when the entry is complete
+// and matches expectedIntegrity (from the lockfile, if any). It reports
+// whether the cache was used. Incomplete or mismatching entries are
+// removed so they are fetched again; with force-pull the cache is ignored.
+//
+// An entry is complete only once its digest file exists: fetchInto writes
+// it last and moves the entry into place atomically, so a crashed or
+// failed fetch never leaves an entry that looks usable.
+func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name string) (bool, error) {
+	if r.forcePull {
+		return false, os.RemoveAll(cachePath)
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		return false, nil
+	}
+	digestInfo, err := loadDigestInfo(cachePath)
+	if err != nil {
+		r.report.Infof("  Cached copy of %s is incomplete, re-fetching...", name)
+		return false, os.RemoveAll(cachePath)
+	}
+	if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
+		r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", name)
+		return false, os.RemoveAll(cachePath)
+	}
+	metadata, err := r.loadMetadata(cachePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to load cached feature metadata: %w", err)
+	}
+	feature.CachePath = cachePath
+	feature.Metadata = metadata
+	feature.ManifestDigest = digestInfo.ManifestDigest
+	feature.Integrity = digestInfo.Integrity
+	return true, nil
+}
+
+// fetchInto runs fetch into a fresh temporary directory next to cachePath
+// and moves the result into place only when fetch succeeded, so failures
+// and concurrent dcx runs never leave a partial cache entry.
+func (r *Resolver) fetchInto(cachePath string, fetch func(dir string) error) error {
+	tmp, err := os.MkdirTemp(filepath.Dir(cachePath), ".fetch-"+filepath.Base(cachePath)+"-")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+
+	if err := fetch(tmp); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(cachePath); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, cachePath); err != nil {
+		// Another dcx run may have finished the same fetch first.
+		if _, derr := loadDigestInfo(cachePath); derr == nil {
+			return nil
+		}
+		return fmt.Errorf("install feature cache: %w", err)
+	}
+	return nil
+}
+
+// Limits on what a registry or URL may send. Features are small scripts;
+// these only stop a hostile or broken server from exhausting memory.
+const (
+	maxManifestSize = 4 << 20   // 4 MiB
+	maxBlobSize     = 512 << 20 // 512 MiB
+	maxErrorBody    = 64 << 10  // 64 KiB
+
+	// maxExtractedSize bounds the total size a feature archive may expand to.
+	maxExtractedSize = 1 << 30 // 1 GiB
+)
+
+// readLimited reads at most limit bytes and fails if there is more.
+func readLimited(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response larger than %d bytes", limit)
+	}
+	return data, nil
+}
+
 // fetchOCIWithDigest fetches a feature from an OCI registry and returns digest info.
 // If lockedManifestDigest is provided (from lockfile), it fetches the manifest by digest
 // instead of by tag, ensuring exact reproducibility.
@@ -366,9 +401,10 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 		ref.Registry, ref.Repository, ref.Resource, manifestReference)
 
 	// Get token for authentication (required for most OCI registries)
-	token, err := r.getRegistryToken(ctx, ref)
-	if err != nil {
-		// Continue without token - some registries might not require auth
+	token, tokenErr := r.getRegistryToken(ctx, ref)
+	if tokenErr != nil {
+		// Continue without a token (some registries allow anonymous
+		// pulls); the error is reported if the registry then refuses.
 		token = ""
 	}
 
@@ -392,12 +428,15 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	defer resp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := readLimited(resp.Body, maxErrorBody)
+		if tokenErr != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			return nil, fmt.Errorf("registry returned %d (authentication failed: %v): %s", resp.StatusCode, tokenErr, string(body))
+		}
 		return nil, fmt.Errorf("registry returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Read manifest body for digest computation
-	manifestBody, err := io.ReadAll(resp.Body)
+	manifestBody, err := readLimited(resp.Body, maxManifestSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
@@ -465,7 +504,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	}
 
 	// Read entire body first (needed for digest computation and extraction)
-	bodyData, err := io.ReadAll(blobResp.Body)
+	bodyData, err := readLimited(blobResp.Body, maxBlobSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read blob body: %w", err)
 	}
@@ -528,7 +567,7 @@ func (r *Resolver) fetchHTTPWithDigest(ctx context.Context, url, destPath string
 	}
 
 	// Read entire body for integrity computation
-	bodyData, err := io.ReadAll(resp.Body)
+	bodyData, err := readLimited(resp.Body, maxBlobSize)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -621,6 +660,7 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 	}
 	fileCount := 0
 
+	var total int64
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -666,7 +706,14 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 				return fmt.Errorf("failed to create file: %w", err)
 			}
 
-			if _, err := io.Copy(f, tr); err != nil {
+			// Bound the expanded size: a small compressed blob can
+			// expand to fill the disk.
+			n, err := io.Copy(f, io.LimitReader(tr, maxExtractedSize-total+1))
+			total += n
+			if err == nil && total > maxExtractedSize {
+				err = fmt.Errorf("archive expands beyond %d bytes", maxExtractedSize)
+			}
+			if err != nil {
 				_ = f.Close()
 				return fmt.Errorf("failed to write file: %w", err)
 			}
@@ -733,8 +780,15 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	scope := fmt.Sprintf("repository:%s/%s:pull", ref.Repository, ref.Resource)
 
 	// Request token
-	tokenURL := fmt.Sprintf("%s?service=%s&scope=%s", realm, service, scope)
-	tokenReq, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+	tokenURL, err := url.Parse(realm)
+	if err != nil {
+		return "", fmt.Errorf("invalid token realm %q: %w", realm, err)
+	}
+	query := tokenURL.Query()
+	query.Set("service", service)
+	query.Set("scope", scope)
+	tokenURL.RawQuery = query.Encode()
+	tokenReq, err := http.NewRequestWithContext(ctx, "GET", tokenURL.String(), nil)
 	if err != nil {
 		return "", err
 	}
@@ -746,7 +800,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	defer tokenResp.Body.Close() //nolint:errcheck // Close error irrelevant after read
 
 	if tokenResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(tokenResp.Body)
+		body, _ := readLimited(tokenResp.Body, maxErrorBody)
 		return "", fmt.Errorf("token request failed with %d: %s", tokenResp.StatusCode, string(body))
 	}
 
@@ -755,7 +809,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil {
+	if err := json.NewDecoder(io.LimitReader(tokenResp.Body, maxManifestSize)).Decode(&tokenData); err != nil {
 		return "", fmt.Errorf("failed to parse token response: %w", err)
 	}
 

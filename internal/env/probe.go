@@ -4,14 +4,11 @@ package env
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/state"
 )
 
 // ProbeType represents the type of shell probe to use.
@@ -116,104 +113,4 @@ func parseEnvOutput(output string) map[string]string {
 		}
 	}
 	return env
-}
-
-// ProbeWithCache probes the user environment with caching support.
-// If a valid cached result exists for the given imageHash, it returns the cached value.
-// Otherwise, it probes fresh and caches the result in container labels.
-func (p *Prober) ProbeWithCache(ctx context.Context, containerID string, probeType ProbeType, user string, imageHash string) (map[string]string, error) {
-	if probeType == ProbeNone || probeType == "" {
-		return nil, nil
-	}
-
-	// Check cache first
-	cachedEnv, cachedHash, err := p.readCache(ctx, containerID)
-	if err == nil && cachedHash == imageHash && len(cachedEnv) > 0 {
-		return cachedEnv, nil
-	}
-
-	// Probe fresh
-	env, err := p.Probe(ctx, containerID, probeType, user)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result
-	if env != nil && imageHash != "" {
-		if cacheErr := p.writeCache(ctx, containerID, env, imageHash); cacheErr != nil {
-			// Log but don't fail - caching is best-effort
-			_ = cacheErr
-		}
-	}
-
-	return env, nil
-}
-
-// readCache reads the cached probed environment from container labels.
-func (p *Prober) readCache(ctx context.Context, containerID string) (map[string]string, string, error) {
-	// Use docker inspect CLI
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", "json", containerID)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, "", err
-	}
-
-	var results []struct {
-		Config struct {
-			Labels map[string]string `json:"Labels"`
-		} `json:"Config"`
-	}
-	if err := json.Unmarshal(output, &results); err != nil {
-		return nil, "", err
-	}
-
-	if len(results) == 0 {
-		return nil, "", fmt.Errorf("container not found")
-	}
-
-	labels := results[0].Config.Labels
-	if labels == nil {
-		return nil, "", fmt.Errorf("no labels found")
-	}
-
-	hash := labels[state.LabelCacheProbedEnvHash]
-	envData := labels[state.LabelCacheProbedEnv]
-
-	if envData == "" {
-		return nil, hash, fmt.Errorf("no cached env found")
-	}
-
-	var env map[string]string
-	if err := json.Unmarshal([]byte(envData), &env); err != nil {
-		return nil, hash, err
-	}
-
-	return env, hash, nil
-}
-
-// writeCache writes the probed environment to container labels.
-func (p *Prober) writeCache(ctx context.Context, containerID string, env map[string]string, imageHash string) error {
-	envData, err := json.Marshal(env)
-	if err != nil {
-		return err
-	}
-
-	// Update container labels using docker update
-	// Note: Docker doesn't support updating labels directly, so we use a workaround
-	// by storing in a well-known location in the container filesystem
-	cmd := []string{"sh", "-c", fmt.Sprintf(`
-mkdir -p /var/lib/dcx && \
-echo '%s' > /var/lib/dcx/probed-env.json && \
-echo '%s' > /var/lib/dcx/probed-env-hash
-`, string(envData), imageHash)}
-
-	_, exitCode, err := container.ExecOutput(ctx, containerID, cmd, "root")
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to cache probed env: exit code %d", exitCode)
-	}
-
-	return nil
 }

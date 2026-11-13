@@ -107,7 +107,7 @@ func (s ContainerState) GetRecovery() Recovery {
 	case StateCreated, StateStopped:
 		return Recovery{
 			Action:      RecoveryRestart,
-			Description: "Container exists but is stopped. Run 'dcx start' to start it.",
+			Description: "Container exists but is stopped. Run 'dcx up' to start it.",
 		}
 	case StateRunning:
 		return Recovery{

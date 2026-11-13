@@ -90,19 +90,23 @@ func runListEnvironments(cmd *cobra.Command, args []string) error {
 				WorkspacePath: lbls.WorkspacePath,
 				Plan:          lbls.BuildMethod,
 				Containers:    []ContainerItem{},
-				CreatedAt:     time.Now(), // Will be updated below
+				CreatedAt:     cont.Created,
 			}
 			envMap[workspaceID] = env
 		}
 
 		// Add container to environment
 		env.Containers = append(env.Containers, ContainerItem{
-			ID:        cont.ID[:12],
+			ID:        shortID(cont.ID),
 			Name:      cont.Name,
 			Status:    cont.State,
 			IsPrimary: lbls.IsPrimary,
-			CreatedAt: time.Now(), // ContainerSummary doesn't have Created
+			CreatedAt: cont.Created,
 		})
+		// The environment is as old as its oldest container.
+		if !cont.Created.IsZero() && (env.CreatedAt.IsZero() || cont.Created.Before(env.CreatedAt)) {
+			env.CreatedAt = cont.Created
+		}
 	}
 
 	// Determine state for each environment

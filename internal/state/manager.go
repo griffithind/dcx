@@ -29,6 +29,7 @@ type ContainerSummary struct {
 	State   string
 	Running bool
 	Labels  map[string]string
+	Created time.Time
 }
 
 // ContainerDetails is detailed container info returned by InspectContainer.
