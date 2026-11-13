@@ -7,33 +7,28 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/griffithind/dcx/internal/common"
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/secrets"
 )
-
-// dcxSecretsSubdir is the namespaced subdirectory under SecretsDir where
-// dcx-managed secrets live. Keeps them from colliding with user secret
-// names like "API_KEY" that are stored flat under SecretsDir.
-const dcxSecretsSubdir = "dcx"
 
 // DCXSecretPath returns the absolute in-container path for a dcx-managed
 // secret by name. Example: DCXSecretPath("authorized_keys") →
 // "/run/secrets/dcx/authorized_keys".
 func DCXSecretPath(name string) string {
-	return filepath.Join(common.SecretsDir, dcxSecretsSubdir, name)
+	return filepath.Join(agentproto.DCXSecretsDir, name)
 }
 
 // DCXSecretsDir returns the absolute in-container path of the dcx-managed
 // secrets directory ("/run/secrets/dcx").
 func DCXSecretsDir() string {
-	return filepath.Join(common.SecretsDir, dcxSecretsSubdir)
+	return agentproto.DCXSecretsDir
 }
 
 // MountSecretsToContainer copies secrets to /run/secrets in the specified container.
 // Secrets are written as files with mode 0400 (read-only by owner).
 // The owner parameter specifies the user who should own the secrets (e.g., "node", "root").
 // This is a standalone function that can be called without a runtime instance.
-func MountSecretsToContainer(ctx context.Context, containerName string, secretList []secrets.Secret, owner string) error {
+func MountSecretsToContainer(ctx context.Context, engine Engine, containerName string, secretList []secrets.Secret, owner string) error {
 	if len(secretList) == 0 {
 		return nil
 	}
@@ -47,15 +42,15 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 		owner = "root"
 	}
 
-	docker := MustDocker()
+	docker := engine
 
 	// Create /run/secrets directory if it doesn't exist
-	if err := docker.MkdirInContainer(ctx, containerName, common.SecretsDir, "root"); err != nil {
+	if err := docker.MkdirInContainer(ctx, containerName, agentproto.SecretsDir, "root"); err != nil {
 		return fmt.Errorf("failed to create secrets directory: %w", err)
 	}
 
 	// Set permissions (755 for directory)
-	if err := docker.ChmodInContainer(ctx, containerName, common.SecretsDir, "755", "root"); err != nil {
+	if err := docker.ChmodInContainer(ctx, containerName, agentproto.SecretsDir, "755", "root"); err != nil {
 		return fmt.Errorf("failed to set directory permissions: %w", err)
 	}
 
@@ -71,11 +66,11 @@ func MountSecretsToContainer(ctx context.Context, containerName string, secretLi
 
 // writeSecretToContainer writes a secret to the container's /run/secrets.
 // Uses docker exec to write directly (docker cp doesn't work with tmpfs mounts).
-func writeSecretToContainer(ctx context.Context, docker *Docker, containerName string, secret secrets.Secret, owner string) error {
+func writeSecretToContainer(ctx context.Context, docker Engine, containerName string, secret secrets.Secret, owner string) error {
 	if err := secrets.ValidateName(secret.Name); err != nil {
 		return err
 	}
-	destPath := filepath.Join(common.SecretsDir, secret.Name)
+	destPath := filepath.Join(agentproto.SecretsDir, secret.Name)
 
 	// Write secret content directly to container using docker exec
 	// (docker cp doesn't work with tmpfs mounts)
@@ -102,10 +97,10 @@ func writeSecretToContainer(ctx context.Context, docker *Docker, containerName s
 // SSH daemon (owned by root, mode 0444 for authorized_keys, 0400 for
 // the host key).
 type DCXSecret struct {
-	Name    string // filename under /run/secrets/dcx/
-	Value   []byte
-	Mode    string // e.g. "0444" or "0400"
-	Owner   string // "root" unless the file must be readable by the remote user
+	Name  string // filename under /run/secrets/dcx/
+	Value []byte
+	Mode  string // e.g. "0444" or "0400"
+	Owner string // "root" unless the file must be readable by the remote user
 }
 
 // MountDCXSecrets writes a set of dcx-managed secrets into the container's
@@ -114,7 +109,7 @@ type DCXSecret struct {
 // Unlike MountSecretsToContainer (which handles user-defined secrets at
 // /run/secrets/<name>), this function targets the dcx/ namespace so the
 // two categories cannot collide.
-func MountDCXSecrets(ctx context.Context, containerName string, mgmt []DCXSecret) error {
+func MountDCXSecrets(ctx context.Context, engine Engine, containerName string, mgmt []DCXSecret) error {
 	if len(mgmt) == 0 {
 		return nil
 	}
@@ -122,13 +117,13 @@ func MountDCXSecrets(ctx context.Context, containerName string, mgmt []DCXSecret
 		return fmt.Errorf("container name not set")
 	}
 
-	docker := MustDocker()
+	docker := engine
 
 	// Ensure /run/secrets and /run/secrets/dcx both exist.
-	if err := docker.MkdirInContainer(ctx, containerName, common.SecretsDir, "root"); err != nil {
+	if err := docker.MkdirInContainer(ctx, containerName, agentproto.SecretsDir, "root"); err != nil {
 		return fmt.Errorf("failed to create secrets directory: %w", err)
 	}
-	if err := docker.ChmodInContainer(ctx, containerName, common.SecretsDir, "755", "root"); err != nil {
+	if err := docker.ChmodInContainer(ctx, containerName, agentproto.SecretsDir, "755", "root"); err != nil {
 		return fmt.Errorf("failed to set secrets directory permissions: %w", err)
 	}
 

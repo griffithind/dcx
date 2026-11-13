@@ -87,7 +87,7 @@ func runRestart(cmd *cobra.Command, args []string) error {
 		} else {
 			actualProject := containerInfo.GetComposeProject(cliCtx.Identifiers.ProjectName)
 			configDir := containerInfo.GetConfigDir(cliCtx.WorkspacePath())
-			stopErr = container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject).Stop(cliCtx.Ctx)
+			stopErr = container.NewUnifiedRuntimeForExistingCompose(cliCtx.Docker, ui.Reporter(), configDir, actualProject).Stop(cliCtx.Ctx)
 		}
 		if stopErr != nil {
 			spinner.Fail("Failed to stop devcontainer")

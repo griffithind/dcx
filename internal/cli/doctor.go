@@ -200,7 +200,7 @@ func runConfigChecks(ctx context.Context, cfgPath string) []CheckResult {
 	})
 
 	// Build resolved devcontainer to validate structure
-	builder := devcontainer.NewBuilder(nil)
+	builder := devcontainer.NewBuilder(nil, ui.Reporter())
 	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
@@ -384,7 +384,7 @@ func validateFeatures(cfg *devcontainer.DevContainerConfig) []CheckResult {
 }
 
 func checkDocker(ctx context.Context) CheckResult {
-	client, err := container.DockerClient()
+	client, err := container.NewDocker()
 	if err != nil {
 		return CheckResult{
 			Name:    "Docker",

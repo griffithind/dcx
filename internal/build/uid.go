@@ -73,12 +73,12 @@ func (b *CLIBuilder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (
 	if !opts.Rebuild {
 		exists, err := b.ImageExists(ctx, opts.Tag)
 		if err == nil && exists {
-			fmt.Printf("[+] Using cached UID image\n")
+			b.report.Infof("[+] Using cached UID image")
 			return opts.Tag, nil
 		}
 	}
 
-	fmt.Printf("[+] Updating UID/GID to %d:%d for user %s\n",
+	b.report.Infof("[+] Updating UID/GID to %d:%d for user %s",
 		opts.HostUID, opts.HostGID, opts.RemoteUser)
 
 	// Get metadata from base image if not provided

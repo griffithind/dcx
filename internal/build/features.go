@@ -22,19 +22,19 @@ func (b *CLIBuilder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOpt
 	if !opts.Rebuild {
 		exists, err := b.ImageExists(ctx, opts.Tag)
 		if err == nil && exists {
-			fmt.Printf("Using cached derived image\n")
+			b.report.Infof("Using cached derived image")
 			return opts.Tag, nil
 		}
 	}
 
 	// Print header with feature list
-	fmt.Printf("Building derived image with %d feature(s)\n", len(opts.Features))
+	b.report.Infof("Building derived image with %d feature(s)", len(opts.Features))
 	for i, f := range opts.Features {
 		name := f.ID
 		if f.Metadata != nil && f.Metadata.Name != "" {
 			name = f.Metadata.Name
 		}
-		fmt.Printf(" => %d. %s\n", i+1, name)
+		b.report.Infof(" => %d. %s", i+1, name)
 	}
 
 	// Create temporary directories:

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"os"
 
 	"github.com/griffithind/dcx/internal/container"
@@ -68,13 +69,13 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get identifiers from service (uses singleton Docker client)
-	_, err = container.DockerClient()
+	// Progress output is discarded so it cannot corrupt the printed config.
+	docker, err := container.NewDocker()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(docker, report.Discard, workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()

@@ -19,7 +19,7 @@ func TestBuilderBuild(t *testing.T) {
 			WorkspaceFolder: "/workspace",
 		}
 
-		builder := NewBuilder(slog.Default())
+		builder := NewBuilder(slog.Default(), nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/.devcontainer/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -40,7 +40,7 @@ func TestBuilderBuild(t *testing.T) {
 			ForwardPorts: []interface{}{float64(8080), "9000:9000"},
 		}
 
-		builder := NewBuilder(slog.Default())
+		builder := NewBuilder(slog.Default(), nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -64,7 +64,7 @@ func TestBuilderBuild(t *testing.T) {
 			},
 		}
 
-		builder := NewBuilder(slog.Default())
+		builder := NewBuilder(slog.Default(), nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",
@@ -99,7 +99,7 @@ func TestBuilderBuild(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				builder := NewBuilder(slog.Default())
+				builder := NewBuilder(slog.Default(), nil)
 				resolved, err := builder.Build(context.Background(), BuilderOptions{
 					ConfigPath:    "/tmp/test/devcontainer.json",
 					WorkspaceRoot: "/tmp/test",
@@ -118,7 +118,7 @@ func TestBuilderBuild(t *testing.T) {
 			require.NoError(t, os.WriteFile(composeFile, []byte("services:\n  app:\n    image: alpine\n"), 0644))
 
 			cfg := &DevContainerConfig{DockerComposeFile: "docker-compose.yml", Service: "app"}
-			builder := NewBuilder(slog.Default())
+			builder := NewBuilder(slog.Default(), nil)
 			resolved, err := builder.Build(context.Background(), BuilderOptions{
 				ConfigPath:    filepath.Join(dir, "devcontainer.json"),
 				WorkspaceRoot: dir,
@@ -136,7 +136,7 @@ func TestBuilderBuild(t *testing.T) {
 			Image: "alpine:latest",
 		}
 
-		builder := NewBuilder(slog.Default())
+		builder := NewBuilder(slog.Default(), nil)
 		resolved, err := builder.Build(context.Background(), BuilderOptions{
 			ConfigPath:    "/tmp/test/devcontainer.json",
 			WorkspaceRoot: "/tmp/test",

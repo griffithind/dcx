@@ -13,10 +13,4 @@ const (
 	// ImageTagPrefix is the prefix for dcx-built images.
 	// Format: dcx/{workspaceID}:{hash}
 	ImageTagPrefix = "dcx/"
-
-	// AgentBinaryPath is the path where dcx-agent is deployed in containers.
-	AgentBinaryPath = "/tmp/dcx-agent"
-
-	// SecretsDir is the directory where secrets are mounted in containers.
-	SecretsDir = "/run/secrets"
 )

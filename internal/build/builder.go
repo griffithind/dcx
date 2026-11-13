@@ -4,6 +4,7 @@ package build
 
 import (
 	"context"
+	"github.com/griffithind/dcx/internal/report"
 	"io"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -141,11 +142,13 @@ type UIDBuildOptions struct {
 
 // CLIBuilder implements ImageBuilder using Docker CLI for all operations.
 // All build and inspection operations use the Docker CLI.
-type CLIBuilder struct{}
+type CLIBuilder struct {
+	report report.Reporter
+}
 
-// NewCLIBuilder creates a new image builder.
-func NewCLIBuilder() *CLIBuilder {
-	return &CLIBuilder{}
+// NewCLIBuilder creates a new image builder reporting progress to rep.
+func NewCLIBuilder(rep report.Reporter) *CLIBuilder {
+	return &CLIBuilder{report: report.OrDiscard(rep)}
 }
 
 // Close is a no-op for CLI-based builder.

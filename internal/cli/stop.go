@@ -73,7 +73,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 			// Compose plan - use docker compose
 			actualProject := containerInfo.GetComposeProject(cliCtx.Identifiers.ProjectName)
 			configDir := containerInfo.GetConfigDir(cliCtx.WorkspacePath())
-			r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
+			r := container.NewUnifiedRuntimeForExistingCompose(cliCtx.Docker, ui.Reporter(), configDir, actualProject)
 			if err := r.Stop(cliCtx.Ctx); err != nil {
 				return fmt.Errorf("failed to stop containers: %w", err)
 			}

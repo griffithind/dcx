@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/common"
+	"github.com/griffithind/dcx/internal/shell"
 )
 
 // DockerfileGenerator generates Dockerfiles for feature installation.
@@ -91,7 +92,7 @@ func (g *DockerfileGenerator) Generate() string {
 	if len(envVars) > 0 {
 		sb.WriteString("# Container environment from features\n")
 		for key, value := range envVars {
-			fmt.Fprintf(&sb, "ENV %s=%s\n", key, common.ShellQuote(value))
+			fmt.Fprintf(&sb, "ENV %s=%s\n", key, dockerfileQuote(value))
 		}
 		sb.WriteString("\n")
 	}
@@ -99,7 +100,7 @@ func (g *DockerfileGenerator) Generate() string {
 	// Add devcontainer.metadata label per spec
 	if g.metadata != "" {
 		sb.WriteString("# Devcontainer metadata (per spec)\n")
-		fmt.Fprintf(&sb, "LABEL devcontainer.metadata=%s\n\n", common.LabelQuote(g.metadata))
+		fmt.Fprintf(&sb, "LABEL devcontainer.metadata=%s\n\n", dockerfileLabelQuote(g.metadata))
 	}
 
 	return sb.String()
@@ -131,15 +132,15 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 	envVars := feature.GetEnvVars()
 	if len(envVars) > 0 {
 		for key, value := range envVars {
-			fmt.Fprintf(sb, "ARG %s=%s\n", key, common.ShellQuote(value))
+			fmt.Fprintf(sb, "ARG %s=%s\n", key, dockerfileQuote(value))
 		}
 	}
 
-	// Escape values for shell
-	escapedName := common.ShellEscapeSingleQuote(featureName)
-	escapedID := common.ShellEscapeSingleQuote(featureID)
-	escapedVersion := common.ShellEscapeSingleQuote(featureVersion)
-	escapedDesc := common.ShellEscapeSingleQuote(featureDescription)
+	// Quote banner lines for the shell. Newlines are flattened first: even a
+	// quoted newline would terminate the Dockerfile RUN instruction.
+	echoLine := func(text string) string {
+		return "echo " + shell.Quote(strings.NewReplacer("\r", " ", "\n", " ").Replace(text))
+	}
 
 	// Use RUN --mount to bind mount feature content from build context
 	// This is more efficient than COPY as content is not persisted in the layer
@@ -150,13 +151,14 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 	sb.WriteString("    set -a && . /tmp/dcx-features/builtin.env && set +a && \\\n")
 	sb.WriteString("    if [ -f ./devcontainer-features.env ]; then . ./devcontainer-features.env; fi && \\\n")
 	sb.WriteString("    echo '===========================================================================' && \\\n")
-	fmt.Fprintf(sb, "    echo 'Feature       : %s' && \\\n", escapedName)
-	fmt.Fprintf(sb, "    echo 'Description   : %s' && \\\n", escapedDesc)
-	fmt.Fprintf(sb, "    echo 'Id            : %s' && \\\n", escapedID)
-	fmt.Fprintf(sb, "    echo 'Version       : %s' && \\\n", escapedVersion)
+	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Feature       : "+featureName))
+	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Description   : "+featureDescription))
+	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Id            : "+featureID))
+	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Version       : "+featureVersion))
 	sb.WriteString("    echo '===========================================================================' && \\\n")
 	sb.WriteString("    chmod +x ./install.sh && \\\n")
-	fmt.Fprintf(sb, "    (./install.sh || { echo 'ERROR: Feature \"%s\" (%s) failed to install!'; exit 1; }) && \\\n", escapedName, escapedID)
+	fmt.Fprintf(sb, "    (./install.sh || { %s; exit 1; }) && \\\n",
+		echoLine(fmt.Sprintf("ERROR: Feature \"%s\" (%s) failed to install!", featureName, featureID)))
 	fmt.Fprintf(sb, "    rm -rf /tmp/dcx-features/%s\n\n", featureDir)
 }
 
@@ -346,4 +348,30 @@ func CollectUpdateContentCommands(features []*Feature) []FeatureHook {
 // These run when attaching to the container.
 func CollectPostAttachCommands(features []*Feature) []FeatureHook {
 	return CollectHooks(features, HookPostAttach)
+}
+
+// dockerfileQuote quotes a value for a Dockerfile ENV or ARG instruction,
+// escaping \, ", $ and ` inside double quotes.
+//
+// Escaping $ means ${VAR} references in feature containerEnv do not expand,
+// which deviates from the spec; that is fixed with the Dockerfile generation
+// rework and intentionally left unchanged here.
+func dockerfileQuote(s string) string {
+	if !strings.ContainsAny(s, " \t\n\"'$`\\!") {
+		return s
+	}
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return `"` + s + `"`
+}
+
+// dockerfileLabelQuote quotes a value for a Dockerfile LABEL instruction.
+// Per the devcontainer reference implementation only ", \ and $ are escaped.
+func dockerfileLabelQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	return `"` + s + `"`
 }

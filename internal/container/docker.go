@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/griffithind/dcx/internal/common"
@@ -25,15 +24,8 @@ import (
 // All operations use the Docker CLI for reliability and simplicity.
 type Docker struct{}
 
-// Singleton instance for Docker.
-var (
-	docker     *Docker
-	dockerOnce sync.Once
-	dockerErr  error
-)
-
-// NewDocker creates a new Docker client.
-// Validates that Docker is accessible via the CLI.
+// NewDocker returns a Docker CLI engine after checking that the daemon is
+// reachable.
 func NewDocker() (*Docker, error) {
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
 	if err := cmd.Run(); err != nil {
@@ -42,21 +34,12 @@ func NewDocker() (*Docker, error) {
 	return &Docker{}, nil
 }
 
-// DockerClient returns the singleton Docker instance, validating Docker access on first use.
-func DockerClient() (*Docker, error) {
-	dockerOnce.Do(func() {
-		docker, dockerErr = NewDocker()
-	})
-	return docker, dockerErr
-}
-
-// MustDocker returns the singleton Docker instance, panicking if Docker is not accessible.
-func MustDocker() *Docker {
-	d, err := DockerClient()
-	if err != nil {
-		panic(fmt.Sprintf("docker not accessible: %v", err))
-	}
-	return d
+// NewDockerCLI returns a Docker CLI engine without contacting the daemon.
+// Commands that may not need Docker at all (config, plan, lock) use it so
+// they keep working when Docker is unavailable; operations report errors
+// when they are actually attempted.
+func NewDockerCLI() *Docker {
+	return &Docker{}
 }
 
 // Ping checks if the Docker daemon is accessible.
@@ -113,53 +96,68 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 
 // ListContainersWithLabels returns containers matching label filters.
 // Implements state.ContainerClient.
+//
+// Labels are read from `docker inspect` JSON. The `docker ps` Labels column
+// is a comma-joined string that cannot be split reliably: dcx stores JSON
+// (features.config) and filesystem paths, both of which may contain commas.
 func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]state.ContainerSummary, error) {
-	args := []string{"ps", "-a", "--format", "json", "--no-trunc"}
+	args := []string{"ps", "-a", "-q", "--no-trunc"}
 	for k, v := range labels {
 		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", k, v))
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.Output()
+	output, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
+	ids := strings.Fields(string(output))
+	if len(ids) == 0 {
+		return nil, nil
+	}
 
-	// Parse JSON lines (docker ps outputs one JSON object per line)
-	var result []state.ContainerSummary
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	inspectArgs := append([]string{"inspect", "--type", "container", "--format", "json"}, ids...)
+	inspectOut, inspectErr := exec.CommandContext(ctx, "docker", inspectArgs...).Output()
+	summaries, parseErr := parseContainerSummaries(inspectOut)
+	if parseErr != nil {
+		if inspectErr != nil {
+			return nil, fmt.Errorf("failed to inspect containers: %w", inspectErr)
 		}
+		return nil, parseErr
+	}
+	// A container removed between `ps` and `inspect` makes inspect exit
+	// non-zero while still printing the others; that is not an error here.
+	return summaries, nil
+}
 
-		var c struct {
-			ID     string `json:"ID"`
-			Names  string `json:"Names"`
-			State  string `json:"State"`
-			Labels string `json:"Labels"`
-		}
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
-			continue // Skip malformed lines
-		}
+// parseContainerSummaries parses `docker inspect --format json` output.
+func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
+	var raw []struct {
+		ID    string `json:"Id"`
+		Name  string `json:"Name"`
+		State struct {
+			Status  string `json:"Status"`
+			Running bool   `json:"Running"`
+		} `json:"State"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse container inspect output: %w", err)
+	}
 
-		// Parse labels from "key=value,key2=value2" format
-		labelMap := make(map[string]string)
-		if c.Labels != "" {
-			for _, kv := range strings.Split(c.Labels, ",") {
-				parts := strings.SplitN(kv, "=", 2)
-				if len(parts) == 2 {
-					labelMap[parts[0]] = parts[1]
-				}
-			}
+	result := make([]state.ContainerSummary, 0, len(raw))
+	for _, c := range raw {
+		labels := c.Config.Labels
+		if labels == nil {
+			labels = map[string]string{}
 		}
-
 		result = append(result, state.ContainerSummary{
 			ID:      c.ID,
-			Name:    c.Names,
-			State:   c.State,
-			Running: c.State == "running",
-			Labels:  labelMap,
+			Name:    strings.TrimPrefix(c.Name, "/"),
+			State:   c.State.Status,
+			Running: c.State.Running,
+			Labels:  labels,
 		})
 	}
 	return result, nil

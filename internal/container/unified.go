@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,13 +19,14 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/state"
-	"github.com/griffithind/dcx/internal/ui"
 )
 
 // UnifiedRuntime implements ContainerRuntime for all plan types.
 // It handles image-based, Dockerfile-based, and compose-based devcontainers
 // through a single unified implementation.
 type UnifiedRuntime struct {
+	engine   Engine
+	report   report.Reporter
 	resolved *devcontainer.ResolvedDevContainer
 	builder  build.ImageBuilder // CLI-based image builder
 
@@ -44,15 +47,18 @@ type UnifiedRuntime struct {
 }
 
 // NewUnifiedRuntime creates a new runtime for a resolved devcontainer.
-func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer) (*UnifiedRuntime, error) {
+func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontainer.ResolvedDevContainer) (*UnifiedRuntime, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("resolved devcontainer is required")
 	}
 
 	// Create CLI-based image builder
-	builder := build.NewCLIBuilder()
+	rep = report.OrDiscard(rep)
+	builder := build.NewCLIBuilder(rep)
 
 	return &UnifiedRuntime{
+		engine:        engine,
+		report:        rep,
 		resolved:      resolved,
 		builder:       builder,
 		containerName: resolved.ServiceName,
@@ -61,8 +67,10 @@ func NewUnifiedRuntime(resolved *devcontainer.ResolvedDevContainer) (*UnifiedRun
 
 // NewUnifiedRuntimeForExistingCompose creates a lightweight runtime for existing compose environments.
 // The configDir parameter should be the directory containing devcontainer.json (and typically the compose files).
-func NewUnifiedRuntimeForExistingCompose(configDir, composeProject string) *UnifiedRuntime {
+func NewUnifiedRuntimeForExistingCompose(engine Engine, rep report.Reporter, configDir, composeProject string) *UnifiedRuntime {
 	return &UnifiedRuntime{
+		engine:         engine,
+		report:         report.OrDiscard(rep),
 		workspacePath:  configDir, // Use configDir as working dir for compose commands
 		composeProject: composeProject,
 		isCompose:      true,
@@ -154,7 +162,7 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatur
 		// Check if derived image is already cached before building base image
 		derivedTag := r.getDerivedImageTag()
 		if !opts.Rebuild && r.derivedImageExists(ctx, derivedTag) {
-			fmt.Printf("Using cached derived image\n")
+			r.report.Infof("Using cached derived image")
 			finalImage = derivedTag
 			r.derivedImage = derivedTag
 		} else {
@@ -195,7 +203,7 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatur
 	}
 
 	// Start the container
-	if err := MustDocker().StartContainer(ctx, containerID); err != nil {
+	if err := r.engine.StartContainer(ctx, containerID); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
@@ -207,16 +215,16 @@ func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatur
 func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (string, error) {
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ImagePlan:
-		fmt.Printf("Using image: %s\n", plan.Image)
+		r.report.Infof("Using image: %s", plan.Image)
 
-		exists, err := MustDocker().ImageExists(ctx, plan.Image)
+		exists, err := r.engine.ImageExists(ctx, plan.Image)
 		if err != nil {
 			return "", fmt.Errorf("failed to check image: %w", err)
 		}
 
 		if !exists || opts.Pull {
-			fmt.Printf("Pulling image: %s\n", plan.Image)
-			if err := MustDocker().PullImageWithProgress(ctx, plan.Image, os.Stdout); err != nil {
+			r.report.Infof("Pulling image: %s", plan.Image)
+			if err := r.engine.PullImageWithProgress(ctx, plan.Image, os.Stdout); err != nil {
 				return "", fmt.Errorf("failed to pull image: %w", err)
 			}
 		}
@@ -225,7 +233,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 
 	case *devcontainer.DockerfilePlan:
 		imageTag := fmt.Sprintf("%s%s:%s", common.ImageTagPrefix, r.resolved.ID, r.resolved.ConfigHash[:common.HashTruncationLength])
-		fmt.Printf("Building image: %s\n", imageTag)
+		r.report.Infof("Building image: %s", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
 			return "", fmt.Errorf("failed to build image: %w", err)
@@ -408,9 +416,9 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 
 		// Warn user about elevated permissions
 		if reqs.Privileged || len(reqs.Capabilities) > 0 {
-			ui.Warning("Features require elevated permissions:")
+			r.report.Warnf("Features require elevated permissions:")
 			for _, name := range reqs.FeatureNames {
-				ui.Warning("  - %s", name)
+				r.report.Warnf("  - %s", name)
 			}
 		}
 
@@ -489,7 +497,7 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 		createOpts.Cmd = []string{"infinity"}
 	}
 
-	return MustDocker().CreateContainer(ctx, createOpts)
+	return r.engine.CreateContainer(ctx, createOpts)
 }
 
 // buildLabels builds the container labels.
@@ -543,7 +551,7 @@ func (r *UnifiedRuntime) buildMounts() mountCollections {
 	// /run/secrets is always a tmpfs: besides user runtime secrets it holds
 	// the dcx-managed SSH host private key, which must never land in the
 	// container's writable layer (visible to docker commit/export/diff).
-	result.Tmpfs[common.SecretsDir] = "rw,noexec,nosuid,size=1m"
+	result.Tmpfs[agentproto.SecretsDir] = "rw,noexec,nosuid,size=1m"
 
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {
@@ -597,9 +605,6 @@ func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
 	return ports
 }
 
-// sshAgentContainerPort is the in-container port the dcx-agent listens on.
-const sshAgentContainerPort = 48022
-
 // sshPortBinding returns the PortForward that publishes the dcx-agent's
 // SSH listener.
 //
@@ -617,7 +622,7 @@ func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
 		host = "127.0.0.1"
 	}
 	pf := devcontainer.PortForward{
-		ContainerPort: sshAgentContainerPort,
+		ContainerPort: agentproto.ListenPort,
 		Host:          host,
 		Protocol:      "tcp",
 		Label:         "dcx SSH (internal)",
@@ -631,7 +636,7 @@ func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
 			pf.EphemeralHostPort = false
 			return pf
 		}
-		ui.Warning("SSH: preferred port %d is busy; falling back to an ephemeral port for this workspace", candidate)
+		r.report.Warnf("SSH: preferred port %d is busy; falling back to an ephemeral port for this workspace", candidate)
 	}
 	pf.EphemeralHostPort = true
 	return pf
@@ -654,7 +659,7 @@ func (r *UnifiedRuntime) Start(ctx context.Context) error {
 	}
 
 	// Single container
-	return MustDocker().StartContainer(ctx, r.containerName)
+	return r.engine.StartContainer(ctx, r.containerName)
 }
 
 // Stop implements ContainerRuntime.Stop.
@@ -673,7 +678,7 @@ func (r *UnifiedRuntime) Stop(ctx context.Context) error {
 	}
 
 	// Single container
-	return MustDocker().StopContainer(ctx, r.containerName, nil)
+	return r.engine.StopContainer(ctx, r.containerName, nil)
 }
 
 // Down implements ContainerRuntime.Down.
@@ -698,7 +703,7 @@ func (r *UnifiedRuntime) Down(ctx context.Context, opts DownOptions) error {
 	}
 
 	// Single container
-	return MustDocker().RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
+	return r.engine.RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
 }
 
 // Build implements ContainerRuntime.Build.
@@ -1013,7 +1018,7 @@ func (r *UnifiedRuntime) derivedImageExists(ctx context.Context, tag string) boo
 	if tag == "" {
 		return false
 	}
-	exists, err := MustDocker().ImageExists(ctx, tag)
+	exists, err := r.engine.ImageExists(ctx, tag)
 	return err == nil && exists
 }
 

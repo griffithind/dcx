@@ -32,6 +32,11 @@ requiring the @devcontainers/cli. Container state is tracked using labels,
 enabling offline-safe operations for start/stop/exec commands.`,
 	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Flags parsed successfully, so any error from here on is a runtime
+		// failure: report it without dumping the command's usage text.
+		// (Flag and argument errors happen earlier and still show usage.)
+		cmd.SilenceUsage = true
+
 		// Initialize workspace path if not provided
 		if workspacePath == "" {
 			var err error

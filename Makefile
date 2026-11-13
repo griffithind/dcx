@@ -113,7 +113,7 @@ vet: build-agent
 
 # Find dead (unused) code
 deadcode: build-agent
-	go run golang.org/x/tools/cmd/deadcode@latest -filter='github.com/griffithind/dcx/(cmd|internal)' ./...
+	go run golang.org/x/tools/cmd/deadcode@latest -test -filter='github.com/griffithind/dcx/(cmd|internal)' ./...
 
 # Help target
 help:

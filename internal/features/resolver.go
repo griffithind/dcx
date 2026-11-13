@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"io"
 	"net/http"
 	"os"
@@ -29,6 +30,7 @@ type Resolver struct {
 	cacheDir  string
 	configDir string
 	forcePull bool
+	report    report.Reporter
 }
 
 // DigestInfo holds digest information for a resolved feature.
@@ -102,8 +104,9 @@ func extractDigestFromResolved(resolved string) string {
 	return ""
 }
 
-// NewResolver creates a new feature resolver.
-func NewResolver(configDir string) (*Resolver, error) {
+// NewResolver creates a new feature resolver reporting fetch progress to rep
+// (nil discards it).
+func NewResolver(configDir string, rep report.Reporter) (*Resolver, error) {
 	// Determine cache directory
 	cacheDir, err := getCacheDir()
 	if err != nil {
@@ -113,6 +116,7 @@ func NewResolver(configDir string) (*Resolver, error) {
 	return &Resolver{
 		cacheDir:  cacheDir,
 		configDir: configDir,
+		report:    report.OrDiscard(rep),
 	}, nil
 }
 
@@ -237,7 +241,7 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 				// Verify integrity against lockfile if available
 				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
 					// Cache integrity doesn't match lockfile, need to re-fetch
-					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.CanonicalID())
+					r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", ref.CanonicalID())
 					_ = os.RemoveAll(cachePath)
 				} else {
 					return nil
@@ -256,9 +260,9 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 
 	// Fetch from OCI registry
 	if lockedManifestDigest != "" {
-		fmt.Printf("    Fetching feature from registry: %s (locked to %s)\n", ref.CanonicalID(), lockedManifestDigest[:min(19, len(lockedManifestDigest))]+"...")
+		r.report.Infof("  Fetching feature from registry: %s (locked to %s)", ref.CanonicalID(), lockedManifestDigest[:min(19, len(lockedManifestDigest))]+"...")
 	} else {
-		fmt.Printf("    Fetching feature from registry: %s\n", ref.CanonicalID())
+		r.report.Infof("  Fetching feature from registry: %s", ref.CanonicalID())
 	}
 	digestInfo, err := r.fetchOCIWithDigest(ctx, ref, cachePath, lockedManifestDigest, expectedIntegrity)
 	if err != nil {
@@ -312,7 +316,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 				// Verify integrity against lockfile if available
 				if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
 					// Cache integrity doesn't match lockfile, need to re-fetch
-					fmt.Printf("    Cache integrity mismatch for %s, re-fetching...\n", ref.URL)
+					r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", ref.URL)
 					_ = os.RemoveAll(cachePath)
 				} else {
 					return nil
@@ -500,7 +504,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	}
 	if err := saveDigestInfo(destPath, *digestInfo); err != nil {
 		// Log but don't fail - digest info is nice to have
-		fmt.Printf("    Warning: failed to save digest info: %v\n", err)
+		r.report.Warnf("failed to save digest info: %v", err)
 	}
 
 	return digestInfo, nil
@@ -548,7 +552,7 @@ func (r *Resolver) fetchHTTPWithDigest(ctx context.Context, url, destPath string
 	}
 	if err := saveDigestInfo(destPath, digestInfo); err != nil {
 		// Log but don't fail
-		fmt.Printf("    Warning: failed to save digest info: %v\n", err)
+		r.report.Warnf("failed to save digest info: %v", err)
 	}
 
 	return integrity, nil

@@ -31,12 +31,12 @@ func init() {
 }
 
 func runSSH(cmd *cobra.Command, args []string) error {
-	_, err := containerPkg.DockerClient()
+	docker, err := containerPkg.NewDocker()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()

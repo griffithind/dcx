@@ -11,27 +11,22 @@ package exec
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/shell"
 	"io"
 	"net"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/term"
 )
-
-// defaultContainerSSHPort is the port the dcx-agent listens on inside the
-// container. Docker -p maps it to an ephemeral host port which we discover
-// at connect time via `docker port`.
-const defaultContainerSSHPort = 48022
 
 // ContainerExecOptions is the high-level options struct used by CLI
 // commands (exec/shell/run) and lifecycle hooks.
@@ -46,6 +41,15 @@ type ContainerExecOptions struct {
 	Stdout        io.Writer // defaults to os.Stdout
 	Stderr        io.Writer // defaults to os.Stderr
 	TTY           *bool     // nil = auto-detect from stdin
+
+	// Ports resolves the host port Docker published for the agent.
+	Ports PortResolver
+}
+
+// PortResolver looks up the host port a container port is published on.
+// container.Engine satisfies it.
+type PortResolver interface {
+	PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error)
 }
 
 // ExecInContainer runs a command (or interactive shell) inside a container
@@ -76,7 +80,7 @@ func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error
 		stderr = os.Stderr
 	}
 
-	client, err := connect(ctx, opts.ContainerName, opts.WorkspaceID, user)
+	client, err := connect(ctx, opts.Ports, opts.ContainerName, opts.WorkspaceID, user)
 	if err != nil {
 		return -1, err
 	}
@@ -146,7 +150,7 @@ func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error
 			runErr = session.Wait()
 		}
 	} else {
-		runErr = session.Run(joinCommandForShell(opts.Command))
+		runErr = session.Run(shell.Join(opts.Command))
 	}
 
 	if runErr != nil {
@@ -167,8 +171,8 @@ func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error
 // The host key is verified against the workspace's persistent host key via
 // FixedHostKey — dcx controls both ends, so no known_hosts round-trip is
 // needed for this path (plain `ssh` clients use ~/.dcx/known_hosts).
-func connect(ctx context.Context, containerName, workspaceID, user string) (*ssh.Client, error) {
-	port, err := resolveSSHPort(ctx, containerName)
+func connect(ctx context.Context, ports PortResolver, containerName, workspaceID, user string) (*ssh.Client, error) {
+	port, err := resolveSSHPort(ctx, ports, containerName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve ssh port for %s: %w", containerName, err)
 	}
@@ -305,34 +309,12 @@ func collectClientSigners() ([]ssh.Signer, error) {
 }
 
 // resolveSSHPort returns the ephemeral host port Docker mapped to the
-// container's :48022. Callers are expected to have already stamped the port
-// into a label at create time once the PR4 changes land; until then we
-// shell out to `docker port`.
-func resolveSSHPort(ctx context.Context, containerName string) (int, error) {
-	d := container.MustDocker()
-	details, err := d.InspectContainer(ctx, containerName)
-	if err == nil && details != nil {
-		if s := details.Labels["com.griffithind.dcx.ssh.host.port"]; s != "" {
-			if n := atoi(s); n > 0 {
-				return n, nil
-			}
-		}
+// agent's container port.
+func resolveSSHPort(ctx context.Context, ports PortResolver, containerName string) (int, error) {
+	if ports == nil {
+		return 0, fmt.Errorf("no port resolver configured")
 	}
-	return d.PortMapping(ctx, containerName, defaultContainerSSHPort, "tcp")
-}
-
-// atoi is a tiny positive-int parser that returns 0 on failure — matches
-// util.StringToInt but kept local to avoid cross-package churn during the
-// rename.
-func atoi(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n
+	return ports.PortMapping(ctx, containerName, agentproto.ListenPort, "tcp")
 }
 
 // handleWindowResize monitors terminal size changes and updates the SSH
@@ -397,30 +379,3 @@ func buildExecEnvironment(user string, cfg *devcontainer.DevContainerConfig) []s
 }
 
 // shellUnsafeChars matches characters that need quoting in shell arguments.
-var shellUnsafeChars = regexp.MustCompile(`[^\w@%+=:,./-]`)
-
-// joinCommandForShell joins command arguments with proper shell quoting.
-func joinCommandForShell(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-
-	quoted := make([]string, len(args))
-	for i, arg := range args {
-		quoted[i] = quoteForShell(arg)
-	}
-	return strings.Join(quoted, " ")
-}
-
-// quoteForShell quotes a string for safe use as a shell argument.
-func quoteForShell(s string) string {
-	if s == "" {
-		return "''"
-	}
-
-	if !shellUnsafeChars.MatchString(s) {
-		return s
-	}
-
-	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
-}

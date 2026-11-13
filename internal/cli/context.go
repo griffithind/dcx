@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/ui"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
@@ -31,13 +32,13 @@ func NewCLIContext() (*CLIContext, error) {
 	ctx := context.Background()
 
 	// Initialize Docker client (uses singleton)
-	docker, err := container.DockerClient()
+	docker, err := container.NewDocker()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
 	// Create service
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
 
 	// Get identifiers
 	ids, err := svc.GetIdentifiers()
@@ -60,7 +61,7 @@ func (c *CLIContext) Close() {
 	if c.Service != nil {
 		c.Service.Close()
 	}
-	// Docker is a singleton, no need to close
+
 }
 
 // GetState retrieves the current container state.

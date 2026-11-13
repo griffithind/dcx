@@ -20,8 +20,8 @@ func TestStateRequirementConstants(t *testing.T) {
 
 func TestStateValidationOptions(t *testing.T) {
 	tests := []struct {
-		name    string
-		opts    StateValidationOptions
+		name string
+		opts StateValidationOptions
 	}{
 		{
 			name: "require running with stale warning",

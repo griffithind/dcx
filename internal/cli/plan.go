@@ -41,13 +41,13 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	// Initialize Docker client (uses singleton)
-	_, err := container.DockerClient()
+	docker, err := container.NewDocker()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
 	// Create service and get plan
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	plan, err := svc.Plan(ctx, service.PlanOptions{})

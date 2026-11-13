@@ -3,6 +3,7 @@ package devcontainer
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,11 +21,13 @@ import (
 // This replaces the previous workspace.Builder.
 type Builder struct {
 	logger *slog.Logger
+	report report.Reporter
 }
 
-// NewBuilder creates a new devcontainer builder.
-func NewBuilder(logger *slog.Logger) *Builder {
-	return &Builder{logger: logger}
+// NewBuilder creates a new devcontainer builder. Progress from feature
+// resolution is sent to rep (nil discards it).
+func NewBuilder(logger *slog.Logger, rep report.Reporter) *Builder {
+	return &Builder{logger: logger, report: report.OrDiscard(rep)}
 }
 
 // BuilderOptions contains options for building a resolved devcontainer.
@@ -240,7 +243,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 // resolveFeatures resolves all features from the configuration.
 func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevContainer, opts BuilderOptions) error {
-	mgr, err := features.NewManager(resolved.ConfigDir)
+	mgr, err := features.NewManager(resolved.ConfigDir, b.report)
 	if err != nil {
 		return fmt.Errorf("failed to create feature manager: %w", err)
 	}

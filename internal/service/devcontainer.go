@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"fmt"
+	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/report"
 	"log/slog"
 	"net"
 	"os"
@@ -25,7 +27,6 @@ import (
 	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
-	"github.com/griffithind/dcx/internal/ui"
 	gossh "golang.org/x/crypto/ssh"
 	sshagent "golang.org/x/crypto/ssh/agent"
 )
@@ -33,6 +34,8 @@ import (
 // DevContainerService provides high-level operations for devcontainer environments.
 // This replaces the previous EnvironmentService in internal/orchestrator.
 type DevContainerService struct {
+	engine        container.Engine
+	report        report.Reporter
 	logger        *slog.Logger
 	stateManager  *state.StateManager
 	builder       *devcontainer.Builder
@@ -44,12 +47,19 @@ type DevContainerService struct {
 	lastResolved *devcontainer.ResolvedDevContainer
 }
 
-// NewDevContainerService creates a new devcontainer service.
-func NewDevContainerService(workspacePath, configPath string, verbose bool) *DevContainerService {
+// NewDevContainerService creates a new devcontainer service backed by the
+// given container engine.
+//
+// Progress messages go to rep; pass report.Discard for machine-readable
+// output.
+func NewDevContainerService(engine container.Engine, rep report.Reporter, workspacePath, configPath string, verbose bool) *DevContainerService {
+	rep = report.OrDiscard(rep)
 	return &DevContainerService{
+		engine:        engine,
+		report:        rep,
 		logger:        slog.Default(),
-		stateManager:  state.NewStateManager(container.MustDocker()),
-		builder:       devcontainer.NewBuilder(slog.Default()),
+		stateManager:  state.NewStateManager(engine),
+		builder:       devcontainer.NewBuilder(slog.Default(), rep),
 		workspacePath: workspacePath,
 		configPath:    configPath,
 		verbose:       verbose,
@@ -196,7 +206,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 		if err != nil {
 			// Log warning but continue without lockfile
 			if s.verbose {
-				ui.Warning("Failed to load lockfile: %v", err)
+				s.report.Warnf("Failed to load lockfile: %v", err)
 			}
 		}
 	}
@@ -229,7 +239,7 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 	}
 
 	// Try to get image labels (the image may not be pulled yet)
-	labels, err := container.MustDocker().GetImageLabels(ctx, imageRef)
+	labels, err := s.engine.GetImageLabels(ctx, imageRef)
 	if err != nil {
 		// Image not available locally, skip metadata merge
 		// It will be pulled later during Up
@@ -246,7 +256,7 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 	imageConfigs, err := devcontainer.ParseImageMetadata(label)
 	if err != nil {
 		if s.verbose {
-			ui.Warning("Failed to parse image metadata: %v", err)
+			s.report.Warnf("Failed to parse image metadata: %v", err)
 		}
 		return cfg
 	}
@@ -258,7 +268,7 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 	// Merge image metadata with local config (local config takes precedence)
 	merged := devcontainer.MergeMetadata(cfg, imageConfigs)
 	if s.verbose {
-		ui.Printf("Merged configuration from %d image metadata layer(s)", len(imageConfigs))
+		s.report.Infof("Merged configuration from %d image metadata layer(s)", len(imageConfigs))
 	}
 
 	return merged
@@ -278,9 +288,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Validate host requirements
 	if resolved.RawConfig != nil && resolved.RawConfig.HostRequirements != nil {
-		dockerInfo, err := container.MustDocker().Info(ctx)
+		dockerInfo, err := s.engine.Info(ctx)
 		if err != nil {
-			ui.Warning("Could not get Docker info for resource validation: %v", err)
+			s.report.Warnf("Could not get Docker info for resource validation: %v", err)
 		} else {
 			dockerRes := &devcontainer.DockerResources{
 				CPUs:   dockerInfo.NCPU,
@@ -288,11 +298,11 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 			}
 			result := devcontainer.ValidateHostRequirementsWithDocker(resolved.RawConfig.HostRequirements, dockerRes)
 			for _, warning := range result.Warnings {
-				ui.Warning("%s", warning)
+				s.report.Warnf("%s", warning)
 			}
 			if !result.Satisfied {
 				for _, errMsg := range result.Errors {
-					ui.Error("%s", errMsg)
+					s.report.Errorf("%s", errMsg)
 				}
 				return fmt.Errorf("host requirements not satisfied")
 			}
@@ -307,12 +317,12 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	if s.verbose {
-		ui.Printf("Current state: %s", currentState)
+		s.report.Infof("Current state: %s", currentState)
 	}
 
 	// Early return if already running and no rebuild/recreate requested
 	if currentState == state.StateRunning && !opts.Recreate && !opts.Rebuild {
-		ui.Println("Devcontainer is already running")
+		s.report.Infof("Devcontainer is already running")
 		return nil
 	}
 
@@ -331,7 +341,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	// time the container stops, so they are fetched and mounted on every
 	// start, not only on create.
 	if len(resolved.RuntimeSecrets) > 0 {
-		ui.Println("Fetching runtime secrets...")
+		s.report.Infof("Fetching runtime secrets...")
 		runtimeSecrets, err = fetcher.FetchSecrets(ctx, resolved.RuntimeSecrets)
 		if err != nil {
 			return fmt.Errorf("failed to fetch secrets: %w", err)
@@ -341,7 +351,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	if isCreatingNew {
 		// Fetch build secrets (passed to docker build)
 		if len(resolved.BuildSecrets) > 0 {
-			ui.Println("Fetching build secrets...")
+			s.report.Infof("Fetching build secrets...")
 			buildSecrets, err := fetcher.FetchSecrets(ctx, resolved.BuildSecrets)
 			if err != nil {
 				return fmt.Errorf("failed to fetch build secrets: %w", err)
@@ -364,7 +374,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		fallthrough
 	case state.StateStale, state.StateBroken:
 		if s.verbose {
-			ui.Println("Removing existing devcontainer...")
+			s.report.Infof("Removing existing devcontainer...")
 		}
 		// Never remove named volumes when recreating: they hold user data
 		// (databases, caches) that must survive a config change. Only an
@@ -395,7 +405,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Pre-deploy agent binary before lifecycle hooks
 	if containerInfo != nil {
-		ui.Println("Installing dcx agent...")
+		s.report.Infof("Installing dcx agent...")
 		updated, err := deploy.PreDeployAgent(ctx, containerInfo.Name)
 		if err != nil {
 			return fmt.Errorf("failed to install dcx agent: %w", err)
@@ -403,7 +413,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		// An agent from an older dcx may still be serving; replace it so
 		// fixes in the new binary actually take effect.
 		if updated {
-			if err := deploy.StopOutdatedAgent(ctx, containerInfo.Name, common.AgentBinaryPath, agentListenAddr); err != nil {
+			if err := deploy.StopOutdatedAgent(ctx, containerInfo.Name, agentproto.BinaryPath, agentproto.LoopbackAddr); err != nil {
 				return err
 			}
 		}
@@ -423,8 +433,8 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Mount runtime secrets before lifecycle hooks
 	if len(runtimeSecrets) > 0 && containerInfo != nil {
-		ui.Println("Mounting secrets...")
-		if err := container.MountSecretsToContainer(ctx, containerInfo.Name, runtimeSecrets, resolved.EffectiveUser); err != nil {
+		s.report.Infof("Mounting secrets...")
+		if err := container.MountSecretsToContainer(ctx, s.engine, containerInfo.Name, runtimeSecrets, resolved.EffectiveUser); err != nil {
 			return fmt.Errorf("failed to mount secrets: %w", err)
 		}
 	}
@@ -436,7 +446,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	// Setup SSH server access
 	if err := s.setupSSHAccess(ctx, resolved, containerInfo); err != nil {
-		ui.Warning("Failed to setup SSH access: %v", err)
+		s.report.Warnf("Failed to setup SSH access: %v", err)
 	}
 
 	return nil
@@ -475,7 +485,7 @@ func (s *DevContainerService) mountSSHSecrets(ctx context.Context, resolved *dev
 	// tracker lives on the ContainerInfo we just refreshed.
 	newHash := container.SHA256Hex(authKeys)
 	if stored := containerInfo.Labels.SSHAuthorizedKeysSHA256; stored != "" && stored != newHash {
-		ui.Printf("SSH: authorized_keys content changed — re-synced")
+		s.report.Infof("SSH: authorized_keys content changed — re-synced")
 	}
 
 	// Owner for the host key must be the user the agent runs as, since the
@@ -488,7 +498,7 @@ func (s *DevContainerService) mountSSHSecrets(ctx context.Context, resolved *dev
 		owner = "root"
 	}
 
-	return container.MountDCXSecrets(ctx, containerInfo.Name, []container.DCXSecret{
+	return container.MountDCXSecrets(ctx, s.engine, containerInfo.Name, []container.DCXSecret{
 		{
 			Name:  "authorized_keys",
 			Value: authKeys,
@@ -527,10 +537,10 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	}
 
 	argv := []string{
-		common.AgentBinaryPath, "listen",
-		"--addr", "0.0.0.0:48022",
-		"--host-key", "/run/secrets/dcx/ssh_host_ed25519_key",
-		"--authorized-keys", "/run/secrets/dcx/authorized_keys",
+		agentproto.BinaryPath, "listen",
+		"--addr", agentproto.ListenAddr("0.0.0.0"),
+		"--host-key", agentproto.HostKeyPath,
+		"--authorized-keys", agentproto.AuthorizedKeysPath,
 		"--user", user,
 		"--workdir", workDir,
 	}
@@ -540,7 +550,7 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	// The agent inherits the container's default user (typically the image's
 	// USER or remoteUser after UID remap). mountSSHSecrets chowns the host
 	// key and authorized_keys to that same user so the agent can read them.
-	if err := container.MustDocker().ExecDetached(ctx, containerInfo.Name, argv); err != nil {
+	if err := s.engine.ExecDetached(ctx, containerInfo.Name, argv); err != nil {
 		return err
 	}
 
@@ -561,30 +571,27 @@ func (s *DevContainerService) launchSSHAgent(ctx context.Context, resolved *devc
 	return fmt.Errorf("dcx agent did not start listening within %s", agentReadyTimeout)
 }
 
-// agentListenAddr is where the in-container agent listens (container side).
-const agentListenAddr = "127.0.0.1:48022"
-
 // agentReadyTimeout bounds how long Up waits for a freshly launched agent.
-const agentReadyTimeout = 15 * time.Second
+var agentReadyTimeout = 15 * time.Second
 
 // agentListening reports whether the in-container agent answers a ping.
 func (s *DevContainerService) agentListening(ctx context.Context, containerName string) bool {
-	return container.MustDocker().ExecInContainer(ctx, containerName, []string{
-		common.AgentBinaryPath, "ping", "--addr", agentListenAddr,
+	return s.engine.ExecInContainer(ctx, containerName, []string{
+		agentproto.BinaryPath, "ping", "--addr", agentproto.LoopbackAddr,
 	}) == nil
 }
 
 // create creates a new environment.
 func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
-	runtime, err := container.NewUnifiedRuntime(resolved)
+	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
 	if _, ok := resolved.Plan.(*devcontainer.ComposePlan); ok {
-		ui.Println("Creating compose-based devcontainer...")
+		s.report.Infof("Creating compose-based devcontainer...")
 	} else {
-		ui.Println("Creating single-container devcontainer...")
+		s.report.Infof("Creating single-container devcontainer...")
 	}
 
 	return runtime.Up(ctx, container.UpOptions{
@@ -598,9 +605,9 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 
 // start starts an existing stopped environment.
 func (s *DevContainerService) start(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
-	ui.Println("Starting existing devcontainer...")
+	s.report.Infof("Starting existing devcontainer...")
 
-	runtime, err := container.NewUnifiedRuntime(resolved)
+	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
@@ -617,11 +624,13 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 	// Apply environment patches and probing before lifecycle hooks
 	probedEnv, err := s.setupContainerEnvironment(ctx, resolved, containerInfo)
 	if err != nil {
-		ui.Warning("Environment setup failed: %v", err)
+		s.report.Warnf("Environment setup failed: %v", err)
 		// Continue with hooks even if env setup fails
 	}
 
 	hookRunner := lifecycle.NewHookRunner(
+		s.engine,
+		s.report,
 		containerInfo.ID,
 		s.workspacePath,
 		resolved.RawConfig,
@@ -636,7 +645,7 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 	// Use pre-resolved features
 	if len(resolved.Features) > 0 {
 		if s.verbose {
-			ui.Printf("  [hooks] Using %d pre-resolved features", len(resolved.Features))
+			s.report.Infof("  [hooks] Using %d pre-resolved features", len(resolved.Features))
 		}
 
 		hookRunner.SetFeatureHooks(
@@ -650,12 +659,12 @@ func (s *DevContainerService) runLifecycleHooks(ctx context.Context, resolved *d
 
 	if isNew {
 		if s.verbose {
-			ui.Println("  [hooks] Running create hooks...")
+			s.report.Infof("  [hooks] Running create hooks...")
 		}
 		return hookRunner.RunAllCreateHooks(ctx)
 	}
 	if s.verbose {
-		ui.Println("  [hooks] Running start hooks...")
+		s.report.Infof("  [hooks] Running start hooks...")
 	}
 	return hookRunner.RunStartHooks(ctx)
 }
@@ -683,19 +692,19 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	// Patch /etc/environment if there are env vars to write
 	if len(envToPatch) > 0 {
 		if s.verbose {
-			ui.Printf("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
+			s.report.Infof("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
 		}
 		if err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
-			ui.Warning("Failed to patch /etc/environment: %v", err)
+			s.report.Warnf("Failed to patch /etc/environment: %v", err)
 		}
 	}
 
 	// Patch /etc/profile to preserve PATH from features
 	if s.verbose {
-		ui.Println("  [env] Patching /etc/profile for PATH preservation...")
+		s.report.Infof("  [env] Patching /etc/profile for PATH preservation...")
 	}
 	if err := patcher.PatchEtcProfile(ctx, containerInfo.ID); err != nil {
-		ui.Warning("Failed to patch /etc/profile: %v", err)
+		s.report.Warnf("Failed to patch /etc/profile: %v", err)
 	}
 
 	// Probe user environment if configured
@@ -718,7 +727,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	imageHash := resolved.ConfigHash
 
 	if s.verbose {
-		ui.Printf("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)
+		s.report.Infof("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)
 	}
 
 	probedEnv, err := prober.ProbeWithCache(ctx, containerInfo.ID, probeType, user, imageHash)
@@ -727,7 +736,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	}
 
 	if s.verbose && probedEnv != nil {
-		ui.Printf("  [env] Captured %d environment variables", len(probedEnv))
+		s.report.Infof("  [env] Captured %d environment variables", len(probedEnv))
 	}
 
 	return probedEnv, nil
@@ -756,7 +765,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 	ids, _ := s.GetIdentifiers()
 
 	// Discover the host-side ephemeral port Docker picked for our listener.
-	port, err := container.MustDocker().PortMapping(ctx, containerInfo.Name, 48022, "tcp")
+	port, err := s.engine.PortMapping(ctx, containerInfo.Name, agentproto.ListenPort, "tcp")
 	if err != nil {
 		return fmt.Errorf("resolve ssh port: %w", err)
 	}
@@ -785,7 +794,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		return fmt.Errorf("failed to update SSH config: %w", err)
 	}
 
-	ui.Printf("SSH configured: ssh %s  (127.0.0.1:%d)", ids.SSHHost, port)
+	s.report.Infof("SSH configured: ssh %s  (127.0.0.1:%d)", ids.SSHHost, port)
 	return nil
 }
 
@@ -942,27 +951,27 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 	}
 
 	if currentState == state.StateAbsent {
-		ui.Println("No devcontainer found")
+		s.report.Infof("No devcontainer found")
 		return nil
 	}
 
 	// Handle based on plan type (single-container vs compose)
 	if containerInfo.IsSingleContainer() {
 		if containerInfo.Running {
-			if err := container.MustDocker().StopContainer(ctx, containerInfo.ID, nil); err != nil {
+			if err := s.engine.StopContainer(ctx, containerInfo.ID, nil); err != nil {
 				return fmt.Errorf("failed to stop container: %w", err)
 			}
 		}
 		// `docker rm -v` only removes the container's anonymous volumes;
 		// named volumes are never touched, so this is always safe and avoids
 		// leaking anonymous volumes on every recreate.
-		if err := container.MustDocker().RemoveContainer(ctx, containerInfo.ID, true, true); err != nil {
+		if err := s.engine.RemoveContainer(ctx, containerInfo.ID, true, true); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {
 		actualProject := containerInfo.GetComposeProject(projectName)
 		configDir := containerInfo.GetConfigDir(s.workspacePath)
-		r := container.NewUnifiedRuntimeForExistingCompose(configDir, actualProject)
+		r := container.NewUnifiedRuntimeForExistingCompose(s.engine, s.report, configDir, actualProject)
 		if err := r.Down(ctx, container.DownOptions{
 			RemoveVolumes: opts.RemoveVolumes,
 			RemoveOrphans: opts.RemoveOrphans,
@@ -981,7 +990,7 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 		_ = dcxssh.RemoveHost(workspaceID)
 	}
 
-	ui.Println("Devcontainer removed")
+	s.report.Infof("Devcontainer removed")
 	return nil
 }
 
@@ -1042,7 +1051,7 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		return err
 	}
 
-	runtime, err := container.NewUnifiedRuntime(resolved)
+	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
@@ -1082,7 +1091,7 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 
 	// Create feature manager and resolve features
 	configDir := filepath.Dir(configPath)
-	mgr, err := features.NewManager(configDir)
+	mgr, err := features.NewManager(configDir, s.report)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create feature manager: %w", err)
 	}

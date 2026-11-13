@@ -172,9 +172,6 @@ func writeReadyFile(path, listenAddr string) {
 	_ = os.WriteFile(path, []byte(listenAddr+"\n"), 0644)
 }
 
-// DefaultReadyFilePath is the sentinel the agent writes once Accept is live
-// inside the container. Readable from the host via `docker exec cat`.
-const DefaultReadyFilePath = "/var/lib/dcx/agent-ready"
 
 // authorize returns true if the presented public key appears in any of the
 // configured AuthorizedKeysPaths. Reads are performed per-attempt because

@@ -240,11 +240,12 @@ Small targeted patches on today's code, each with a test. Do these before any re
 
 ### Phase 2: introduce seams (3–5 days)
 
-- [ ] `engine.ContainerEngine` interface. Move `container.Docker` behind it, delete `MustDocker()`, inject through `app`. Add a fake.
-- [ ] `report.Reporter`. Replace `fmt.Printf` and `ui.*` in non-CLI packages. Set `SilenceUsage`.
-- [ ] `agentproto` constants (port 48022 appears in 6+ places, plus secret paths and label keys).
-- [ ] `internal/shell`: one quoter, fuzz-tested. Delete the other two.
-- [ ] Read labels via `docker inspect` JSON, not comma-split `ps` output.
+- [x] `container.Engine` interface implemented by `*Docker`. `MustDocker()` and the singleton are deleted; the engine is injected into the service, runtime, secrets, hooks and SSH exec (`ssh/exec` no longer imports `container`). `containertest.Fake` added.
+- [x] `report.Reporter`, with a terminal implementation in `ui`, `Discard` for `--json` output (`config`, `debug --json`, `ssh info --json`), and a `Recorder` for tests. No package outside `cli`/`ui` prints. Usage is only printed for flag errors.
+- [x] `agentproto` holds the agent binary path, port and secret paths; the hard-coded copies are gone.
+- [x] `internal/shell` provides `Quote`/`Join`, round-trip tested through `/bin/sh` and fuzzed. `quoteForShell` and the buggy `ShellEscapeSingleQuote` are deleted. The Dockerfile ENV/LABEL escapers moved into the Dockerfile generator unchanged; their ENV semantics are fixed in Phase 4.
+- [x] Container labels are read from `docker inspect` JSON.
+- [ ] Still shelling out to `docker` outside the engine: `build/` (image builds), `env/probe.go`, `ssh/deploy`, `container/compose.go`, `cli/doctor.go`. Move them behind `Engine` when those areas are reworked (Phases 4–6).
 
 With these seams in place, `service` and `container` become unit-testable. Aim for 60%+ before Phase 5.
 

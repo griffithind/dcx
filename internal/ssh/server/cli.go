@@ -8,11 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
-	"github.com/griffithind/dcx/internal/common"
+	"github.com/griffithind/dcx/internal/agentproto"
 )
 
 // Execute runs the agent CLI.
@@ -58,12 +57,12 @@ Use "dcx-agent <command> --help" for more information about a command.
 // listener errors.
 func runListenCmd(args []string) error {
 	fs := flag.NewFlagSet("listen", flag.ContinueOnError)
-	addr := fs.String("addr", "0.0.0.0:48022", "TCP address to bind (host:port)")
+	addr := fs.String("addr", agentproto.ListenAddr("0.0.0.0"), "TCP address to bind (host:port)")
 	userFlag := fs.String("user", "", "Default user for sessions (falls back to SSH client user)")
 	workDir := fs.String("workdir", "/workspace", "Working directory")
 	shell := fs.String("shell", "", "Shell to use (auto-detected if empty)")
-	hostKey := fs.String("host-key", defaultHostKeyPath(), "Path to persistent host key")
-	authKeys := fs.String("authorized-keys", defaultAuthorizedKeysPath(), "Primary authorized_keys file")
+	hostKey := fs.String("host-key", agentproto.HostKeyPath, "Path to persistent host key")
+	authKeys := fs.String("authorized-keys", agentproto.AuthorizedKeysPath, "Primary authorized_keys file")
 	allowCIDRs := fs.String("allow-cidrs", "", "Comma-separated CIDR list to accept in addition to loopback")
 
 	if err := fs.Parse(args); err != nil {
@@ -87,7 +86,7 @@ func runListenCmd(args []string) error {
 		HostKeyPath:         *hostKey,
 		AuthorizedKeysPaths: []string{*authKeys},
 		Gate:                gate,
-		ReadyFile:           DefaultReadyFilePath,
+		ReadyFile:           agentproto.ReadyFile,
 	})
 	if err != nil {
 		return err
@@ -176,24 +175,12 @@ func defaultGateway() string {
 	return ""
 }
 
-// defaultHostKeyPath returns the path where dcx mounts the per-workspace
-// host key via the DCX secrets mechanism. Matches container.DCXSecretPath.
-func defaultHostKeyPath() string {
-	return filepath.Join(common.SecretsDir, "dcx", "ssh_host_ed25519_key")
-}
-
-// defaultAuthorizedKeysPath returns the path where dcx mounts the primary
-// authorized_keys list. Matches container.DCXSecretPath.
-func defaultAuthorizedKeysPath() string {
-	return filepath.Join(common.SecretsDir, "dcx", "authorized_keys")
-}
-
 // runPingCmd is used by host-side dcx to probe "is the listener up?"
 // without needing ssh/nc/curl installed in the container image.
 // Exit code 0 = reachable, non-zero = not.
 func runPingCmd(args []string) error {
 	fs := flag.NewFlagSet("ping", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:48022", "Address to probe")
+	addr := fs.String("addr", agentproto.LoopbackAddr, "Address to probe")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

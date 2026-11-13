@@ -1,6 +1,7 @@
 package container
 
 import (
+	"github.com/griffithind/dcx/internal/agentproto"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -34,7 +35,7 @@ func TestNewUnifiedRuntime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime, err := NewUnifiedRuntime(tt.resolved)
+			runtime, err := NewUnifiedRuntime(NewDockerCLI(), nil, tt.resolved)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errContains)
@@ -67,7 +68,7 @@ func TestNewUnifiedRuntimeForExistingCompose(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runtime := NewUnifiedRuntimeForExistingCompose(
+			runtime := NewUnifiedRuntimeForExistingCompose(NewDockerCLI(), nil, 
 				tt.configDir,
 				tt.composeProject,
 			)
@@ -428,7 +429,7 @@ func TestBuildPortBindings(t *testing.T) {
 
 			// The last entry must be the dcx SSH listener.
 			ssh := got[len(got)-1]
-			assert.Equal(t, sshAgentContainerPort, ssh.ContainerPort)
+			assert.Equal(t, agentproto.ListenPort, ssh.ContainerPort)
 			assert.Equal(t, "127.0.0.1", ssh.Host)
 			assert.True(t, ssh.EphemeralHostPort)
 		})

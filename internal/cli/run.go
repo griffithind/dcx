@@ -133,6 +133,7 @@ func executeInContainer(execArgs []string) error {
 		Config:        cfg,
 		WorkspacePath: cliCtx.WorkspacePath(),
 		Command:       execArgs,
+		Ports:         cliCtx.Docker,
 	})
 
 	if err != nil {

@@ -96,7 +96,9 @@ Load config → Validate host → Check state → Fetch secrets
 | File | Purpose |
 |------|---------|
 | `unified.go` | `UnifiedRuntime` - strategy pattern for all plan types |
-| `docker.go` | `Docker` client - singleton, wraps docker CLI |
+| `engine.go` | `Engine` interface - everything the service/runtime need from the container engine |
+| `docker.go` | `Docker` - the Docker CLI implementation of `Engine` (no singleton; injected) |
+| `containertest/` | `Fake` in-memory `Engine` for unit tests |
 | `compose.go` | `Compose` client - wraps docker compose CLI |
 | `exec.go` | Command execution in containers |
 | `secrets.go` | Secret mounting after container start |
@@ -154,6 +156,9 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agent/` - Agent CLI and SSH server implementation
+- `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths)
+- `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
+- `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
 
 ## Key Types
 
@@ -255,7 +260,7 @@ All commands use shared initialization:
 ```go
 cliCtx, err := NewCLIContext()
 defer cliCtx.Close()
-// cliCtx.Docker - singleton Docker client
+// cliCtx.Docker - Docker CLI engine, passed into the service
 // cliCtx.Service - DevContainerService
 // cliCtx.Identifiers - project/workspace IDs
 ```
@@ -361,3 +366,10 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 | State detection | `internal/state/manager.go` |
 | Feature resolution | `internal/features/manager.go` |
 | Image building | `internal/build/dockerfile.go` |
+
+## Package Rules
+
+- Only `internal/cli` (and `internal/ui`) print. Everything else takes a `report.Reporter`; commands with `--json` output pass `report.Discard`.
+- Library code never constructs a Docker client; it receives a `container.Engine`. Use `containertest.Fake` in unit tests.
+- Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
+- Agent paths, ports and secret locations come from `agentproto`.

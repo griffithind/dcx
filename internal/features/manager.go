@@ -3,6 +3,7 @@ package features
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"path"
 	"strings"
 
@@ -25,8 +26,8 @@ type Manager struct {
 }
 
 // NewManager creates a new feature manager.
-func NewManager(configDir string) (*Manager, error) {
-	resolver, err := NewResolver(configDir)
+func NewManager(configDir string, rep report.Reporter) (*Manager, error) {
+	resolver, err := NewResolver(configDir, rep)
 	if err != nil {
 		return nil, err
 	}

@@ -50,6 +50,7 @@ func runShell(cmd *cobra.Command, args []string) error {
 		WorkspacePath: cliCtx.WorkspacePath(),
 		Command:       nil, // nil = interactive shell
 		TTY:           &tty,
+		Ports:         cliCtx.Docker,
 	})
 	if err != nil {
 		return err

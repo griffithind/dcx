@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/report"
 
 	containerPkg "github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
@@ -37,7 +39,7 @@ func init() {
 // sshInfo is the structured output dcx ssh info [--json] produces.
 type sshInfo struct {
 	Workspace   string   `json:"workspace"`
-	Host        string   `json:"host"`        // the ~/.ssh/config Host alias (workspace.dcx)
+	Host        string   `json:"host"` // the ~/.ssh/config Host alias (workspace.dcx)
 	BindAddress string   `json:"bind_address"`
 	Port        int      `json:"port"`
 	HostKey     string   `json:"host_key_fingerprint"`
@@ -49,7 +51,10 @@ type sshInfo struct {
 func runSSHInfo(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	// Docker is optional here: identifiers and host-key details work without
+	// it, and the port lookup below is best-effort.
+	docker := containerPkg.NewDockerCLI()
+	svc := service.NewDevContainerService(docker, sshInfoReporter(), workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
@@ -74,11 +79,9 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Best-effort: look up the actual mapped port from Docker.
-	if docker, derr := containerPkg.DockerClient(); derr == nil {
-		if port, perr := docker.PortMapping(ctx, resolveContainerName(ctx, svc), 48022, "tcp"); perr == nil {
-			info.Port = port
-			info.BindAddress = "127.0.0.1"
-		}
+	if port, perr := docker.PortMapping(ctx, resolveContainerName(ctx, svc), agentproto.ListenPort, "tcp"); perr == nil {
+		info.Port = port
+		info.BindAddress = "127.0.0.1"
 	}
 
 	if sshInfoDoctor {
@@ -116,7 +119,7 @@ func runSSHDoctor(ctx context.Context, info sshInfo) error {
 	// 1. Port resolvable?
 	if info.Port == 0 {
 		ui.Printf("  [%s] Listener not bound to any host port", fail)
-		return fmt.Errorf("listener is not publishing port 48022")
+		return fmt.Errorf("listener is not publishing port %d", agentproto.ListenPort)
 	}
 	ui.Printf("  [%s] Listener published on %s:%d", pass, info.BindAddress, info.Port)
 
@@ -144,4 +147,12 @@ func resolveContainerName(ctx context.Context, svc *service.DevContainerService)
 		return ""
 	}
 	return plan.ContainerInfo.Name
+}
+
+// sshInfoReporter discards progress output in --json mode.
+func sshInfoReporter() report.Reporter {
+	if sshInfoJSON {
+		return report.Discard
+	}
+	return ui.Reporter()
 }

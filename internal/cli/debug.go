@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"runtime"
 	"strings"
@@ -148,7 +149,7 @@ func runDebug(cmd *cobra.Command, args []string) error {
 func getDockerInfo(ctx context.Context) DockerInfo {
 	info := DockerInfo{}
 
-	client, err := container.DockerClient()
+	client, err := container.NewDocker()
 	if err != nil {
 		info.Available = false
 		info.Error = err.Error()
@@ -185,7 +186,7 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	}
 
 	// Build resolved devcontainer
-	builder := devcontainer.NewBuilder(nil)
+	builder := devcontainer.NewBuilder(nil, debugReporter())
 	resolved, err := builder.Build(ctx, devcontainer.BuilderOptions{
 		ConfigPath:    cfgPath,
 		WorkspaceRoot: workspacePath,
@@ -231,12 +232,12 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 }
 
 func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
-	_, err := container.DockerClient()
+	docker, err := container.NewDocker()
 	if err != nil {
 		return
 	}
 
-	svc := service.NewDevContainerService(workspacePath, configPath, verbose)
+	svc := service.NewDevContainerService(docker, debugReporter(), workspacePath, configPath, verbose)
 	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
@@ -415,4 +416,13 @@ func outputDebugTable(debug *DebugInfo) error {
 	}
 
 	return nil
+}
+
+// debugReporter discards progress output in --json mode so it cannot corrupt
+// the JSON document.
+func debugReporter() report.Reporter {
+	if debugOutputJSON {
+		return report.Discard
+	}
+	return ui.Reporter()
 }

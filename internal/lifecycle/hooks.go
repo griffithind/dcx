@@ -4,6 +4,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	sshexec "github.com/griffithind/dcx/internal/ssh/exec"
-	"github.com/griffithind/dcx/internal/ui"
 )
 
 // WaitFor represents the lifecycle command to wait for before considering
@@ -64,6 +64,8 @@ type CommandSpec struct {
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
+	ports         sshexec.PortResolver
+	report        report.Reporter
 	containerID   string
 	workspacePath string
 	cfg           *devcontainer.DevContainerConfig
@@ -82,8 +84,10 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner.
 // workspaceID is the environment key for SSH proxy directory.
-func NewHookRunner(containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
+func NewHookRunner(ports sshexec.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	return &HookRunner{
+		ports:         ports,
+		report:        report.OrDiscard(rep),
 		containerID:   containerID,
 		workspacePath: workspacePath,
 		cfg:           cfg,
@@ -130,7 +134,7 @@ func (r *HookRunner) RunInitialize(ctx context.Context) error {
 	if r.cfg.InitializeCommand == nil {
 		return nil
 	}
-	ui.Println("Running initializeCommand...")
+	r.report.Infof("Running initializeCommand...")
 	return r.runHostCommand(ctx, r.cfg.InitializeCommand)
 }
 
@@ -139,7 +143,7 @@ func (r *HookRunner) RunOnCreate(ctx context.Context) error {
 	if r.cfg.OnCreateCommand == nil {
 		return nil
 	}
-	ui.Println("Running onCreateCommand...")
+	r.report.Infof("Running onCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.OnCreateCommand)
 }
 
@@ -148,7 +152,7 @@ func (r *HookRunner) RunUpdateContent(ctx context.Context) error {
 	if r.cfg.UpdateContentCommand == nil {
 		return nil
 	}
-	ui.Println("Running updateContentCommand...")
+	r.report.Infof("Running updateContentCommand...")
 	return r.runContainerCommand(ctx, r.cfg.UpdateContentCommand)
 }
 
@@ -157,7 +161,7 @@ func (r *HookRunner) RunPostCreate(ctx context.Context) error {
 	if r.cfg.PostCreateCommand == nil {
 		return nil
 	}
-	ui.Println("Running postCreateCommand...")
+	r.report.Infof("Running postCreateCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostCreateCommand)
 }
 
@@ -166,7 +170,7 @@ func (r *HookRunner) RunPostStart(ctx context.Context) error {
 	if r.cfg.PostStartCommand == nil {
 		return nil
 	}
-	ui.Println("Running postStartCommand...")
+	r.report.Infof("Running postStartCommand...")
 	return r.runContainerCommand(ctx, r.cfg.PostStartCommand)
 }
 
@@ -181,7 +185,7 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 	// Helper to print ready message once we pass the waitFor threshold
 	printReadyIfNeeded := func(hookType WaitFor) {
 		if !readyPrinted && !r.shouldBlock(hookType) {
-			ui.Println("Container is ready (remaining hooks running...)")
+			r.report.Infof("Container is ready (remaining hooks running...)")
 			readyPrinted = true
 		}
 	}
@@ -233,7 +237,7 @@ func (r *HookRunner) RunAllCreateHooks(ctx context.Context) error {
 
 	// Log if we had post-ready hooks
 	if readyPrinted && waitFor != WaitForPostStartCommand {
-		ui.Println("All lifecycle hooks completed")
+		r.report.Infof("All lifecycle hooks completed")
 	}
 
 	return nil
@@ -257,7 +261,7 @@ func (r *HookRunner) RunStartHooks(ctx context.Context) error {
 // runFeatureHooks executes a list of feature hooks.
 func (r *HookRunner) runFeatureHooks(ctx context.Context, hooks []features.FeatureHook, hookType string) error {
 	for _, hook := range hooks {
-		ui.Printf("Running %s from feature '%s'...", hookType, hook.FeatureName)
+		r.report.Infof("Running %s from feature '%s'...", hookType, hook.FeatureName)
 		if err := r.runContainerCommand(ctx, hook.Command); err != nil {
 			return fmt.Errorf("feature '%s' %s failed: %w", hook.FeatureName, hookType, err)
 		}
@@ -294,7 +298,7 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 
 	// Parallel execution for map commands with context cancellation
 	// Per spec, if one parallel command fails, cancel the others
-	ui.Printf("  Running %d parallel commands...", len(cmds))
+	r.report.Infof("  Running %d parallel commands...", len(cmds))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -330,7 +334,7 @@ func (r *HookRunner) runHostCommand(ctx context.Context, command interface{}) er
 	if len(errs) > 0 {
 		// Return first error, but log all
 		for _, err := range errs {
-			ui.Error("  %v", err)
+			r.report.Errorf("  %v", err)
 		}
 		return errs[0]
 	}
@@ -367,7 +371,7 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 
 	// Parallel execution for map commands with context cancellation
 	// Per spec, if one parallel command fails, cancel the others
-	ui.Printf("  Running %d parallel commands...", len(cmds))
+	r.report.Infof("  Running %d parallel commands...", len(cmds))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -403,7 +407,7 @@ func (r *HookRunner) runContainerCommand(ctx context.Context, command interface{
 	if len(errs) > 0 {
 		// Return first error, but log all
 		for _, err := range errs {
-			ui.Error("  %v", err)
+			r.report.Errorf("  %v", err)
 		}
 		return errs[0]
 	}
@@ -421,7 +425,7 @@ func formatCommandForDisplay(cmd CommandSpec) string {
 
 // executeHostCommand runs a single command on the host.
 func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec) error {
-	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
+	r.report.Infof("  > %s", formatCommandForDisplay(cmdSpec))
 
 	var cmd *exec.Cmd
 	if cmdSpec.UseShell {
@@ -441,7 +445,7 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, cmdSpec CommandSpec
 
 // executeContainerCommand runs a single command in the container via SSH.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec CommandSpec) error {
-	ui.Printf("  > %s", formatCommandForDisplay(cmdSpec))
+	r.report.Infof("  > %s", formatCommandForDisplay(cmdSpec))
 
 	// Build the command to execute
 	var execCmd []string
@@ -471,6 +475,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, cmdSpec Comman
 		TTY:           &tty,
 		Stdout:        os.Stdout,
 		Stderr:        os.Stderr,
+		Ports:         r.ports,
 	})
 
 	if err != nil {

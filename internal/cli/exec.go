@@ -54,6 +54,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Config:        cfg,
 		WorkspacePath: cliCtx.WorkspacePath(),
 		Command:       args,
+		Ports:         cliCtx.Docker,
 	})
 
 	if err != nil {
