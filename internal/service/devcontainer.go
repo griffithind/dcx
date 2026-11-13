@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/report"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -175,6 +176,11 @@ type LoadOptions struct {
 	ForcePull bool
 	// UseLockfile loads and uses the lockfile for feature resolution
 	UseLockfile bool
+	// PullForMetadata pulls the base image when it is not available
+	// locally, so its devcontainer.metadata label (remoteUser, env,
+	// mounts, ...) is merged on the first run too. Without it the first
+	// `up` and later runs could resolve differently.
+	PullForMetadata bool
 }
 
 // Load resolves the devcontainer configuration.
@@ -190,7 +196,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 	}
 
 	// Merge image metadata if available (per spec)
-	cfg = s.mergeImageMetadata(ctx, cfg)
+	cfg = s.mergeImageMetadata(ctx, cfg, opts.PullForMetadata)
 
 	// Project name from devcontainer.json name field
 	var projectName string
@@ -229,7 +235,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 
 // mergeImageMetadata merges devcontainer.metadata from the base image with local config.
 // Per spec, images can embed configuration in the devcontainer.metadata label.
-func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devcontainer.DevContainerConfig) *devcontainer.DevContainerConfig {
+func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devcontainer.DevContainerConfig, pull bool) *devcontainer.DevContainerConfig {
 	// Get base image reference from config
 	imageRef := cfg.Image
 	if imageRef == "" {
@@ -238,11 +244,17 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 		return cfg
 	}
 
-	// Try to get image labels (the image may not be pulled yet)
 	labels, err := s.engine.GetImageLabels(ctx, imageRef)
+	if err != nil && pull {
+		s.report.Infof("Pulling image: %s", imageRef)
+		if perr := s.engine.PullImageWithProgress(ctx, imageRef, io.Discard); perr != nil {
+			s.report.Warnf("Could not pull %s to read its metadata: %v", imageRef, perr)
+		} else {
+			labels, err = s.engine.GetImageLabels(ctx, imageRef)
+		}
+	}
 	if err != nil {
-		// Image not available locally, skip metadata merge
-		// It will be pulled later during Up
+		// Image not available locally; resolve without its metadata.
 		return cfg
 	}
 
@@ -277,8 +289,9 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 // Up brings up a devcontainer environment.
 func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
-		ForcePull:   opts.Pull,
-		UseLockfile: true,
+		ForcePull:       opts.Pull,
+		UseLockfile:     true,
+		PullForMetadata: true,
 	})
 	if err != nil {
 		return err
@@ -685,7 +698,11 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	for k, v := range cfg.ContainerEnv {
 		envToPatch[k] = v
 	}
-	for k, v := range cfg.RemoteEnv {
+	remoteEnv := cfg.RemoteEnv
+	if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
+		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, devcontainer.EnvListToMap(details.Env))
+	}
+	for k, v := range remoteEnv {
 		envToPatch[k] = v
 	}
 
@@ -1044,8 +1061,9 @@ type LockResult struct {
 // Build builds the devcontainer images without starting containers.
 func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) error {
 	resolved, err := s.LoadWithOptions(ctx, LoadOptions{
-		ForcePull:   opts.Pull,
-		UseLockfile: !opts.FrozenLockfile, // Don't use lockfile if frozen (verify mode)
+		ForcePull:       opts.Pull,
+		UseLockfile:     !opts.FrozenLockfile, // Don't use lockfile if frozen (verify mode)
+		PullForMetadata: true,
 	})
 	if err != nil {
 		return err

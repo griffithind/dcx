@@ -1,0 +1,5 @@
+{
+  "image": "alpine:3.20",
+  "containerEnv": {"USER_SET": "1"},
+  "features": {"./dind-like": {}}
+}

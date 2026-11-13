@@ -1,0 +1,12 @@
+{
+  "name": "Basic Image",
+  "plan": {
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "type": "image"
+  },
+  "baseImage": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "serviceName": "basic_image",
+  "workspaceFolder": "/workspaces/proj",
+  "remoteUser": "vscode",
+  "effectiveUser": "vscode"
+}

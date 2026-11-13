@@ -1,0 +1,50 @@
+{
+  "name": "proj",
+  "plan": {
+    "image": "alpine:3.20",
+    "type": "image"
+  },
+  "baseImage": "alpine:3.20",
+  "serviceName": "proj",
+  "workspaceFolder": "/workspaces/proj",
+  "forwardPorts": [
+    {
+      "HostPort": 3000,
+      "ContainerPort": 3000,
+      "Host": "",
+      "Label": "",
+      "Protocol": "",
+      "OnAutoForward": "",
+      "EphemeralHostPort": false
+    },
+    {
+      "HostPort": 8080,
+      "ContainerPort": 80,
+      "Host": "",
+      "Label": "",
+      "Protocol": "",
+      "OnAutoForward": "",
+      "EphemeralHostPort": false
+    }
+  ],
+  "appPorts": [
+    {
+      "HostPort": 9000,
+      "ContainerPort": 90,
+      "Host": "127.0.0.1",
+      "Label": "",
+      "Protocol": "",
+      "OnAutoForward": "",
+      "EphemeralHostPort": false
+    },
+    {
+      "HostPort": 7000,
+      "ContainerPort": 7000,
+      "Host": "",
+      "Label": "",
+      "Protocol": "",
+      "OnAutoForward": "",
+      "EphemeralHostPort": false
+    }
+  ]
+}

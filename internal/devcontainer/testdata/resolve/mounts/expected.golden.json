@@ -1,0 +1,38 @@
+{
+  "name": "proj",
+  "plan": {
+    "image": "alpine:3.20",
+    "type": "image"
+  },
+  "baseImage": "alpine:3.20",
+  "serviceName": "proj",
+  "workspaceFolder": "/workspaces/proj",
+  "mounts": [
+    {
+      "source": "<home>/.ssh",
+      "target": "/root/.ssh",
+      "type": "bind",
+      "readonly": true
+    },
+    {
+      "source": "/var/run/docker.sock",
+      "target": "/var/run/docker.sock",
+      "type": "bind"
+    },
+    {
+      "source": "/host/data",
+      "target": "/data",
+      "type": "bind",
+      "readonly": true
+    },
+    {
+      "source": "named",
+      "target": "/named",
+      "type": "volume"
+    },
+    {
+      "target": "/scratch",
+      "type": "tmpfs"
+    }
+  ]
+}

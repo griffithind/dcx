@@ -434,11 +434,9 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 			createOpts.Init = true
 		}
 
-		// Collect feature environment variables
-		featureEnv := features.CollectContainerEnv(r.resolved.Features)
-		for k, v := range featureEnv {
-			createOpts.Env = append(createOpts.Env, fmt.Sprintf("%s=%s", k, v))
-		}
+		// Feature containerEnv is baked into the derived image as ENV, so
+		// it is not passed again here (that would override user
+		// containerEnv and freeze ${VAR} references unexpanded).
 	}
 
 	// Pass GPU requirements to container creation
@@ -479,6 +477,7 @@ func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (
 			}
 			createOpts.Sysctls[k] = v
 		}
+		createOpts.RunArgs = runArgs.Passthrough
 	}
 
 	// Handle overrideCommand
@@ -592,7 +591,9 @@ func (r *UnifiedRuntime) buildPortBindings() []devcontainer.PortForward {
 
 	// Add app ports (bound to localhost for security)
 	for _, ap := range r.resolved.AppPorts {
-		ap.Host = "localhost"
+		if ap.Host == "" {
+			ap.Host = "localhost"
+		}
 		ports = append(ports, ap)
 	}
 
@@ -805,11 +806,7 @@ func (r *UnifiedRuntime) generateComposeOverride(plan *devcontainer.ComposePlan,
 	// Ports — forwardPorts plus the dcx SSH listener.
 	sb.WriteString("    ports:\n")
 	for _, port := range r.resolved.ForwardPorts {
-		if port.HostPort == port.ContainerPort {
-			fmt.Fprintf(&sb, "      - \"%d\"\n", port.ContainerPort)
-		} else {
-			fmt.Fprintf(&sb, "      - \"%d:%d\"\n", port.HostPort, port.ContainerPort)
-		}
+		fmt.Fprintf(&sb, "      - %q\n", port.DockerSpec())
 	}
 	// dcx SSH: "<bind>::48022" (Docker picks ephemeral) or "<bind>:<pref>:48022"
 	// (we have a remembered port from a prior up for this workspace).

@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -226,5 +227,42 @@ func TestParseShmSize(t *testing.T) {
 				t.Errorf("parseShmSize(%q) = %d, want %d", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParseRunArgsPassthroughAndIgnored(t *testing.T) {
+	got := ParseRunArgs([]string{
+		"--network=host",
+		"--memory", "2g",
+		"-e", "FOO=bar",
+		"--cap-add=SYS_ADMIN",
+		"--init",
+		"--label", "team=platform",
+		"--ulimit", "nofile=1024:2048",
+		"--rm",
+		"--name", "mine",
+		"--shm-size=2gb",
+	})
+	if got.NetworkMode != "host" {
+		t.Errorf("NetworkMode = %q", got.NetworkMode)
+	}
+	if got.ShmSize != 2<<30 {
+		t.Errorf("ShmSize = %d", got.ShmSize)
+	}
+	wantPass := []string{"--memory", "2g", "-e", "FOO=bar", "--cap-add=SYS_ADMIN", "--init", "--label", "team=platform", "--ulimit", "nofile=1024:2048"}
+	if strings.Join(got.Passthrough, " ") != strings.Join(wantPass, " ") {
+		t.Errorf("Passthrough = %q, want %q", got.Passthrough, wantPass)
+	}
+	wantIgnored := []string{"--rm", "--name"}
+	if strings.Join(got.Ignored, " ") != strings.Join(wantIgnored, " ") {
+		t.Errorf("Ignored = %q, want %q", got.Ignored, wantIgnored)
+	}
+}
+
+func TestParseShmSizeUnits(t *testing.T) {
+	for in, want := range map[string]int64{"512": 512, "512b": 512, "64k": 64 << 10, "64m": 64 << 20, "2g": 2 << 30, "2gb": 2 << 30, "2GB": 2 << 30, "x": 0, "": 0, "-1m": 0} {
+		if got := parseShmSize(in); got != want {
+			t.Errorf("parseShmSize(%q) = %d, want %d", in, got, want)
+		}
 	}
 }

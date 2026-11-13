@@ -1,6 +1,8 @@
 package devcontainer
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -151,5 +153,54 @@ func TestSubstitute(t *testing.T) {
 			got := Substitute(tt.input, tt.ctx)
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestResolveContainerEnvRefs(t *testing.T) {
+	got := ResolveContainerEnvRefs(map[string]string{
+		"PATH":    "${containerEnv:PATH}:/custom/bin",
+		"MISSING": "${containerEnv:NOPE:fallback}",
+		"EMPTY":   "x${containerEnv:NOPE}y",
+		"PLAIN":   "keep ${SHELL_VAR} as-is",
+	}, map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
+
+	want := map[string]string{
+		"PATH":    "/usr/local/bin:/usr/bin:/custom/bin",
+		"MISSING": "fallback",
+		"EMPTY":   "xy",
+		"PLAIN":   "keep ${SHELL_VAR} as-is",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// Load must substitute identically whether the config is auto-discovered or
+// passed explicitly with --config.
+func TestLoadSubstitutesWithExplicitConfigPath(t *testing.T) {
+	ws := t.TempDir()
+	dir := filepath.Join(ws, ".devcontainer", "variant")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgJSON := `{"image": "alpine:${localEnv:DCX_TEST_TAG:3.20}", "workspaceFolder": "/src/${localWorkspaceFolderBasename}"}`
+	if err := os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(cfgJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(ws, ".devcontainer/variant/devcontainer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Image != "alpine:3.20" {
+		t.Errorf("image = %q", cfg.Image)
+	}
+	if cfg.WorkspaceFolder != "/src/"+filepath.Base(ws) {
+		t.Errorf("workspaceFolder = %q", cfg.WorkspaceFolder)
 	}
 }

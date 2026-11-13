@@ -14,7 +14,6 @@ import (
 var configLocations = []string{
 	".devcontainer/devcontainer.json",
 	".devcontainer.json",
-	".devcontainer/docker-compose.yml", // compose file can serve as implicit config
 }
 
 // Parse parses a devcontainer.json file from bytes.
@@ -102,40 +101,28 @@ func Resolve(workspacePath string) (string, error) {
 	return "", fmt.Errorf("no devcontainer.json found in %s", workspacePath)
 }
 
-// Load loads and parses the devcontainer configuration.
-// Returns the parsed config and the path to the config file.
+// Load locates, parses and substitutes the devcontainer configuration.
+// Returns the config and the path it was loaded from. Substitution runs
+// exactly once here, whether the file was found automatically or given via
+// --config.
 func Load(workspacePath, configPath string) (*DevContainerConfig, string, error) {
-	// If config path is specified, use it
 	if configPath != "" {
 		if !filepath.IsAbs(configPath) {
 			configPath = filepath.Join(workspacePath, configPath)
 		}
-		cfg, err := ParseFile(configPath)
-		return cfg, configPath, err
+	} else {
+		resolvedPath, err := Resolve(workspacePath)
+		if err != nil {
+			return nil, "", err
+		}
+		configPath = resolvedPath
 	}
 
-	// Otherwise, resolve the config file
-	resolvedPath, err := Resolve(workspacePath)
+	cfg, err := ParseFile(configPath)
 	if err != nil {
-		return nil, "", err
+		return nil, configPath, err
 	}
 
-	cfg, err := ParseFile(resolvedPath)
-	if err != nil {
-		return nil, resolvedPath, err
-	}
-
-	// Compute container workspace folder
-	containerWorkspace := DetermineContainerWorkspaceFolder(cfg, workspacePath)
-
-	// Create substitution context
-	ctx := &SubstitutionContext{
-		LocalWorkspaceFolder:     workspacePath,
-		ContainerWorkspaceFolder: containerWorkspace,
-	}
-
-	// Perform variable substitution
-	SubstituteConfig(cfg, ctx)
-
-	return cfg, resolvedPath, nil
+	SubstituteConfig(cfg, NewSubstitutionContext(workspacePath, cfg))
+	return cfg, configPath, nil
 }

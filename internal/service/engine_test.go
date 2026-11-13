@@ -180,3 +180,39 @@ func TestMountSecretsRejectsUnsafeNameWithoutWriting(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, fake.CallsTo("WriteFileInContainer"))
 }
+
+func TestLoadPullsImageForMetadataWhenRequested(t *testing.T) {
+	fake := &containertest.Fake{Registry: map[string]map[string]string{
+		"alpine:latest": {devcontainer.DevcontainerMetadataLabel: `[{"remoteUser": "vscode"}]`},
+	}}
+	svc, _ := newTestService(t, fake)
+
+	// Without PullForMetadata a missing image is resolved without metadata.
+	resolved, err := svc.LoadWithOptions(context.Background(), LoadOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "", resolved.RemoteUser)
+	assert.Empty(t, fake.CallsTo("PullImageWithProgress"))
+
+	// With it (as `up` and `build` do) the image is pulled and its
+	// metadata merged, so the first run resolves like later ones.
+	resolved, err = svc.LoadWithOptions(context.Background(), LoadOptions{PullForMetadata: true})
+	require.NoError(t, err)
+	assert.Equal(t, "vscode", resolved.RemoteUser)
+	assert.Len(t, fake.CallsTo("PullImageWithProgress"), 1)
+}
+
+func TestLoadSurvivesFailedMetadataPull(t *testing.T) {
+	fake := &containertest.Fake{}
+	svc, rec := newTestService(t, fake)
+
+	resolved, err := svc.LoadWithOptions(context.Background(), LoadOptions{PullForMetadata: true})
+	require.NoError(t, err)
+	assert.Equal(t, "", resolved.RemoteUser)
+	var warned bool
+	for _, m := range rec.Messages() {
+		if m.Level == report.LevelWarn && strings.Contains(m.Text, "Could not pull") {
+			warned = true
+		}
+	}
+	assert.True(t, warned, "a failed pull should be reported, not fatal")
+}

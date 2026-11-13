@@ -1,0 +1,14 @@
+{
+  "image": "alpine:3.20",
+  "runArgs": [
+    "--network=host",
+    "--memory", "2g",
+    "-e", "FOO=bar",
+    "--shm-size=2gb",
+    "--cap-add=SYS_ADMIN",
+    "--label", "team=platform",
+    "--ulimit", "nofile=1024:2048",
+    "--device", "/dev/fuse",
+    "--rm"
+  ]
+}

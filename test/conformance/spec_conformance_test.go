@@ -4,6 +4,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -117,11 +118,24 @@ func TestSpecPropertyParsing(t *testing.T) {
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
-		ports := cfg.GetForwardPorts()
-		assert.Equal(t, []string{"3000:3000", "8080:80"}, ports)
+		specs := func(values []interface{}) []string {
+			var out []string
+			for _, v := range values {
+				s, ok := v.(string)
+				if !ok {
+					s = fmt.Sprint(v)
+				}
+				pf, err := devcontainer.ParsePortSpec(s)
+				require.NoError(t, err)
+				out = append(out, pf.DockerSpec())
+			}
+			return out
+		}
+		assert.Equal(t, []string{"3000:3000", "8080:80"}, specs(cfg.ForwardPorts))
 
-		appPorts := cfg.GetAppPorts()
-		assert.Equal(t, []string{"3000:3000", "5000:5000"}, appPorts)
+		appPorts, ok := cfg.AppPort.([]interface{})
+		require.True(t, ok)
+		assert.Equal(t, []string{"3000:3000", "5000:5000"}, specs(appPorts))
 
 		attr := cfg.GetPortAttribute("3000")
 		require.NotNil(t, attr)

@@ -1,0 +1,53 @@
+{
+  "name": "subst-demo",
+  "plan": {
+    "image": "alpine:3.20",
+    "type": "image"
+  },
+  "baseImage": "alpine:3.20",
+  "serviceName": "subst-demo",
+  "workspaceFolder": "/src/proj",
+  "containerEnv": {
+    "HOST_HOME": "<home>",
+    "ID": "<id>",
+    "WITH_DEFAULT": "a:b",
+    "WS": "/src/proj"
+  },
+  "remoteEnv": {
+    "LOCAL": "demo",
+    "PATH": "${containerEnv:PATH}:/custom/bin"
+  },
+  "mounts": [
+    {
+      "source": "cache-<id>",
+      "target": "/cache",
+      "type": "volume"
+    },
+    {
+      "source": "<home>/.config",
+      "target": "/home/vscode/.config",
+      "type": "bind"
+    }
+  ],
+  "capAdd": [
+    "SYS_PTRACE"
+  ],
+  "securityOpt": [
+    "seccomp=unconfined"
+  ],
+  "runArgs": {
+    "User": "",
+    "NetworkMode": "",
+    "IpcMode": "",
+    "PidMode": "",
+    "ShmSize": 0,
+    "CapDrop": null,
+    "Devices": null,
+    "ExtraHosts": null,
+    "Sysctls": {},
+    "Passthrough": [
+      "--hostname=proj"
+    ],
+    "Ignored": null
+  }
+}

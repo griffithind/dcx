@@ -209,7 +209,7 @@ All state persisted in Docker labels (prefix `com.griffithind.dcx`):
 devcontainer.json (JSONC)
     ↓ Parse()
 DevContainerConfig
-    ↓ SubstituteVariables()
+    ↓ SubstituteConfig() — exactly once, in devcontainer.Load (also with --config)
 DevContainerConfig (substituted)
     ↓ Builder.Build()
     ├─ Create ExecutionPlan
@@ -373,3 +373,6 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Library code never constructs a Docker client; it receives a `container.Engine`. Use `containertest.Fake` in unit tests.
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
+- Variable substitution happens once, in `devcontainer.Load` (`NewSubstitutionContext` + `SubstituteConfig`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
+- Parse mounts with `ParseMountString` and ports with `ParsePortSpec`; don't add new parsers.
+- Resolution changes are covered by golden files in `internal/devcontainer/testdata/resolve`; review the diff of `go test ./internal/devcontainer -run TestResolveGolden -args -update`.

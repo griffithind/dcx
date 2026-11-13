@@ -159,9 +159,10 @@ func TestMergeMetadata(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, merged *DevContainerConfig) {
-				// Local explicit false should still be respected (local takes final precedence)
+				// Spec: privileged is true if any source sets it, so an image
+				// that needs it cannot be silently downgraded.
 				require.NotNil(t, merged.Privileged)
-				assert.False(t, *merged.Privileged)
+				assert.True(t, *merged.Privileged)
 			},
 		},
 		{
@@ -281,9 +282,9 @@ func TestMergeMetadata(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, merged *DevContainerConfig) {
-				// First config wins for values not in local
-				assert.Equal(t, "first-user", merged.RemoteUser)
-				assert.Equal(t, "onCreateCommand", merged.WaitFor)
+				// Later image layers override earlier ones (spec: last wins)
+				assert.Equal(t, "second-user", merged.RemoteUser)
+				assert.Equal(t, "postCreateCommand", merged.WaitFor)
 			},
 		},
 		{
@@ -323,70 +324,6 @@ func TestMergeMetadata(t *testing.T) {
 			require.NotNil(t, merged)
 			if tt.check != nil {
 				tt.check(t, merged)
-			}
-		})
-	}
-}
-
-func TestUnionMounts(t *testing.T) {
-	tests := []struct {
-		name string
-		a    []Mount
-		b    []Mount
-		want int
-	}{
-		{
-			name: "both empty",
-			a:    nil,
-			b:    nil,
-			want: 0,
-		},
-		{
-			name: "a only",
-			a: []Mount{
-				{Source: "/src1", Target: "/target1"},
-			},
-			b:    nil,
-			want: 1,
-		},
-		{
-			name: "b only",
-			a:    nil,
-			b: []Mount{
-				{Source: "/src1", Target: "/target1"},
-			},
-			want: 1,
-		},
-		{
-			name: "union without duplicates",
-			a: []Mount{
-				{Source: "/src1", Target: "/target1"},
-			},
-			b: []Mount{
-				{Source: "/src2", Target: "/target2"},
-			},
-			want: 2,
-		},
-		{
-			name: "deduplicates by target",
-			a: []Mount{
-				{Source: "/src1", Target: "/target1"},
-			},
-			b: []Mount{
-				{Source: "/different-src", Target: "/target1"}, // Same target, should be skipped
-				{Source: "/src2", Target: "/target2"},
-			},
-			want: 2, // /target1 from a, /target2 from b
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := unionMounts(tt.a, tt.b)
-			if tt.want == 0 {
-				assert.Nil(t, got)
-			} else {
-				assert.Len(t, got, tt.want)
 			}
 		})
 	}
@@ -448,4 +385,33 @@ func TestUnionExtensions(t *testing.T) {
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// Merging must not mutate the caller's local config (its maps were
+// previously shared with the merged result).
+func TestMergeMetadataDoesNotMutateLocal(t *testing.T) {
+	local := &DevContainerConfig{
+		ContainerEnv:   map[string]string{"A": "local"},
+		Customizations: map[string]interface{}{"vscode": map[string]interface{}{"extensions": []interface{}{"a"}}},
+	}
+	merged := MergeMetadata(local, []DevContainerConfig{{
+		ContainerEnv:   map[string]string{"B": "image"},
+		Customizations: map[string]interface{}{"vscode": map[string]interface{}{"extensions": []interface{}{"b"}}},
+	}})
+
+	assert.Equal(t, map[string]string{"A": "local", "B": "image"}, merged.ContainerEnv)
+	assert.Equal(t, map[string]string{"A": "local"}, local.ContainerEnv)
+	exts := local.Customizations["vscode"].(map[string]interface{})["extensions"].([]interface{})
+	assert.Equal(t, []interface{}{"a"}, exts)
+}
+
+func TestMergeMetadataMountsLastWinsPerTarget(t *testing.T) {
+	merged := MergeMetadata(&DevContainerConfig{
+		Mounts: []Mount{{Source: "local-vol", Target: "/data", Type: "volume"}},
+	}, []DevContainerConfig{{
+		Mounts: []Mount{{Source: "img-vol", Target: "/data", Type: "volume"}, {Source: "other", Target: "/other", Type: "volume"}},
+	}})
+	require.Len(t, merged.Mounts, 2)
+	assert.Equal(t, "local-vol", merged.Mounts[0].Source)
+	assert.Equal(t, "/other", merged.Mounts[1].Target)
 }

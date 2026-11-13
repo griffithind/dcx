@@ -38,7 +38,7 @@ type DevContainerConfig struct {
 	Build *BuildConfig `json:"build,omitempty"`
 
 	// Compose-based configuration
-	DockerComposeFile interface{} `json:"dockerComposeFile,omitempty"` // string or []string
+	DockerComposeFile StringOrSlice `json:"dockerComposeFile,omitempty"`
 	Service           string      `json:"service,omitempty"`
 	RunServices       []string    `json:"runServices,omitempty"`
 
@@ -104,7 +104,7 @@ type DevContainerConfig struct {
 // PlanType returns the execution plan type for this configuration.
 // This is the canonical method for determining how to build/run the container.
 func (c *DevContainerConfig) PlanType() PlanType {
-	if c.DockerComposeFile != nil {
+	if len(c.DockerComposeFile) > 0 {
 		return PlanTypeCompose
 	}
 	if c.Build != nil {
@@ -133,31 +133,12 @@ type HostRequirements struct {
 
 // GetDockerComposeFiles returns the docker compose file paths as a slice.
 func (c *DevContainerConfig) GetDockerComposeFiles() []string {
-	if c.DockerComposeFile == nil {
-		return nil
-	}
-
-	switch v := c.DockerComposeFile.(type) {
-	case string:
-		return []string{v}
-	case []interface{}:
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				result = append(result, s)
-			}
-		}
-		return result
-	case []string:
-		return v
-	default:
-		return nil
-	}
+	return c.DockerComposeFile
 }
 
 // IsComposePlan returns true if this config uses docker compose.
 func (c *DevContainerConfig) IsComposePlan() bool {
-	return c.DockerComposeFile != nil
+	return len(c.DockerComposeFile) > 0
 }
 
 // IsSinglePlan returns true if this config uses image or build.
@@ -179,71 +160,6 @@ func (c *DevContainerConfig) SetRawJSON(data []byte) {
 func (c *DevContainerConfig) MarshalJSON() ([]byte, error) {
 	type Alias DevContainerConfig
 	return json.Marshal((*Alias)(c))
-}
-
-// GetForwardPorts returns the forward ports as a slice of strings.
-// Each element is in the format "hostPort:containerPort" or just "port".
-func (c *DevContainerConfig) GetForwardPorts() []string {
-	if len(c.ForwardPorts) == 0 {
-		return nil
-	}
-
-	result := make([]string, 0, len(c.ForwardPorts))
-	for _, port := range c.ForwardPorts {
-		switch v := port.(type) {
-		case float64:
-			// Single port number
-			result = append(result, formatPort(int(v)))
-		case int:
-			result = append(result, formatPort(v))
-		case string:
-			// Already a string (could be "8080" or "8080:80" or "host:container")
-			result = append(result, v)
-		}
-	}
-
-	return result
-}
-
-func formatPort(port int) string {
-	// For devcontainer ports, we expose on the same host port
-	return fmt.Sprintf("%d:%d", port, port)
-}
-
-// GetAppPorts returns the app ports as a slice of strings.
-// AppPort can be an integer, string, or array of integers/strings.
-// Each element is in the format "hostPort:containerPort".
-func (c *DevContainerConfig) GetAppPorts() []string {
-	if c.AppPort == nil {
-		return nil
-	}
-
-	var result []string
-
-	switch v := c.AppPort.(type) {
-	case float64:
-		// Single port number
-		result = append(result, formatPort(int(v)))
-	case int:
-		result = append(result, formatPort(v))
-	case string:
-		// Single port as string
-		result = append(result, v)
-	case []interface{}:
-		// Array of ports
-		for _, port := range v {
-			switch p := port.(type) {
-			case float64:
-				result = append(result, formatPort(int(p)))
-			case int:
-				result = append(result, formatPort(p))
-			case string:
-				result = append(result, p)
-			}
-		}
-	}
-
-	return result
 }
 
 // PortAttribute represents attributes for a specific port.
@@ -271,16 +187,12 @@ func (m *Mount) UnmarshalJSON(data []byte) error {
 	// Try string first
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		m.Raw = s
-		// Parse the mount string
-		parsed := parseMount(s)
-		if parsed != nil {
-			m.Source = parsed.Source
-			m.Target = parsed.Target
-			m.Type = parsed.Type
-			m.ReadOnly = parsed.ReadOnly
-			m.Consistency = parsed.Consistency
+		// Parsed provisionally so metadata merging can key on Target;
+		// SubstituteConfig re-parses after variable substitution.
+		if parsed, err := ParseMountString(s); err == nil {
+			*m = parsed
 		}
+		m.Raw = s
 		return nil
 	}
 
@@ -309,44 +221,38 @@ func (m Mount) String() string {
 	return result
 }
 
-// ParsedMount represents a parsed mount specification.
-type ParsedMount struct {
-	Source      string
-	Target      string
-	Type        string // bind, volume, tmpfs
-	ReadOnly    bool
-	Consistency string // cached, delegated, consistent (macOS)
+// ParseMountString parses a mount given as a string. It is the only mount
+// string parser in dcx (user, image-metadata and feature mounts all use it).
+//
+// Two forms are accepted:
+//   - Docker --mount syntax: "type=bind,source=/a,target=/b,readonly"
+//     (src/dst/destination aliases, readonly or readonly=true, consistency)
+//   - Docker -v short syntax: "/host:/container[:ro]"
+//
+// The form is chosen by the presence of '=', so a value containing ':'
+// (e.g. an expanded path) can never be mistaken for the short form.
+func ParseMountString(spec string) (Mount, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return Mount{}, fmt.Errorf("empty mount")
+	}
+	if strings.Contains(spec, "=") {
+		return parseKeyValueMount(spec)
+	}
+	return parseShortMount(spec)
 }
 
-// parseMount parses a devcontainer mount string into a ParsedMount.
-// Devcontainer format: "source=/path,target=/path,type=bind,consistency=cached,readonly=true"
-// Also accepts Docker short format: "source:target" or "source:target:ro"
-func parseMount(mount string) *ParsedMount {
-	// Check for Docker short format (contains colon but no source= pattern)
-	if strings.Contains(mount, ":") && !strings.Contains(mount, "source=") {
-		return parseDockerShortMount(mount)
+func parseShortMount(spec string) (Mount, error) {
+	parts := strings.SplitN(spec, ":", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return Mount{}, fmt.Errorf("invalid mount %q: expected source:target[:options]", spec)
 	}
-
-	return parseDevcontainerMount(mount)
-}
-
-// parseDockerShortMount parses Docker short format: "source:target" or "source:target:ro"
-func parseDockerShortMount(mount string) *ParsedMount {
-	parts := strings.SplitN(mount, ":", 3)
-	if len(parts) < 2 {
-		return nil
+	m := Mount{Source: parts[0], Target: parts[1], Type: "bind"}
+	if !strings.HasPrefix(m.Source, "/") && !strings.HasPrefix(m.Source, ".") && !strings.HasPrefix(m.Source, "~") {
+		m.Type = "volume"
 	}
-
-	m := &ParsedMount{
-		Source: parts[0],
-		Target: parts[1],
-		Type:   "bind",
-	}
-
-	if len(parts) >= 3 {
-		// Check for options (readonly, consistency)
-		opts := strings.Split(parts[2], ",")
-		for _, opt := range opts {
+	if len(parts) == 3 {
+		for _, opt := range strings.Split(parts[2], ",") {
 			switch opt {
 			case "ro", "readonly":
 				m.ReadOnly = true
@@ -355,34 +261,19 @@ func parseDockerShortMount(mount string) *ParsedMount {
 			}
 		}
 	}
-
-	return m
+	return m, nil
 }
 
-// parseDevcontainerMount parses devcontainer key=value format.
-func parseDevcontainerMount(mount string) *ParsedMount {
-	parts := strings.Split(mount, ",")
-
-	m := &ParsedMount{
-		Type: "bind", // Default type
-	}
-
-	for _, part := range parts {
+func parseKeyValueMount(spec string) (Mount, error) {
+	m := Mount{Type: "bind"}
+	for _, part := range strings.Split(spec, ",") {
 		part = strings.TrimSpace(part)
-
-		// Handle standalone options without a value
-		if part == "readonly" || part == "ro" {
-			m.ReadOnly = true
+		if part == "" {
 			continue
 		}
-
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-
+		key, value, hasValue := strings.Cut(part, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 		switch key {
 		case "source", "src":
 			m.Source = value
@@ -391,44 +282,28 @@ func parseDevcontainerMount(mount string) *ParsedMount {
 		case "type":
 			m.Type = value
 		case "readonly", "ro":
-			m.ReadOnly = value == "true" || value == "1"
+			m.ReadOnly = !hasValue || value == "true" || value == "1"
 		case "consistency":
 			m.Consistency = value
 		}
 	}
-
-	// Validate required fields
 	if m.Target == "" {
-		return nil
+		return Mount{}, fmt.Errorf("invalid mount %q: missing target", spec)
 	}
 	if m.Type != "tmpfs" && m.Source == "" {
-		return nil
+		return Mount{}, fmt.Errorf("invalid mount %q: missing source", spec)
 	}
-
-	return m
+	return m, nil
 }
 
-// ParseWorkspaceMount parses a workspace mount string into a Mount.
-// This is used by the container package to convert workspace mount configuration
-// into the structured type for container creation.
+// ParseWorkspaceMount parses a workspace mount string into a Mount, or
+// returns nil if it is invalid.
 func ParseWorkspaceMount(spec string) *Mount {
-	parsed := parseMount(spec)
-	if parsed == nil {
+	m, err := ParseMountString(spec)
+	if err != nil {
 		return nil
 	}
-
-	mountType := parsed.Type
-	if mountType == "" {
-		mountType = "bind"
-	}
-
-	return &Mount{
-		Source:      parsed.Source,
-		Target:      parsed.Target,
-		Type:        mountType,
-		ReadOnly:    parsed.ReadOnly,
-		Consistency: parsed.Consistency,
-	}
+	return &m
 }
 
 // GetPortAttribute returns the attributes for a specific port.

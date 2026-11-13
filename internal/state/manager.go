@@ -44,6 +44,9 @@ type ContainerDetails struct {
 	Labels     map[string]string
 	Mounts     []string
 	WorkingDir string
+	// Env is the container's environment (image ENV plus containerEnv) as
+	// KEY=VALUE pairs.
+	Env []string
 }
 
 // StateManager handles state detection and management for devcontainer environments.

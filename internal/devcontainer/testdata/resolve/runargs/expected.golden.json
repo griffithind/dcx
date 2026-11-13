@@ -1,0 +1,37 @@
+{
+  "name": "proj",
+  "plan": {
+    "image": "alpine:3.20",
+    "type": "image"
+  },
+  "baseImage": "alpine:3.20",
+  "serviceName": "proj",
+  "workspaceFolder": "/workspaces/proj",
+  "runArgs": {
+    "User": "",
+    "NetworkMode": "host",
+    "IpcMode": "",
+    "PidMode": "",
+    "ShmSize": 2147483648,
+    "CapDrop": null,
+    "Devices": [
+      "/dev/fuse"
+    ],
+    "ExtraHosts": null,
+    "Sysctls": {},
+    "Passthrough": [
+      "--memory",
+      "2g",
+      "-e",
+      "FOO=bar",
+      "--cap-add=SYS_ADMIN",
+      "--label",
+      "team=platform",
+      "--ulimit",
+      "nofile=1024:2048"
+    ],
+    "Ignored": [
+      "--rm"
+    ]
+  }
+}

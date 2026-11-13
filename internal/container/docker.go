@@ -184,6 +184,7 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 		Config struct {
 			Labels     map[string]string `json:"Labels"`
 			WorkingDir string            `json:"WorkingDir"`
+			Env        []string          `json:"Env"`
 		} `json:"Config"`
 		Mounts []struct {
 			Source      string `json:"Source"`
@@ -215,6 +216,7 @@ func (d *Docker) InspectContainer(ctx context.Context, containerID string) (*sta
 		Labels:     info.Config.Labels,
 		Mounts:     mounts,
 		WorkingDir: info.Config.WorkingDir,
+		Env:        info.Config.Env,
 	}, nil
 }
 
@@ -505,32 +507,9 @@ func (d *Docker) CreateContainer(ctx context.Context, opts CreateContainerOption
 		}
 	}
 
-	// Port bindings.
-	//
-	// Three shapes, driven by fields on each PortForward:
-	//
-	//   EphemeralHostPort=true + Host set  -> -p <host>::<container>    (Docker picks host port, binds only to <host>)
-	//   EphemeralHostPort=true + no Host   -> -p ::<container>          (Docker picks host port, binds to 0.0.0.0)
-	//   HostPort set (or default to container) + Host -> -p <host>:<hostPort>:<container>
-	//   HostPort set (or default to container) + no Host -> -p <hostPort>:<container>
+	// Port bindings
 	for _, p := range opts.Ports {
-		if p.EphemeralHostPort {
-			if p.Host != "" {
-				args = append(args, "-p", fmt.Sprintf("%s::%d", p.Host, p.ContainerPort))
-			} else {
-				args = append(args, "-p", fmt.Sprintf("::%d", p.ContainerPort))
-			}
-			continue
-		}
-		hostPort := p.HostPort
-		if hostPort == 0 {
-			hostPort = p.ContainerPort
-		}
-		if p.Host != "" {
-			args = append(args, "-p", fmt.Sprintf("%s:%d:%d", p.Host, hostPort, p.ContainerPort))
-		} else {
-			args = append(args, "-p", fmt.Sprintf("%d:%d", hostPort, p.ContainerPort))
-		}
+		args = append(args, "-p", p.DockerSpec())
 	}
 
 	// Workspace mount
@@ -556,6 +535,10 @@ func (d *Docker) CreateContainer(ctx context.Context, opts CreateContainerOption
 	for _, e := range opts.Env {
 		args = append(args, "-e", e)
 	}
+
+	// Remaining runArgs from devcontainer.json, verbatim. They come after
+	// dcx's own flags so single-valued options (e.g. --hostname) win.
+	args = append(args, opts.RunArgs...)
 
 	// Entrypoint
 	if len(opts.Entrypoint) > 0 {

@@ -1,0 +1,28 @@
+{
+  "name": "proj",
+  "plan": {
+    "image": "alpine:3.20",
+    "type": "image"
+  },
+  "baseImage": "alpine:3.20",
+  "serviceName": "proj",
+  "workspaceFolder": "/workspaces/proj",
+  "containerEnv": {
+    "USER_SET": "1"
+  },
+  "mounts": [
+    {
+      "source": "dind-var-lib-docker-<id>",
+      "target": "/var/lib/docker",
+      "type": "volume"
+    }
+  ],
+  "capAdd": [
+    "NET_ADMIN"
+  ],
+  "privileged": true,
+  "init": true,
+  "features": [
+    "./dind-like"
+  ]
+}

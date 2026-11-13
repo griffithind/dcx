@@ -32,12 +32,16 @@ type Fake struct {
 	Ports map[string]int
 	// Images lists image refs that exist locally.
 	Images map[string]bool
-	// ImageLabels maps image refs to their labels.
+	// ImageLabels maps image refs to their labels (local images).
 	ImageLabels map[string]map[string]string
+	// Registry maps image refs to the labels they get once pulled.
+	Registry map[string]map[string]string
 	// ExecFunc decides the result of ExecInContainer (nil = success).
 	ExecFunc func(containerName string, argv []string) error
 	// Files records WriteFileInContainer content by "<container>:<path>".
 	Files map[string][]byte
+	// Env holds each container's environment (KEY=VALUE) by ID or name.
+	Env map[string][]string
 
 	calls []Call
 }
@@ -103,7 +107,11 @@ func (f *Fake) InspectContainer(_ context.Context, id string) (*state.ContainerD
 	if c == nil {
 		return nil, fmt.Errorf("container not found: %s", id)
 	}
-	return &state.ContainerDetails{ID: c.ID, Name: c.Name, State: c.State, Running: c.Running, Labels: c.Labels}, nil
+	env := f.Env[c.ID]
+	if env == nil {
+		env = f.Env[c.Name]
+	}
+	return &state.ContainerDetails{ID: c.ID, Name: c.Name, State: c.State, Running: c.Running, Labels: c.Labels, Env: env}, nil
 }
 
 func (f *Fake) StopContainer(_ context.Context, id string, _ *time.Duration) error {
@@ -193,10 +201,18 @@ func (f *Fake) PullImageWithProgress(_ context.Context, ref string, _ io.Writer)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("PullImageWithProgress", ref)
+	labels, ok := f.Registry[ref]
+	if !ok {
+		return fmt.Errorf("pull %s: not found", ref)
+	}
 	if f.Images == nil {
 		f.Images = map[string]bool{}
 	}
+	if f.ImageLabels == nil {
+		f.ImageLabels = map[string]map[string]string{}
+	}
 	f.Images[ref] = true
+	f.ImageLabels[ref] = labels
 	return nil
 }
 

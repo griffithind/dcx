@@ -251,18 +251,22 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 
 ### Phase 3: config → resolve pipeline (1 week)
 
-- [ ] Typed config model (replace `interface{}` fields; reuse the dead `LifecycleCommand`/`PortSpec`/`StringOrSlice` types).
-- [ ] One substitution pass over the whole model, after discovery, with full context (`devcontainerId`, `containerEnv` lazily at exec time, `userHome`). Apply it to feature contributions too. Same behaviour with or without `--config`.
-- [ ] Parse mounts after substitution. One mount parser, one port parser.
-- [ ] Spec-correct merge: last-wins, image metadata always fetched (pull or inspect remotely if needed) so the first and second `up` match.
-- [ ] Full `runArgs` support: map known flags into the spec, pass the rest through verbatim.
-- [ ] Golden-file tests: `testdata/<case>/devcontainer.json` → `resolved.golden.json`.
+- [x] One substitution pass (`SubstituteConfig`) over every string property, including name, build options, compose files, runArgs, capAdd/securityOpt, ports and lifecycle commands. It runs once in `Load` with a single context (`NewSubstitutionContext`: `devcontainerId`, `userHome`, workspace folders), identically with or without `--config`. The builder's partial second pass is gone. Feature mounts are substituted too. `${containerEnv:VAR}` is resolved at exec time and when patching `/etc/environment`, against the container's inspected environment.
+- [x] String mounts are re-parsed after substitution, and `ParseMountString` is the only mount parser (user, metadata and feature mounts). The form is chosen by `=`, so a value containing `:` cannot trigger the short form. Mounts are merged per target.
+- [x] One port parser, `ParsePortSpec`, supporting `p`, `h:c`, `ip:h:c`, `ip::c` and `/udp`. `PortForward.DockerSpec()` is used for both `docker run` and compose. `forwardPorts` entries like `db:5432` are skipped with a message instead of getting a random host port.
+- [x] Image metadata merge follows the spec (last layer wins, `init`/`privileged` true if any layer sets them, mounts last wins per target, per-key maps). It never mutates the local config. `up` and `build` pull the base image when it is missing, so its metadata applies on the first run too.
+- [x] `runArgs`: unknown flags pass through verbatim to `docker run`; `--rm`, `--name` and `-d` are refused with a warning; `--shm-size=2gb` parses; compose configs get a warning that runArgs don't apply.
+- [x] Feature `containerEnv` is no longer passed as runtime `-e` (it is image `ENV`), and its `ENV` lines no longer escape `$`, so `${PATH}` expands (W9). `.devcontainer/docker-compose.yml` is no longer treated as a devcontainer.json (B7).
+- [x] Golden tests: `internal/devcontainer/testdata/resolve/<case>/` run the real `Load`+`Build`; refresh them with `go test ./internal/devcontainer -run TestResolveGolden -args -update`. E2E tests in `test/e2e/config_resolution_e2e_test.go` cover runArgs, `${devcontainerId}`, feature PATH, `--config` and `${containerEnv:…}`.
+- [x] `dockerComposeFile` is typed (`StringOrSlice`). The dead `PortSpec`/`PortSpecs`/`GPUConfig`/`FeatureConfig` models are deleted.
+- [ ] Moved to Phase 5: typed lifecycle commands (`LifecycleCommand` is kept for this). They flow through features, build metadata and the hook runner as `interface{}` and are best retyped together with the reconciler.
+- [ ] Still open: the image-metadata merge is skipped for Dockerfile and compose plans (it would need the built image first). Image-metadata lifecycle commands are not run.
 
 ### Phase 4: identity and keys (2–3 days)
 
 - [ ] `Identity` from the workspace path; container name and compose project come from it. Migration: detect old `name`-based containers through the `workspace.path` label and adopt them.
 - [ ] `Keys.Build` / `Keys.Runtime` over the normalized model, including local feature contents, context files and the base digest.
-- [ ] Image tags from `Keys.Build` in dcx's own repo namespace (`dcx/<wsid>:<build>`, `…-uid`). Fix `clean` to match. Deterministic Dockerfile generation (sorted ARG/ENV, ENV per feature stage, no shell quoting on ENV).
+- [ ] Image tags from `Keys.Build` in dcx's own repo namespace (`dcx/<wsid>:<build>`, `…-uid`). Fix `clean` to match. Deterministic Dockerfile generation (sorted ARG/ENV, ENV per feature stage). (`$` in ENV is already fixed, in Phase 3.)
 
 ### Phase 5: reconciler (1 week)
 

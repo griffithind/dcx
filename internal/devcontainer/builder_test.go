@@ -117,7 +117,7 @@ func TestBuilderBuild(t *testing.T) {
 			composeFile := filepath.Join(dir, "docker-compose.yml")
 			require.NoError(t, os.WriteFile(composeFile, []byte("services:\n  app:\n    image: alpine\n"), 0644))
 
-			cfg := &DevContainerConfig{DockerComposeFile: "docker-compose.yml", Service: "app"}
+			cfg := &DevContainerConfig{DockerComposeFile: StringOrSlice{"docker-compose.yml"}, Service: "app"}
 			builder := NewBuilder(slog.Default(), nil)
 			resolved, err := builder.Build(context.Background(), BuilderOptions{
 				ConfigPath:    filepath.Join(dir, "devcontainer.json"),

@@ -230,6 +230,12 @@ type ParsedRunArgs struct {
 	Devices     []string
 	ExtraHosts  []string
 	Sysctls     map[string]string
+
+	// Passthrough holds every other flag, verbatim, for `docker run`.
+	Passthrough []string
+	// Ignored holds flags dcx refuses because they break container
+	// management (--rm, --name, -d/--detach).
+	Ignored []string
 }
 
 // NewResolvedDevContainer creates a new ResolvedDevContainer with initialized maps.

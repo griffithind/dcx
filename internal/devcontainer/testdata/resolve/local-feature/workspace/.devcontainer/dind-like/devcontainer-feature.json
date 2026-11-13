@@ -1,0 +1,10 @@
+{
+  "id": "dind-like",
+  "version": "1.0.0",
+  "name": "Docker-in-Docker-like",
+  "mounts": [{"source": "dind-var-lib-docker-${devcontainerId}", "target": "/var/lib/docker", "type": "volume"}],
+  "containerEnv": {"PATH": "/opt/dind/bin:${PATH}", "USER_SET": "from-feature"},
+  "privileged": true,
+  "init": true,
+  "capAdd": ["NET_ADMIN"]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "subst-${localEnv:PROJECT_SUFFIX}",
+  "image": "alpine:${localEnv:ALPINE_TAG:3.20}",
+  "workspaceFolder": "/src/${localWorkspaceFolderBasename}",
+  "containerEnv": {
+    "WS": "${containerWorkspaceFolder}",
+    "HOST_HOME": "${userHome}",
+    "WITH_DEFAULT": "${localEnv:UNSET_VAR:a:b}",
+    "ID": "${devcontainerId}"
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/custom/bin",
+    "LOCAL": "${localEnv:PROJECT_SUFFIX}"
+  },
+  "mounts": [
+    "source=cache-${devcontainerId},target=/cache,type=volume",
+    {"source": "${localEnv:HOME}/.config", "target": "/home/vscode/.config", "type": "bind"}
+  ],
+  "runArgs": ["--hostname=${localWorkspaceFolderBasename}"],
+  "capAdd": ["SYS_PTRACE"],
+  "securityOpt": ["seccomp=unconfined"]
+}

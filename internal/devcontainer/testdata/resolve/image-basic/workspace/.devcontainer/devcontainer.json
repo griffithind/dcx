@@ -1,0 +1,6 @@
+{
+  // comments and trailing commas are allowed
+  "name": "Basic Image",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
+}

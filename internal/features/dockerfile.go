@@ -92,7 +92,7 @@ func (g *DockerfileGenerator) Generate() string {
 	if len(envVars) > 0 {
 		sb.WriteString("# Container environment from features\n")
 		for key, value := range envVars {
-			fmt.Fprintf(&sb, "ENV %s=%s\n", key, dockerfileQuote(value))
+			fmt.Fprintf(&sb, "ENV %s=%s\n", key, dockerfileEnvQuote(value))
 		}
 		sb.WriteString("\n")
 	}
@@ -236,22 +236,6 @@ func NeedsInit(features []*Feature) bool {
 	return false
 }
 
-// CollectContainerEnv collects all container environment variables from features.
-func CollectContainerEnv(features []*Feature) map[string]string {
-	env := make(map[string]string)
-
-	for _, feature := range features {
-		if feature.Metadata == nil {
-			continue
-		}
-		for key, value := range feature.Metadata.ContainerEnv {
-			env[key] = value
-		}
-	}
-
-	return env
-}
-
 // FeatureHook represents a lifecycle hook from a feature.
 type FeatureHook struct {
 	// FeatureID identifies which feature this hook is from
@@ -350,12 +334,19 @@ func CollectPostAttachCommands(features []*Feature) []FeatureHook {
 	return CollectHooks(features, HookPostAttach)
 }
 
-// dockerfileQuote quotes a value for a Dockerfile ENV or ARG instruction,
-// escaping \, ", $ and ` inside double quotes.
-//
-// Escaping $ means ${VAR} references in feature containerEnv do not expand,
-// which deviates from the spec; that is fixed with the Dockerfile generation
-// rework and intentionally left unchanged here.
+// dockerfileEnvQuote quotes a feature containerEnv value for a Dockerfile
+// ENV instruction. Per the feature spec, ${VAR} references (typically
+// "${PATH}") must expand against the image environment, so $ is left
+// unescaped; only \ and " are escaped inside the double quotes.
+func dockerfileEnvQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
+}
+
+// dockerfileQuote quotes a literal value (feature option) for a Dockerfile
+// ARG instruction, escaping \, ", $ and ` inside double quotes so nothing
+// is expanded.
 func dockerfileQuote(s string) string {
 	if !strings.ContainsAny(s, " \t\n\"'$`\\!") {
 		return s

@@ -1,0 +1,14 @@
+{
+  "name": "Compose App",
+  "plan": {
+    "files": [
+      "<workspace>/.devcontainer/docker-compose.yml",
+      "<workspace>/.devcontainer/docker-compose.override.yml"
+    ],
+    "project": "compose_app",
+    "service": "app",
+    "type": "compose"
+  },
+  "serviceName": "compose_app",
+  "workspaceFolder": "/workspace"
+}

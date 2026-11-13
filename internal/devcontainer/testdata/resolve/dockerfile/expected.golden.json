@@ -1,0 +1,17 @@
+{
+  "name": "df",
+  "plan": {
+    "args": {
+      "VERSION": "1.0",
+      "WS": "proj"
+    },
+    "context": "<workspace>",
+    "dockerfile": "<workspace>/.devcontainer/Dockerfile",
+    "target": "dev",
+    "type": "dockerfile"
+  },
+  "serviceName": "df",
+  "workspaceFolder": "/workspaces/proj",
+  "containerUser": "builder",
+  "effectiveUser": "builder"
+}

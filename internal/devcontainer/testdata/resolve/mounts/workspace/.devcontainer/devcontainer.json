@@ -1,0 +1,10 @@
+{
+  "image": "alpine:3.20",
+  "mounts": [
+    "type=bind,src=${localEnv:HOME}/.ssh,dst=/root/.ssh,readonly",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "/host/data:/data:ro",
+    {"type": "volume", "source": "named", "target": "/named"},
+    {"type": "tmpfs", "target": "/scratch"}
+  ]
+}

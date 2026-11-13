@@ -67,7 +67,7 @@ func TestPlanType(t *testing.T) {
 
 	t.Run("compose-based config with string", func(t *testing.T) {
 		cfg := &DevContainerConfig{
-			DockerComposeFile: "docker-compose.yml",
+			DockerComposeFile: StringOrSlice{"docker-compose.yml"},
 			Service:           "app",
 		}
 		assert.Equal(t, PlanTypeCompose, cfg.PlanType())
@@ -75,7 +75,7 @@ func TestPlanType(t *testing.T) {
 
 	t.Run("compose-based config with array", func(t *testing.T) {
 		cfg := &DevContainerConfig{
-			DockerComposeFile: []interface{}{"docker-compose.yml", "docker-compose.dev.yml"},
+			DockerComposeFile: StringOrSlice{"docker-compose.yml", "docker-compose.dev.yml"},
 			Service:           "app",
 		}
 		assert.Equal(t, PlanTypeCompose, cfg.PlanType())
@@ -84,7 +84,7 @@ func TestPlanType(t *testing.T) {
 	t.Run("compose takes precedence", func(t *testing.T) {
 		cfg := &DevContainerConfig{
 			Image:             "alpine:latest",
-			DockerComposeFile: "docker-compose.yml",
+			DockerComposeFile: StringOrSlice{"docker-compose.yml"},
 			Service:           "app",
 		}
 		assert.Equal(t, PlanTypeCompose, cfg.PlanType())
@@ -125,42 +125,10 @@ func TestMountUnmarshal(t *testing.T) {
 	})
 }
 
-func TestGetForwardPorts(t *testing.T) {
-	t.Run("integer ports", func(t *testing.T) {
-		cfg := &DevContainerConfig{
-			ForwardPorts: []interface{}{float64(8080), float64(3000)},
-		}
-		ports := cfg.GetForwardPorts()
-		assert.Equal(t, []string{"8080:8080", "3000:3000"}, ports)
-	})
-
-	t.Run("string ports", func(t *testing.T) {
-		cfg := &DevContainerConfig{
-			ForwardPorts: []interface{}{"8080", "9000:9000"},
-		}
-		ports := cfg.GetForwardPorts()
-		assert.Equal(t, []string{"8080", "9000:9000"}, ports)
-	})
-
-	t.Run("mixed ports", func(t *testing.T) {
-		cfg := &DevContainerConfig{
-			ForwardPorts: []interface{}{float64(8080), "9000:9000"},
-		}
-		ports := cfg.GetForwardPorts()
-		assert.Equal(t, []string{"8080:8080", "9000:9000"}, ports)
-	})
-
-	t.Run("empty ports", func(t *testing.T) {
-		cfg := &DevContainerConfig{}
-		ports := cfg.GetForwardPorts()
-		assert.Nil(t, ports)
-	})
-}
-
 func TestGetDockerComposeFiles(t *testing.T) {
 	t.Run("single string", func(t *testing.T) {
 		cfg := &DevContainerConfig{
-			DockerComposeFile: "docker-compose.yml",
+			DockerComposeFile: StringOrSlice{"docker-compose.yml"},
 		}
 		files := cfg.GetDockerComposeFiles()
 		assert.Equal(t, []string{"docker-compose.yml"}, files)
@@ -168,7 +136,7 @@ func TestGetDockerComposeFiles(t *testing.T) {
 
 	t.Run("array of strings", func(t *testing.T) {
 		cfg := &DevContainerConfig{
-			DockerComposeFile: []interface{}{"docker-compose.yml", "docker-compose.dev.yml"},
+			DockerComposeFile: StringOrSlice{"docker-compose.yml", "docker-compose.dev.yml"},
 		}
 		files := cfg.GetDockerComposeFiles()
 		assert.Equal(t, []string{"docker-compose.yml", "docker-compose.dev.yml"}, files)

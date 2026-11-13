@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/shell"
+	"github.com/griffithind/dcx/internal/state"
 	"io"
 	"net"
 	"os"
@@ -42,14 +43,17 @@ type ContainerExecOptions struct {
 	Stderr        io.Writer // defaults to os.Stderr
 	TTY           *bool     // nil = auto-detect from stdin
 
-	// Ports resolves the host port Docker published for the agent.
+	// Ports resolves the agent's published port and the container's
+	// environment (for ${containerEnv:VAR} in remoteEnv).
 	Ports PortResolver
 }
 
-// PortResolver looks up the host port a container port is published on.
+// PortResolver is what exec needs from the container engine: the host port
+// a container port is published on, and container details (environment).
 // container.Engine satisfies it.
 type PortResolver interface {
 	PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error)
+	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
 }
 
 // ExecInContainer runs a command (or interactive shell) inside a container
@@ -57,7 +61,7 @@ type PortResolver interface {
 func ExecInContainer(ctx context.Context, opts ContainerExecOptions) (int, error) {
 	user, workDir := resolveUserAndWorkDir(opts.Config, opts.WorkspacePath)
 
-	env := buildExecEnvironment(user, opts.Config)
+	env := buildExecEnvironment(user, opts.Config, containerEnvFor(ctx, opts))
 	env = append(env, opts.Env...)
 
 	tty := false
@@ -346,11 +350,6 @@ func resolveUserAndWorkDir(cfg *devcontainer.DevContainerConfig, workspacePath s
 		if user == "" {
 			user = cfg.ContainerUser
 		}
-		if user != "" {
-			user = devcontainer.Substitute(user, &devcontainer.SubstitutionContext{
-				LocalWorkspaceFolder: workspacePath,
-			})
-		}
 		workDir = devcontainer.DetermineContainerWorkspaceFolder(cfg, workspacePath)
 	}
 
@@ -365,17 +364,39 @@ func resolveUserAndWorkDir(cfg *devcontainer.DevContainerConfig, workspacePath s
 }
 
 // buildExecEnvironment creates the base environment for container
-// execution.
-func buildExecEnvironment(user string, cfg *devcontainer.DevContainerConfig) []string {
+// execution. ${containerEnv:VAR} references in remoteEnv are resolved
+// against containerEnv.
+func buildExecEnvironment(user string, cfg *devcontainer.DevContainerConfig, containerEnv map[string]string) []string {
 	env := []string{
 		"USER=" + user,
 	}
 	if cfg != nil {
-		for k, v := range cfg.RemoteEnv {
+		for k, v := range devcontainer.ResolveContainerEnvRefs(cfg.RemoteEnv, containerEnv) {
 			env = append(env, k+"="+v)
 		}
 	}
 	return env
 }
 
-// shellUnsafeChars matches characters that need quoting in shell arguments.
+// containerEnvFor returns the container's environment when remoteEnv needs
+// it for ${containerEnv:VAR} references, or nil otherwise.
+func containerEnvFor(ctx context.Context, opts ContainerExecOptions) map[string]string {
+	if opts.Config == nil || opts.Ports == nil {
+		return nil
+	}
+	needed := false
+	for _, v := range opts.Config.RemoteEnv {
+		if strings.Contains(v, "${containerEnv:") {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return nil
+	}
+	details, err := opts.Ports.InspectContainer(ctx, opts.ContainerName)
+	if err != nil || details == nil {
+		return nil
+	}
+	return devcontainer.EnvListToMap(details.Env)
+}

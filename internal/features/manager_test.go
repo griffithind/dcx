@@ -133,3 +133,10 @@ func TestResolveDependenciesAttemptsEachRefOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load())
 }
+
+func TestDockerfileEnvQuoteKeepsVariableReferences(t *testing.T) {
+	assert.Equal(t, `"/usr/local/go/bin:${PATH}"`, dockerfileEnvQuote("/usr/local/go/bin:${PATH}"))
+	assert.Equal(t, `"say \"hi\" \\ bye"`, dockerfileEnvQuote(`say "hi" \ bye`))
+	// Option values stay literal.
+	assert.Equal(t, `"\$HOME"`, dockerfileQuote("$HOME"))
+}

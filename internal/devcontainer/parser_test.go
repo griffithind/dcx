@@ -287,3 +287,17 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+
+// A compose file is not a devcontainer.json; it used to be picked up (and
+// fed to the JSON parser) before multi-folder configs were considered.
+func TestResolveIgnoresComposeFileAsConfig(t *testing.T) {
+	ws := t.TempDir()
+	dc := filepath.Join(ws, ".devcontainer")
+	require.NoError(t, os.MkdirAll(filepath.Join(dc, "app"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dc, "docker-compose.yml"), []byte("services: {}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dc, "app", "devcontainer.json"), []byte(`{"image":"alpine"}`), 0o644))
+
+	got, err := Resolve(ws)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dc, "app", "devcontainer.json"), got)
+}

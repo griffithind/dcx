@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/griffithind/dcx/internal/common"
 	"github.com/griffithind/dcx/internal/features"
@@ -77,25 +75,12 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	}
 	resolved.RawConfig = opts.Config
 
-	// Build substitution context if not provided
+	// The config has already been substituted by Load. The context is still
+	// needed for values contributed by features (e.g. mounts referencing
+	// ${devcontainerId}).
 	subCtx := opts.SubstitutionContext
 	if subCtx == nil {
-		subCtx = &SubstitutionContext{
-			LocalWorkspaceFolder: opts.WorkspaceRoot,
-			DevcontainerID:       resolved.ID,
-			LocalEnv:             os.Getenv,
-		}
-		// Set container workspace folder (default or from config)
-		if opts.Config.WorkspaceFolder != "" {
-			subCtx.ContainerWorkspaceFolder = opts.Config.WorkspaceFolder
-		} else {
-			subCtx.ContainerWorkspaceFolder = "/workspaces/" + filepath.Base(opts.WorkspaceRoot)
-		}
-
-		// Set user home
-		if home, err := os.UserHomeDir(); err == nil {
-			subCtx.UserHome = home
-		}
+		subCtx = NewSubstitutionContext(opts.WorkspaceRoot, opts.Config)
 	}
 
 	// Create execution plan based on config type
@@ -147,14 +132,12 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	}
 
 	// Resolve workspace paths
-	resolved.WorkspaceFolder = subCtx.ContainerWorkspaceFolder
-	if opts.Config.WorkspaceMount != "" {
-		resolved.WorkspaceMount = Substitute(opts.Config.WorkspaceMount, subCtx)
-	}
+	resolved.WorkspaceFolder = DetermineContainerWorkspaceFolder(opts.Config, opts.WorkspaceRoot)
+	resolved.WorkspaceMount = opts.Config.WorkspaceMount
 
 	// User configuration
-	resolved.RemoteUser = Substitute(opts.Config.RemoteUser, subCtx)
-	resolved.ContainerUser = Substitute(opts.Config.ContainerUser, subCtx)
+	resolved.RemoteUser = opts.Config.RemoteUser
+	resolved.ContainerUser = opts.Config.ContainerUser
 	if opts.Config.UpdateRemoteUserUID != nil {
 		resolved.UpdateRemoteUserUID = *opts.Config.UpdateRemoteUserUID
 	}
@@ -169,10 +152,10 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	// Environment variables
 	for k, v := range opts.Config.ContainerEnv {
-		resolved.ContainerEnv[k] = Substitute(v, subCtx)
+		resolved.ContainerEnv[k] = v
 	}
 	for k, v := range opts.Config.RemoteEnv {
-		resolved.RemoteEnv[k] = Substitute(v, subCtx)
+		resolved.RemoteEnv[k] = v
 	}
 
 	// Runtime options
@@ -188,16 +171,22 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	// Parse runArgs into structured form
 	if len(opts.Config.RunArgs) > 0 {
 		resolved.RunArgs = ParseRunArgs(opts.Config.RunArgs)
+		for _, arg := range resolved.RunArgs.Ignored {
+			b.report.Warnf("runArgs: ignoring %s (dcx manages the container's name and lifetime)", arg)
+		}
+		if planType == PlanTypeCompose {
+			b.report.Warnf("runArgs are not applied to Docker Compose configurations; set these options in the compose file")
+		}
 	}
 
 	// Forward ports
-	resolved.ForwardPorts = parseForwardPorts(opts.Config.ForwardPorts)
+	resolved.ForwardPorts = b.parsePorts("forwardPorts", []interface{}(opts.Config.ForwardPorts))
 
 	// App ports (bound to localhost for security)
-	resolved.AppPorts = parseAppPorts(opts.Config.GetAppPorts())
+	resolved.AppPorts = b.parsePorts("appPort", opts.Config.AppPort)
 
 	// Mounts
-	resolved.Mounts = parseMounts(opts.Config.Mounts)
+	resolved.Mounts = b.parseMounts(opts.Config.Mounts)
 
 	// Service name (sanitized for Docker)
 	resolved.ServiceName = common.SanitizeProjectName(resolved.Name)
@@ -222,7 +211,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	// Resolve features if any exist
 	if len(opts.Config.Features) > 0 {
-		if err := b.resolveFeatures(ctx, resolved, opts); err != nil {
+		if err := b.resolveFeatures(ctx, resolved, opts, subCtx); err != nil {
 			return nil, err
 		}
 	}
@@ -242,7 +231,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 }
 
 // resolveFeatures resolves all features from the configuration.
-func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevContainer, opts BuilderOptions) error {
+func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevContainer, opts BuilderOptions, subCtx *SubstitutionContext) error {
 	mgr, err := features.NewManager(resolved.ConfigDir, b.report)
 	if err != nil {
 		return fmt.Errorf("failed to create feature manager: %w", err)
@@ -264,67 +253,81 @@ func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevCont
 	resolved.Features = feats
 
 	// Merge feature mounts, capAdd, securityOpt, etc.
-	b.mergeFeatureRuntimeConfig(resolved, feats)
+	b.mergeFeatureRuntimeConfig(resolved, feats, subCtx)
 
 	return nil
 }
 
 // mergeFeatureRuntimeConfig merges runtime configuration from features into resolved.
-func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feats []*features.Feature) {
+//
+// Feature containerEnv is not merged here: it is baked into the derived
+// image as ENV (where ${VAR} references expand against the image), and
+// passing it again at runtime would override user containerEnv and freeze
+// unexpanded references.
+func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feats []*features.Feature, subCtx *SubstitutionContext) {
 	for _, feat := range feats {
 		if feat.Metadata == nil {
 			continue
 		}
 
-		// Merge mounts
 		for _, fm := range feat.Metadata.Mounts {
-			if fm.Target == "" {
+			m, err := featureMount(fm, subCtx)
+			if err != nil {
+				b.report.Warnf("Ignoring mount from feature %s: %v", feat.ID, err)
 				continue
 			}
-
-			mountType := fm.Type
-			if mountType == "" {
-				mountType = "bind"
-			}
-
-			resolved.Mounts = append(resolved.Mounts, Mount{
-				Source: fm.Source,
-				Target: fm.Target,
-				Type:   mountType,
-			})
+			resolved.Mounts = mergeMountByTarget(resolved.Mounts, m)
 		}
 
-		// Merge capAdd
-		for _, cap := range feat.Metadata.CapAdd {
-			if !contains(resolved.CapAdd, cap) {
-				resolved.CapAdd = append(resolved.CapAdd, cap)
+		for _, c := range feat.Metadata.CapAdd {
+			if !contains(resolved.CapAdd, c) {
+				resolved.CapAdd = append(resolved.CapAdd, c)
 			}
 		}
-
-		// Merge securityOpt
 		for _, opt := range feat.Metadata.SecurityOpt {
 			if !contains(resolved.SecurityOpt, opt) {
 				resolved.SecurityOpt = append(resolved.SecurityOpt, opt)
 			}
 		}
-
-		// Merge privileged (OR: if any feature needs privileged, enable it)
 		if feat.Metadata.Privileged {
 			resolved.Privileged = true
 		}
-
-		// Merge init (OR: if any feature needs init, enable it)
 		if feat.Metadata.Init {
 			resolved.Init = true
 		}
+	}
+}
 
-		// Merge containerEnv
-		for k, v := range feat.Metadata.ContainerEnv {
-			if _, exists := resolved.ContainerEnv[k]; !exists {
-				resolved.ContainerEnv[k] = v
-			}
+// featureMount converts a feature-declared mount, applying the same variable
+// substitution and parser as devcontainer.json mounts.
+func featureMount(fm features.FeatureMount, subCtx *SubstitutionContext) (Mount, error) {
+	if fm.Raw != "" {
+		return ParseMountString(Substitute(fm.Raw, subCtx))
+	}
+	m := Mount{
+		Source: Substitute(fm.Source, subCtx),
+		Target: Substitute(fm.Target, subCtx),
+		Type:   fm.Type,
+	}
+	if m.Type == "" {
+		m.Type = "bind"
+	}
+	if m.Target == "" {
+		return Mount{}, fmt.Errorf("missing target")
+	}
+	return m, nil
+}
+
+// mergeMountByTarget adds m, replacing an existing mount with the same
+// target (a container path can only be mounted once).
+func mergeMountByTarget(mounts []Mount, m Mount) []Mount {
+	for i := range mounts {
+		if mounts[i].Target == m.Target {
+			mounts[i] = m
+			return mounts
 		}
 	}
+	return append(mounts, m)
 }
 
 // contains checks if a string slice contains a value.
@@ -406,81 +409,31 @@ func parseGPURequirements(hr *HostRequirements) *GPURequirements {
 	return gpu
 }
 
-// parseForwardPorts converts config forwardPorts to resolved PortForward slice.
-func parseForwardPorts(ports []interface{}) []PortForward {
-	if len(ports) == 0 {
-		return nil
-	}
-
-	result := make([]PortForward, 0, len(ports))
-	for _, port := range ports {
-		switch v := port.(type) {
-		case float64:
-			result = append(result, PortForward{ContainerPort: int(v), HostPort: int(v)})
-		case int:
-			result = append(result, PortForward{ContainerPort: v, HostPort: v})
-		case string:
-			if pf := parsePortString(v); pf.ContainerPort > 0 {
-				result = append(result, pf)
-			}
-		}
-	}
-	return result
-}
-
-// parseAppPorts converts config appPorts to resolved PortForward slice.
-func parseAppPorts(ports []string) []PortForward {
-	if len(ports) == 0 {
-		return nil
-	}
-
-	result := make([]PortForward, 0, len(ports))
-	for _, port := range ports {
-		if pf := parsePortString(port); pf.ContainerPort > 0 {
-			result = append(result, pf)
-		}
-	}
-	return result
-}
-
-// parsePortString parses a port string like "8080" or "8080:9000" into a PortForward.
-func parsePortString(s string) PortForward {
-	var pf PortForward
-	parts := strings.Split(s, ":")
-	if len(parts) == 2 {
-		if hp, err := strconv.Atoi(parts[0]); err == nil {
-			pf.HostPort = hp
-		}
-		if cp, err := strconv.Atoi(parts[1]); err == nil {
-			pf.ContainerPort = cp
-		}
-	} else if len(parts) == 1 {
-		if p, err := strconv.Atoi(parts[0]); err == nil {
-			pf.ContainerPort = p
-			pf.HostPort = p
-		}
-	}
-	return pf
-}
-
 // parseMounts validates config mounts and defaults the Type field.
-func parseMounts(mounts []Mount) []Mount {
+func (b *Builder) parseMounts(mounts []Mount) []Mount {
 	if len(mounts) == 0 {
 		return nil
 	}
 
 	result := make([]Mount, 0, len(mounts))
 	for _, m := range mounts {
+		if m.Target == "" && m.Raw != "" {
+			parsed, err := ParseMountString(m.Raw)
+			if err != nil {
+				b.report.Warnf("Ignoring mount: %v", err)
+				continue
+			}
+			parsed.Raw = m.Raw
+			m = parsed
+		}
 		if m.Target == "" {
+			b.report.Warnf("Ignoring mount without a target: %q", m.Raw)
 			continue
 		}
-
-		// Default type to bind if not specified
 		if m.Type == "" {
 			m.Type = "bind"
 		}
-
-		result = append(result, m)
+		result = mergeMountByTarget(result, m)
 	}
 	return result
 }

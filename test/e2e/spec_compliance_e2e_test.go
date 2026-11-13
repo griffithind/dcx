@@ -139,14 +139,18 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Use an image with a command that keeps running (alpine with a sleep)
-	// and explicitly set overrideCommand to false
+	// With overrideCommand=false dcx must not replace the image's command
+	// with `sleep infinity`. alpine's default command (/bin/sh) keeps
+	// running because dcx allocates a TTY and stdin.
+	//
+	// (This test used to pass runArgs ["--entrypoint","sleep","-c","infinity"],
+	// which is not valid docker syntax — "-c" is --cpu-shares — and only
+	// "worked" because dcx silently dropped runArgs.)
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
 		"image": "alpine:latest",
 		"workspaceFolder": "/workspace",
-		"overrideCommand": false,
-		"runArgs": ["--entrypoint", "sleep", "-c", "infinity"]
+		"overrideCommand": false
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
@@ -154,13 +158,13 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// The container should still run because we're using runArgs to set entrypoint
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Verify the container is running
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "echo", "still-running")
+	// PID 1 is the image's own command, not dcx's sleep.
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "exec", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "still-running")
+	assert.Contains(t, stdout, "/bin/sh")
+	assert.NotContains(t, stdout, "sleep")
 }
 
 // TestWaitForDefaultE2E tests the default waitFor behavior (updateContentCommand per spec).

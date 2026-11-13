@@ -727,13 +727,6 @@ func TestFeatureSecurityRequirementsIntegration(t *testing.T) {
 			needsInit := features.NeedsInit(tt.features)
 			assert.Equal(t, tt.wantInit, needsInit, "init mismatch")
 
-			// Test CollectContainerEnv
-			envMap := features.CollectContainerEnv(tt.features)
-			if tt.wantEnvKeys != nil {
-				for _, key := range tt.wantEnvKeys {
-					assert.Contains(t, envMap, key, "env key %s should be present", key)
-				}
-			}
 		})
 	}
 }
