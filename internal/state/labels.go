@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/griffithind/dcx/internal/util"
@@ -117,6 +118,10 @@ const (
 	// LabelComposeService is the service name within the compose project.
 	LabelComposeService = Prefix + ".compose.service"
 
+	// Labels docker compose sets on the containers it creates.
+	composeLabelConfigFiles = "com.docker.compose.project.config_files"
+	composeLabelWorkingDir  = "com.docker.compose.project.working_dir"
+
 	// LabelIsPrimary indicates this is the primary devcontainer.
 	LabelIsPrimary = Prefix + ".container.primary"
 )
@@ -204,6 +209,11 @@ type ContainerLabels struct {
 	ComposeProject string
 	ComposeService string
 	IsPrimary      bool
+
+	// Recorded by docker compose itself (read-only, never written by dcx):
+	// the -f files and project directory the container was created with.
+	ComposeConfigFiles []string
+	ComposeWorkingDir  string
 
 	// Cache
 	CacheData           *CacheData
@@ -369,6 +379,10 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 	// Compose
 	l.ComposeProject = m[LabelComposeProject]
 	l.ComposeService = m[LabelComposeService]
+	if files := m[composeLabelConfigFiles]; files != "" {
+		l.ComposeConfigFiles = strings.Split(files, ",")
+	}
+	l.ComposeWorkingDir = m[composeLabelWorkingDir]
 	l.IsPrimary = m[LabelIsPrimary] == "true"
 
 	// Cache

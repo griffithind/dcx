@@ -758,10 +758,7 @@ func readAgentPubkeys(sock string) ([]byte, error) {
 }
 
 // DownOptions contains options for tearing down a devcontainer.
-type DownOptions struct {
-	RemoveVolumes bool
-	RemoveOrphans bool
-}
+type DownOptions = container.DownOptions
 
 // DownWithIDs removes the environment using just project name and workspace ID.
 func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
@@ -789,14 +786,12 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 	} else {
-		actualProject := containerInfo.GetComposeProject(projectName)
-		configDir := containerInfo.GetConfigDir(s.workspacePath)
-		r := container.NewUnifiedRuntimeForExistingCompose(s.engine, s.report, configDir, actualProject)
-		if err := r.Down(ctx, container.DownOptions{
-			RemoveVolumes: opts.RemoveVolumes,
-			RemoveOrphans: opts.RemoveOrphans,
-		}); err != nil {
+		project := container.ExistingComposeProject(containerInfo, projectName, s.workspacePath)
+		if err := project.Down(ctx, opts); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
+		}
+		if path, err := container.ComposeOverridePath(containerInfo.WorkspaceID); err == nil && containerInfo.WorkspaceID != "" {
+			_ = os.RemoveAll(filepath.Dir(path))
 		}
 	}
 

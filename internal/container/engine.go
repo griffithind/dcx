@@ -17,7 +17,7 @@ type Engine interface {
 
 	Info(ctx context.Context) (*SystemInfo, error)
 
-	CreateContainer(ctx context.Context, opts CreateContainerOptions) (string, error)
+	CreateContainer(ctx context.Context, spec ContainerSpec) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error)
 	GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)

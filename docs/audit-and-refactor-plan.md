@@ -283,13 +283,15 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 - [x] Agent: runs with output in `/tmp/dcx-agent.log`, and a failed start reports the log's tail. (Versioned atomic deploy and the readiness wait were done in Phase 1.)
 - [x] `dcx build` builds exactly what `up` would run, including features and the UID layer (`UnifiedRuntime.buildImages`, H5).
 - [x] Found while testing: lifecycle hooks inherited `os.Stdin`, and x/crypto/ssh keeps reading it after the session ends, so a hook swallowed the user's next keystrokes (e.g. the first input to `dcx shell`). Hooks now get an empty stdin.
-- [ ] Not done: `waitFor` still only affects the "ready" message (everything runs in the foreground); `postAttachCommand` is not run for plain `ssh` sessions; image-metadata lifecycle commands are not run; `UnifiedRuntime` and the duplicate `DownOptions` remain (they fold into Phase 6's ContainerSpec work).
+- [ ] Not done: `waitFor` still only affects the "ready" message (everything runs in the foreground); `postAttachCommand` is not run for plain `ssh` sessions; image-metadata lifecycle commands are not run; `UnifiedRuntime` and the duplicate `DownOptions` remain (they fold into Phase 6's ContainerSpec work; DownOptions done in Phase 6).
 
 ### Phase 6: compose parity (3–4 days)
 
-- [ ] `spec.ContainerSpec`, rendered by both engines. Override YAML via `yaml.v3`, not `fmt`.
-- [ ] Always pass explicit `-f` files and the override to compose (fixes the lightweight runtime that relies on default file names).
-- [ ] A table-driven test asserting that every `ContainerSpec` field appears in both renderings.
+- [x] `container.ContainerSpec` holds every runtime setting of the primary container. `UnifiedRuntime.spec` is the only place it is derived from the resolved config. `dockerRunArgs` renders it for single-container plans, and `composeOverride` (yaml.v3 structs, not `fmt`) renders it for compose. This fixes W8: compose now gets capAdd, securityOpt, privileged, init, containerUser, feature security requirements, GPU (`deploy.resources`), appPorts, overrideCommand and typed mounts. Named volumes are declared with an explicit `name`, so they match what `docker run` uses. Values are `$`-escaped, so compose no longer re-interpolates resolved strings. Docker-only by design: container name, working directory, workspace mount (the compose file owns it) and runArgs.
+- [x] One compose executor (`ComposeProject`, which replaces the `Compose` client and `runCompose`), always with explicit `-f` files. The override is persistent (`~/.dcx/compose/<workspace-id>/docker-compose.dcx.yml`, removed on `down`). Stop, start and down on an existing environment use the files and project directory that compose recorded on the container, skipping files that no longer exist. Build secrets go in a one-off override. Compose build and `config` use only the user's files.
+- [x] `TestContainerSpecParity` checks, by reflection, that every `ContainerSpec` field is rendered by both engines or listed as docker-only. `TestSpecComposeParity` covers the W8 settings end to end through `spec`.
+- [x] Also: the keep-alive entrypoint is a shell with a TERM trap (`docker stop` returns at once instead of after the 10s kill timeout). It ignores any service `command`, so `overrideCommand: true` works for compose. `runServices` always includes the primary service. `CreateContainer` now only creates (`docker create`). The duplicate `DownOptions` types are merged.
+- [ ] Not done: `UnifiedRuntime` keeps its Start/Stop/Down methods next to the service's label-based paths. Folding those together belongs with the thin-CLI work in Phase 8.
 
 ### Phase 7: agent hardening (3–4 days)
 
@@ -298,10 +300,30 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 - [ ] Shell integration files go in a root-owned dir (`/run/dcx`), not `/tmp`.
 - [ ] Client host-key policy matches the server's (no silent regeneration). Clean up stale host keys on `down`.
 - [ ] `~/.ssh/dcx/config` pulled in via `Include` at the top of `~/.ssh/config`, so user `Host *` blocks don't override dcx's settings.
+- [ ] Plain `ssh` reaches parity with `dcx shell`/`exec`, so Phase 8 can delete them (see "Making ssh the only way in" below).
+
+#### Making ssh the only way in
+
+Goal: `ssh <alias>` (terminal, editor, scp/sftp, git) gives the same session as `dcx shell`/`dcx exec`. dcx then needs no SSH client of its own for user sessions. Today the agent already handles user, workdir, login shell, agent forwarding and SFTP. These are the gaps:
+
+| Gap | Today | Change |
+|---|---|---|
+| `remoteEnv` (with `${containerEnv:…}`) | Only the dcx client sends it (`buildExecEnvironment`). The agent uses its own process environment. `/etc/environment` is patched, but nothing reads it (no PAM). | `Up` writes the resolved session env (remoteEnv + userEnvProbe result) to a root-owned file at an `agentproto` path (`/run/dcx/session.env`). The agent loads it for every session. One source for shells, editors and hooks. |
+| `postAttachCommand` | Run by `dcx shell` only, since Phase 5. | `Up` writes the parsed command next to `session.env`. The agent runs it at the start of each interactive (PTY, no command) session, as the session user, with output on the session's stderr. Failure warns and does not block. Matches current `dcx shell` behaviour. |
+| Finding the container from the cwd | `dcx shell` looks up the workspace. With ssh you need the alias. `<name>.dcx` collides for two checkouts with the same `name`. | Keep `<name>.dcx` when it is unique. On a collision `up` uses `<slug>-<id8>.dcx` and says so. `dcx ssh info` prints the alias. |
+| Friendly errors | "container not running, run `dcx up`" | ssh just says "connection refused". The thin launcher below can preflight. |
+| Exit codes / signals | The client maps them. | Covered by the `exit-signal` item above. |
+| Host dependency | Built-in Go client, so no OpenSSH is needed. | Requires OpenSSH on the host. Acceptable: it is what editors use anyway. |
+
+Lifecycle hooks still need an in-process client, to stream output and run as a specific user. `internal/ssh/exec` stays as a library for them, renamed `internal/ssh/client`. It reads env from `session.env` like any other session instead of building its own.
 
 ### Phase 8: thin CLI and cleanup (2–3 days)
 
-- [ ] Every command goes through `app`. exec/shell/run share one helper fed by `Resolved` (user and env), not the raw config.
+- [ ] Every command goes through `app`.
+- [ ] Delete `dcx shell` and `dcx exec` (needs the Phase 7 ssh parity). Their replacement is a thin, cwd-aware launcher, `dcx ssh [-- cmd args…]`. It preflights "is it running", then `syscall.Exec`s OpenSSH to the workspace alias: `-t` when interactive, and the command joined with `shell.Join`, because OpenSSH space-joins argv and would otherwise change quoting compared with `dcx exec -- a "b c"`. Printing the command moves to `dcx ssh info`. This is a breaking change, so it gets a release note.
+- [ ] `dcx run <shortcut>` resolves the shortcut on the host as now, then goes through the same OpenSSH launcher.
+- [ ] Shrink `internal/ssh/exec` → `internal/ssh/client` (hooks only): drop TTY, window resize, interactive shell and the remoteEnv builder.
+- [ ] e2e: replace the ~135 `RunDCXInDir(…, "exec", "--", …)` calls with `helpers.SSHExec(t, workspace, args…)`. It runs `ssh` against the generated config, so the suite tests the path users actually take. This is a mechanical rewrite. Add e2e tests for remoteEnv, postAttach and an alias collision over plain ssh.
 - [ ] `doctor`/`debug` → `app.Diagnose` returning check results; the CLI renders them. Reuse the real resolver so debug can't disagree with up.
 - [ ] Flag parsing: drop the early `ParseFlags`; use `PersistentPreRunE` for UI init.
 - [ ] Shortcuts: run string shortcuts with `sh -c` (with args appended as `"$@"`), not `Fields` + quoting.

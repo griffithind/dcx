@@ -9,7 +9,6 @@ import (
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/report"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,20 +30,11 @@ type UnifiedRuntime struct {
 	resolved *devcontainer.ResolvedDevContainer
 	builder  build.ImageBuilder // CLI-based image builder
 
-	// Cached state
 	containerID   string
 	containerName string
 
-	// Runtime state
-	overridePath string
 	derivedImage string
 	sshBindHost  string // "" == 127.0.0.1 (the default)
-
-	// For lightweight existing container operations
-	workspacePath  string
-	composeProject string   // Set when working with existing compose environment
-	isCompose      bool     // Whether this is a compose environment
-	compose        *Compose // Compose client for compose operations
 }
 
 // NewUnifiedRuntime creates a new runtime for a resolved devcontainer.
@@ -64,19 +54,6 @@ func NewUnifiedRuntime(engine Engine, rep report.Reporter, resolved *devcontaine
 		builder:       builder,
 		containerName: resolved.ServiceName,
 	}, nil
-}
-
-// NewUnifiedRuntimeForExistingCompose creates a lightweight runtime for existing compose environments.
-// The configDir parameter should be the directory containing devcontainer.json (and typically the compose files).
-func NewUnifiedRuntimeForExistingCompose(engine Engine, rep report.Reporter, configDir, composeProject string) *UnifiedRuntime {
-	return &UnifiedRuntime{
-		engine:         engine,
-		report:         report.OrDiscard(rep),
-		workspacePath:  configDir, // Use configDir as working dir for compose commands
-		composeProject: composeProject,
-		isCompose:      true,
-		compose:        ComposeClient(configDir, composeProject),
-	}
 }
 
 // Up implements ContainerRuntime.Up.
@@ -102,38 +79,51 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 
 // upCompose handles compose-based configurations.
 func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
-	if _, err := r.buildImages(ctx, opts); err != nil {
-		return err
-	}
-
-	// Generate override file
-	override, err := r.generateComposeOverride(plan, opts.BuildSecrets)
-	if err != nil {
-		return fmt.Errorf("failed to generate override: %w", err)
-	}
-
-	// Write override to temp file
-	r.overridePath, err = r.writeToTempFile(override, "dcx-override-*.yml")
+	image, err := r.buildImages(ctx, opts)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(r.overridePath) }()
 
-	// Build compose args
-	args := r.composeBaseArgs(plan)
-	args = append(args, "up", "-d")
+	if err := r.writeComposeOverride(plan, r.spec(image)); err != nil {
+		return fmt.Errorf("failed to write compose override: %w", err)
+	}
+	project := r.composeProject(plan)
 
+	// Build secrets only matter when compose itself builds the service
+	// (no dcx layers). They live in a one-off override so the persistent
+	// one never references deleted secret files.
+	if len(opts.BuildSecrets) > 0 && r.derivedImage == "" {
+		path, err := writeTempOverride(plan.Service, ContainerSpec{}, opts.BuildSecrets)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.Remove(path) }()
+		project = project.with(path)
+	}
+
+	args := []string{"up", "-d"}
 	// Add --build only if explicitly requested and we DON'T have features
 	if opts.Build && !hasFeatures {
 		args = append(args, "--build")
 	}
+	args = append(args, composeServices(plan)...)
+	return project.run(ctx, args...)
+}
 
-	// Determine which services to start
-	if len(plan.RunServices) > 0 {
-		args = append(args, plan.RunServices...)
+// composeServices returns the services `up` starts: all of them when
+// runServices is empty, otherwise runServices plus the primary service,
+// which the spec says is always started.
+func composeServices(plan *devcontainer.ComposePlan) []string {
+	if len(plan.RunServices) == 0 {
+		return nil
 	}
-
-	return r.runCompose(ctx, args)
+	services := append([]string(nil), plan.RunServices...)
+	for _, s := range services {
+		if s == plan.Service {
+			return services
+		}
+	}
+	return append(services, plan.Service)
 }
 
 // upSingle handles single-container configurations (image or Dockerfile).
@@ -353,140 +343,144 @@ func (r *UnifiedRuntime) layerTag(kind string, parts ...string) string {
 		hex.EncodeToString(sum[:])[:common.HashTruncationLength])
 }
 
-// createContainer creates a single container.
+// createContainer creates the primary container from imageRef.
 func (r *UnifiedRuntime) createContainer(ctx context.Context, imageRef string) (string, error) {
-	containerName := r.resolved.ServiceName
-	workspaceFolder := r.resolved.WorkspaceFolder
+	return r.engine.CreateContainer(ctx, r.spec(imageRef))
+}
 
-	containerLabels := r.buildLabels()
-	mountColl := r.buildMounts()
-	env := r.buildEnvironment()
+// spec builds the ContainerSpec of the primary container. It is the single
+// place runtime settings are derived from the resolved configuration, for
+// both single-container and compose plans.
+//
+// Settings that only exist for `docker run` are left out for compose: the
+// container name and working directory (compose owns them), the workspace
+// mount (the compose file defines it, per the spec) and runArgs.
+func (r *UnifiedRuntime) spec(image string) ContainerSpec {
+	res := r.resolved
+	_, isCompose := res.Plan.(*devcontainer.ComposePlan)
 
-	// Build workspace mount as structured type
-	var workspaceMount *devcontainer.Mount
-	if r.resolved.WorkspaceMount != "" {
-		// Parse the workspace mount string
-		parsed := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount)
-		if parsed != nil {
-			workspaceMount = parsed
-		}
+	s := ContainerSpec{
+		Image:       image,
+		User:        res.ContainerUser,
+		Labels:      r.buildLabels(),
+		Env:         r.buildEnvironment(),
+		Ports:       r.buildPortBindings(),
+		CapAdd:      append([]string(nil), res.CapAdd...),
+		SecurityOpt: append([]string(nil), res.SecurityOpt...),
+		Privileged:  res.Privileged,
+		Init:        res.Init,
 	}
-	if workspaceMount == nil && r.resolved.LocalRoot != "" && workspaceFolder != "" {
-		// Default workspace mount
-		workspaceMount = &devcontainer.Mount{
-			Type:   "bind",
-			Source: r.resolved.LocalRoot,
-			Target: workspaceFolder,
+	s.Mounts, s.Tmpfs = r.buildMounts()
+
+	if !isCompose {
+		s.Name = res.ServiceName
+		s.WorkingDir = res.WorkspaceFolder
+		if wm := r.workspaceMount(); wm != nil {
+			s.Mounts = append([]devcontainer.Mount{*wm}, s.Mounts...)
 		}
-	}
-
-	ports := r.buildPortBindings()
-
-	createOpts := CreateContainerOptions{
-		Name:            containerName,
-		Image:           imageRef,
-		Labels:          containerLabels,
-		Env:             env,
-		WorkspacePath:   r.resolved.LocalRoot,
-		WorkspaceFolder: workspaceFolder,
-		WorkspaceMount:  workspaceMount,
-		Mounts:          mountColl.Mounts,
-		Tmpfs:           mountColl.Tmpfs,
-		Ports:           ports,
-		CapAdd:          r.resolved.CapAdd,
-		SecurityOpt:     r.resolved.SecurityOpt,
-		Privileged:      r.resolved.Privileged,
-		Init:            r.resolved.Init,
-		User:            r.resolved.ContainerUser,
+		r.applyRunArgs(&s)
 	}
 
-	// Apply feature security requirements (capabilities, security options, privileged mode)
-	if len(r.resolved.Features) > 0 {
-		reqs := features.GetSecurityRequirements(r.resolved.Features)
+	r.applyFeatureRequirements(&s)
 
-		// Warn user about elevated permissions
-		if reqs.Privileged || len(reqs.Capabilities) > 0 {
-			r.report.Warnf("Features require elevated permissions:")
-			for _, name := range reqs.FeatureNames {
-				r.report.Warnf("  - %s", name)
-			}
-		}
-
-		// Apply feature requirements to container
-		createOpts.CapAdd = append(createOpts.CapAdd, reqs.Capabilities...)
-		createOpts.SecurityOpt = append(createOpts.SecurityOpt, reqs.SecurityOpts...)
-		if reqs.Privileged {
-			createOpts.Privileged = true
-		}
-
-		// Check if any feature needs init
-		if features.NeedsInit(r.resolved.Features) {
-			createOpts.Init = true
-		}
-
-		// Feature containerEnv is baked into the derived image as ENV, so
-		// it is not passed again here (that would override user
-		// containerEnv and freeze ${VAR} references unexpanded).
-	}
-
-	// Pass GPU requirements to container creation
-	if r.resolved.GPURequirements != nil && r.resolved.GPURequirements.Enabled {
-		if r.resolved.GPURequirements.Count > 0 {
-			createOpts.GPURequest = strconv.Itoa(r.resolved.GPURequirements.Count)
+	if gpu := res.GPURequirements; gpu != nil && gpu.Enabled {
+		if gpu.Count > 0 {
+			s.GPUs = strconv.Itoa(gpu.Count)
 		} else {
-			createOpts.GPURequest = "all"
+			s.GPUs = "all"
 		}
 	}
 
-	// Apply parsed runArgs from devcontainer.json
-	if r.resolved.RunArgs != nil {
-		runArgs := r.resolved.RunArgs
-
-		// Apply parsed values (runArgs override defaults)
-		if runArgs.NetworkMode != "" {
-			createOpts.NetworkMode = runArgs.NetworkMode
-		}
-		if runArgs.IpcMode != "" {
-			createOpts.IpcMode = runArgs.IpcMode
-		}
-		if runArgs.PidMode != "" {
-			createOpts.PidMode = runArgs.PidMode
-		}
-		if runArgs.ShmSize > 0 {
-			createOpts.ShmSize = runArgs.ShmSize
-		}
-		if runArgs.User != "" {
-			createOpts.User = runArgs.User
-		}
-		createOpts.CapDrop = append(createOpts.CapDrop, runArgs.CapDrop...)
-		createOpts.Devices = append(createOpts.Devices, runArgs.Devices...)
-		createOpts.ExtraHosts = append(createOpts.ExtraHosts, runArgs.ExtraHosts...)
-		for k, v := range runArgs.Sysctls {
-			if createOpts.Sysctls == nil {
-				createOpts.Sysctls = make(map[string]string)
-			}
-			createOpts.Sysctls[k] = v
-		}
-		createOpts.RunArgs = runArgs.Passthrough
+	if r.overrideCommand() {
+		s.Entrypoint = append([]string(nil), keepAliveEntrypoint...)
 	}
+	return s
+}
 
-	// Handle overrideCommand
-	// Per spec: default true for image/dockerfile, false for compose
-	shouldOverride := false
+// workspaceMount returns the workspace mount of a single-container plan:
+// workspaceMount from the config, or a bind of the local workspace.
+func (r *UnifiedRuntime) workspaceMount() *devcontainer.Mount {
+	if r.resolved.WorkspaceMount != "" {
+		if m := devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount); m != nil {
+			return m
+		}
+	}
+	if r.resolved.LocalRoot != "" && r.resolved.WorkspaceFolder != "" {
+		return &devcontainer.Mount{Type: "bind", Source: r.resolved.LocalRoot, Target: r.resolved.WorkspaceFolder}
+	}
+	return nil
+}
+
+// applyRunArgs applies the runArgs dcx models to s and keeps the rest for
+// verbatim pass-through.
+func (r *UnifiedRuntime) applyRunArgs(s *ContainerSpec) {
+	ra := r.resolved.RunArgs
+	if ra == nil {
+		return
+	}
+	if ra.NetworkMode != "" {
+		s.NetworkMode = ra.NetworkMode
+	}
+	if ra.IpcMode != "" {
+		s.IpcMode = ra.IpcMode
+	}
+	if ra.PidMode != "" {
+		s.PidMode = ra.PidMode
+	}
+	if ra.ShmSize > 0 {
+		s.ShmSize = ra.ShmSize
+	}
+	if ra.User != "" {
+		s.User = ra.User
+	}
+	s.CapDrop = append(s.CapDrop, ra.CapDrop...)
+	s.Devices = append(s.Devices, ra.Devices...)
+	s.ExtraHosts = append(s.ExtraHosts, ra.ExtraHosts...)
+	for k, v := range ra.Sysctls {
+		if s.Sysctls == nil {
+			s.Sysctls = make(map[string]string)
+		}
+		s.Sysctls[k] = v
+	}
+	s.RunArgs = ra.Passthrough
+}
+
+// applyFeatureRequirements adds the capabilities, security options,
+// privileged mode and init that features declare.
+//
+// Feature containerEnv is baked into the derived image as ENV, so it is not
+// passed again here (that would override user containerEnv and freeze
+// ${VAR} references unexpanded).
+func (r *UnifiedRuntime) applyFeatureRequirements(s *ContainerSpec) {
+	if len(r.resolved.Features) == 0 {
+		return
+	}
+	reqs := features.GetSecurityRequirements(r.resolved.Features)
+	if reqs.Privileged || len(reqs.Capabilities) > 0 {
+		r.report.Warnf("Features require elevated permissions:")
+		for _, name := range reqs.FeatureNames {
+			r.report.Warnf("  - %s", name)
+		}
+	}
+	s.CapAdd = append(s.CapAdd, reqs.Capabilities...)
+	s.SecurityOpt = append(s.SecurityOpt, reqs.SecurityOpts...)
+	if reqs.Privileged {
+		s.Privileged = true
+	}
+	if features.NeedsInit(r.resolved.Features) {
+		s.Init = true
+	}
+}
+
+// overrideCommand reports whether the image/service command is replaced by
+// a keep-alive. Per spec it defaults to true for image/Dockerfile plans and
+// false for compose.
+func (r *UnifiedRuntime) overrideCommand() bool {
 	if r.resolved.RawConfig != nil && r.resolved.RawConfig.OverrideCommand != nil {
-		// Explicit setting takes precedence
-		shouldOverride = *r.resolved.RawConfig.OverrideCommand
-	} else {
-		// Default: true for image/dockerfile, false for compose
-		_, isCompose := r.resolved.Plan.(*devcontainer.ComposePlan)
-		shouldOverride = !isCompose
+		return *r.resolved.RawConfig.OverrideCommand
 	}
-	if shouldOverride {
-		createOpts.Entrypoint = []string{"sleep"}
-		createOpts.Cmd = []string{"infinity"}
-	}
-
-	return r.engine.CreateContainer(ctx, createOpts)
+	_, isCompose := r.resolved.Plan.(*devcontainer.ComposePlan)
+	return !isCompose
 }
 
 // buildLabels builds the container labels.
@@ -527,47 +521,33 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	return l.ToMap()
 }
 
-// mountCollections holds separated mount types for container creation.
-type mountCollections struct {
-	Mounts []devcontainer.Mount // Structured mounts
-	Tmpfs  map[string]string    // For tmpfs mounts
-}
-
-// buildMounts builds the container mounts, separating tmpfs from other mounts.
-func (r *UnifiedRuntime) buildMounts() mountCollections {
-	result := mountCollections{
-		Tmpfs: make(map[string]string),
-	}
-
-	// /run/secrets is always a tmpfs: besides user runtime secrets it holds
-	// the dcx-managed SSH host private key, which must never land in the
-	// container's writable layer (visible to docker commit/export/diff).
-	result.Tmpfs[agentproto.SecretsDir] = "rw,noexec,nosuid,size=1m"
-
+// buildMounts returns the configured mounts, with tmpfs mounts split out.
+// /run/secrets is always a tmpfs: besides user runtime secrets it holds
+// the dcx-managed SSH host private key, which must never land in the
+// container's writable layer (visible to docker commit/export/diff).
+func (r *UnifiedRuntime) buildMounts() ([]devcontainer.Mount, map[string]string) {
+	var mounts []devcontainer.Mount
+	tmpfs := map[string]string{agentproto.SecretsDir: "rw,noexec,nosuid,size=1m"}
 	for _, m := range r.resolved.Mounts {
 		if m.Type == "tmpfs" {
-			// Tmpfs handled separately via HostConfig.Tmpfs
-			result.Tmpfs[m.Target] = ""
+			tmpfs[m.Target] = ""
 		} else {
-			// Pass structured mount directly
-			result.Mounts = append(result.Mounts, m)
+			mounts = append(mounts, m)
 		}
 	}
-	return result
+	return mounts, tmpfs
 }
 
-// buildEnvironment builds the container environment.
-func (r *UnifiedRuntime) buildEnvironment() []string {
-	var env []string
+// buildEnvironment builds the container environment: containerEnv plus
+// DCX_PROJECT_NAME (for terminal titles and user scripts).
+func (r *UnifiedRuntime) buildEnvironment() map[string]string {
+	env := make(map[string]string, len(r.resolved.ContainerEnv)+1)
 	for k, v := range r.resolved.ContainerEnv {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
+		env[k] = v
 	}
-
-	// Add DCX_PROJECT_NAME for terminal titles and user scripts
 	if r.resolved.Name != "" {
-		env = append(env, fmt.Sprintf("DCX_PROJECT_NAME=%s", r.resolved.Name))
+		env["DCX_PROJECT_NAME"] = r.resolved.Name
 	}
-
 	return env
 }
 
@@ -637,65 +617,25 @@ func (r *UnifiedRuntime) sshPortBinding() devcontainer.PortForward {
 
 // Start implements ContainerRuntime.Start.
 func (r *UnifiedRuntime) Start(ctx context.Context) error {
-	if r.resolved != nil {
-		if _, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
-			plan := r.resolved.Plan.(*devcontainer.ComposePlan)
-			args := r.composeBaseArgs(plan)
-			args = append(args, "start")
-			return r.runCompose(ctx, args)
-		}
+	if plan, ok := r.composePlan(); ok {
+		return r.composeProject(plan).Start(ctx)
 	}
-
-	// Lightweight compose runtime - use Compose client
-	if r.compose != nil {
-		return r.compose.Start(ctx)
-	}
-
-	// Single container
 	return r.engine.StartContainer(ctx, r.containerName)
 }
 
 // Stop implements ContainerRuntime.Stop.
 func (r *UnifiedRuntime) Stop(ctx context.Context) error {
-	if r.resolved != nil {
-		if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
-			args := r.composeBaseArgs(plan)
-			args = append(args, "stop")
-			return r.runCompose(ctx, args)
-		}
+	if plan, ok := r.composePlan(); ok {
+		return r.composeProject(plan).Stop(ctx)
 	}
-
-	// Lightweight compose runtime - use Compose client
-	if r.compose != nil {
-		return r.compose.Stop(ctx)
-	}
-
-	// Single container
 	return r.engine.StopContainer(ctx, r.containerName, nil)
 }
 
 // Down implements ContainerRuntime.Down.
 func (r *UnifiedRuntime) Down(ctx context.Context, opts DownOptions) error {
-	if r.resolved != nil {
-		if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
-			args := r.composeBaseArgs(plan)
-			args = append(args, "down")
-			if opts.RemoveVolumes {
-				args = append(args, "-v")
-			}
-			if opts.RemoveOrphans {
-				args = append(args, "--remove-orphans")
-			}
-			return r.runCompose(ctx, args)
-		}
+	if plan, ok := r.composePlan(); ok {
+		return r.composeProject(plan).Down(ctx, opts)
 	}
-
-	// Lightweight compose runtime - use Compose client
-	if r.compose != nil {
-		return r.compose.Down(ctx, ComposeDownOptions(opts))
-	}
-
-	// Single container
 	return r.engine.RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
 }
 
@@ -706,15 +646,14 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 	}
 
 	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
-		args := r.composeBaseArgs(plan)
-		args = append(args, "build")
+		args := []string{"build"}
 		if opts.NoCache {
 			args = append(args, "--no-cache")
 		}
 		if opts.Pull {
 			args = append(args, "--pull")
 		}
-		return r.runCompose(ctx, args)
+		return r.userCompose(plan).run(ctx, args...)
 	}
 
 	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, Pull: opts.Pull})
@@ -729,164 +668,100 @@ func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 
 // Compose helper methods
 
-func (r *UnifiedRuntime) composeBaseArgs(plan *devcontainer.ComposePlan) []string {
-	projectName := r.containerName
-	if plan != nil && plan.ProjectName != "" {
-		projectName = plan.ProjectName
-	} else if r.composeProject != "" {
-		projectName = r.composeProject
+func (r *UnifiedRuntime) composePlan() (*devcontainer.ComposePlan, bool) {
+	if r.resolved == nil {
+		return nil, false
 	}
-	args := []string{"-p", projectName}
-
-	if plan != nil {
-		for _, f := range plan.Files {
-			args = append(args, "-f", f)
-		}
-	}
-
-	if r.overridePath != "" {
-		args = append(args, "-f", r.overridePath)
-	}
-
-	return args
+	plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan)
+	return plan, ok
 }
 
-func (r *UnifiedRuntime) runCompose(ctx context.Context, args []string) error {
-	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
-	if r.resolved != nil {
-		cmd.Dir = r.resolved.ConfigDir
-	} else if r.workspacePath != "" {
-		cmd.Dir = r.workspacePath
+// userCompose is the project with only the user's compose files: used to
+// build and inspect the services before dcx's override applies.
+func (r *UnifiedRuntime) userCompose(plan *devcontainer.ComposePlan) ComposeProject {
+	name := plan.ProjectName
+	if name == "" {
+		name = r.containerName
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
+	return ComposeProject{
+		Name:  name,
+		Dir:   r.resolved.ConfigDir,
+		Files: append([]string(nil), plan.Files...),
+	}
 }
 
-func (r *UnifiedRuntime) generateComposeOverride(plan *devcontainer.ComposePlan, buildSecrets map[string]string) (string, error) {
-	var sb strings.Builder
-	sb.WriteString("# Generated by dcx - do not edit\n")
-	sb.WriteString("services:\n")
-	fmt.Fprintf(&sb, "  %s:\n", plan.Service)
-
-	// Add labels
-	sb.WriteString("    labels:\n")
-	for k, v := range r.buildLabels() {
-		fmt.Fprintf(&sb, "      %s: %q\n", k, v)
-	}
-
-	// Add environment variables (containerEnv + DCX_PROJECT_NAME)
-	env := r.buildEnvironment()
-	if len(env) > 0 {
-		sb.WriteString("    environment:\n")
-		for _, e := range env {
-			fmt.Fprintf(&sb, "      - %q\n", e)
+// composeProject is the full project: the user's files plus dcx's
+// persistent override, once it has been written.
+func (r *UnifiedRuntime) composeProject(plan *devcontainer.ComposePlan) ComposeProject {
+	p := r.userCompose(plan)
+	if path, err := ComposeOverridePath(r.resolved.ID); err == nil {
+		if _, err := os.Stat(path); err == nil {
+			p = p.with(path)
 		}
 	}
+	return p
+}
 
-	// Add derived image if features were installed
-	if r.derivedImage != "" {
-		fmt.Fprintf(&sb, "    image: %s\n", r.derivedImage)
+// ComposeOverridePath is where dcx keeps the compose override of a
+// workspace. It persists for the environment's lifetime (compose records
+// it in the containers' config_files label), so later start/stop/down
+// commands see the same project definition as `up`.
+func ComposeOverridePath(workspaceID string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
 	}
+	return filepath.Join(home, ".dcx", "compose", workspaceID, "docker-compose.dcx.yml"), nil
+}
 
-	// Add build secrets if any (for compose builds without features)
-	if len(buildSecrets) > 0 && r.derivedImage == "" {
-		sb.WriteString("    build:\n")
-		sb.WriteString("      secrets:\n")
-		for name := range buildSecrets {
-			fmt.Fprintf(&sb, "        - %s\n", name)
-		}
+// writeComposeOverride renders spec for the primary service and writes it
+// to the workspace's persistent override file.
+func (r *UnifiedRuntime) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
+	data, err := composeOverride(plan.Service, spec, nil)
+	if err != nil {
+		return err
 	}
+	path, err := ComposeOverridePath(r.resolved.ID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
 
-	// Ports — forwardPorts plus the dcx SSH listener.
-	sb.WriteString("    ports:\n")
-	for _, port := range r.resolved.ForwardPorts {
-		fmt.Fprintf(&sb, "      - %q\n", port.DockerSpec())
+// writeTempOverride writes a one-off compose override (e.g. build secrets)
+// and returns its path; the caller removes it.
+func writeTempOverride(service string, spec ContainerSpec, buildSecrets map[string]string) (string, error) {
+	data, err := composeOverride(service, spec, buildSecrets)
+	if err != nil {
+		return "", err
 	}
-	// dcx SSH: "<bind>::48022" (Docker picks ephemeral) or "<bind>:<pref>:48022"
-	// (we have a remembered port from a prior up for this workspace).
-	ssh := r.sshPortBinding()
-	if ssh.EphemeralHostPort {
-		fmt.Fprintf(&sb, "      - \"%s::%d\"\n", ssh.Host, ssh.ContainerPort)
-	} else {
-		fmt.Fprintf(&sb, "      - \"%s:%d:%d\"\n", ssh.Host, ssh.HostPort, ssh.ContainerPort)
+	f, err := os.CreateTemp("", "dcx-override-*.yml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-
-	// Add mounts
-	mountColl := r.buildMounts()
-	if len(mountColl.Mounts) > 0 {
-		sb.WriteString("    volumes:\n")
-		for _, m := range mountColl.Mounts {
-			// Convert structured mount back to compose volume string
-			mountStr := fmt.Sprintf("%s:%s", m.Source, m.Target)
-			if m.ReadOnly {
-				mountStr += ":ro"
-			}
-			fmt.Fprintf(&sb, "      - %q\n", mountStr)
-		}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("failed to write temp file: %w", err)
 	}
-
-	// Add tmpfs mounts
-	if len(mountColl.Tmpfs) > 0 {
-		sb.WriteString("    tmpfs:\n")
-		for path, opts := range mountColl.Tmpfs {
-			if opts != "" {
-				fmt.Fprintf(&sb, "      - %q\n", path+":"+opts)
-			} else {
-				fmt.Fprintf(&sb, "      - %q\n", path)
-			}
-		}
-	}
-
-	// Add top-level secrets definitions if any
-	if len(buildSecrets) > 0 && r.derivedImage == "" {
-		sb.WriteString("secrets:\n")
-		for name, path := range buildSecrets {
-			fmt.Fprintf(&sb, "  %s:\n", name)
-			fmt.Fprintf(&sb, "    file: %s\n", path)
-		}
-	}
-
-	return sb.String(), nil
+	_ = f.Close()
+	return f.Name(), nil
 }
 
 func (r *UnifiedRuntime) ensureServicesBuilt(ctx context.Context, plan *devcontainer.ComposePlan, buildSecrets map[string]string) error {
-	args := r.composeBaseArgs(plan)
-
-	// Add build secrets override if any
+	project := r.userCompose(plan)
 	if len(buildSecrets) > 0 {
-		override := r.generateBuildSecretsOverride(plan, buildSecrets)
-		overridePath, err := r.writeToTempFile(override, "dcx-build-secrets-*.yml")
+		path, err := writeTempOverride(plan.Service, ContainerSpec{}, buildSecrets)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = os.Remove(overridePath) }()
-		args = append(args, "-f", overridePath)
+		defer func() { _ = os.Remove(path) }()
+		project = project.with(path)
 	}
-
-	args = append(args, "build")
-	return r.runCompose(ctx, args)
-}
-
-// generateBuildSecretsOverride generates a compose override file with build secrets.
-// Secrets are referenced by their temp file paths.
-func (r *UnifiedRuntime) generateBuildSecretsOverride(plan *devcontainer.ComposePlan, buildSecrets map[string]string) string {
-	var sb strings.Builder
-	sb.WriteString("# Generated by dcx - build secrets override\n")
-	sb.WriteString("services:\n")
-	fmt.Fprintf(&sb, "  %s:\n", plan.Service)
-	sb.WriteString("    build:\n")
-	sb.WriteString("      secrets:\n")
-	for name := range buildSecrets {
-		fmt.Fprintf(&sb, "        - %s\n", name)
-	}
-	sb.WriteString("secrets:\n")
-	for name, path := range buildSecrets {
-		fmt.Fprintf(&sb, "  %s:\n", name)
-		fmt.Fprintf(&sb, "    file: %s\n", path)
-	}
-	return sb.String()
+	return project.run(ctx, "build")
 }
 
 func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
@@ -898,20 +773,12 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 		return "", fmt.Errorf("no compose configuration found")
 	}
 
-	paths := plan.Files
-	if len(paths) == 0 {
+	if len(plan.Files) == 0 {
 		return "", fmt.Errorf("no compose files specified")
 	}
 
 	// Use docker compose config to get fully resolved configuration
-	args := []string{"compose"}
-	for _, f := range paths {
-		args = append(args, "-f", f)
-	}
-	args = append(args, "config", "--format", "json")
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = filepath.Dir(paths[0])
+	cmd := r.userCompose(plan).command(ctx, "config", "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get compose config: %w", err)
@@ -951,22 +818,6 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 		projectName = r.resolved.ServiceName
 	}
 	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
-}
-
-func (r *UnifiedRuntime) writeToTempFile(content, pattern string) (string, error) {
-	tmpFile, err := os.CreateTemp("", pattern)
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	if _, err := tmpFile.WriteString(content); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-		return "", fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	_ = tmpFile.Close()
-	return tmpFile.Name(), nil
 }
 
 // Ensure UnifiedRuntime implements ContainerRuntime.

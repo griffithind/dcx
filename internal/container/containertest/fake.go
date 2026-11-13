@@ -42,6 +42,8 @@ type Fake struct {
 	Outputs map[string]string
 	// Files records WriteFileInContainer content by "<container>:<path>".
 	Files map[string][]byte
+	// Specs records every CreateContainer request.
+	Specs []container.ContainerSpec
 	// Env holds each container's environment (KEY=VALUE) by ID or name.
 	Env map[string][]string
 
@@ -146,10 +148,11 @@ func (f *Fake) Info(context.Context) (*container.SystemInfo, error) {
 	return &container.SystemInfo{NCPU: 8, MemTotal: 16 << 30}, nil
 }
 
-func (f *Fake) CreateContainer(_ context.Context, opts container.CreateContainerOptions) (string, error) {
+func (f *Fake) CreateContainer(_ context.Context, opts container.ContainerSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("CreateContainer", opts.Name, opts.Image)
+	f.Specs = append(f.Specs, opts)
 	id := fmt.Sprintf("fake-%d", len(f.Containers)+1)
 	f.Containers = append(f.Containers, state.ContainerSummary{ID: id, Name: opts.Name, State: "created", Labels: opts.Labels})
 	return id, nil

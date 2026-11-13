@@ -105,7 +105,9 @@ Load config → Check state (running + setup complete → done)
 | `engine.go` | `Engine` interface - everything the service/runtime need from the container engine |
 | `docker.go` | `Docker` - the Docker CLI implementation of `Engine` (no singleton; injected) |
 | `containertest/` | `Fake` in-memory `Engine` for unit tests |
-| `compose.go` | `Compose` client - wraps docker compose CLI |
+| `spec.go` | `ContainerSpec` - every runtime setting of the primary container |
+| `compose.go` | `ComposeProject` - the only docker compose executor (always explicit `-f` files) |
+| `compose_override.go` | `composeOverride` - renders a `ContainerSpec` as compose override YAML (yaml.v3) |
 | `exec.go` | Command execution in containers |
 | `secrets.go` | Secret mounting after container start |
 
@@ -274,6 +276,9 @@ defer cliCtx.Close()
 ### Strategy Pattern (UnifiedRuntime)
 Single `Up()` method dispatches to plan-specific implementation internally.
 
+### ContainerSpec (one source for runtime settings)
+`UnifiedRuntime.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `~/.dcx/compose/<workspace-id>/docker-compose.dcx.yml`; existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
+
 ### Sealed Interface (ExecutionPlan)
 ```go
 type ExecutionPlan interface {
@@ -386,5 +391,6 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
 - Variable substitution happens once, in `devcontainer.Load` (`NewSubstitutionContext` + `SubstituteConfig`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
+- Container runtime settings live in `container.ContainerSpec`, rendered by both engines; run `docker compose` only through `container.ComposeProject`.
 - Parse mounts with `ParseMountString` and ports with `ParsePortSpec`; don't add new parsers.
 - Resolution changes are covered by golden files in `internal/devcontainer/testdata/resolve`; review the diff of `go test ./internal/devcontainer -run TestResolveGolden -args -update`.

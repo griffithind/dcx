@@ -48,39 +48,6 @@ func TestNewUnifiedRuntime(t *testing.T) {
 	}
 }
 
-func TestNewUnifiedRuntimeForExistingCompose(t *testing.T) {
-	tests := []struct {
-		name           string
-		configDir      string
-		composeProject string
-	}{
-		{
-			name:           "basic compose",
-			configDir:      "/test/project",
-			composeProject: "my-project",
-		},
-		{
-			name:           "empty project",
-			configDir:      "/test",
-			composeProject: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runtime := NewUnifiedRuntimeForExistingCompose(NewDockerCLI(), nil, 
-				tt.configDir,
-				tt.composeProject,
-			)
-			require.NotNil(t, runtime)
-			assert.Equal(t, tt.composeProject, runtime.composeProject)
-			assert.True(t, runtime.isCompose)
-			assert.Equal(t, tt.configDir, runtime.workspacePath)
-			assert.NotNil(t, runtime.compose, "compose client should be initialized")
-		})
-	}
-}
-
 func TestUpOptions(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -327,9 +294,9 @@ func TestBuildMounts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runtime := &UnifiedRuntime{resolved: tt.resolved}
-			got := runtime.buildMounts()
-			assert.Equal(t, tt.wantMounts, got.Mounts)
-			assert.Equal(t, tt.wantTmpfs, got.Tmpfs)
+			mounts, tmpfs := runtime.buildMounts()
+			assert.Equal(t, tt.wantMounts, mounts)
+			assert.Equal(t, tt.wantTmpfs, tmpfs)
 		})
 	}
 }
@@ -436,49 +403,6 @@ func TestBuildPortBindings(t *testing.T) {
 	}
 }
 
-func TestComposeBaseArgs(t *testing.T) {
-	tests := []struct {
-		name           string
-		containerName  string
-		composeProject string
-		plan           *devcontainer.ComposePlan
-		wantContains   []string
-	}{
-		{
-			name:          "container name only",
-			containerName: "test-container",
-			wantContains:  []string{"-p", "test-container"},
-		},
-		{
-			name:           "compose project",
-			composeProject: "my-project",
-			wantContains:   []string{"-p", "my-project"},
-		},
-		{
-			name:          "with plan",
-			containerName: "fallback",
-			plan: &devcontainer.ComposePlan{
-				ProjectName: "plan-project",
-				Files:       []string{"docker-compose.yml"},
-			},
-			wantContains: []string{"-p", "plan-project", "-f", "docker-compose.yml"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runtime := &UnifiedRuntime{
-				containerName:  tt.containerName,
-				composeProject: tt.composeProject,
-			}
-			args := runtime.composeBaseArgs(tt.plan)
-			for _, want := range tt.wantContains {
-				assert.Contains(t, args, want)
-			}
-		})
-	}
-}
-
 func TestOverrideCommandDefault(t *testing.T) {
 	// Per devcontainer spec:
 	// - Default true for image/dockerfile-based containers
@@ -541,15 +465,11 @@ func TestOverrideCommandDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test the logic directly
-			var shouldOverride bool
-			if tt.overrideCommand != nil {
-				shouldOverride = *tt.overrideCommand
-			} else {
-				_, isCompose := tt.plan.(*devcontainer.ComposePlan)
-				shouldOverride = !isCompose
-			}
-			assert.Equal(t, tt.wantOverride, shouldOverride, "overrideCommand default for %T", tt.plan)
+			runtime := &UnifiedRuntime{resolved: &devcontainer.ResolvedDevContainer{
+				Plan:      tt.plan,
+				RawConfig: &devcontainer.DevContainerConfig{OverrideCommand: tt.overrideCommand},
+			}}
+			assert.Equal(t, tt.wantOverride, runtime.overrideCommand(), "overrideCommand default for %T", tt.plan)
 		})
 	}
 }

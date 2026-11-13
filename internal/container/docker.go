@@ -377,192 +377,100 @@ func (d *Docker) KillContainer(ctx context.Context, containerID, signal string) 
 	return nil
 }
 
-// CreateContainerOptions contains options for creating a container.
-type CreateContainerOptions struct {
-	Name            string
-	Image           string
-	WorkspacePath   string
-	WorkspaceFolder string
-	WorkspaceMount  *devcontainer.Mount // Structured workspace mount (nil means use WorkspacePath/WorkspaceFolder)
-	Labels          map[string]string
-	Env             []string
-	Mounts          []devcontainer.Mount // Structured mount specifications
-	RunArgs         []string
-	User            string
-	Privileged      bool
-	Init            bool
-	CapAdd      []string
-	CapDrop     []string
-	SecurityOpt []string
-	NetworkMode string
-	IpcMode         string
-	PidMode         string
-	ShmSize         int64
-	Devices         []string
-	ExtraHosts      []string
-	Tmpfs           map[string]string
-	Sysctls         map[string]string
-	Ports           []devcontainer.PortForward // Structured port bindings
-	Entrypoint      []string
-	Cmd             []string
-	GPURequest      string // GPU request: "all" or count like "1", "2"
-}
-
-// CreateContainer creates a new container using Docker CLI.
-// Returns the container ID.
-func (d *Docker) CreateContainer(ctx context.Context, opts CreateContainerOptions) (string, error) {
-	args := []string{"run", "-d"}
-
-	// Container name
-	if opts.Name != "" {
-		args = append(args, "--name", opts.Name)
-	}
-
-	// User
-	if opts.User != "" {
-		args = append(args, "-u", opts.User)
-	}
-
-	// Working directory
-	if opts.WorkspaceFolder != "" {
-		args = append(args, "-w", opts.WorkspaceFolder)
-	}
-
-	// TTY and stdin
-	args = append(args, "-t", "-i")
-
-	// Privileged mode
-	if opts.Privileged {
-		args = append(args, "--privileged")
-	}
-
-	// Init process
-	if opts.Init {
-		args = append(args, "--init")
-	}
-
-	// Network mode
-	if opts.NetworkMode != "" {
-		args = append(args, "--network", opts.NetworkMode)
-	}
-
-	// IPC mode
-	if opts.IpcMode != "" {
-		args = append(args, "--ipc", opts.IpcMode)
-	}
-
-	// PID mode
-	if opts.PidMode != "" {
-		args = append(args, "--pid", opts.PidMode)
-	}
-
-	// Shared memory size
-	if opts.ShmSize > 0 {
-		args = append(args, "--shm-size", strconv.FormatInt(opts.ShmSize, 10))
-	}
-
-	// Capabilities
-	for _, cap := range opts.CapAdd {
-		args = append(args, "--cap-add", cap)
-	}
-	for _, cap := range opts.CapDrop {
-		args = append(args, "--cap-drop", cap)
-	}
-
-	// Security options
-	for _, opt := range opts.SecurityOpt {
-		args = append(args, "--security-opt", opt)
-	}
-
-	// Devices
-	for _, device := range opts.Devices {
-		args = append(args, "--device", device)
-	}
-
-	// Extra hosts
-	for _, host := range opts.ExtraHosts {
-		args = append(args, "--add-host", host)
-	}
-
-	// Sysctls
-	for k, v := range opts.Sysctls {
-		args = append(args, "--sysctl", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Tmpfs mounts
-	for path, opts := range opts.Tmpfs {
-		if opts != "" {
-			args = append(args, "--tmpfs", fmt.Sprintf("%s:%s", path, opts))
-		} else {
-			args = append(args, "--tmpfs", path)
-		}
-	}
-
-	// GPU support
-	if opts.GPURequest != "" {
-		if opts.GPURequest == "all" {
-			args = append(args, "--gpus", "all")
-		} else {
-			args = append(args, "--gpus", opts.GPURequest)
-		}
-	}
-
-	// Port bindings
-	for _, p := range opts.Ports {
-		args = append(args, "-p", p.DockerSpec())
-	}
-
-	// Workspace mount
-	if opts.WorkspaceMount != nil {
-		mountStr := formatMount(opts.WorkspaceMount)
-		args = append(args, "--mount", mountStr)
-	} else if opts.WorkspacePath != "" && opts.WorkspaceFolder != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:%s", opts.WorkspacePath, opts.WorkspaceFolder))
-	}
-
-	// Additional mounts
-	for _, m := range opts.Mounts {
-		mountStr := formatMount(&m)
-		args = append(args, "--mount", mountStr)
-	}
-
-	// Labels
-	for k, v := range opts.Labels {
-		args = append(args, "-l", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Environment variables
-	for _, e := range opts.Env {
-		args = append(args, "-e", e)
-	}
-
-	// Remaining runArgs from devcontainer.json, verbatim. They come after
-	// dcx's own flags so single-valued options (e.g. --hostname) win.
-	args = append(args, opts.RunArgs...)
-
-	// Entrypoint
-	if len(opts.Entrypoint) > 0 {
-		args = append(args, "--entrypoint", opts.Entrypoint[0])
-	}
-
-	// Image
-	args = append(args, opts.Image)
-
-	// Command (either remaining entrypoint args or cmd)
-	if len(opts.Entrypoint) > 1 {
-		args = append(args, opts.Entrypoint[1:]...)
-	} else if len(opts.Cmd) > 0 {
-		args = append(args, opts.Cmd...)
-	}
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
+// CreateContainer creates (but does not start) the container described by
+// spec and returns its ID.
+func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", dockerRunArgs(spec)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %s", strings.TrimSpace(string(output)))
 	}
+	return strings.TrimSpace(string(output)), nil
+}
 
-	containerID := strings.TrimSpace(string(output))
-	return containerID, nil
+// dockerRunArgs renders a ContainerSpec as `docker create` arguments.
+func dockerRunArgs(s ContainerSpec) []string {
+	args := []string{"create", "-t", "-i"}
+	add := func(flag string, values ...string) {
+		for _, v := range values {
+			args = append(args, flag, v)
+		}
+	}
+
+	if s.Name != "" {
+		add("--name", s.Name)
+	}
+	if s.User != "" {
+		add("-u", s.User)
+	}
+	if s.WorkingDir != "" {
+		add("-w", s.WorkingDir)
+	}
+	if s.Privileged {
+		args = append(args, "--privileged")
+	}
+	if s.Init {
+		args = append(args, "--init")
+	}
+	if s.NetworkMode != "" {
+		add("--network", s.NetworkMode)
+	}
+	if s.IpcMode != "" {
+		add("--ipc", s.IpcMode)
+	}
+	if s.PidMode != "" {
+		add("--pid", s.PidMode)
+	}
+	if s.ShmSize > 0 {
+		add("--shm-size", strconv.FormatInt(s.ShmSize, 10))
+	}
+	add("--cap-add", s.CapAdd...)
+	add("--cap-drop", s.CapDrop...)
+	add("--security-opt", s.SecurityOpt...)
+	add("--device", s.Devices...)
+	add("--add-host", s.ExtraHosts...)
+	for _, k := range sortedKeys(s.Sysctls) {
+		add("--sysctl", k+"="+s.Sysctls[k])
+	}
+	for _, path := range sortedKeys(s.Tmpfs) {
+		if opts := s.Tmpfs[path]; opts != "" {
+			add("--tmpfs", path+":"+opts)
+		} else {
+			add("--tmpfs", path)
+		}
+	}
+	if s.GPUs != "" {
+		add("--gpus", s.GPUs)
+	}
+	for _, p := range s.Ports {
+		add("-p", p.DockerSpec())
+	}
+	for i := range s.Mounts {
+		add("--mount", formatMount(&s.Mounts[i]))
+	}
+	for _, k := range sortedKeys(s.Labels) {
+		add("-l", k+"="+s.Labels[k])
+	}
+	for _, k := range sortedKeys(s.Env) {
+		add("-e", k+"="+s.Env[k])
+	}
+
+	// Remaining runArgs from devcontainer.json, verbatim. They come after
+	// dcx's own flags so single-valued options (e.g. --hostname) win.
+	args = append(args, s.RunArgs...)
+
+	if len(s.Entrypoint) > 0 {
+		add("--entrypoint", s.Entrypoint[0])
+	}
+	args = append(args, s.Image)
+	// docker takes only the entrypoint executable as a flag; the rest of
+	// the entrypoint becomes the command (replacing the image's CMD).
+	if len(s.Entrypoint) > 1 {
+		args = append(args, s.Entrypoint[1:]...)
+	} else {
+		args = append(args, s.Cmd...)
+	}
+	return args
 }
 
 // formatMount formats a devcontainer.Mount as a --mount flag value.
