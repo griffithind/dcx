@@ -60,7 +60,6 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | `root.go` | Root command, global flags (`--workspace`, `--config`, `--quiet`, `--verbose`) |
 | `context.go` | `CLIContext` - shared init for Docker client, Service, Identifiers |
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
-| `exec_builder.go` | Builds docker exec commands for exec/shell/run |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `exec.go`, `shell.go`, `run.go` | Execution commands |
 | `status.go`, `logs.go`, `plan.go` | Information commands |
@@ -81,8 +80,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 **Key Methods:**
 - `Load()` / `LoadWithOptions()` - Resolve devcontainer configuration
 - `Plan()` - Analyze state and determine action (Create/Start/Recreate/Skip)
-- `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH
-- `QuickStart()` - Fast path when container exists and is up-to-date
+- `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
 - `Down()` / `DownWithIDs()` - Remove containers
 - `Build()` - Build images without starting
 - `Lock()` - Generate/verify lockfile

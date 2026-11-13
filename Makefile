@@ -1,4 +1,4 @@
-.PHONY: build build-agent build-linux release release-agent test test-unit test-integration test-e2e test-conformance test-all test-coverage lint clean install docs deadcode
+.PHONY: build build-agent build-linux release release-agent test test-unit test-e2e test-conformance test-all test-coverage lint clean install deadcode
 
 # Build variables
 BINARY_NAME=dcx
@@ -61,13 +61,9 @@ install: build
 # Run all tests
 test: test-unit
 
-# Run unit tests
-test-unit:
+# Run unit tests (agent binaries are needed for go:embed)
+test-unit: build-agent
 	go test -v -race ./internal/...
-
-# Run integration tests (requires Docker)
-test-integration:
-	go test -v -tags=integration ./test/integration/...
 
 # Run end-to-end tests (requires Docker, builds first)
 test-e2e: build
@@ -81,18 +77,17 @@ test-conformance:
 test-all: test-unit test-conformance test-e2e
 
 # Run tests with coverage
-test-coverage:
+test-coverage: build-agent
 	go test -coverprofile=coverage.out ./internal/...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+# Pinned golangci-lint version (keep in sync with CI)
+GOLANGCI_LINT_VERSION ?= v2.14.0
+
 # Run linter (requires agent binaries for go:embed)
 lint: build-agent
-	golangci-lint run ./...
-
-# Generate documentation
-docs:
-	go doc -all ./internal/... > docs/api/godoc.txt
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 
 # Clean build artifacts
 clean:
@@ -113,11 +108,11 @@ fmt:
 	go fmt ./...
 
 # Run go vet
-vet:
+vet: build-agent
 	go vet ./...
 
 # Find dead (unused) code
-deadcode:
+deadcode: build-agent
 	go run golang.org/x/tools/cmd/deadcode@latest -filter='github.com/griffithind/dcx/(cmd|internal)' ./...
 
 # Help target
@@ -130,13 +125,11 @@ help:
 	@echo "  install            - Install dcx to GOPATH/bin"
 	@echo "  test               - Run unit tests"
 	@echo "  test-unit          - Run unit tests with verbose output"
-	@echo "  test-integration   - Run integration tests (requires Docker)"
 	@echo "  test-e2e           - Run end-to-end tests (builds first, requires Docker)"
 	@echo "  test-conformance   - Run conformance tests (spec compliance)"
 	@echo "  test-all           - Run all tests (unit, conformance, e2e; builds first)"
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  lint               - Run golangci-lint"
-	@echo "  docs               - Generate API documentation"
 	@echo "  clean              - Remove build artifacts"
 	@echo "  deps               - Download and tidy dependencies"
 	@echo "  fmt                - Format source code"
