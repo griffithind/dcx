@@ -5,7 +5,9 @@
     "type": "image"
   },
   "baseImage": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "serviceName": "basic_image-<id8>",
+  "resourceName": "basic_image-<id8>",
+  "sshHost": "basic_image.dcx",
+  "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
   "remoteUser": "vscode",
   "effectiveUser": "vscode"

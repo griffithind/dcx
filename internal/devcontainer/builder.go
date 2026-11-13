@@ -36,12 +36,6 @@ type BuilderOptions struct {
 	// Config is the parsed devcontainer configuration
 	Config *DevContainerConfig
 
-	// SubstitutionContext provides variable substitution values
-	SubstitutionContext *SubstitutionContext
-
-	// ProjectName is the sanitized project name from devcontainer.json name field
-	ProjectName string
-
 	// Lockfile is the lockfile to use for feature resolution (optional)
 	// When set, features will be resolved using pinned versions from the lockfile.
 	Lockfile *lockfile.Lockfile
@@ -49,9 +43,9 @@ type BuilderOptions struct {
 	// ForcePull forces re-fetching features from the registry
 	ForcePull bool
 
-	// LocalConfig is the substituted devcontainer.json before image-metadata
+	// Local is the substituted devcontainer.json before image-metadata
 	// merging; the staleness key is computed from it. Defaults to Config.
-	LocalConfig *DevContainerConfig
+	Local *DevContainerConfig
 }
 
 // Build creates a ResolvedDevContainer from the given options.
@@ -62,27 +56,20 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	resolved := NewResolvedDevContainer()
 
-	// Set identity
 	resolved.ConfigPath = opts.ConfigPath
 	resolved.ConfigDir = filepath.Dir(opts.ConfigPath)
 	resolved.LocalRoot = opts.WorkspaceRoot
-	resolved.ID = ComputeID(opts.WorkspaceRoot)
-
-	// Use project name if provided, otherwise compute from config
-	if opts.ProjectName != "" {
-		resolved.Name = opts.ProjectName
-	} else {
-		resolved.Name = ComputeName(opts.WorkspaceRoot, opts.Config)
+	resolved.Identity = NewIdentity(opts.WorkspaceRoot, opts.Config, opts.ConfigPath)
+	resolved.Config = opts.Config
+	resolved.Local = opts.Local
+	if resolved.Local == nil {
+		resolved.Local = opts.Config
 	}
-	resolved.RawConfig = opts.Config
 
 	// The config has already been substituted by Load. The context is still
 	// needed for values contributed by features (e.g. mounts referencing
 	// ${devcontainerId}).
-	subCtx := opts.SubstitutionContext
-	if subCtx == nil {
-		subCtx = NewSubstitutionContext(opts.WorkspaceRoot, opts.Config)
-	}
+	subCtx := NewSubstitutionContext(opts.WorkspaceRoot, opts.Config)
 
 	// Create execution plan based on config type
 	planType := opts.Config.PlanType()
@@ -105,26 +92,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		resolved.Plan = plan
 
 	case PlanTypeCompose:
-		composeFiles := opts.Config.DockerComposeFile
-		absolutePaths := make([]string, len(composeFiles))
-		for i, f := range composeFiles {
-			absolutePaths[i] = filepath.Join(resolved.ConfigDir, f)
-		}
-
-		// For compose projects, prefer explicit compose.yaml name over devcontainer.json name
-		// Only use compose name if explicitly set in compose.yaml (not auto-derived from directory)
-		projectName := ""
-		if explicitName := getExplicitProjectName(absolutePaths); explicitName != "" {
-			// Use explicit compose.yaml name
-			projectName = SanitizeProjectName(explicitName)
-			// Also update resolved.Name so SSH host and identifiers use compose name
-			resolved.Name = explicitName
-		}
-		if projectName == "" {
-			projectName = ResourceName(resolved.Name, resolved.ID)
-		}
-
-		plan := NewComposePlan(absolutePaths, opts.Config.Service, projectName)
+		plan := NewComposePlan(composeFilePaths(opts.Config, opts.ConfigPath), opts.Config.Service, resolved.ResourceName)
 		plan.RunServices = opts.Config.RunServices
 		resolved.Plan = plan
 	}
@@ -186,11 +154,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	// Mounts
 	resolved.Mounts = b.parseMounts(opts.Config.Mounts)
 
-	// Container name: unique per workspace (see ResourceName)
-	resolved.ServiceName = ResourceName(resolved.Name, resolved.ID)
-
-	// Customizations
-	resolved.Customizations = opts.Config.Customizations
+	resolved.OverrideCommand = overrideCommand(planType, opts.Config.OverrideCommand)
+	resolved.HostRequirements = opts.Config.HostRequirements
+	resolved.UserEnvProbe = opts.Config.UserEnvProbe
 
 	// GPU requirements
 	if opts.Config.HostRequirements != nil {
@@ -215,21 +181,24 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	}
 
 	// Compute the staleness key from the local (pre-merge) config
-	keyConfig := opts.LocalConfig
-	if keyConfig == nil {
-		keyConfig = opts.Config
-	}
-	resolved.LocalConfig = keyConfig
-	if err := b.computeHashes(resolved, keyConfig); err != nil {
+	if err := b.computeHashes(resolved, resolved.Local); err != nil {
 		return nil, err
 	}
 
 	// Populate build decisions
 	b.populateBuildDecisions(resolved, opts.Config)
 
-	// Initialize labels
-
 	return resolved, nil
+}
+
+// overrideCommand applies the spec's default for overrideCommand: true for
+// image and Dockerfile plans, false for compose (whose service command is
+// usually the point).
+func overrideCommand(plan PlanType, configured *bool) bool {
+	if configured != nil {
+		return *configured
+	}
+	return plan != PlanTypeCompose
 }
 
 // resolveFeatures resolves all features from the configuration.

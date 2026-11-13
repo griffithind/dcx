@@ -27,7 +27,7 @@ func TestBuilderBuild(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.NotEmpty(t, resolved.ID)
+		assert.NotEmpty(t, resolved.WorkspaceID)
 		assert.Equal(t, "Test Container", resolved.Name)
 		assert.Equal(t, "/tmp/test/.devcontainer/devcontainer.json", resolved.ConfigPath)
 		assert.Equal(t, "/tmp/test", resolved.LocalRoot)
@@ -129,24 +129,6 @@ func TestBuilderBuild(t *testing.T) {
 			assert.Equal(t, PlanTypeCompose, resolved.Plan.Type())
 		})
 	})
-
-	t.Run("uses project name when provided", func(t *testing.T) {
-		cfg := &DevContainerConfig{
-			Name:  "Config Name",
-			Image: "alpine:latest",
-		}
-
-		builder := NewBuilder(slog.Default(), nil)
-		resolved, err := builder.Build(context.Background(), BuilderOptions{
-			ConfigPath:    "/tmp/test/devcontainer.json",
-			WorkspaceRoot: "/tmp/test",
-			Config:        cfg,
-			ProjectName:   "custom-project",
-		})
-
-		require.NoError(t, err)
-		assert.Equal(t, "custom-project", resolved.Name)
-	})
 }
 
 func TestParseGPURequirementsOptional(t *testing.T) {
@@ -162,3 +144,72 @@ func TestParseGPURequirementsOptional(t *testing.T) {
 		t.Fatalf("an empty object states no requirement: %+v", empty)
 	}
 }
+
+func TestOverrideCommandDefault(t *testing.T) {
+	// Per devcontainer spec:
+	// - Default true for image/dockerfile-based containers
+	// - Default false for compose-based containers
+	tests := []struct {
+		name            string
+		plan            ExecutionPlan
+		overrideCommand *bool
+		wantOverride    bool
+	}{
+		{
+			name:            "image plan - default should override",
+			plan:            NewImagePlan("alpine:latest"),
+			overrideCommand: nil,
+			wantOverride:    true,
+		},
+		{
+			name:            "image plan - explicit true",
+			plan:            NewImagePlan("alpine:latest"),
+			overrideCommand: overridePtr(true),
+			wantOverride:    true,
+		},
+		{
+			name:            "image plan - explicit false",
+			plan:            NewImagePlan("alpine:latest"),
+			overrideCommand: overridePtr(false),
+			wantOverride:    false,
+		},
+		{
+			name:            "dockerfile plan - default should override",
+			plan:            NewDockerfilePlan("Dockerfile", "."),
+			overrideCommand: nil,
+			wantOverride:    true,
+		},
+		{
+			name:            "dockerfile plan - explicit false",
+			plan:            NewDockerfilePlan("Dockerfile", "."),
+			overrideCommand: overridePtr(false),
+			wantOverride:    false,
+		},
+		{
+			name:            "compose plan - default should NOT override",
+			plan:            NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: nil,
+			wantOverride:    false,
+		},
+		{
+			name:            "compose plan - explicit true",
+			plan:            NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: overridePtr(true),
+			wantOverride:    true,
+		},
+		{
+			name:            "compose plan - explicit false",
+			plan:            NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
+			overrideCommand: overridePtr(false),
+			wantOverride:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantOverride, overrideCommand(tt.plan.Type(), tt.overrideCommand), "overrideCommand default for %T", tt.plan)
+		})
+	}
+}
+
+func overridePtr(b bool) *bool { return &b }

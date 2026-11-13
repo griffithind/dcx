@@ -26,8 +26,7 @@ func TestNewProvisioner(t *testing.T) {
 		{
 			name: "valid resolved",
 			resolved: &devcontainer.ResolvedDevContainer{
-				ID:          "test-id",
-				ServiceName: "test-service",
+				Identity: devcontainer.Identity{WorkspaceID: "test-id", ResourceName: "test-service"},
 			},
 			wantErr: false,
 		},
@@ -235,81 +234,6 @@ func TestBuildPortBindings(t *testing.T) {
 			assert.False(t, ssh.EphemeralHostPort)
 		})
 	}
-}
-
-func TestOverrideCommandDefault(t *testing.T) {
-	// Per devcontainer spec:
-	// - Default true for image/dockerfile-based containers
-	// - Default false for compose-based containers
-	tests := []struct {
-		name            string
-		plan            devcontainer.ExecutionPlan
-		overrideCommand *bool
-		wantOverride    bool
-	}{
-		{
-			name:            "image plan - default should override",
-			plan:            devcontainer.NewImagePlan("alpine:latest"),
-			overrideCommand: nil,
-			wantOverride:    true,
-		},
-		{
-			name:            "image plan - explicit true",
-			plan:            devcontainer.NewImagePlan("alpine:latest"),
-			overrideCommand: boolPtr(true),
-			wantOverride:    true,
-		},
-		{
-			name:            "image plan - explicit false",
-			plan:            devcontainer.NewImagePlan("alpine:latest"),
-			overrideCommand: boolPtr(false),
-			wantOverride:    false,
-		},
-		{
-			name:            "dockerfile plan - default should override",
-			plan:            devcontainer.NewDockerfilePlan("Dockerfile", "."),
-			overrideCommand: nil,
-			wantOverride:    true,
-		},
-		{
-			name:            "dockerfile plan - explicit false",
-			plan:            devcontainer.NewDockerfilePlan("Dockerfile", "."),
-			overrideCommand: boolPtr(false),
-			wantOverride:    false,
-		},
-		{
-			name:            "compose plan - default should NOT override",
-			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
-			overrideCommand: nil,
-			wantOverride:    false,
-		},
-		{
-			name:            "compose plan - explicit true",
-			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
-			overrideCommand: boolPtr(true),
-			wantOverride:    true,
-		},
-		{
-			name:            "compose plan - explicit false",
-			plan:            devcontainer.NewComposePlan([]string{"docker-compose.yml"}, "app", "project"),
-			overrideCommand: boolPtr(false),
-			wantOverride:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runtime := &Provisioner{resolved: &devcontainer.ResolvedDevContainer{
-				Plan:      tt.plan,
-				RawConfig: &devcontainer.DevContainerConfig{OverrideCommand: tt.overrideCommand},
-			}}
-			assert.Equal(t, tt.wantOverride, runtime.overrideCommand(), "overrideCommand default for %T", tt.plan)
-		})
-	}
-}
-
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 func TestFeatureSecurityRequirementsIntegration(t *testing.T) {

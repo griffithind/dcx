@@ -1,0 +1,16 @@
+{
+  "name": "Named Project",
+  "plan": {
+    "files": [
+      "<workspace>/.devcontainer/docker-compose.yml"
+    ],
+    "project": "my_stack",
+    "runServices": null,
+    "service": "app",
+    "type": "compose"
+  },
+  "resourceName": "my_stack",
+  "sshHost": "named_project.dcx",
+  "overrideCommand": false,
+  "workspaceFolder": "/workspace"
+}

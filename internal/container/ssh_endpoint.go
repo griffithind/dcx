@@ -44,8 +44,6 @@ func (e sshEndpoint) portForward() devcontainer.PortForward {
 		HostPort:      e.hostPort,
 		Host:          e.access.BindHost(),
 		Protocol:      "tcp",
-		Label:         "dcx SSH (internal)",
-		OnAutoForward: "ignore",
 	}
 }
 
@@ -131,17 +129,17 @@ func (r *Provisioner) chooseSSHPort(ctx context.Context) (int, error) {
 	}
 	for _, c := range containers {
 		l := state.ContainerLabelsFromMap(c.Labels)
-		if l.WorkspaceID != r.resolved.ID && l.SSHPort > 0 {
+		if l.WorkspaceID != r.resolved.WorkspaceID && l.SSHPort > 0 {
 			claimed[l.SSHPort] = true
 		}
 	}
-	port, err := dcxssh.PickPort(r.resolved.ID, func(p int) bool {
+	port, err := dcxssh.PickPort(r.resolved.WorkspaceID, func(p int) bool {
 		return !claimed[p] && dcxssh.IsHostPortAvailable(p)
 	})
 	if err != nil {
 		return 0, err
 	}
-	if preferred := dcxssh.DeterministicPort(r.resolved.ID); port != preferred {
+	if preferred := dcxssh.DeterministicPort(r.resolved.WorkspaceID); port != preferred {
 		r.report.Infof("SSH: preferred port %d is taken; using %d", preferred, port)
 	}
 	return port, nil

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
@@ -35,7 +36,10 @@ type DevContainerService struct {
 	configPath    string
 	verbose       bool
 
-	// Cached resolved devcontainer from last operation
+	// Test seams for Up's side effects outside the engine; nil uses the
+	// real implementations (agentctl.Provision, lifecycle.HookRunner).
+	provisionAgent func(context.Context, container.Engine, report.Reporter, agentctl.Options) error
+	newHooks       func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks
 }
 
 // NewDevContainerService creates a new devcontainer service backed by the
@@ -63,11 +67,8 @@ func NewDevContainerService(engine container.Engine, rep report.Reporter, worksp
 // directory name otherwise.
 func (s *DevContainerService) Identity() *devcontainer.Identity {
 	s.idOnce.Do(func() {
-		cfg, _, err := devcontainer.Load(s.workspacePath, s.configPath)
-		if err != nil {
-			cfg = nil
-		}
-		s.identity = devcontainer.ComputeIdentity(s.workspacePath, cfg)
+		ids := devcontainer.LoadIdentity(s.workspacePath, s.configPath)
+		s.identity = &ids
 	})
 	return s.identity
 }
@@ -128,102 +129,42 @@ func (s *DevContainerService) Load(ctx context.Context) (*devcontainer.ResolvedD
 
 // LoadWithOptions resolves the devcontainer configuration with specified options.
 func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOptions) (*devcontainer.ResolvedDevContainer, error) {
-	cfg, configPath, err := devcontainer.Load(s.workspacePath, s.configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	lock := devcontainer.LockfileIgnore
+	if opts.UseLockfile {
+		lock = devcontainer.LockfileUse
 	}
-
-	// Merge image metadata if available (per spec). The pre-merge config
-	// is kept for the staleness key.
-	localCfg := cfg
-	cfg = s.mergeImageMetadata(ctx, cfg, opts.PullForMetadata)
-
-	// Project name from devcontainer.json name field
-	var projectName string
-	if cfg.Name != "" {
-		projectName = devcontainer.SanitizeProjectName(cfg.Name)
-	}
-
-	// Load lockfile if requested and features exist
-	var lf *lockfile.Lockfile
-	if opts.UseLockfile && len(cfg.Features) > 0 {
-		var err error
-		lf, _, err = lockfile.Load(configPath)
-		if err != nil {
-			// Log warning but continue without lockfile
-			if s.verbose {
-				s.report.Warnf("Failed to load lockfile: %v", err)
-			}
-		}
-	}
-
-	resolved, err := s.builder.Build(ctx, devcontainer.BuilderOptions{
-		ConfigPath:    configPath,
-		WorkspaceRoot: s.workspacePath,
-		Config:        cfg,
-		ProjectName:   projectName,
-		Lockfile:      lf,
+	return devcontainer.ResolveWorkspace(ctx, devcontainer.ResolveOptions{
+		WorkspacePath: s.workspacePath,
+		ConfigPath:    s.configPath,
+		Images:        engineImages{engine: s.engine, report: s.report, pull: opts.PullForMetadata},
+		Lockfile:      lock,
 		ForcePull:     opts.ForcePull,
-		LocalConfig:   localCfg,
+		Report:        s.report,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve devcontainer: %w", err)
-	}
-
-	return resolved, nil
 }
 
-// mergeImageMetadata merges devcontainer.metadata from the base image with local config.
-// Per spec, images can embed configuration in the devcontainer.metadata label.
-func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devcontainer.DevContainerConfig, pull bool) *devcontainer.DevContainerConfig {
-	// Get base image reference from config
-	imageRef := cfg.Image
-	if imageRef == "" {
-		// For Dockerfile-based configs, we'd need to parse FROM which is complex.
-		// Skip for now - image metadata is most useful for pre-built images anyway.
-		return cfg
-	}
+// engineImages reads image metadata through the container engine, pulling
+// the image first when pull is set and it is not available locally.
+type engineImages struct {
+	engine container.Engine
+	report report.Reporter
+	pull   bool
+}
 
-	labels, err := s.engine.ImageLabels(ctx, imageRef)
-	if err != nil && pull {
-		s.report.Infof("Pulling image: %s", imageRef)
-		if perr := s.engine.PullImageWithProgress(ctx, imageRef, io.Discard); perr != nil {
-			s.report.Warnf("Could not pull %s to read its metadata: %v", imageRef, perr)
-		} else {
-			labels, err = s.engine.ImageLabels(ctx, imageRef)
+func (e engineImages) ImageMetadata(ctx context.Context, imageRef string) (string, error) {
+	labels, err := e.engine.ImageLabels(ctx, imageRef)
+	if err != nil && e.pull {
+		e.report.Infof("Pulling image: %s", imageRef)
+		if perr := e.engine.PullImageWithProgress(ctx, imageRef, io.Discard); perr != nil {
+			e.report.Warnf("Could not pull %s to read its metadata: %v", imageRef, perr)
+			return "", perr
 		}
+		labels, err = e.engine.ImageLabels(ctx, imageRef)
 	}
 	if err != nil {
-		// Image not available locally; resolve without its metadata.
-		return cfg
+		return "", err
 	}
-
-	// Look for devcontainer.metadata label
-	label := labels[devcontainer.DevcontainerMetadataLabel]
-	if label == "" {
-		return cfg
-	}
-
-	// Parse the metadata
-	imageConfigs, err := devcontainer.ParseImageMetadata(label)
-	if err != nil {
-		if s.verbose {
-			s.report.Warnf("Failed to parse image metadata: %v", err)
-		}
-		return cfg
-	}
-
-	if len(imageConfigs) == 0 {
-		return cfg
-	}
-
-	// Merge image metadata with local config (local config takes precedence)
-	merged := devcontainer.MergeMetadata(cfg, imageConfigs)
-	if s.verbose {
-		s.report.Infof("Merged configuration from %d image metadata layer(s)", len(imageConfigs))
-	}
-
-	return merged
+	return labels[devcontainer.DevcontainerMetadataLabel], nil
 }
 
 // create creates a new environment.
@@ -300,11 +241,6 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 // It returns the probed environment (injected into lifecycle hooks and
 // sessions) and remoteEnv with ${containerEnv:…} resolved.
 func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) (probed, remoteEnv map[string]string, err error) {
-	cfg := resolved.RawConfig
-	if cfg == nil {
-		return nil, nil, nil
-	}
-
 	patcher := env.NewPatcher(s.engine)
 	prober := env.NewProber(s.engine)
 
@@ -340,11 +276,11 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	}
 
 	// Probe user environment if configured
-	if cfg.UserEnvProbe == "" || cfg.UserEnvProbe == "none" {
+	if resolved.UserEnvProbe == "" || resolved.UserEnvProbe == "none" {
 		return nil, remoteEnv, nil
 	}
 
-	probeType := env.ParseProbeType(cfg.UserEnvProbe)
+	probeType := env.ParseProbeType(resolved.UserEnvProbe)
 	if probeType == env.ProbeNone {
 		return nil, remoteEnv, nil
 	}
@@ -354,7 +290,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	user := resolved.EffectiveUser
 
 	if s.verbose {
-		s.report.Infof("  [env] Probing user environment (mode: %s)...", cfg.UserEnvProbe)
+		s.report.Infof("  [env] Probing user environment (mode: %s)...", resolved.UserEnvProbe)
 	}
 
 	probedEnv, err := prober.Probe(ctx, containerInfo.ID, probeType, user)
@@ -376,7 +312,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 // writes the ~/.ssh/config block pointing at 127.0.0.1:<port>.
 func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
 	if containerInfo == nil {
-		_, containerInfo, _ = s.stateManager.State(ctx, resolved.ID)
+		_, containerInfo, _ = s.stateManager.State(ctx, resolved.WorkspaceID)
 	}
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
@@ -563,7 +499,8 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 
 // Lock generates, verifies, or checks the devcontainer-lock.json file.
 func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*LockResult, error) {
-	// Load and resolve the devcontainer configuration
+	// Read the config (no resolution yet) for the checks that need no
+	// network: anything to lock, and a lockfile to verify against.
 	cfg, configPath, err := devcontainer.Load(s.workspacePath, s.configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
@@ -592,29 +529,13 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 		return nil, fmt.Errorf("lockfile not found: run 'dcx lock' to generate one")
 	}
 
-	// Create feature manager and resolve features
-	configDir := filepath.Dir(configPath)
-	mgr, err := features.NewManager(configDir, s.report)
+	// Resolve exactly as `dcx up` does; verification resolves through the
+	// existing lockfile so it checks what the lockfile pins.
+	resolved, err := s.LoadWithOptions(ctx, LoadOptions{UseLockfile: opts.Mode != LockModeGenerate})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create feature manager: %w", err)
+		return nil, err
 	}
-
-	// For verify/frozen modes, use existing lockfile for resolution
-	// This ensures we're checking against what the lockfile says
-	if opts.Mode != LockModeGenerate && existingLockfile != nil {
-		mgr.SetLockfile(existingLockfile)
-	}
-
-	// Resolve all features
-	var overrideOrder []string
-	if cfg.OverrideFeatureInstallOrder != nil {
-		overrideOrder = cfg.OverrideFeatureInstallOrder
-	}
-
-	resolvedFeatures, err := mgr.ResolveAll(ctx, cfg.Features, overrideOrder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve features: %w", err)
-	}
+	resolvedFeatures := resolved.Features
 
 	// Generate new lockfile from resolved features
 	newLockfile := features.GenerateLockfile(resolvedFeatures)

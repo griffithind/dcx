@@ -7,20 +7,13 @@ import (
 // ResolvedDevContainer represents a fully resolved devcontainer configuration.
 // This is the central domain object containing everything needed to create/run a container.
 //
-// ACCESS PATTERN:
-//   - Use resolved fields (e.g., RemoteUser, ContainerEnv) for values that have been
-//     processed with variable substitution and feature merging.
-//   - Use RawConfig only for fields NOT copied to resolved (e.g., HostRequirements,
-//     OverrideCommand, lifecycle hooks) where you need the original config value.
-//   - Resolved fields take precedence over RawConfig for any field that exists in both.
+// It is produced only by ResolveWorkspace. Read resolved fields; Config is
+// for display and for the lifecycle commands (which become resolved hook
+// lists once they are typed).
 type ResolvedDevContainer struct {
-	// === Identity ===
-
-	// ID is the stable identifier: base32(sha256(realpath))[0:12]
-	ID string
-
-	// Name is the human-readable name (from config or directory name).
-	Name string
+	// Identity is the workspace's ID, name, Docker resource name and SSH
+	// alias (see NewIdentity).
+	Identity
 
 	// ConfigPath is the absolute path to devcontainer.json.
 	ConfigPath string
@@ -33,8 +26,14 @@ type ResolvedDevContainer struct {
 
 	// === Source Configuration ===
 
-	// RawConfig is the original parsed devcontainer.json configuration.
-	RawConfig *DevContainerConfig
+	// Config is the effective configuration: devcontainer.json (substituted)
+	// with the base image's devcontainer.metadata merged in.
+	Config *DevContainerConfig
+
+	// Local is devcontainer.json as written (substituted, before image
+	// metadata was merged in). It is the staleness key's input and the
+	// "local" entry dcx adds to an image's devcontainer.metadata label.
+	Local *DevContainerConfig
 
 	// === Execution Plan ===
 
@@ -50,9 +49,6 @@ type ResolvedDevContainer struct {
 	// For DockerfilePlan: determined after building
 	// For ComposePlan: extracted from service config
 	BaseImage string
-
-	// ServiceName is the container/service name (sanitized for Docker).
-	ServiceName string
 
 	// WorkspaceFolder is the path inside the container.
 	WorkspaceFolder string
@@ -108,6 +104,18 @@ type ResolvedDevContainer struct {
 	// RunArgs contains parsed docker run arguments from devcontainer.json.
 	RunArgs *ParsedRunArgs
 
+	// OverrideCommand replaces the image/service command with a keep-alive
+	// (overrideCommand; defaults to true for image and Dockerfile plans and
+	// false for compose, per the spec).
+	OverrideCommand bool
+
+	// HostRequirements are the minimum host resources (nil: none).
+	HostRequirements *HostRequirements
+
+	// UserEnvProbe is how the user environment is probed for hooks and
+	// sessions ("" or "none": not at all).
+	UserEnvProbe string
+
 	// === Ports ===
 
 	// ForwardPorts are ports to forward from the container.
@@ -128,18 +136,7 @@ type ResolvedDevContainer struct {
 	// and image cache tagging.
 	ConfigHash string
 
-	// === Customizations ===
-
-	// Customizations are tool-specific customizations (e.g., VS Code settings).
-	Customizations map[string]interface{}
-
 	// === GPU ===
-
-	// LocalConfig is devcontainer.json as written (substituted, before image
-	// metadata was merged in). It is what dcx records as the "local" entry
-	// of an image's devcontainer.metadata label; RawConfig already contains
-	// the base image's metadata.
-	LocalConfig *DevContainerConfig
 
 	// GPURequirements specifies GPU requirements.
 	GPURequirements *GPURequirements
@@ -165,14 +162,10 @@ type PortForward struct {
 	HostPort      int
 	ContainerPort int
 	Host          string // Host to bind to (e.g., "localhost" for localhost-only)
-	Label         string
 	Protocol      string
-	OnAutoForward string
 
-	// EphemeralHostPort, if true, asks Docker to assign the host port itself
-	// (via the `host::container` syntax). Used for the dcx-agent SSH port so
-	// the mapping is unique per container and discovered post-create via
-	// `docker port`.
+	// EphemeralHostPort asks Docker to assign the host port itself (the
+	// `host::container` syntax).
 	EphemeralHostPort bool
 }
 
@@ -213,7 +206,6 @@ func NewResolvedDevContainer() *ResolvedDevContainer {
 	return &ResolvedDevContainer{
 		ContainerEnv:   make(map[string]string),
 		RemoteEnv:      make(map[string]string),
-		Customizations: make(map[string]interface{}),
 		RuntimeSecrets: make(map[string]SecretConfig),
 		BuildSecrets:   make(map[string]SecretConfig),
 	}

@@ -12,7 +12,9 @@
     "target": "dev",
     "type": "dockerfile"
   },
-  "serviceName": "df-<id8>",
+  "resourceName": "df-<id8>",
+  "sshHost": "df.dcx",
+  "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
   "containerUser": "builder",
   "effectiveUser": "builder"

@@ -1,0 +1,5 @@
+{
+  "name": "Metadata Image",
+  "image": "example.com/prebuilt:1",
+  "containerEnv": {"LOCAL": "1", "SHARED": "local"}
+}

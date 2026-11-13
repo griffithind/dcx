@@ -5,25 +5,23 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
-  "serviceName": "proj-<id8>",
+  "resourceName": "proj-<id8>",
+  "sshHost": "<id>.dcx",
+  "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
   "forwardPorts": [
     {
       "HostPort": 3000,
       "ContainerPort": 3000,
       "Host": "",
-      "Label": "",
       "Protocol": "",
-      "OnAutoForward": "",
       "EphemeralHostPort": false
     },
     {
       "HostPort": 8080,
       "ContainerPort": 80,
       "Host": "",
-      "Label": "",
       "Protocol": "",
-      "OnAutoForward": "",
       "EphemeralHostPort": false
     }
   ],
@@ -32,18 +30,14 @@
       "HostPort": 9000,
       "ContainerPort": 90,
       "Host": "127.0.0.1",
-      "Label": "",
       "Protocol": "",
-      "OnAutoForward": "",
       "EphemeralHostPort": false
     },
     {
       "HostPort": 7000,
       "ContainerPort": 7000,
       "Host": "",
-      "Label": "",
       "Protocol": "",
-      "OnAutoForward": "",
       "EphemeralHostPort": false
     }
   ]

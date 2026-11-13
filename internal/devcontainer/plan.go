@@ -55,10 +55,6 @@ type DockerfilePlan struct {
 
 	// Options are additional build options from devcontainer.json.
 	Options []string
-
-	// BaseImage is the base image extracted from the Dockerfile's FROM instruction.
-	// This is populated during build resolution.
-	BaseImage string
 }
 
 // Type returns PlanTypeDockerfile.
@@ -81,9 +77,6 @@ type ComposePlan struct {
 
 	// ProjectName is the compose project name (sanitized for Docker).
 	ProjectName string
-
-	// WorkDir is the working directory for compose commands.
-	WorkDir string
 }
 
 // Type returns PlanTypeCompose.

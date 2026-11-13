@@ -1,0 +1,4 @@
+name: My Stack
+services:
+  app:
+    image: alpine:3.20

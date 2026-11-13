@@ -20,7 +20,9 @@ type goldenView struct {
 	Name            string            `json:"name"`
 	Plan            any               `json:"plan"`
 	BaseImage       string            `json:"baseImage,omitempty"`
-	ServiceName     string            `json:"serviceName"`
+	ResourceName    string            `json:"resourceName"`
+	SSHHost         string            `json:"sshHost"`
+	OverrideCommand bool              `json:"overrideCommand"`
 	WorkspaceFolder string            `json:"workspaceFolder"`
 	WorkspaceMount  string            `json:"workspaceMount,omitempty"`
 	RemoteUser      string            `json:"remoteUser,omitempty"`
@@ -73,8 +75,20 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
-// TestResolveGolden runs the real Load + Builder.Build pipeline over every
-// case in testdata/resolve and compares a normalized view with the case's
+// goldenImages serves a case's image-metadata.json (the devcontainer.metadata
+// label of every image) when the case has one.
+type goldenImages string
+
+func (g goldenImages) ImageMetadata(_ context.Context, _ string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(string(g), "image-metadata.json"))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	return string(data), err
+}
+
+// TestResolveGolden runs ResolveWorkspace, the production pipeline, over
+// every case in testdata/resolve and compares a normalized view with the case's
 // expected.golden.json. Run with -update to rewrite the golden files.
 //
 // A case directory contains:
@@ -82,6 +96,7 @@ func copyTree(t *testing.T, src, dst string) {
 //	workspace/     the workspace root (with .devcontainer/...)
 //	env            optional KEY=VALUE lines exported for the run
 //	config-path    optional --config value (relative to the workspace)
+//	image-metadata.json  optional devcontainer.metadata label of the image
 func TestResolveGolden(t *testing.T) {
 	cases, err := os.ReadDir("testdata/resolve")
 	if err != nil {
@@ -111,22 +126,24 @@ func TestResolveGolden(t *testing.T) {
 				configPath = strings.TrimSpace(string(data))
 			}
 
-			cfg, cfgPath, err := Load(ws, configPath)
-			if err != nil {
-				t.Fatalf("Load: %v", err)
-			}
-			resolved, err := NewBuilder(nil, nil).Build(context.Background(), BuilderOptions{
-				ConfigPath:    cfgPath,
-				WorkspaceRoot: ws,
-				Config:        cfg,
+			resolved, err := ResolveWorkspace(context.Background(), ResolveOptions{
+				WorkspacePath: ws,
+				ConfigPath:    configPath,
+				Images:        goldenImages(caseDir),
+				Lockfile:      LockfileUse,
 			})
 			if err != nil {
-				t.Fatalf("Build: %v", err)
+				t.Fatalf("ResolveWorkspace: %v", err)
+			}
+			// Commands that don't resolve (stop, down, ssh) must agree with
+			// resolution on the workspace's identity.
+			if ids := LoadIdentity(ws, configPath); ids != resolved.Identity {
+				t.Errorf("LoadIdentity = %+v, resolution has %+v", ids, resolved.Identity)
 			}
 
 			view := goldenView{
 				Name: resolved.Name, Plan: planView(resolved.Plan), BaseImage: resolved.BaseImage,
-				ServiceName: resolved.ServiceName, WorkspaceFolder: resolved.WorkspaceFolder,
+				ResourceName: resolved.ResourceName, SSHHost: resolved.SSHHost, OverrideCommand: resolved.OverrideCommand, WorkspaceFolder: resolved.WorkspaceFolder,
 				WorkspaceMount: resolved.WorkspaceMount, RemoteUser: resolved.RemoteUser,
 				ContainerUser: resolved.ContainerUser, EffectiveUser: resolved.EffectiveUser,
 				ContainerEnv: resolved.ContainerEnv, RemoteEnv: resolved.RemoteEnv,
@@ -146,8 +163,8 @@ func TestResolveGolden(t *testing.T) {
 			out := string(got)
 			out = strings.ReplaceAll(out, ws, "<workspace>")
 			out = strings.ReplaceAll(out, home, "<home>")
-			out = strings.ReplaceAll(out, resolved.ID, "<id>")
-			out = strings.ReplaceAll(out, resolved.ID[:resourceIDLength], "<id8>")
+			out = strings.ReplaceAll(out, resolved.WorkspaceID, "<id>")
+			out = strings.ReplaceAll(out, resolved.WorkspaceID[:resourceIDLength], "<id8>")
 			out += "\n"
 
 			goldenPath := filepath.Join(caseDir, "expected.golden.json")

@@ -205,9 +205,7 @@ func TestDockerRunArgsEntrypoint(t *testing.T) {
 
 func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
 	return &Provisioner{report: report.Discard, resolved: &devcontainer.ResolvedDevContainer{
-		ID:              "1234abcd5678",
-		Name:            "ws",
-		ServiceName:     "ws-1234abcd",
+		Identity:        devcontainer.Identity{WorkspaceID: "1234abcd5678", Name: "ws", ResourceName: "ws-1234abcd"},
 		LocalRoot:       "/home/u/ws",
 		WorkspaceFolder: "/workspaces/ws",
 		Plan:            plan,
@@ -221,7 +219,8 @@ func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
 		Features: []*features.Feature{{ID: "dind", Metadata: &features.FeatureMetadata{
 			ID: "dind", CapAdd: []string{"NET_ADMIN"}, SecurityOpt: []string{"seccomp=unconfined"},
 		}}},
-		RawConfig: &devcontainer.DevContainerConfig{},
+		Config:          &devcontainer.DevContainerConfig{},
+		OverrideCommand: plan.Type() != devcontainer.PlanTypeCompose,
 	}}
 }
 

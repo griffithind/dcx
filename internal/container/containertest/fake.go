@@ -54,7 +54,8 @@ type Fake struct {
 	// Env holds each container's environment (KEY=VALUE) by ID or name.
 	Env map[string][]string
 
-	calls []Call
+	calls   []Call
+	created int
 }
 
 var _ container.Engine = (*Fake)(nil)
@@ -160,7 +161,8 @@ func (f *Fake) CreateContainer(_ context.Context, opts container.ContainerSpec) 
 	defer f.mu.Unlock()
 	f.record("CreateContainer", opts.Name, opts.Image)
 	f.Specs = append(f.Specs, opts)
-	id := fmt.Sprintf("fake-%d", len(f.Containers)+1)
+	f.created++
+	id := fmt.Sprintf("fake-%d", f.created)
 	f.Containers = append(f.Containers, state.ContainerSummary{ID: id, Name: opts.Name, State: "created", Labels: opts.Labels})
 	return id, nil
 }

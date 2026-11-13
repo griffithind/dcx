@@ -23,11 +23,10 @@ func singleRuntime(t *testing.T, fake *containertest.Fake, network string) *cont
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	resolved := &devcontainer.ResolvedDevContainer{
-		ID:          sshTestWorkspace,
-		ServiceName: "app-ws",
-		BaseImage:   "alpine:3",
-		Plan:        &devcontainer.ImagePlan{Image: "alpine:3"},
-		RawConfig:   &devcontainer.DevContainerConfig{},
+		Identity:  devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
+		BaseImage: "alpine:3",
+		Plan:      &devcontainer.ImagePlan{Image: "alpine:3"},
+		Config:    &devcontainer.DevContainerConfig{},
 	}
 	if network != "" {
 		resolved.RunArgs = &devcontainer.ParsedRunArgs{NetworkMode: network}
@@ -115,9 +114,9 @@ func TestComposeSharedNetworkPublishesOnTheOwner(t *testing.T) {
 		Registry: map[string]map[string]string{"mcr.example/base:1": {}},
 	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
-		ID: sshTestWorkspace, ServiceName: "app-ws",
-		Plan:      devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
-		RawConfig: &devcontainer.DevContainerConfig{},
+		Identity: devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
+		Plan:     devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
+		Config:   &devcontainer.DevContainerConfig{},
 	})
 	require.NoError(t, err)
 	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))

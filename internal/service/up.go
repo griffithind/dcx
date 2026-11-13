@@ -62,7 +62,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 	ids := s.Identity()
 
-	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.ID, resolved.ConfigHash)
+	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.WorkspaceID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -191,7 +191,7 @@ func sshAccessFor(action upAction, existing *state.ContainerInfo, requested *con
 
 // checkHostRequirements validates hostRequirements against the Docker host.
 func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
-	if resolved.RawConfig == nil || resolved.RawConfig.HostRequirements == nil {
+	if resolved.HostRequirements == nil {
 		return nil
 	}
 	info, err := s.engine.Info(ctx)
@@ -205,7 +205,7 @@ func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolve
 		s.report.Infof("No GPU runtime on the Docker host; starting without GPUs (optional requirement)")
 		resolved.GPURequirements = nil
 	}
-	result := devcontainer.ValidateHostRequirementsWithDocker(resolved.RawConfig.HostRequirements,
+	result := devcontainer.ValidateHostRequirementsWithDocker(resolved.HostRequirements,
 		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal})
 	for _, w := range result.Warnings {
 		s.report.Warnf("%s", w)
@@ -275,7 +275,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 			// `dcx down --volumes` removes them. Orphans go: compose runs
 			// down with the edited files, so a renamed or removed service
 			// (possibly the old primary) would otherwise keep running.
-			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.ID, DownOptions{RemoveOrphans: true}); err != nil {
+			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.WorkspaceID, DownOptions{RemoveOrphans: true}); err != nil {
 				return fmt.Errorf("failed to remove existing environment: %w", err)
 			}
 			createOpts.Rebuild = false
@@ -286,7 +286,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 		r.started = true
 	}
 
-	_, info, err := s.stateManager.State(ctx, r.resolved.ID)
+	_, info, err := s.stateManager.State(ctx, r.resolved.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}
@@ -318,7 +318,11 @@ func (s *DevContainerService) fetchBuildSecrets(ctx context.Context, resolved *d
 // stepAgent installs (or upgrades) the dcx-agent, writes its SSH secrets
 // and makes sure it is listening.
 func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
-	return agentctl.Provision(ctx, s.engine, s.report, agentctl.Options{
+	provision := agentctl.Provision
+	if s.provisionAgent != nil {
+		provision = s.provisionAgent
+	}
+	return provision(ctx, s.engine, s.report, agentctl.Options{
 		ContainerName: r.info.Name,
 		WorkspaceID:   r.ids.WorkspaceID,
 		User:          r.resolved.EffectiveUser,
@@ -374,8 +378,8 @@ func sessionConfig(resolved *devcontainer.ResolvedDevContainer, probed, remoteEn
 		}
 	}
 	var postAttach interface{}
-	if resolved.RawConfig != nil {
-		postAttach = resolved.RawConfig.PostAttachCommand
+	if resolved.Config != nil {
+		postAttach = resolved.Config.PostAttachCommand
 	}
 	cfg.PostAttach = lifecycle.AttachSteps(features.CollectPostAttachCommands(resolved.Features), postAttach)
 	return cfg
@@ -406,7 +410,11 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 	runner := s.hookRunner(r, port)
 	markers := s.markersFor(r.info)
 
-	if err := runner.RunCreateHooks(ctx, markers); err != nil {
+	var created lifecycle.Markers // a nil *containerMarkers must stay a nil interface
+	if markers != nil {
+		created = markers
+	}
+	if err := runner.RunCreateHooks(ctx, created); err != nil {
 		return fmt.Errorf("lifecycle hooks failed: %w", err)
 	}
 
@@ -432,15 +440,32 @@ func (s *DevContainerService) stepSSHConfig(ctx context.Context, r *upRun) error
 	return nil
 }
 
-// hookRunner builds a lifecycle hook runner for the resolved config.
-func (s *DevContainerService) hookRunner(r *upRun, sshPort int) *lifecycle.HookRunner {
-	runner := lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, r.resolved.RawConfig, r.resolved.ID)
-	if len(r.resolved.Features) > 0 {
+// lifecycleHooks runs the lifecycle phases (*lifecycle.HookRunner; tests
+// substitute it through DevContainerService.newHooks).
+type lifecycleHooks interface {
+	RunInitialize(ctx context.Context) error
+	RunCreateHooks(ctx context.Context, markers lifecycle.Markers) error
+	RunStartHooks(ctx context.Context) error
+}
+
+// hookRunner returns the lifecycle hooks of this run; container hooks
+// connect to the agent on 127.0.0.1:sshPort.
+func (s *DevContainerService) hookRunner(r *upRun, sshPort int) lifecycleHooks {
+	if s.newHooks != nil {
+		return s.newHooks(r.resolved, sshPort)
+	}
+	return newHookRunner(s, r.resolved, sshPort)
+}
+
+// newHookRunner builds the real hook runner for the resolved config.
+func newHookRunner(s *DevContainerService, resolved *devcontainer.ResolvedDevContainer, sshPort int) *lifecycle.HookRunner {
+	runner := lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, resolved.Config, resolved.WorkspaceID)
+	if len(resolved.Features) > 0 {
 		runner.SetFeatureHooks(
-			features.CollectOnCreateCommands(r.resolved.Features),
-			features.CollectUpdateContentCommands(r.resolved.Features),
-			features.CollectPostCreateCommands(r.resolved.Features),
-			features.CollectPostStartCommands(r.resolved.Features),
+			features.CollectOnCreateCommands(resolved.Features),
+			features.CollectUpdateContentCommands(resolved.Features),
+			features.CollectPostCreateCommands(resolved.Features),
+			features.CollectPostStartCommands(resolved.Features),
 		)
 	}
 	return runner

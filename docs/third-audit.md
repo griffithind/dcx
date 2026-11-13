@@ -214,6 +214,30 @@ Regression tests cover:
 
 Regression tests: unit tests for the endpoint (published/recorded, port collision, widened access, host, `container:`, compose owner), `PickPort`, `sshAccessFor`, the agent's listen address and default user, and `ForRemoval`. New e2e tests cover host networking, compose `service:` networking, a renamed compose service, root `remoteUser` on a non-root image, and `--hosts` across restart and recreate (126 e2e tests).
 
+**Step 4 (one resolution function): done.**
+- **`devcontainer.ResolveWorkspace`** is the only pipeline: load and substitute, merge image metadata, lockfile, build.
+  - Image metadata comes in through a one-method `ImageMetadataSource`, which the service implements with the engine, pulling the image when asked.
+  - `LoadWithOptions`, `Lock`, status, debug and the golden tests all go through it. The service's own `mergeImageMetadata`, project-name sanitising and `Lock`'s separate feature manager are gone.
+- **Identity:** `NewIdentity` is the only place it is computed, and `ResolvedDevContainer` embeds it.
+  - The name is devcontainer.json's `name` (or the directory name), and the SSH alias comes from it. The resource name is `<slug>-<id8>`, except that a compose top-level `name:` sets the compose project.
+  - Commands that don't resolve use `LoadIdentity`, and the golden test asserts it equals the resolved identity in every case.
+  - `ComputeIdentity`, `ComputeName` and `BuilderOptions.ProjectName` are deleted.
+  - Visible changes: labels and status show the display name (`Compose App`, not `compose_app`), and a compose `name:` no longer renames the workspace. `DCX_PROJECT_NAME` stays sanitized.
+- **Config fields:**
+  - `RawConfig` is renamed `Config` (merged) and `LocalConfig` is renamed `Local` (as written).
+  - New resolved fields: `OverrideCommand` (spec default applied in the builder), `HostRequirements` and `UserEnvProbe`. Their readers moved off the config.
+  - Lifecycle commands and `postAttachCommand` still read `Config` until step 5 types them.
+- **Deleted:** `Customizations`, `DockerfilePlan.BaseImage`, `ComposePlan.WorkDir`, `PortForward.Label`/`OnAutoForward`, `BuilderOptions.SubstitutionContext` and the provisioner's `overrideCommand`/`localConfig`.
+- **Golden tests** now run `ResolveWorkspace`, with new `image-metadata` and `compose-named` cases and `resourceName`/`sshHost`/`overrideCommand` in the view.
+- **T8:** `Up` has unit tests against `containertest.Fake`, with seams for the agent provisioner and the lifecycle hooks:
+  - create, then a no-op second run;
+  - resume after a failed hook;
+  - start running postStart again;
+  - recreate on staleness;
+  - a pre-marker container whose agent is down.
+
+  The last one found a panic: a nil `*containerMarkers` was passed as a non-nil `lifecycle.Markers`, and the hook runner dereferenced it. That is fixed, and confirmed by running the test against the old code. The fake now gives unique container IDs.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

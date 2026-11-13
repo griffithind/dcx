@@ -175,7 +175,7 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	if err != nil {
 		return err
 	}
-	cfg := resolved.RawConfig
+	cfg := resolved.Config
 
 	// Populate workspace debug
 	planType := ""
@@ -183,13 +183,13 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 		planType = string(resolved.Plan.Type())
 	}
 	debug.Workspace = WorkspaceDebug{
-		ID:           resolved.ID,
+		ID:           resolved.WorkspaceID,
 		Name:         resolved.Name,
 		Path:         resolved.LocalRoot,
 		ConfigPath:   resolved.ConfigPath,
 		PlanType:     planType,
 		Image:        resolved.BaseImage,
-		ServiceName:  resolved.ServiceName,
+		ServiceName:  resolved.ResourceName,
 		FeatureCount: len(resolved.Features),
 	}
 

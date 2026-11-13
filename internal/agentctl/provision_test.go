@@ -31,7 +31,6 @@ func TestLaunchSkipsWhenAlreadyListening(t *testing.T) {
 	assert.Empty(t, fake.CallsTo("ExecDetachedAsRoot"))
 }
 
-
 func TestLaunchStartsAndWaitsForReadiness(t *testing.T) {
 	var pings atomic.Int32
 	fake := &containertest.Fake{ExecFunc: func(_ string, argv []string) error {

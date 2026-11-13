@@ -61,7 +61,7 @@ func TestSetupComplete(t *testing.T) {
 
 func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {
 	resolved := &devcontainer.ResolvedDevContainer{
-		RawConfig: &devcontainer.DevContainerConfig{PostAttachCommand: "echo hi"},
+		Config: &devcontainer.DevContainerConfig{PostAttachCommand: "echo hi"},
 	}
 	cfg := sessionConfig(resolved,
 		map[string]string{"PATH": "/probed/bin", "NVM_DIR": "/nvm"},
@@ -104,8 +104,8 @@ func TestDecideUp(t *testing.T) {
 func TestOptionalGPUDroppedWithoutRuntime(t *testing.T) {
 	svc, _ := newTestService(t, &containertest.Fake{}) // fake Info reports no GPU
 	resolved := &devcontainer.ResolvedDevContainer{
-		RawConfig:       &devcontainer.DevContainerConfig{HostRequirements: &devcontainer.HostRequirements{GPU: "optional"}},
-		GPURequirements: &devcontainer.GPURequirements{Enabled: true, Optional: true},
+		HostRequirements: &devcontainer.HostRequirements{GPU: "optional"},
+		GPURequirements:  &devcontainer.GPURequirements{Enabled: true, Optional: true},
 	}
 	require.NoError(t, svc.checkHostRequirements(context.Background(), resolved))
 	assert.Nil(t, resolved.GPURequirements)

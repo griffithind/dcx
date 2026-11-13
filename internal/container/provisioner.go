@@ -53,7 +53,7 @@ func NewProvisioner(engine Engine, rep report.Reporter, resolved *devcontainer.R
 		report:        rep,
 		resolved:      resolved,
 		builder:       builder,
-		containerName: resolved.ServiceName,
+		containerName: resolved.ResourceName,
 	}, nil
 }
 
@@ -259,7 +259,7 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
-		imageTag := fmt.Sprintf("%s%s:base", ImageTagPrefix, r.resolved.ID)
+		imageTag := fmt.Sprintf("%s%s:base", ImageTagPrefix, r.resolved.WorkspaceID)
 		r.report.Infof("Building image: %s", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
@@ -270,16 +270,6 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 	}
 
 	return "", fmt.Errorf("no image or build configuration found")
-}
-
-// localConfig is devcontainer.json without the base image's metadata, the
-// "local" entry dcx adds to an image's devcontainer.metadata label. Using
-// the merged config there recorded the base image's metadata twice.
-func (r *Provisioner) localConfig() *devcontainer.DevContainerConfig {
-	if r.resolved.LocalConfig != nil {
-		return r.resolved.LocalConfig
-	}
-	return r.resolved.RawConfig
 }
 
 // buildDockerfile builds an image from a Dockerfile using the CLI.
@@ -305,7 +295,7 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 	}
 
 	// Generate metadata for the built image (local config only, no base or features yet)
-	metadata, _ := build.GenerateMetadataLabel("", nil, r.localConfig())
+	metadata, _ := build.GenerateMetadataLabel("", nil, r.resolved.Local)
 
 	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
@@ -353,7 +343,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 			Rebuild:           rebuild,
 			Progress:          os.Stdout,
 			BaseImageMetadata: baseImageMetadata,
-			LocalConfig:       r.localConfig(),
+			LocalConfig:       r.resolved.Local,
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to build derived image with features: %w", err)
@@ -394,7 +384,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 // layerTag returns dcx/<workspaceID>:<kind>-<hash of parts>.
 func (r *Provisioner) layerTag(kind string, parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return fmt.Sprintf("%s%s:%s-%s", ImageTagPrefix, r.resolved.ID, kind,
+	return fmt.Sprintf("%s%s:%s-%s", ImageTagPrefix, r.resolved.WorkspaceID, kind,
 		hex.EncodeToString(sum[:])[:hashTruncationLength])
 }
 
@@ -428,7 +418,7 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 	s.Mounts, s.Tmpfs = r.buildMounts()
 
 	if !isCompose {
-		s.Name = res.ServiceName
+		s.Name = res.ResourceName
 		s.WorkingDir = res.WorkspaceFolder
 		if wm := r.workspaceMount(); wm != nil {
 			s.Mounts = append([]devcontainer.Mount{*wm}, s.Mounts...)
@@ -446,7 +436,7 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 		}
 	}
 
-	if r.overrideCommand() {
+	if r.resolved.OverrideCommand {
 		s.Entrypoint = append([]string(nil), keepAliveEntrypoint...)
 	}
 	return s
@@ -527,21 +517,10 @@ func (r *Provisioner) applyFeatureRequirements(s *ContainerSpec) {
 	}
 }
 
-// overrideCommand reports whether the image/service command is replaced by
-// a keep-alive. Per spec it defaults to true for image/Dockerfile plans and
-// false for compose.
-func (r *Provisioner) overrideCommand() bool {
-	if r.resolved.RawConfig != nil && r.resolved.RawConfig.OverrideCommand != nil {
-		return *r.resolved.RawConfig.OverrideCommand
-	}
-	_, isCompose := r.resolved.Plan.(*devcontainer.ComposePlan)
-	return !isCompose
-}
-
 // buildLabels builds the container labels.
 func (r *Provisioner) buildLabels() map[string]string {
 	l := state.NewContainerLabels()
-	l.WorkspaceID = r.resolved.ID
+	l.WorkspaceID = r.resolved.WorkspaceID
 	l.WorkspaceName = r.resolved.Name
 	l.WorkspacePath = r.resolved.LocalRoot
 	l.ConfigPath = r.resolved.ConfigPath
@@ -603,8 +582,10 @@ func (r *Provisioner) buildEnvironment() map[string]string {
 	for k, v := range r.resolved.ContainerEnv {
 		env[k] = v
 	}
-	if r.resolved.Name != "" {
-		env["DCX_PROJECT_NAME"] = r.resolved.Name
+	// The sanitized name, as dcx has always set it (the display name may
+	// contain spaces).
+	if slug := devcontainer.SanitizeProjectName(r.resolved.Name); slug != "" {
+		env["DCX_PROJECT_NAME"] = slug
 	}
 	return env
 }
@@ -698,7 +679,7 @@ func (r *Provisioner) userCompose(plan *devcontainer.ComposePlan) ComposeProject
 // persistent override, once it has been written.
 func (r *Provisioner) composeProject(plan *devcontainer.ComposePlan) ComposeProject {
 	p := r.userCompose(plan)
-	if path, err := ComposeOverridePath(r.resolved.ID); err == nil {
+	if path, err := ComposeOverridePath(r.resolved.WorkspaceID); err == nil {
 		if _, err := os.Stat(path); err == nil {
 			p = p.with(path)
 		}
@@ -732,7 +713,7 @@ func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec 
 	if err != nil {
 		return err
 	}
-	path, err := ComposeOverridePath(r.resolved.ID)
+	path, err := ComposeOverridePath(r.resolved.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -795,7 +776,7 @@ func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontaine
 		projectName = svc.ProjectName
 	}
 	if projectName == "" {
-		projectName = r.resolved.ServiceName
+		projectName = r.resolved.ResourceName
 	}
 	return fmt.Sprintf("%s-%s", projectName, plan.Service), true, nil
 }

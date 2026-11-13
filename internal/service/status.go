@@ -44,7 +44,7 @@ func (s *DevContainerService) Status(ctx context.Context, detailed bool) (*Statu
 
 	var err error
 	if resolved, rerr := s.Load(ctx); rerr == nil {
-		r.Config, r.ConfigHash = resolved.RawConfig, resolved.ConfigHash
+		r.Config, r.ConfigHash = resolved.Config, resolved.ConfigHash
 		r.State, r.Container, err = s.stateManager.StateWithHash(ctx, ids.WorkspaceID, resolved.ConfigHash)
 	} else {
 		if cfg, _, lerr := devcontainer.Load(s.workspacePath, s.configPath); lerr == nil {

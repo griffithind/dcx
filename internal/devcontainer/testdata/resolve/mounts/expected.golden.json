@@ -5,7 +5,9 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
-  "serviceName": "proj-<id8>",
+  "resourceName": "proj-<id8>",
+  "sshHost": "<id>.dcx",
+  "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
   "mounts": [
     {

@@ -1,0 +1,1 @@
+[{"remoteUser": "dev", "containerEnv": {"FROM_IMAGE": "1", "SHARED": "image"}, "capAdd": ["SYS_PTRACE"], "overrideCommand": false}]

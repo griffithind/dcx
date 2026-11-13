@@ -5,7 +5,9 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
-  "serviceName": "subst-demo-<id8>",
+  "resourceName": "subst-demo-<id8>",
+  "sshHost": "subst-demo.dcx",
+  "overrideCommand": true,
   "workspaceFolder": "/src/proj",
   "containerEnv": {
     "HOST_HOME": "<home>",

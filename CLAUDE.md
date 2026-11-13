@@ -82,7 +82,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 | `devcontainer.go` | `DevContainerService` - main orchestrator |
 
 **Key Methods:**
-- `Load()` / `LoadWithOptions()` - Resolve devcontainer configuration
+- `Load()` / `LoadWithOptions()` - Resolve through `devcontainer.ResolveWorkspace` (the service only supplies image metadata via the engine)
 - `Stop()` / `Restart()` - Stop (honouring `shutdownAction`), or stop and bring up again through `Up`
 - `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
 - `Status()` / `List()` - Data for `dcx status` / `dcx list`; the CLI only renders it (golden tests in `internal/cli/testdata`)
@@ -134,7 +134,9 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `config.go` | `DevContainerConfig` struct with custom unmarshalers |
 | `types.go` | `StringOrSlice`, `LifecycleCommand`, `Mount`, `PortSpec` |
 | `substitute.go` | Variable substitution (`${localEnv:VAR}`, `${containerWorkspaceFolder}`) |
-| `builder.go` | `Builder.Build()` - creates `ResolvedDevContainer` |
+| `resolve.go` | `ResolveWorkspace()` - the one resolution pipeline (load, image metadata via `ImageMetadataSource`, lockfile, build) |
+| `builder.go` | `Builder.Build()` - the build step of `ResolveWorkspace` |
+| `id.go` | `NewIdentity` / `LoadIdentity` - the only place the workspace identity is computed |
 | `resolved.go` | `ResolvedDevContainer` - central domain object |
 | `plan.go` | `ExecutionPlan` interface (sealed) with ImagePlan, DockerfilePlan, ComposePlan |
 | `hashes.go` | Config/Dockerfile/Compose/Features hash computation |
@@ -179,9 +181,12 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 Central domain object after all resolution:
 ```go
 type ResolvedDevContainer struct {
-    ID, Name, ConfigPath, ConfigDir, LocalRoot  // Identity
+    Identity                                     // WorkspaceID, Name, ResourceName, SSHHost
+    ConfigPath, ConfigDir, LocalRoot
+    Config, Local *DevContainerConfig            // merged with image metadata / as written
     Plan ExecutionPlan                           // Image/Dockerfile/Compose
-    BaseImage, ServiceName, WorkspaceFolder      // Runtime config
+    BaseImage, WorkspaceFolder                   // Runtime config
+    OverrideCommand bool; HostRequirements; UserEnvProbe  // resolved; read these, not Config
     RemoteUser, ContainerUser, EffectiveUser     // User config
     ContainerEnv, RemoteEnv map[string]string    // Environment
     Mounts []Mount                               // Volume mounts
@@ -224,8 +229,11 @@ devcontainer.json (JSONC)
     ↓ Parse()
 DevContainerConfig
     ↓ SubstituteConfig() — exactly once, in devcontainer.Load (also with --config)
-DevContainerConfig (substituted)
+DevContainerConfig (substituted)               — Local
+    ↓ MergeMetadata(image devcontainer.metadata)  — Config (ImageMetadataSource)
+    ↓ lockfile (LockfileUse)
     ↓ Builder.Build()
+    ├─ NewIdentity (name, resource name / compose project, SSH alias)
     ├─ Create ExecutionPlan
     ├─ features.Manager.ResolveAll() → topological sort
     ├─ Compute hashes
@@ -233,6 +241,7 @@ DevContainerConfig (substituted)
     ↓
 ResolvedDevContainer
 ```
+All of it is `devcontainer.ResolveWorkspace`; up, status, build, lock, debug and the golden tests resolve through it. Commands that must not resolve (stop, down, ssh) use `LoadIdentity`, which the golden test checks against resolution.
 
 ### Container Lifecycle (Up)
 ```

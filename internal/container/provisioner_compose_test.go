@@ -17,16 +17,14 @@ func composeUIDRuntime(t *testing.T, fake *containertest.Fake) *container.Provis
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	resolved := &devcontainer.ResolvedDevContainer{
-		ID:              "ws1234567890",
-		Name:            "app",
-		ServiceName:     "app-ws123456",
+		Identity:        devcontainer.Identity{WorkspaceID: "ws1234567890", Name: "app", ResourceName: "app-ws123456"},
 		Plan:            devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
 		RemoteUser:      "vscode",
 		EffectiveUser:   "vscode",
 		ShouldUpdateUID: true,
 		HostUID:         1000,
 		HostGID:         1000,
-		RawConfig:       &devcontainer.DevContainerConfig{},
+		Config:          &devcontainer.DevContainerConfig{},
 	}
 	prov, err := container.NewProvisioner(fake, nil, resolved)
 	require.NoError(t, err)
@@ -67,9 +65,9 @@ func TestBuildImagesBuildsComposeServicesWithoutLayers(t *testing.T) {
 		ComposeOutputs: map[string]string{"config --format json": `{"services":{"app":{"build":{"context":"."}}}}`},
 	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
-		ID: "ws1234567890", ServiceName: "app-ws123456",
-		Plan:      devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
-		RawConfig: &devcontainer.DevContainerConfig{},
+		Identity: devcontainer.Identity{WorkspaceID: "ws1234567890", ResourceName: "app-ws123456"},
+		Plan:     devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
+		Config:   &devcontainer.DevContainerConfig{},
 	})
 	require.NoError(t, err)
 	require.NoError(t, prov.BuildImages(context.Background(), container.UpOptions{Build: true, Rebuild: true}))
