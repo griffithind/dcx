@@ -147,6 +147,7 @@ func TestResolveGolden(t *testing.T) {
 			out = strings.ReplaceAll(out, ws, "<workspace>")
 			out = strings.ReplaceAll(out, home, "<home>")
 			out = strings.ReplaceAll(out, resolved.ID, "<id>")
+			out = strings.ReplaceAll(out, resolved.ID[:resourceIDLength], "<id8>")
 			out += "\n"
 
 			goldenPath := filepath.Join(caseDir, "expected.golden.json")

@@ -10,7 +10,7 @@
     "target": "dev",
     "type": "dockerfile"
   },
-  "serviceName": "df",
+  "serviceName": "df-<id8>",
   "workspaceFolder": "/workspaces/proj",
   "containerUser": "builder",
   "effectiveUser": "builder"

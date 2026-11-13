@@ -3,8 +3,6 @@ package state
 import (
 	"context"
 	"time"
-
-	"github.com/griffithind/dcx/internal/common"
 )
 
 // ContainerClient is the interface for container operations needed by the state manager.
@@ -114,6 +112,7 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 		Status:         c.State,
 		Running:        c.Running || c.State == "running",
 		ConfigHash:     l.HashConfig,
+		HashVersion:    l.HashVersion,
 		WorkspaceID:    l.WorkspaceID,
 		Plan:           l.BuildMethod,
 		ComposeProject: l.ComposeProject,
@@ -122,54 +121,25 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 	}
 }
 
-// GetStateWithProject handles lookup for both project-named and workspace ID containers.
+// GetStateWithProject returns the state of the workspace's containers.
+//
+// Containers are always identified by the workspace ID label, which is
+// independent of names, so environments created by older dcx versions
+// (whose container/project names were derived from "name" alone) are still
+// found. projectName is accepted for API compatibility and not used for the
+// lookup.
 func (m *StateManager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (ContainerState, *ContainerInfo, error) {
-	// First try project name if set
-	if projectName != "" {
-		sanitized := common.SanitizeProjectName(projectName)
-		containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
-			LabelWorkspaceID: sanitized,
-		})
-		if err == nil && len(containers) > 0 {
-			return m.processContainers(containers)
-		}
-	}
-
-	// Fall back to workspace ID lookup
+	_ = projectName
 	return m.GetState(ctx, workspaceID)
 }
 
-// processContainers extracts state and info from a list of containers.
-func (m *StateManager) processContainers(containers []ContainerSummary) (ContainerState, *ContainerInfo, error) {
-	if len(containers) == 0 {
-		return StateAbsent, nil, nil
-	}
+// CurrentHashVersion is stamped on containers as LabelHashVersion.
+const CurrentHashVersion = "2"
 
-	// Find the primary container
-	var primary *ContainerSummary
-	for i := range containers {
-		if IsPrimaryContainer(containers[i].Labels) {
-			primary = &containers[i]
-			break
-		}
-	}
-
-	// No primary container found - broken state
-	if primary == nil {
-		if len(containers) > 0 {
-			info := containerInfoFromSummary(&containers[0])
-			return StateBroken, info, nil
-		}
-		return StateBroken, nil, nil
-	}
-
-	info := containerInfoFromSummary(primary)
-
-	if primary.State == "running" || primary.Running {
-		return StateRunning, info, nil
-	}
-
-	return StateCreated, info, nil
+// IsLegacyHash reports whether the container's config hash was computed by
+// an older dcx and therefore cannot be used to detect config changes.
+func (c *ContainerInfo) IsLegacyHash() bool {
+	return c != nil && c.HashVersion != CurrentHashVersion
 }
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
@@ -179,10 +149,12 @@ func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectNa
 		return state, info, err
 	}
 
-	if info.ConfigHash != "" && info.ConfigHash != currentConfigHash {
+	// Hashes from another algorithm version can't be compared; treat such
+	// containers as current rather than recreating every environment on
+	// upgrade (callers can point users at --recreate, see IsLegacyHash).
+	if info.ConfigHash != "" && info.HashVersion == CurrentHashVersion && info.ConfigHash != currentConfigHash {
 		return StateStale, info, nil
 	}
 
 	return state, info, nil
 }
-

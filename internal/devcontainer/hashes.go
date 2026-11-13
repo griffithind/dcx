@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,27 +15,34 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ComputeConfigHash computes a single hash of all build inputs for a devcontainer:
-// devcontainer.json content, Dockerfile content, compose files (including referenced
-// Dockerfiles from service build directives), and feature configuration.
+// ComputeConfigHash computes the staleness key of a devcontainer: when it
+// changes, the container must be recreated.
 //
-// This hash is used for both staleness detection and image cache tagging.
-// Any change to any input produces a different hash.
+// It hashes what determines the container, not the bytes on disk:
+//   - the substituted local devcontainer.json, normalized (so comments,
+//     formatting and key order don't matter) and without properties that
+//     don't affect the container: name, customizations, ports attributes,
+//     remoteEnv, host requirements, waitFor, userEnvProbe, shutdownAction,
+//     and the lifecycle commands that run on every start/attach
+//     (initializeCommand, postStartCommand, postAttachCommand);
+//   - the Dockerfile, compose files and Dockerfiles referenced by compose
+//     services;
+//   - the resolved features (see FeaturesKey), including local feature
+//     contents.
+//
+// Pass the local config before image-metadata merging so the key does not
+// depend on whether the base image happens to be available locally.
 func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
 	h := sha256.New()
 
-	// 1. devcontainer.json content
-	if raw := cfg.GetRawJSON(); len(raw) > 0 {
-		h.Write(raw)
-	} else {
-		data, err := json.Marshal(cfg)
-		if err != nil {
-			return "", fmt.Errorf("marshal config for hash: %w", err)
-		}
-		h.Write(data)
+	norm, err := normalizedConfigJSON(cfg)
+	if err != nil {
+		return "", err
 	}
+	h.Write([]byte("config\x00"))
+	h.Write(norm)
 
-	// 2. Dockerfile content (for DockerfilePlan)
+	// Dockerfile content (for DockerfilePlan)
 	if dockerfilePath != "" {
 		if content, err := os.ReadFile(dockerfilePath); err == nil {
 			h.Write([]byte("\x00dockerfile\x00"))
@@ -42,50 +50,107 @@ func ComputeConfigHash(cfg *DevContainerConfig, dockerfilePath string, composeFi
 		}
 	}
 
-	// 3. Compose files and their referenced Dockerfiles
+	// Compose files and their referenced Dockerfiles
 	if len(composeFiles) > 0 {
 		for _, f := range composeFiles {
 			content, err := os.ReadFile(f)
 			if err != nil {
 				return "", fmt.Errorf("read compose file %s: %w", f, err)
 			}
-			h.Write([]byte("\x00compose:" + f + "\x00"))
+			h.Write([]byte("\x00compose:" + filepath.Base(f) + "\x00"))
 			h.Write(content)
 		}
 
-		// Include Dockerfiles referenced by compose service build directives.
-		// Sort paths for deterministic hashing.
 		dockerfilePaths := collectComposeDockerfiles(composeFiles)
 		sort.Strings(dockerfilePaths)
-
 		for _, df := range dockerfilePaths {
 			content, err := os.ReadFile(df)
 			if err != nil {
-				// Skip Dockerfiles that don't exist (may be generated later)
 				continue
 			}
-			h.Write([]byte("\x00compose-dockerfile:" + df + "\x00"))
+			h.Write([]byte("\x00compose-dockerfile\x00"))
 			h.Write(content)
 		}
 	}
 
-	// 4. Features configuration
 	if len(resolvedFeatures) > 0 {
-		var featureData []string
-		for _, f := range resolvedFeatures {
-			optData, _ := json.Marshal(f.Options)
-			version := ""
-			if f.Metadata != nil {
-				version = f.Metadata.Version
-			}
-			featureData = append(featureData, fmt.Sprintf("%s:%s:%s", f.ID, version, string(optData)))
-		}
-		sort.Strings(featureData)
 		h.Write([]byte("\x00features\x00"))
-		h.Write([]byte(strings.Join(featureData, "|")))
+		h.Write([]byte(FeaturesKey(resolvedFeatures)))
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// normalizedConfigJSON marshals the container-relevant part of cfg.
+// encoding/json sorts map keys, so the result is deterministic.
+func normalizedConfigJSON(cfg *DevContainerConfig) ([]byte, error) {
+	if cfg == nil {
+		return []byte("null"), nil
+	}
+	n := *cfg
+	n.Name = ""
+	n.Customizations = nil
+	n.PortsAttributes = nil
+	n.OtherPortsAttributes = nil
+	n.RemoteEnv = nil
+	n.HostRequirements = nil
+	n.WaitFor = ""
+	n.UserEnvProbe = ""
+	n.ShutdownAction = ""
+	n.InitializeCommand = nil
+	n.PostStartCommand = nil
+	n.PostAttachCommand = nil
+	data, err := json.Marshal(&n)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config for hash: %w", err)
+	}
+	return data, nil
+}
+
+// FeaturesKey identifies a resolved feature set: feature IDs, versions,
+// options, registry digests and, for local features, a hash of their files,
+// so editing a local feature's install.sh changes the key.
+func FeaturesKey(feats []*features.Feature) string {
+	entries := make([]string, 0, len(feats))
+	for _, f := range feats {
+		opts, _ := json.Marshal(f.Options)
+		version := ""
+		if f.Metadata != nil {
+			version = f.Metadata.Version
+		}
+		content := ""
+		if f.Source.Type == features.SourceTypeLocalPath && f.CachePath != "" {
+			content = hashDir(f.CachePath)
+		}
+		entries = append(entries, strings.Join([]string{f.ID, version, string(opts), f.ManifestDigest, f.Integrity, content}, "\x1f"))
+	}
+	sort.Strings(entries)
+	sum := sha256.Sum256([]byte(strings.Join(entries, "\x1e")))
+	return hex.EncodeToString(sum[:])
+}
+
+// hashDir hashes the relative paths, modes and contents of all regular
+// files under dir. Unreadable entries are skipped.
+func hashDir(dir string) string {
+	h := sha256.New()
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(dir, path)
+		_, _ = fmt.Fprintf(h, "%s\x00%o\x00%d\x00", filepath.ToSlash(rel), info.Mode().Perm(), len(data)) // hash.Hash writes never fail
+		h.Write(data)
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // collectComposeDockerfiles parses compose files and returns absolute paths

@@ -19,7 +19,8 @@ type DevContainerID struct {
 	// Name is the human-readable name (from config or directory name).
 	Name string
 
-	// ProjectName is the sanitized project name (for compose and container naming).
+	// ProjectName is the Docker resource name (container name and default
+	// compose project): "<sanitized name>-<id prefix>", unique per workspace.
 	ProjectName string
 
 	// SSHHost is the SSH hostname (name.dcx or id.dcx).
@@ -77,25 +78,46 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevCo
 		name = cfg.Name
 	}
 
-	// ProjectName = sanitized devcontainer name (if set)
-	projectName := ""
-	if cfg != nil && cfg.Name != "" {
-		projectName = common.SanitizeProjectName(cfg.Name)
-	}
-
-	// SSH host: prefer sanitized project name, otherwise use ID
+	// SSH host alias: the readable "<name>.dcx" users type, falling back
+	// to the ID when there is no name.
 	sshHost := id
-	if projectName != "" {
-		sshHost = projectName
+	if cfg != nil && cfg.Name != "" {
+		if slug := common.SanitizeProjectName(cfg.Name); slug != "" {
+			sshHost = slug
+		}
 	}
 	sshHost = sshHost + common.SSHHostSuffix
 
 	return &DevContainerID{
 		ID:          id,
 		Name:        name,
-		ProjectName: projectName,
+		ProjectName: ResourceName(name, id),
 		SSHHost:     sshHost,
 	}
+}
+
+// resourceIDLength is how many characters of the workspace ID are appended
+// to Docker resource names.
+const resourceIDLength = 8
+
+// ResourceName returns the Docker container name / default compose project
+// name for a workspace: the sanitized display name plus a prefix of the
+// workspace ID. Deriving it from the name alone made two checkouts (clones,
+// worktrees) with the same "name" collide on "container name already in
+// use".
+func ResourceName(displayName, workspaceID string) string {
+	suffix := workspaceID
+	if len(suffix) > resourceIDLength {
+		suffix = suffix[:resourceIDLength]
+	}
+	slug := common.SanitizeProjectName(displayName)
+	if slug == "" {
+		slug = "dcx"
+	}
+	if suffix == "" {
+		return slug
+	}
+	return slug + "-" + suffix
 }
 
 // SanitizeProjectName ensures the name is valid for Docker container/compose project names.

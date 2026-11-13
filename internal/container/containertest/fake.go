@@ -187,6 +187,16 @@ func (f *Fake) ImageExists(_ context.Context, ref string) (bool, error) {
 	return f.Images[ref], nil
 }
 
+func (f *Fake) GetImageID(_ context.Context, ref string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("GetImageID", ref)
+	if !f.Images[ref] {
+		return "", fmt.Errorf("image not found: %s", ref)
+	}
+	return "sha256:" + ref, nil
+}
+
 func (f *Fake) GetImageLabels(_ context.Context, ref string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

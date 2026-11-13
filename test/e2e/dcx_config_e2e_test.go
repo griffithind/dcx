@@ -55,24 +55,32 @@ services:
 		assert.True(t, helpers.ContainsLabel(stdout, "SSH", "ssh testproject.dcx"), "should show SSH command")
 	})
 
-	// Test container name uses project name
+	// The compose project is "<name>-<workspace id prefix>" so two checkouts
+	// with the same name don't share containers or volumes.
+	project := ""
+	for _, line := range strings.Split(helpers.StripANSI(helpers.RunDCXInDirSuccess(t, workspace, "status")), "\n") {
+		if strings.HasPrefix(line, "Project:") {
+			project = strings.TrimSpace(strings.TrimPrefix(line, "Project:"))
+		}
+	}
+
 	t.Run("container_name_uses_project", func(t *testing.T) {
+		require.True(t, strings.HasPrefix(project, "testproject-"), "project = %q", project)
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		// Container name should be testproject-app-1, not dcx_<hash>-app-1
 		assert.Contains(t, stdout, "Name:")
-		assert.Contains(t, stdout, "testproject-app-1")
+		assert.Contains(t, stdout, project+"-app-1")
 	})
 
 	// Test compose_project label is set correctly
 	t.Run("compose_project_label", func(t *testing.T) {
 		cmd := exec.Command("docker", "inspect", "--format",
 			`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`,
-			"testproject-app-1")
+			project+"-app-1")
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "failed to inspect container: %s", output)
 
 		labelValue := strings.TrimSpace(string(output))
-		assert.Equal(t, "testproject", labelValue)
+		assert.Equal(t, project, labelValue)
 	})
 }
 

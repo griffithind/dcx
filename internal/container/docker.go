@@ -740,10 +740,18 @@ func parseImageSize(sizeStr string) int64 {
 	return int64(size * float64(multiplier))
 }
 
-// CleanupDerivedImages removes derived images created by dcx.
-// If workspaceID is provided, only images for that environment are removed.
-// If keepCurrent is true, the current derived image (matching configHash) is preserved.
-func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID, currentConfigHash string, keepCurrent bool) (*CleanupResult, error) {
+// isDcxImage reports whether an image was built by dcx: everything under
+// the dcx/ repository (dcx/<workspace>:base, :features-*, :uid-*), plus the
+// dcx-derived* names older versions used.
+func isDcxImage(img imageInfo) bool {
+	return strings.HasPrefix(img.Repository, common.ImageTagPrefix) ||
+		strings.HasPrefix(img.Repository, "dcx-derived")
+}
+
+// CleanupDerivedImages removes images built by dcx. Images still used by a
+// container (running or stopped) are kept: docker refuses to remove them
+// without --force, which is never passed.
+func (d *Docker) CleanupDerivedImages(ctx context.Context) (*CleanupResult, error) {
 	result := &CleanupResult{}
 
 	images, err := d.listImages(ctx)
@@ -752,31 +760,19 @@ func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID, currentC
 	}
 
 	for _, img := range images {
-		// Derived images follow the pattern: dcx-derived/<workspaceID>:<hash>
-		if img.Repository == "" || !strings.HasPrefix(img.Repository, "dcx-derived/") {
+		if !isDcxImage(img) {
 			continue
 		}
-
-		// Parse the tag
-		imageWorkspaceID := strings.TrimPrefix(img.Repository, "dcx-derived/")
-		imageHash := img.Tag
-
-		// If workspaceID filter is provided, only match that environment
-		if workspaceID != "" && imageWorkspaceID != workspaceID {
-			continue
+		// Remove by reference so an image with several dcx tags is untagged
+		// tag by tag instead of failing with "referenced in multiple
+		// repositories".
+		ref := img.Repository + ":" + img.Tag
+		if img.Tag == "" || img.Tag == "<none>" {
+			ref = img.ID
 		}
-
-		// If keepCurrent is true and this is the current image, skip it
-		if keepCurrent && currentConfigHash != "" && imageHash == currentConfigHash {
-			continue
+		if err := d.removeImage(ctx, ref); err != nil {
+			continue // in use
 		}
-
-		// Remove the image
-		if err := d.removeImage(ctx, img.ID); err != nil {
-			// Log but continue - image might be in use
-			continue
-		}
-
 		result.ImagesRemoved++
 		result.SpaceReclaimed += parseImageSize(img.Size)
 	}
@@ -784,9 +780,9 @@ func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID, currentC
 	return result, nil
 }
 
-// CleanupAllDerivedImages removes all derived images created by dcx.
+// CleanupAllDerivedImages removes all images built by dcx that are not in use.
 func (d *Docker) CleanupAllDerivedImages(ctx context.Context) (*CleanupResult, error) {
-	return d.CleanupDerivedImages(ctx, "", "", false)
+	return d.CleanupDerivedImages(ctx)
 }
 
 // CleanupDanglingImages removes dangling (untagged) images.
@@ -818,7 +814,7 @@ func (d *Docker) GetDerivedImageStats(ctx context.Context) (count int, totalSize
 	}
 
 	for _, img := range images {
-		if strings.HasPrefix(img.Repository, "dcx-derived/") {
+		if isDcxImage(img) {
 			count++
 			totalSize += parseImageSize(img.Size)
 		}

@@ -45,6 +45,11 @@ const (
 	// LabelHashConfig is the combined hash of all build inputs
 	// (devcontainer.json, Dockerfiles, compose files, features).
 	LabelHashConfig = Prefix + ".hash.config"
+
+	// LabelHashVersion identifies the algorithm behind LabelHashConfig.
+	// Containers without it were created by a dcx version whose hashes are
+	// not comparable with the current ones.
+	LabelHashVersion = Prefix + ".hash.version"
 )
 
 // State labels.
@@ -168,7 +173,8 @@ type ContainerLabels struct {
 	ConfigPath    string
 
 	// Hash
-	HashConfig string
+	HashConfig  string
+	HashVersion string
 
 	// State
 	CreatedAt      time.Time
@@ -197,10 +203,10 @@ type ContainerLabels struct {
 	CacheProbedEnvHash  string
 
 	// SSH
-	SSHHostPort              int
-	SSHBindAddress           string
-	SSHAllowedClientIPs      string
-	SSHAuthorizedKeysSHA256  string
+	SSHHostPort             int
+	SSHBindAddress          string
+	SSHAllowedClientIPs     string
+	SSHAuthorizedKeysSHA256 string
 }
 
 // CacheData holds cached information for staleness detection.
@@ -241,6 +247,7 @@ func (l *ContainerLabels) ToMap() map[string]string {
 
 	// Hash
 	setIfNotEmpty(m, LabelHashConfig, l.HashConfig)
+	setIfNotEmpty(m, LabelHashVersion, l.HashVersion)
 
 	// State
 	if !l.CreatedAt.IsZero() {
@@ -321,6 +328,7 @@ func ContainerLabelsFromMap(m map[string]string) *ContainerLabels {
 
 	// Hash
 	l.HashConfig = m[LabelHashConfig]
+	l.HashVersion = m[LabelHashVersion]
 
 	// State
 	if t, err := time.Parse(time.RFC3339, m[LabelCreatedAt]); err == nil {

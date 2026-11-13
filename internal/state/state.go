@@ -215,7 +215,8 @@ type ContainerInfo struct {
 	Name           string
 	Status         string
 	Running        bool
-	ConfigHash     string // Combined hash of all build inputs, used for staleness detection and image tagging
+	ConfigHash     string // Staleness key of the config the container was created from
+	HashVersion    string // Algorithm version of ConfigHash ("" = legacy)
 	WorkspaceID    string // Stable identifier
 	Plan           string
 	ComposeProject string
@@ -243,4 +244,3 @@ func (c *ContainerInfo) GetConfigDir(defaultDir string) string {
 	}
 	return defaultDir
 }
-

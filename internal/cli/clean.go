@@ -21,7 +21,7 @@ var cleanCmd = &cobra.Command{
 	Long: `Clean up orphaned dcx resources.
 
 This command removes:
-- Derived images created by dcx (dcx-derived/*)
+- Images built by dcx (dcx/*) that no container uses
 - Optionally, dangling (untagged) images
 
 By default, only derived images are cleaned. Use --all to include dangling images.
@@ -111,7 +111,7 @@ func showCleanStats(ctx context.Context, docker *container.Docker) error {
 	}
 
 	if count > 0 {
-		ui.Printf("Derived images: %d (%s)", count, formatBytes(size))
+		ui.Printf("dcx images: %d (%s); images used by a container are kept", count, formatBytes(size))
 	} else {
 		ui.Println("Derived images: none")
 	}

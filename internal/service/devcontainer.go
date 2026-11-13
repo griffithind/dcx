@@ -195,7 +195,9 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Merge image metadata if available (per spec)
+	// Merge image metadata if available (per spec). The pre-merge config
+	// is kept for the staleness key.
+	localCfg := cfg
 	cfg = s.mergeImageMetadata(ctx, cfg, opts.PullForMetadata)
 
 	// Project name from devcontainer.json name field
@@ -224,6 +226,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 		ProjectName:   projectName,
 		Lockfile:      lf,
 		ForcePull:     opts.ForcePull,
+		LocalConfig:   localCfg,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve devcontainer: %w", err)
@@ -323,7 +326,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 
 	// Check current state first to determine what actions are needed
-	currentState, _, err := s.stateManager.GetStateWithProjectAndHash(
+	currentState, existing, err := s.stateManager.GetStateWithProjectAndHash(
 		ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
@@ -331,6 +334,20 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 
 	if s.verbose {
 		s.report.Infof("Current state: %s", currentState)
+	}
+	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
+		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
+	}
+
+	// Compose named volumes are scoped to the project name. Keep the project
+	// an existing environment was created with (older dcx versions derived
+	// it from "name" alone), so recreating it never orphans its volumes.
+	if existing != nil && existing.ComposeProject != "" {
+		if plan, ok := resolved.Plan.(*devcontainer.ComposePlan); ok && plan.ProjectName != existing.ComposeProject {
+			kept := *plan
+			kept.ProjectName = existing.ComposeProject
+			resolved.Plan = &kept
+		}
 	}
 
 	// Early return if already running and no rebuild/recreate requested
@@ -405,7 +422,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 		}
 		isNewEnvironment = true
 	case state.StateCreated:
-		if err := s.start(ctx, resolved); err != nil {
+		if err := s.startExisting(ctx, resolved, existing); err != nil {
 			return err
 		}
 	}
@@ -616,15 +633,36 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 	})
 }
 
-// start starts an existing stopped environment.
-func (s *DevContainerService) start(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
+// startExisting starts the stopped environment found by the state lookup.
+//
+// It acts on what actually exists (container ID, compose project label)
+// rather than on names recomputed from the current config, which may differ
+// for environments created by older dcx versions or before a rename.
+func (s *DevContainerService) startExisting(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, existing *state.ContainerInfo) error {
 	s.report.Infof("Starting existing devcontainer...")
 
-	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, resolved)
+	if existing == nil {
+		return fmt.Errorf("no existing devcontainer to start")
+	}
+	if existing.IsSingleContainer() {
+		return s.engine.StartContainer(ctx, existing.ID)
+	}
+
+	plan, ok := resolved.Plan.(*devcontainer.ComposePlan)
+	if !ok {
+		return fmt.Errorf("existing compose environment but configuration is not a compose plan")
+	}
+	project := *plan
+	if existing.ComposeProject != "" {
+		project.ProjectName = existing.ComposeProject
+	}
+	target := *resolved
+	target.Plan = &project
+
+	runtime, err := container.NewUnifiedRuntime(s.engine, s.report, &target)
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
-
 	return runtime.Start(ctx)
 }
 

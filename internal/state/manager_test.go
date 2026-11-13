@@ -59,6 +59,7 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 						LabelWorkspaceID: "test-workspace",
 						LabelIsPrimary:   "true",
 						LabelHashConfig:  "old-hash",
+						LabelHashVersion: CurrentHashVersion,
 					},
 				},
 			},
@@ -81,6 +82,7 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 						LabelWorkspaceID: "test-workspace",
 						LabelIsPrimary:   "true",
 						LabelHashConfig:  "same-hash",
+						LabelHashVersion: CurrentHashVersion,
 					},
 				},
 			},
@@ -139,6 +141,7 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 						LabelWorkspaceID: "test-workspace",
 						LabelIsPrimary:   "true",
 						LabelHashConfig:  "hash-before-dockerfile-change",
+						LabelHashVersion: CurrentHashVersion,
 					},
 				},
 			},
@@ -158,8 +161,9 @@ func TestContainerInfoConfigHash(t *testing.T) {
 		summary := &ContainerSummary{
 			ID: "abc123", Name: "test", State: "running",
 			Labels: map[string]string{
-				LabelHashConfig: "the-hash",
-				LabelIsPrimary:  "true",
+				LabelHashConfig:  "the-hash",
+				LabelHashVersion: CurrentHashVersion,
+				LabelIsPrimary:   "true",
 			},
 		}
 
@@ -178,4 +182,22 @@ func TestContainerInfoConfigHash(t *testing.T) {
 		info := containerInfoFromSummary(summary)
 		assert.Empty(t, info.ConfigHash)
 	})
+}
+
+// Containers created before the hash format changed carry no version label;
+// their hash can't be compared, so they must not be recreated on upgrade.
+func TestLegacyHashIsNotStale(t *testing.T) {
+	client := &mockContainerClient{containers: []ContainerSummary{{
+		ID: "abc123", Name: "test", State: "running", Running: true,
+		Labels: map[string]string{
+			LabelWorkspaceID: "ws",
+			LabelIsPrimary:   "true",
+			LabelHashConfig:  "hash-from-old-dcx",
+		},
+	}}}
+
+	state, info, err := NewStateManager(client).GetStateWithProjectAndHash(context.Background(), "", "ws", "new-hash")
+	require.NoError(t, err)
+	assert.Equal(t, StateRunning, state)
+	assert.True(t, info.IsLegacyHash())
 }

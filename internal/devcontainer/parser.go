@@ -26,9 +26,6 @@ func Parse(data []byte) (*DevContainerConfig, error) {
 		return nil, fmt.Errorf("failed to parse devcontainer.json: %w", err)
 	}
 
-	// Store raw JSON for hash computation
-	cfg.SetRawJSON(stripped)
-
 	return &cfg, nil
 }
 

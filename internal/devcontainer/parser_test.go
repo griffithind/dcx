@@ -32,7 +32,7 @@ func TestParseDevcontainerJSON(t *testing.T) {
 			},
 		},
 		{
-			name:  "JSONC with comments",
+			name: "JSONC with comments",
 			input: `{"image": "alpine" /* comment */, "name": "test" // inline comment
 			}`,
 			check: func(t *testing.T, cfg *DevContainerConfig) {
@@ -106,10 +106,10 @@ func TestParseDevcontainerJSON(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	tests := []struct {
-		name       string
-		setup      func(t *testing.T, dir string)
-		wantPath   string
-		wantErr    bool
+		name        string
+		setup       func(t *testing.T, dir string)
+		wantPath    string
+		wantErr     bool
 		errContains string
 	}{
 		{
@@ -286,7 +286,6 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
-
 
 // A compose file is not a devcontainer.json; it used to be picked up (and
 // fed to the JSON parser) before multi-folder configs were considered.

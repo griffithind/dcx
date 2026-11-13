@@ -5,7 +5,7 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
-  "serviceName": "proj",
+  "serviceName": "proj-<id8>",
   "workspaceFolder": "/workspaces/proj",
   "forwardPorts": [
     {

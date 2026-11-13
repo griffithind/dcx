@@ -2,6 +2,7 @@ package features
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,4 +140,28 @@ func TestDockerfileEnvQuoteKeepsVariableReferences(t *testing.T) {
 	assert.Equal(t, `"say \"hi\" \\ bye"`, dockerfileEnvQuote(`say "hi" \ bye`))
 	// Option values stay literal.
 	assert.Equal(t, `"\$HOME"`, dockerfileQuote("$HOME"))
+}
+
+// The generated Dockerfile must be byte-identical for identical inputs (map
+// iteration used to reorder ARG/ENV lines and defeat BuildKit's cache), and
+// each feature's ENV must follow its own install so later features see it.
+func TestDockerfileIsDeterministicWithPerFeatureEnv(t *testing.T) {
+	mk := func() []*Feature {
+		return []*Feature{
+			{ID: "a", Metadata: &FeatureMetadata{ID: "a",
+				Options:      map[string]OptionDefinition{"zeta": {Default: "1"}, "alpha": {Default: "2"}, "mid": {Default: "3"}},
+				ContainerEnv: map[string]string{"PATH": "/opt/a/bin:${PATH}", "A_HOME": "/opt/a", "Z": "z"}}},
+			{ID: "b", Metadata: &FeatureMetadata{ID: "b", ContainerEnv: map[string]string{"B": "1"}}},
+		}
+	}
+	first := NewDockerfileGenerator("alpine:3.20", mk(), "/tmp/x", "", "").Generate()
+	for i := 0; i < 20; i++ {
+		assert.Equal(t, first, NewDockerfileGenerator("alpine:3.20", mk(), "/tmp/x", "", "").Generate())
+	}
+
+	installA := strings.Index(first, "# Feature 1:")
+	envA := strings.Index(first, `ENV PATH="/opt/a/bin:${PATH}"`)
+	installB := strings.Index(first, "# Feature 2:")
+	require.True(t, installA >= 0 && envA > installA && installB > envA, "feature a's ENV must come between its install and feature b's:\n%s", first)
+	assert.NotContains(t, first, "# syntax=")
 }

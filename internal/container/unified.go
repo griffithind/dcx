@@ -2,6 +2,8 @@ package container
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/griffithind/dcx/internal/agentproto"
@@ -11,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/common"
@@ -93,7 +94,7 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 	case *devcontainer.ComposePlan:
 		return r.upCompose(ctx, opts, hasFeatures, plan)
 	case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
-		return r.upSingle(ctx, opts, hasFeatures)
+		return r.upSingle(ctx, opts)
 	default:
 		return fmt.Errorf("unsupported plan type: %T", plan)
 	}
@@ -101,26 +102,23 @@ func (r *UnifiedRuntime) Up(ctx context.Context, opts UpOptions) error {
 
 // upCompose handles compose-based configurations.
 func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatures bool, plan *devcontainer.ComposePlan) error {
-	// Build derived image with features if needed
-	if hasFeatures {
-		// Check if derived image is already cached before building compose services
-		derivedTag := r.getDerivedImageTag()
-		needsBuild := opts.Rebuild || !r.derivedImageExists(ctx, derivedTag)
-
-		if needsBuild {
-			// Only build compose services if we need to build a new derived image
-			if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
-				return fmt.Errorf("failed to build services: %w", err)
-			}
+	// Layer features and the UID update on top of the service's image.
+	if hasFeatures || r.resolved.ShouldUpdateUID {
+		// Build compose services first (Docker's cache makes this cheap) so
+		// the base image exists and reflects the current build context.
+		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
+			return fmt.Errorf("failed to build services: %w", err)
 		}
-
-		if err := r.buildDerivedImageForCompose(ctx, opts, plan); err != nil {
-			return fmt.Errorf("failed to build derived image with features: %w", err)
+		baseImage, err := r.getComposeBaseImage(ctx, plan)
+		if err != nil {
+			return fmt.Errorf("failed to determine base image: %w", err)
 		}
-	} else {
-		// Even without features, we may need to apply UID update layer for compose
-		if err := r.applyUIDUpdateForCompose(ctx, opts, plan); err != nil {
-			return fmt.Errorf("failed to apply UID update: %w", err)
+		finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+		if err != nil {
+			return err
+		}
+		if finalImage != baseImage {
+			r.derivedImage = finalImage
 		}
 	}
 
@@ -155,45 +153,20 @@ func (r *UnifiedRuntime) upCompose(ctx context.Context, opts UpOptions, hasFeatu
 }
 
 // upSingle handles single-container configurations (image or Dockerfile).
-func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions, hasFeatures bool) error {
-	// Build derived image with features if needed
-	var finalImage string
-	if hasFeatures {
-		// Check if derived image is already cached before building base image
-		derivedTag := r.getDerivedImageTag()
-		if !opts.Rebuild && r.derivedImageExists(ctx, derivedTag) {
-			r.report.Infof("Using cached derived image")
-			finalImage = derivedTag
-			r.derivedImage = derivedTag
-		} else {
-			// Need to build - resolve base image first
-			baseImage, err := r.resolveBaseImage(ctx, opts)
-			if err != nil {
-				return err
-			}
-			derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild)
-			if err != nil {
-				return fmt.Errorf("failed to build derived image with features: %w", err)
-			}
-			finalImage = derivedImage
-			r.derivedImage = derivedImage
-		}
-	} else {
-		// No features - resolve base image
-		baseImage, err := r.resolveBaseImage(ctx, opts)
-		if err != nil {
-			return err
-		}
-		finalImage = baseImage
-		// Even without features, we may need to apply UID update layer
-		uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, opts.Rebuild)
-		if err != nil {
-			return fmt.Errorf("failed to apply UID update: %w", err)
-		}
-		if uidImage != baseImage {
-			finalImage = uidImage
-			r.derivedImage = uidImage
-		}
+func (r *UnifiedRuntime) upSingle(ctx context.Context, opts UpOptions) error {
+	// Base image: pulled, or built from the Dockerfile. The build always
+	// runs (Docker's layer cache makes it cheap), so changes to files the
+	// Dockerfile copies are picked up.
+	baseImage, err := r.resolveBaseImage(ctx, opts)
+	if err != nil {
+		return err
+	}
+	finalImage, err := r.layerImages(ctx, baseImage, opts.Rebuild)
+	if err != nil {
+		return err
+	}
+	if finalImage != baseImage {
+		r.derivedImage = finalImage
 	}
 
 	// Create the container
@@ -232,7 +205,7 @@ func (r *UnifiedRuntime) resolveBaseImage(ctx context.Context, opts UpOptions) (
 		return plan.Image, nil
 
 	case *devcontainer.DockerfilePlan:
-		imageTag := fmt.Sprintf("%s%s:%s", common.ImageTagPrefix, r.resolved.ID, r.resolved.ConfigHash[:common.HashTruncationLength])
+		imageTag := fmt.Sprintf("%s%s:base", common.ImageTagPrefix, r.resolved.ID)
 		r.report.Infof("Building image: %s", imageTag)
 
 		if err := r.buildDockerfile(ctx, imageTag, plan, opts.BuildSecrets); err != nil {
@@ -284,83 +257,80 @@ func (r *UnifiedRuntime) buildDockerfile(ctx context.Context, imageTag string, p
 	return err
 }
 
-// buildDerivedImage builds an image with features installed using the CLI.
-func (r *UnifiedRuntime) buildDerivedImage(ctx context.Context, baseImage string, rebuild bool) (string, error) {
-	// Get derived image tag (use temp tag if stable tag unavailable)
-	derivedTag := r.getDerivedImageTag()
-	if derivedTag == "" {
-		derivedTag = fmt.Sprintf("dcx-derived-temp:%d", time.Now().UnixNano())
-	}
+// layerImages builds (or reuses) the image layers dcx adds on top of the
+// base image: features first, then the UID update. Returns the final image.
+//
+// Each layer is tagged dcx/<workspace>:<kind>-<hash>, where the hash covers
+// the ID of the image it is built on plus the layer's own inputs. A new base
+// (pulled or rebuilt) therefore produces new tags instead of reusing stale
+// layers, and a cached features image still gets its UID layer.
+func (r *UnifiedRuntime) layerImages(ctx context.Context, baseImage string, rebuild bool) (string, error) {
+	image := baseImage
 
-	// Get base image metadata for merging
-	baseImageMetadata := ""
-	if cliBuilder, ok := r.builder.(*build.CLIBuilder); ok {
-		labels, err := cliBuilder.GetImageLabels(ctx, baseImage)
-		if err == nil && labels != nil {
+	if len(r.resolved.Features) > 0 {
+		baseID, err := r.engine.GetImageID(ctx, image)
+		if err != nil {
+			return "", fmt.Errorf("failed to inspect base image %s: %w", image, err)
+		}
+		tag := r.layerTag("features", baseID, devcontainer.FeaturesKey(r.resolved.Features),
+			r.resolved.RemoteUser, r.resolved.ContainerUser)
+
+		baseImageMetadata := ""
+		if labels, err := r.engine.GetImageLabels(ctx, image); err == nil {
 			baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
+		}
+		image, err = r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
+			BaseImage:         image,
+			Tag:               tag,
+			Features:          r.resolved.Features,
+			RemoteUser:        r.resolved.RemoteUser,
+			ContainerUser:     r.resolved.ContainerUser,
+			Rebuild:           rebuild,
+			Progress:          os.Stdout,
+			BaseImageMetadata: baseImageMetadata,
+			LocalConfig:       r.resolved.RawConfig,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to build derived image with features: %w", err)
 		}
 	}
 
-	// Build the derived image using the CLI builder
-	remoteUser := r.resolved.RemoteUser
-	containerUser := r.resolved.ContainerUser
+	if r.resolved.ShouldUpdateUID {
+		imageID, err := r.engine.GetImageID(ctx, image)
+		if err != nil {
+			return "", fmt.Errorf("failed to inspect image %s: %w", image, err)
+		}
+		effectiveUser := r.resolved.EffectiveUser
+		imageUser := r.resolved.ContainerUser
+		if imageUser == "" {
+			imageUser = effectiveUser
+		}
+		hostUID, hostGID := r.resolved.HostUID, r.resolved.HostGID
+		tag := r.layerTag("uid", imageID, effectiveUser, imageUser, strconv.Itoa(hostUID), strconv.Itoa(hostGID))
 
-	derivedImage, err := r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
-		BaseImage:         baseImage,
-		Tag:               derivedTag,
-		Features:          r.resolved.Features,
-		RemoteUser:        remoteUser,
-		ContainerUser:     containerUser,
-		Rebuild:           rebuild,
-		Progress:          os.Stdout,
-		BaseImageMetadata: baseImageMetadata,
-		LocalConfig:       r.resolved.RawConfig,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to build derived image: %w", err)
+		image, err = r.builder.BuildUIDUpdate(ctx, build.UIDBuildOptions{
+			BaseImage:  image,
+			Tag:        tag,
+			RemoteUser: effectiveUser,
+			ImageUser:  imageUser,
+			HostUID:    hostUID,
+			HostGID:    hostGID,
+			Rebuild:    rebuild,
+			Progress:   os.Stdout,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to build UID update image: %w", err)
+		}
 	}
 
-	// Apply UID update layer if needed
-	finalImage, err := r.applyUIDUpdateLayer(ctx, derivedImage, rebuild)
-	if err != nil {
-		return "", err
-	}
-
-	return finalImage, nil
+	return image, nil
 }
 
-// applyUIDUpdateLayer applies a UID update layer to match host UID/GID using the SDK.
-func (r *UnifiedRuntime) applyUIDUpdateLayer(ctx context.Context, baseImage string, rebuild bool) (string, error) {
-	if !r.resolved.ShouldUpdateUID {
-		return baseImage, nil
-	}
-
-	effectiveUser := r.resolved.EffectiveUser
-	hostUID := r.resolved.HostUID
-	hostGID := r.resolved.HostGID
-
-	uidTag := fmt.Sprintf("%s-uid%d", baseImage, hostUID)
-
-	imageUser := r.resolved.ContainerUser
-	if imageUser == "" {
-		imageUser = effectiveUser
-	}
-
-	finalImage, err := r.builder.BuildUIDUpdate(ctx, build.UIDBuildOptions{
-		BaseImage:  baseImage,
-		Tag:        uidTag,
-		RemoteUser: effectiveUser,
-		ImageUser:  imageUser,
-		HostUID:    hostUID,
-		HostGID:    hostGID,
-		Rebuild:    rebuild,
-		Progress:   os.Stdout,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to build UID update image: %w", err)
-	}
-
-	return finalImage, nil
+// layerTag returns dcx/<workspaceID>:<kind>-<hash of parts>.
+func (r *UnifiedRuntime) layerTag(kind string, parts ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return fmt.Sprintf("%s%s:%s-%s", common.ImageTagPrefix, r.resolved.ID, kind,
+		hex.EncodeToString(sum[:])[:common.HashTruncationLength])
 }
 
 // createContainer creates a single container.
@@ -507,6 +477,7 @@ func (r *UnifiedRuntime) buildLabels() map[string]string {
 	l.WorkspacePath = r.resolved.LocalRoot
 	l.ConfigPath = r.resolved.ConfigPath
 	l.HashConfig = r.resolved.ConfigHash
+	l.HashVersion = state.CurrentHashVersion
 	l.BuildMethod = string(r.resolved.Plan.Type())
 	l.IsPrimary = true
 
@@ -893,43 +864,6 @@ func (r *UnifiedRuntime) generateBuildSecretsOverride(plan *devcontainer.Compose
 	return sb.String()
 }
 
-func (r *UnifiedRuntime) buildDerivedImageForCompose(ctx context.Context, opts UpOptions, plan *devcontainer.ComposePlan) error {
-	baseImage, err := r.getComposeBaseImage(ctx, plan)
-	if err != nil {
-		return fmt.Errorf("failed to determine base image: %w", err)
-	}
-
-	derivedImage, err := r.buildDerivedImage(ctx, baseImage, opts.Rebuild)
-	if err != nil {
-		return err
-	}
-
-	r.derivedImage = derivedImage
-	return nil
-}
-
-func (r *UnifiedRuntime) applyUIDUpdateForCompose(ctx context.Context, opts UpOptions, plan *devcontainer.ComposePlan) error {
-	if !r.resolved.ShouldUpdateUID {
-		return nil
-	}
-
-	baseImage, err := r.getComposeBaseImage(ctx, plan)
-	if err != nil {
-		return fmt.Errorf("failed to determine base image: %w", err)
-	}
-
-	uidImage, err := r.applyUIDUpdateLayer(ctx, baseImage, opts.Rebuild)
-	if err != nil {
-		return err
-	}
-
-	if uidImage != baseImage {
-		r.derivedImage = uidImage
-	}
-
-	return nil
-}
-
 func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devcontainer.ComposePlan) (string, error) {
 	if r.resolved.BaseImage != "" {
 		return r.resolved.BaseImage, nil
@@ -992,31 +926,6 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 		projectName = r.resolved.ServiceName
 	}
 	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
-}
-
-// getDerivedImageTag returns the expected tag for the derived image.
-// This mirrors the logic in buildDerivedImage but without building.
-func (r *UnifiedRuntime) getDerivedImageTag() string {
-	if r.resolved.DerivedImage != "" {
-		return r.resolved.DerivedImage
-	}
-	if r.resolved.ID != "" && len(r.resolved.ConfigHash) >= common.HashTruncationLength {
-		return fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, r.resolved.ID, r.resolved.ConfigHash[:common.HashTruncationLength])
-	}
-	if r.resolved.ID != "" {
-		return fmt.Sprintf("dcx-derived-%s:latest", r.resolved.ID)
-	}
-	// Fallback - can't cache without stable tag
-	return ""
-}
-
-// derivedImageExists checks if the derived image already exists locally.
-func (r *UnifiedRuntime) derivedImageExists(ctx context.Context, tag string) bool {
-	if tag == "" {
-		return false
-	}
-	exists, err := r.engine.ImageExists(ctx, tag)
-	return err == nil && exists
 }
 
 func (r *UnifiedRuntime) writeToTempFile(content, pattern string) (string, error) {

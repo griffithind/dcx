@@ -264,9 +264,14 @@ With these seams in place, `service` and `container` become unit-testable. Aim f
 
 ### Phase 4: identity and keys (2–3 days)
 
-- [ ] `Identity` from the workspace path; container name and compose project come from it. Migration: detect old `name`-based containers through the `workspace.path` label and adopt them.
-- [ ] `Keys.Build` / `Keys.Runtime` over the normalized model, including local feature contents, context files and the base digest.
-- [ ] Image tags from `Keys.Build` in dcx's own repo namespace (`dcx/<wsid>:<build>`, `…-uid`). Fix `clean` to match. Deterministic Dockerfile generation (sorted ARG/ENV, ENV per feature stage). (`$` in ENV is already fixed, in Phase 3.)
+- [x] Container names and default compose project names are `ResourceName(name, id)` = `<sanitized name>-<8-char workspace id>`, so clones and worktrees with the same `name` coexist (W7). An explicit compose `name:` is still respected. The SSH alias stays `<name>.dcx`; collisions there remain possible and are a known limitation.
+- [x] Existing environments are found by the workspace-id label (the never-matching project-name lookup is removed). `up` on a stopped environment starts the container ID or compose project recorded in labels. Existing compose environments keep their original project name on recreate, so project-scoped named volumes are never orphaned.
+- [x] Staleness key (`ComputeConfigHash`) is computed over the normalized, substituted local config, before image-metadata merging. It ignores comments, formatting, name, customizations, ports attributes, remoteEnv, waitFor/userEnvProbe/shutdownAction, and start/attach hooks. It includes local feature file contents (`FeaturesKey`), so editing `install.sh` triggers a rebuild (H1, H2).
+- [x] `hash.version` label: containers created by older dcx are treated as current (no mass recreate on upgrade), with a hint to run `dcx up --recreate`.
+- [x] Image pipeline: the base build always runs (BuildKit's cache makes it cheap), so Dockerfile context changes and `--pull` take effect. Features and UID layers are tagged `dcx/<workspace>:<kind>-<hash(parent image ID + layer inputs)>`, so the UID layer is applied on cache hits (W5) and keyed by user/UID/GID (W6). Valid for digest-pinned images.
+- [x] `dcx clean` matches `dcx/*` (plus legacy `dcx-derived*`) and removes by reference; images in use by containers are kept.
+- [x] Feature Dockerfile is deterministic (sorted ARG/ENV), each feature's ENV follows its install so later features see it, and the `# syntax=` frontend pin (a Docker Hub pull on every build) is gone.
+- [ ] Not done: the base image digest is not part of the staleness key (a newer upstream image doesn't recreate the container by design); `--rebuild` doesn't pass `--no-cache` to the base Dockerfile build.
 
 ### Phase 5: reconciler (1 week)
 

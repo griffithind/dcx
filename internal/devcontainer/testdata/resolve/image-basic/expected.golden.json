@@ -5,7 +5,7 @@
     "type": "image"
   },
   "baseImage": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "serviceName": "basic_image",
+  "serviceName": "basic_image-<id8>",
   "workspaceFolder": "/workspaces/proj",
   "remoteUser": "vscode",
   "effectiveUser": "vscode"

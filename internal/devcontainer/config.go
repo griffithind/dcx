@@ -39,8 +39,8 @@ type DevContainerConfig struct {
 
 	// Compose-based configuration
 	DockerComposeFile StringOrSlice `json:"dockerComposeFile,omitempty"`
-	Service           string      `json:"service,omitempty"`
-	RunServices       []string    `json:"runServices,omitempty"`
+	Service           string        `json:"service,omitempty"`
+	RunServices       []string      `json:"runServices,omitempty"`
 
 	// Workspace configuration
 	WorkspaceFolder string `json:"workspaceFolder,omitempty"`
@@ -96,9 +96,6 @@ type DevContainerConfig struct {
 
 	// Customizations for tools like VS Code
 	Customizations map[string]interface{} `json:"customizations,omitempty"`
-
-	// Store the raw JSON for hash computation
-	rawJSON []byte
 }
 
 // PlanType returns the execution plan type for this configuration.
@@ -144,16 +141,6 @@ func (c *DevContainerConfig) IsComposePlan() bool {
 // IsSinglePlan returns true if this config uses image or build.
 func (c *DevContainerConfig) IsSinglePlan() bool {
 	return c.Image != "" || c.Build != nil
-}
-
-// GetRawJSON returns the raw JSON content for hash computation.
-func (c *DevContainerConfig) GetRawJSON() []byte {
-	return c.rawJSON
-}
-
-// SetRawJSON stores the raw JSON content.
-func (c *DevContainerConfig) SetRawJSON(data []byte) {
-	c.rawJSON = data
 }
 
 // MarshalJSON implements json.Marshaler.

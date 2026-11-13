@@ -5,7 +5,7 @@
     "type": "image"
   },
   "baseImage": "alpine:3.20",
-  "serviceName": "subst-demo",
+  "serviceName": "subst-demo-<id8>",
   "workspaceFolder": "/src/proj",
   "containerEnv": {
     "HOST_HOME": "<home>",

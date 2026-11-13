@@ -13,7 +13,6 @@ import (
 func TestComputeConfigHash(t *testing.T) {
 	t.Run("image plan produces stable hash", func(t *testing.T) {
 		cfg := &DevContainerConfig{Image: "alpine:latest"}
-		cfg.SetRawJSON([]byte(`{"image":"alpine:latest"}`))
 
 		hash1, err := ComputeConfigHash(cfg, "", nil, nil)
 		require.NoError(t, err)
@@ -27,10 +26,8 @@ func TestComputeConfigHash(t *testing.T) {
 
 	t.Run("different devcontainer.json produces different hash", func(t *testing.T) {
 		cfg1 := &DevContainerConfig{Image: "alpine:latest"}
-		cfg1.SetRawJSON([]byte(`{"image":"alpine:latest"}`))
 
 		cfg2 := &DevContainerConfig{Image: "ubuntu:latest"}
-		cfg2.SetRawJSON([]byte(`{"image":"ubuntu:latest"}`))
 
 		hash1, err := ComputeConfigHash(cfg1, "", nil, nil)
 		require.NoError(t, err)
@@ -44,7 +41,6 @@ func TestComputeConfigHash(t *testing.T) {
 		dir := t.TempDir()
 		df := filepath.Join(dir, "Dockerfile")
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{"build":{"dockerfile":"Dockerfile"}}`))
 
 		require.NoError(t, os.WriteFile(df, []byte("FROM alpine:latest"), 0644))
 		hash1, err := ComputeConfigHash(cfg, df, nil, nil)
@@ -61,7 +57,6 @@ func TestComputeConfigHash(t *testing.T) {
 		dir := t.TempDir()
 		compose := filepath.Join(dir, "docker-compose.yml")
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{"dockerComposeFile":"docker-compose.yml"}`))
 
 		require.NoError(t, os.WriteFile(compose, []byte("services:\n  app:\n    image: alpine\n"), 0644))
 		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
@@ -83,7 +78,6 @@ func TestComputeConfigHash(t *testing.T) {
 		require.NoError(t, os.WriteFile(compose, []byte("services:\n  app:\n    build: ./app\n"), 0644))
 
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{"dockerComposeFile":"docker-compose.yml","service":"app"}`))
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile"), []byte("FROM node:18"), 0644))
 		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
@@ -107,7 +101,6 @@ func TestComputeConfigHash(t *testing.T) {
 		), 0644))
 
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{}`))
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile.dev"), []byte("FROM node:18"), 0644))
 		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
@@ -136,7 +129,6 @@ func TestComputeConfigHash(t *testing.T) {
 		), 0644))
 
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{}`))
 
 		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
 		require.NoError(t, err)
@@ -151,7 +143,6 @@ func TestComputeConfigHash(t *testing.T) {
 
 	t.Run("feature change produces different hash", func(t *testing.T) {
 		cfg := &DevContainerConfig{Image: "alpine:latest"}
-		cfg.SetRawJSON([]byte(`{"image":"alpine:latest"}`))
 
 		feats1 := []*features.Feature{
 			{ID: "feat1", Options: map[string]interface{}{"version": "1.0"}},
@@ -170,7 +161,6 @@ func TestComputeConfigHash(t *testing.T) {
 
 	t.Run("feature order does not affect hash", func(t *testing.T) {
 		cfg := &DevContainerConfig{Image: "alpine:latest"}
-		cfg.SetRawJSON([]byte(`{"image":"alpine:latest"}`))
 
 		feats1 := []*features.Feature{
 			{ID: "feat-a", Metadata: &features.FeatureMetadata{Version: "1.0"}},
@@ -197,7 +187,6 @@ func TestComputeConfigHash(t *testing.T) {
 		), 0644))
 
 		cfg := &DevContainerConfig{}
-		cfg.SetRawJSON([]byte(`{}`))
 
 		hash, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
 		require.NoError(t, err)
@@ -311,4 +300,76 @@ func TestCollectComposeDockerfiles(t *testing.T) {
 		paths := collectComposeDockerfiles([]string{"/nonexistent/compose.yml"})
 		assert.Empty(t, paths)
 	})
+}
+
+// Edits that don't affect the container (comments, formatting, editor
+// customizations, start/attach hooks) must not mark it stale; edits that do
+// must.
+func TestConfigHashIsSemantic(t *testing.T) {
+	hash := func(t *testing.T, jsonc string) string {
+		t.Helper()
+		cfg, err := Parse([]byte(jsonc))
+		require.NoError(t, err)
+		h, err := ComputeConfigHash(cfg, "", nil, nil)
+		require.NoError(t, err)
+		return h
+	}
+	base := hash(t, `{"image": "alpine:3.20", "containerEnv": {"A": "1"}}`)
+
+	same := []string{
+		"{\n  // a comment\n  \"containerEnv\": {\"A\": \"1\"},\n  \"image\": \"alpine:3.20\",\n}",
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "name": "renamed"}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "customizations": {"vscode": {"extensions": ["x"]}}}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "postStartCommand": "echo hi", "postAttachCommand": "echo hi"}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "remoteEnv": {"B": "2"}, "waitFor": "postStartCommand"}`,
+	}
+	for _, s := range same {
+		assert.Equal(t, base, hash(t, s), "should not be stale: %s", s)
+	}
+
+	different := []string{
+		`{"image": "alpine:3.21", "containerEnv": {"A": "1"}}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "2"}}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "mounts": ["source=v,target=/v,type=volume"]}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "runArgs": ["--memory=1g"]}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "postCreateCommand": "make setup"}`,
+		`{"image": "alpine:3.20", "containerEnv": {"A": "1"}, "forwardPorts": [3000]}`,
+	}
+	for _, s := range different {
+		assert.NotEqual(t, base, hash(t, s), "should be stale: %s", s)
+	}
+}
+
+// Editing a local feature's files must change the key (previously only
+// ID, version and options were hashed, so it never rebuilt).
+func TestFeaturesKeyCoversLocalFeatureContent(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "install.sh"), []byte("echo v1"), 0o755))
+	feat := &features.Feature{
+		ID:        "./my-feature",
+		Source:    features.FeatureSource{Type: features.SourceTypeLocalPath},
+		CachePath: dir,
+		Metadata:  &features.FeatureMetadata{ID: "my-feature", Version: "1.0.0"},
+	}
+	k1 := FeaturesKey([]*features.Feature{feat})
+	assert.Equal(t, k1, FeaturesKey([]*features.Feature{feat}), "stable")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "install.sh"), []byte("echo v2"), 0o755))
+	assert.NotEqual(t, k1, FeaturesKey([]*features.Feature{feat}))
+}
+
+// The key must not depend on the absolute workspace location of compose
+// files (the same project checked out elsewhere has the same content).
+func TestConfigHashComposeIndependentOfLocation(t *testing.T) {
+	write := func(dir string) string {
+		p := filepath.Join(dir, "docker-compose.yml")
+		require.NoError(t, os.WriteFile(p, []byte("services:\n  app:\n    image: alpine\n"), 0o644))
+		return p
+	}
+	cfg := &DevContainerConfig{DockerComposeFile: StringOrSlice{"docker-compose.yml"}, Service: "app"}
+	h1, err := ComputeConfigHash(cfg, "", []string{write(t.TempDir())}, nil)
+	require.NoError(t, err)
+	h2, err := ComputeConfigHash(cfg, "", []string{write(t.TempDir())}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, h1, h2)
 }

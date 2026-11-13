@@ -12,11 +12,11 @@ import (
 // flattening all fields into a single coherent type aligned with devcontainer terminology.
 //
 // ACCESS PATTERN:
-// - Use resolved fields (e.g., RemoteUser, ContainerEnv) for values that have been
-//   processed with variable substitution and feature merging.
-// - Use RawConfig only for fields NOT copied to resolved (e.g., HostRequirements,
-//   OverrideCommand, lifecycle hooks) where you need the original config value.
-// - Resolved fields take precedence over RawConfig for any field that exists in both.
+//   - Use resolved fields (e.g., RemoteUser, ContainerEnv) for values that have been
+//     processed with variable substitution and feature merging.
+//   - Use RawConfig only for fields NOT copied to resolved (e.g., HostRequirements,
+//     OverrideCommand, lifecycle hooks) where you need the original config value.
+//   - Resolved fields take precedence over RawConfig for any field that exists in both.
 type ResolvedDevContainer struct {
 	// === Identity ===
 
@@ -153,10 +153,6 @@ type ResolvedDevContainer struct {
 	BuildSecrets map[string]SecretConfig
 
 	// === Build State ===
-
-	// DerivedImage is the derived image name with features.
-	// Computed as: dcx/{ID}:{hash}-features
-	DerivedImage string
 
 	// ShouldUpdateUID indicates whether UID update layer is needed.
 	ShouldUpdateUID bool

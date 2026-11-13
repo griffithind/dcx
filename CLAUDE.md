@@ -197,7 +197,7 @@ StateBroken   // Inconsistent state
 ### ContainerLabels (`state/labels.go`)
 All state persisted in Docker labels (prefix `com.griffithind.dcx`):
 - `workspace.id`, `workspace.name`, `workspace.path`
-- `hash.config`, `hash.dockerfile`, `hash.compose`, `hash.features`, `hash.overall`
+- `hash.config` (staleness key), `hash.version`
 - `build.method` (image/dockerfile/compose)
 - `compose.project`, `compose.service`, `container.primary`
 - `features.installed`, `features.config`
@@ -284,7 +284,13 @@ No database - all state in Docker container labels. Survives Docker restarts, wo
 ```
 Base Image → Features Layer → UID Update Layer → Final Image
 ```
-Each step tagged and cached. Skipped if already built with same hash.
+- Base: pulled, or built from the Dockerfile on every create (BuildKit's cache makes this cheap) as `dcx/<workspace>:base`.
+- Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `UnifiedRuntime.layerImages`), and reused when the tag exists.
+
+### Naming and staleness
+- Container / default compose project name: `devcontainer.ResourceName(name, id)` (`<slug>-<id8>`). Never derive Docker names from `name` alone.
+- Existing environments are always located by the `workspace.id` label and operated on by container ID / recorded compose project.
+- `hash.config` is the semantic staleness key from `ComputeConfigHash`; `hash.version` marks its algorithm. Containers with an older version are treated as current.
 
 ## Variable Substitution
 

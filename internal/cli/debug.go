@@ -208,7 +208,6 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 		ConfigPath:   resolved.ConfigPath,
 		PlanType:     planType,
 		Image:        resolved.BaseImage,
-		FinalImage:   resolved.DerivedImage, // Empty if no features
 		ServiceName:  resolved.ServiceName,
 		FeatureCount: len(resolved.Features),
 	}

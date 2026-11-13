@@ -51,6 +51,10 @@ type BuilderOptions struct {
 
 	// ForcePull forces re-fetching features from the registry
 	ForcePull bool
+
+	// LocalConfig is the substituted devcontainer.json before image-metadata
+	// merging; the staleness key is computed from it. Defaults to Config.
+	LocalConfig *DevContainerConfig
 }
 
 // Build creates a ResolvedDevContainer from the given options.
@@ -120,8 +124,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 			resolved.Name = explicitName
 		}
 		if projectName == "" {
-			// Fall back to devcontainer.json name or directory name
-			projectName = common.SanitizeProjectName(resolved.Name)
+			projectName = ResourceName(resolved.Name, resolved.ID)
 		}
 
 		resolved.Plan = NewComposePlan(
@@ -188,8 +191,8 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	// Mounts
 	resolved.Mounts = b.parseMounts(opts.Config.Mounts)
 
-	// Service name (sanitized for Docker)
-	resolved.ServiceName = common.SanitizeProjectName(resolved.Name)
+	// Container name: unique per workspace (see ResourceName)
+	resolved.ServiceName = ResourceName(resolved.Name, resolved.ID)
 
 	// Customizations
 	resolved.Customizations = opts.Config.Customizations
@@ -216,8 +219,12 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		}
 	}
 
-	// Compute hashes
-	if err := b.computeHashes(resolved, opts.Config); err != nil {
+	// Compute the staleness key from the local (pre-merge) config
+	keyConfig := opts.LocalConfig
+	if keyConfig == nil {
+		keyConfig = opts.Config
+	}
+	if err := b.computeHashes(resolved, keyConfig); err != nil {
 		return nil, err
 	}
 
@@ -358,13 +365,6 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 	}
 
 	resolved.ConfigHash = configHash
-
-	// Set derived image tag based on config hash so that any change
-	// (devcontainer.json, Dockerfiles, compose files, features) invalidates the cache.
-	if len(configHash) >= common.HashTruncationLength {
-		resolved.DerivedImage = fmt.Sprintf("%s%s:%s-features", common.ImageTagPrefix, resolved.ID, configHash[:common.HashTruncationLength])
-	}
-
 	return nil
 }
 

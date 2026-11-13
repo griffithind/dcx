@@ -389,3 +389,19 @@ func TestParseContainerSummariesKeepsCommasInLabels(t *testing.T) {
 		t.Errorf("unexpected second summary: %+v", got[1])
 	}
 }
+
+func TestIsDcxImage(t *testing.T) {
+	cases := map[string]bool{
+		"dcx/abc123def456":          true,
+		"dcx-derived-abc123def456":  true,
+		"dcx-derived-temp":          true,
+		"alpine":                    false,
+		"mcr.microsoft.com/dcx/foo": false,
+		"mydcx/app":                 false,
+	}
+	for repo, want := range cases {
+		if got := isDcxImage(imageInfo{Repository: repo}); got != want {
+			t.Errorf("isDcxImage(%q) = %v, want %v", repo, got, want)
+		}
+	}
+}

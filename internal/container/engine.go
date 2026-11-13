@@ -23,6 +23,7 @@ type Engine interface {
 	GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
 
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
+	GetImageID(ctx context.Context, imageRef string) (string, error)
 	GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
 	PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error
 
