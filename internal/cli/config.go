@@ -77,10 +77,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 
 	svc := service.NewDevContainerService(docker, report.Discard, workspacePath, configPath, verbose)
 
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return fmt.Errorf("failed to get identifiers: %w", err)
-	}
+	ids := svc.Identifiers()
 
 	// Resolve the configuration so the reported ConfigHash matches what
 	// `dcx up` stamps into the container label — ComputeConfigHash covers

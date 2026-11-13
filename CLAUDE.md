@@ -53,7 +53,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 
 ### Entry Points
 - `cmd/dcx/main.go` - Main CLI bootstrap, calls `cli.Execute()`
-- `cmd/dcx-agent/main.go` - Agent binary bootstrap, calls `server.Execute()` (`internal/ssh/server`)
+- `cmd/dcx-agent/main.go` - Agent binary bootstrap, calls `agent.Execute()` (`internal/agent`)
 - `agent-embed.go` - Embedded agent binaries via `//go:embed bin/dcx-agent-linux-*.gz`
 
 ### CLI Layer (`internal/cli/`)
@@ -92,7 +92,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 Load config → decideUp(state, setup complete, --recreate/--rebuild) → none | resume | start | create | recreate
     → initialize (host initializeCommand)
     → container (create / recreate / start / resume)
-    → agent (versioned deploy, SSH secrets, launch + readiness)
+    → agent (agentctl.Provision: versioned install, SSH secrets, setup, launch + readiness)
     → secrets (runtime secrets on tmpfs)
     → environment (/etc/environment, userEnvProbe)
     → lifecycle hooks (onCreate/updateContent/postCreate once via markers in
@@ -161,7 +161,9 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 
 ### Supporting Packages
 - `internal/lifecycle/` - Hook execution; `ParseCommand` is the only lifecycle command parser; `Markers` records completed once-per-container phases
-- `internal/ssh/` - Host keys, known_hosts, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only), `server` (the agent)
+- `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
+- `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
+- `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only)
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
@@ -244,10 +246,10 @@ CLIContext (Docker, Service, Identifiers)
     ├─ BuildWithFeatures() → derived image
     ├─ ApplyUIDUpdate() → final image
     ├─ CreateContainer() with labels
-    ├─ DeployAgent() → copy dcx-agent to container
-    ├─ MountRuntimeSecrets()
+    ├─ agentctl.Provision() → install dcx-agent, SSH secrets, launch
+    ├─ MountSecretsToContainer() (runtime secrets)
     ├─ RunLifecycleHooks() (onCreate, postStart, etc.)
-    └─ SetupSSHAccess() → update ~/.ssh/config
+    └─ setupSSHAccess() → ~/.ssh/dcx/config block
 ```
 
 ### State Detection

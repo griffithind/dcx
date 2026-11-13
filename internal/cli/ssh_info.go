@@ -56,10 +56,7 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 	docker := containerPkg.NewDockerCLI()
 	svc := service.NewDevContainerService(docker, sshInfoReporter(), workspacePath, configPath, verbose)
 
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return fmt.Errorf("identifiers: %w", err)
-	}
+	ids := svc.Identifiers()
 
 	hostKeyPath, signer, err := dcxssh.LoadHostKey(ids.WorkspaceID)
 	if err != nil {

@@ -230,6 +230,13 @@ Regression tests: env patch (unit), lock modes, feature cache, and two e2e tests
 - **`UnifiedRuntime` → `Provisioner`** (`provisioner.go`): it builds image layers and creates or starts environments.
 - **Also removed:** the unused `cli.CheckState` and `ui.IsVerbose`.
 
+**Step 5 (extract agent provisioning): done.**
+- **New `internal/agentctl`:** `ssh/deploy` moved in (`install.go`), along with the service's agent secret writing, root setup, launch and readiness code. `agentctl.Provision(ctx, engine, rep, Options)` is now the single call `up` makes for the agent. The launch, secret and timeout tests moved with it.
+- **`ssh.AuthorizedKeys`** is the old `collectAuthorizedKeys`, which moved to `internal/ssh` along with the fallback-key and agent-key helpers and their test.
+- **Identifiers:** `Service.Identifiers()` computes them once per service and returns no error, because it couldn't fail. Callers no longer re-parse devcontainer.json each time.
+- **Rename:** `internal/ssh/server` → `internal/agent`, the dcx-agent itself. The depguard rules and `CLAUDE.md` follow.
+- **Size:** the service drops from about 1,450 to about 1,100 lines across `devcontainer.go` and `up.go`. Service coverage dips from 33% to 28%, because tested agent code moved out; agentctl is at 67%. What remains is orchestration, config loading, image-metadata merge, environment setup, SSH config and `Lock`.
+
 ## 5. Recommended plan
 
 Each step ships on its own, in this order:

@@ -5,7 +5,7 @@
 // All client connections complete public-key authentication against a
 // mounted authorized_keys file. A pre-handshake IP gate rejects any source
 // address outside the configured allowlist (loopback by default).
-package server
+package agent
 
 import (
 	"bytes"

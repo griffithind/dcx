@@ -219,10 +219,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 
 	svc := service.NewDevContainerService(docker, debugReporter(), workspacePath, configPath, verbose)
 
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		return
-	}
+	ids := svc.Identifiers()
 
 	// Try to find container by workspace ID
 	workspaceID := debug.Workspace.ID

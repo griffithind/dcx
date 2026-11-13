@@ -12,7 +12,7 @@ import (
 	"time"
 
 	dcxembed "github.com/griffithind/dcx"
-	"github.com/griffithind/dcx/internal/ssh/deploy"
+	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,7 +68,7 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 
 	// Deploy the agent binary
 	binaryPath := agentproto.BinaryPath
-	updated, err := deploy.Deploy(ctx, container.NewDockerCLI(), containerName)
+	updated, err := agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "DeployToContainer should succeed")
 	assert.False(t, updated, "dcx up already installed the current agent")
 
@@ -116,12 +116,12 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 	defer cancel()
 
 	// First deploy
-	_, err = deploy.Deploy(ctx, container.NewDockerCLI(), containerName)
+	_, err = agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "first deploy should succeed")
 
 	// Second deploy should also succeed (and be fast since binary exists)
 	start := time.Now()
-	updated, err := deploy.Deploy(ctx, container.NewDockerCLI(), containerName)
+	updated, err := agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "second deploy should succeed")
 	assert.False(t, updated, "second deploy of the same binary should be a no-op")
 	elapsed := time.Since(start)
@@ -157,7 +157,7 @@ func TestInstallAgentPreDeployE2E(t *testing.T) {
 	defer cancel()
 
 	// Use PreDeployAgent which is the main entry point
-	_, err = deploy.Deploy(ctx, container.NewDockerCLI(), containerName)
+	_, err = agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err, "PreDeployAgent should succeed")
 
 	// Verify binary exists and runs
@@ -203,7 +203,7 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 
 	// Deploy
 	binaryPath := agentproto.BinaryPath
-	_, err = deploy.Deploy(ctx, container.NewDockerCLI(), containerName)
+	_, err = agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
 	require.NoError(t, err)
 
 	// Verify binary can run (which confirms correct architecture)

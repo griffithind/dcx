@@ -7,7 +7,7 @@
 // -p <bind>:<host>:<container> restricts which host interface accepts
 // packets, the agent may bind 0.0.0.0 inside the container (WSL2 NAT) — in
 // that case the gate is the only layer enforcing "loopback-only by default."
-package server
+package agent
 
 import (
 	"fmt"

@@ -48,11 +48,7 @@ func NewCLIContext() (*CLIContext, error) {
 	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
 
 	// Get identifiers
-	ids, err := svc.GetIdentifiers()
-	if err != nil {
-		stop()
-		return nil, fmt.Errorf("failed to get identifiers: %w", err)
-	}
+	ids := svc.Identifiers()
 
 	return &CLIContext{
 		stop:        stop,

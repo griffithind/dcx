@@ -64,8 +64,7 @@ func TestIdentifiers(t *testing.T) {
 				workspacePath: tt.workspacePath,
 			}
 
-			ids, err := svc.GetIdentifiers()
-			require.NoError(t, err)
+			ids := svc.Identifiers()
 			assert.NotEmpty(t, ids.WorkspaceID)
 			assert.Contains(t, ids.SSHHost, tt.wantSSHSuffix)
 		})

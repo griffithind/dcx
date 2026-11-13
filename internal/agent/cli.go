@@ -1,6 +1,6 @@
 // Package server provides the CLI for dcx-agent, a minimal binary that runs
 // inside containers and exposes an SSH surface for host-side dcx.
-package server
+package agent
 
 import (
 	"context"

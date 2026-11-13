@@ -1,4 +1,4 @@
-package service
+package ssh
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 // regression where Claude Desktop / ssh2 and other clients that can only
 // present a file-based private key got "All configured authentication
 // methods failed" — because when the user had any SSH-agent or on-disk
-// key, collectAuthorizedKeys skipped the dcx fallback entirely.
+// key, AuthorizedKeys skipped the dcx fallback entirely.
 //
 // The fallback MUST appear in authorized_keys regardless of what else is
 // present on the host, so clients pointed at ~/.dcx/id_ed25519 can always
@@ -34,9 +34,9 @@ func TestCollectAuthorizedKeys_AlwaysIncludesFallback(t *testing.T) {
 		t.Fatalf("write user key: %v", err)
 	}
 
-	keys, err := collectAuthorizedKeys()
+	keys, err := AuthorizedKeys()
 	if err != nil {
-		t.Fatalf("collectAuthorizedKeys: %v", err)
+		t.Fatalf("AuthorizedKeys: %v", err)
 	}
 
 	if !bytes.Contains(keys, userPub) {
@@ -63,9 +63,9 @@ func TestCollectAuthorizedKeys_GeneratesFallbackWhenEmpty(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("SSH_AUTH_SOCK", "")
 
-	keys, err := collectAuthorizedKeys()
+	keys, err := AuthorizedKeys()
 	if err != nil {
-		t.Fatalf("collectAuthorizedKeys: %v", err)
+		t.Fatalf("AuthorizedKeys: %v", err)
 	}
 	if len(keys) == 0 {
 		t.Fatal("expected fallback to produce a non-empty authorized_keys")

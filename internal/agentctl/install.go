@@ -1,7 +1,4 @@
-// Package deploy installs the dcx-agent binary into containers and stops
-// agents left over from an older install. Everything runs through the
-// container engine.
-package deploy
+package agentctl
 
 import (
 	"context"

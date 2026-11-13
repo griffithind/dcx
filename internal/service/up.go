@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/secrets"
-	"github.com/griffithind/dcx/internal/ssh/deploy"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -59,7 +59,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	if err != nil {
 		return err
 	}
-	ids, _ := s.GetIdentifiers()
+	ids := s.Identifiers()
 
 	currentState, existing, err := s.stateManager.GetStateWithHash(ctx, resolved.ID, resolved.ConfigHash)
 	if err != nil {
@@ -264,26 +264,16 @@ func (s *DevContainerService) fetchBuildSecrets(ctx context.Context, resolved *d
 	return paths, cleanup, nil
 }
 
-// stepAgent installs the current dcx-agent (replacing an outdated running
-// one), mounts its SSH secrets and makes sure it is listening.
+// stepAgent installs (or upgrades) the dcx-agent, writes its SSH secrets
+// and makes sure it is listening.
 func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
-	s.report.Infof("Installing dcx agent...")
-	updated, err := deploy.Deploy(ctx, s.engine, r.info.Name)
-	if err != nil {
-		return fmt.Errorf("failed to install dcx agent: %w", err)
-	}
-	if updated {
-		if err := deploy.StopOutdated(ctx, s.engine, r.info.Name); err != nil {
-			return err
-		}
-	}
-	if err := s.mountSSHSecrets(ctx, r.resolved, r.info); err != nil {
-		return fmt.Errorf("failed to mount SSH secrets: %w", err)
-	}
-	if err := s.launchSSHAgent(ctx, r.resolved, r.info, r.opts.SSHAllowedCIDRs); err != nil {
-		return fmt.Errorf("failed to launch SSH agent: %w", err)
-	}
-	return nil
+	return agentctl.Provision(ctx, s.engine, s.report, agentctl.Options{
+		ContainerName: r.info.Name,
+		WorkspaceID:   r.ids.WorkspaceID,
+		User:          r.resolved.EffectiveUser,
+		WorkDir:       r.resolved.WorkspaceFolder,
+		AllowedCIDRs:  r.opts.SSHAllowedCIDRs,
+	})
 }
 
 // stepRuntimeSecrets fetches and mounts runtime secrets. /run/secrets is a

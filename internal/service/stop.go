@@ -32,7 +32,7 @@ type StopOptions struct {
 // Stop stops the workspace's containers without removing them, honouring
 // shutdownAction "none" unless forced.
 func (s *DevContainerService) Stop(ctx context.Context, opts StopOptions) (StopOutcome, error) {
-	ids, _ := s.GetIdentifiers()
+	ids := s.Identifiers()
 	st, info, err := s.stateManager.GetState(ctx, ids.WorkspaceID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get state: %w", err)
@@ -64,7 +64,7 @@ type RestartOptions struct {
 // postStart hooks, SSH config). It reports whether shutdownAction "none"
 // skipped it.
 func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) (skipped bool, err error) {
-	ids, _ := s.GetIdentifiers()
+	ids := s.Identifiers()
 	st, info, err := s.stateManager.GetState(ctx, ids.WorkspaceID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get state: %w", err)

@@ -26,7 +26,7 @@ linters:
         # container; it must not pull in host-side dcx.
         agent-stays-small:
           files:
-            - "**/internal/ssh/server/**"
+            - "**/internal/agent/**"
             - "**/cmd/dcx-agent/**"
           deny:
             - pkg: github.com/spf13/cobra
@@ -53,7 +53,7 @@ linters:
             - "!**/internal/secrets/**"
             - "!**/internal/selinux/**"
             - "!**/internal/devcontainer/hostreqs.go"
-            - "!**/internal/ssh/server/**"
+            - "!**/internal/agent/**"
             - "!**/cmd/**"
             - "!$test"
             - "!**/test/**"

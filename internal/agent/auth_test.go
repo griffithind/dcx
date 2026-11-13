@@ -1,4 +1,4 @@
-package server
+package agent
 
 import (
 	"crypto/ed25519"
