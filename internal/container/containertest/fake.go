@@ -34,8 +34,8 @@ type Fake struct {
 	Ports map[string]int
 	// Images lists image refs that exist locally.
 	Images map[string]bool
-	// ImageLabels maps image refs to their labels (local images).
-	ImageLabels map[string]map[string]string
+	// LocalImageLabels maps image refs to their labels (local images).
+	LocalImageLabels map[string]map[string]string
 	// Registry maps image refs to the labels they get once pulled.
 	Registry map[string]map[string]string
 	// ExecFunc decides the result of ExecInContainer (nil = success).
@@ -185,10 +185,10 @@ func (f *Fake) PortMapping(_ context.Context, name string, port int, proto strin
 	return 0, fmt.Errorf("port %d not published for %s", port, name)
 }
 
-func (f *Fake) GetLogs(_ context.Context, id string, _ container.LogsOptions) (io.ReadCloser, error) {
+func (f *Fake) Logs(_ context.Context, id string, _ container.LogsOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("GetLogs", id)
+	f.record("Logs", id)
 	return io.NopCloser(strings.NewReader("")), nil
 }
 
@@ -199,21 +199,21 @@ func (f *Fake) ImageExists(_ context.Context, ref string) (bool, error) {
 	return f.Images[ref], nil
 }
 
-func (f *Fake) GetImageID(_ context.Context, ref string) (string, error) {
+func (f *Fake) ImageID(_ context.Context, ref string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("GetImageID", ref)
+	f.record("ImageID", ref)
 	if !f.Images[ref] {
 		return "", fmt.Errorf("image not found: %s", ref)
 	}
 	return "sha256:" + ref, nil
 }
 
-func (f *Fake) GetImageLabels(_ context.Context, ref string) (map[string]string, error) {
+func (f *Fake) ImageLabels(_ context.Context, ref string) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("GetImageLabels", ref)
-	if labels, ok := f.ImageLabels[ref]; ok {
+	f.record("ImageLabels", ref)
+	if labels, ok := f.LocalImageLabels[ref]; ok {
 		return labels, nil
 	}
 	return nil, fmt.Errorf("image not found: %s", ref)
@@ -230,11 +230,11 @@ func (f *Fake) PullImageWithProgress(_ context.Context, ref string, _ io.Writer)
 	if f.Images == nil {
 		f.Images = map[string]bool{}
 	}
-	if f.ImageLabels == nil {
-		f.ImageLabels = map[string]map[string]string{}
+	if f.LocalImageLabels == nil {
+		f.LocalImageLabels = map[string]map[string]string{}
 	}
 	f.Images[ref] = true
-	f.ImageLabels[ref] = labels
+	f.LocalImageLabels[ref] = labels
 	return nil
 }
 

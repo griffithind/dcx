@@ -1,0 +1,33 @@
+Workspace: /home/dev/myapp
+Project: myapp-abcd1234
+Workspace ID: abcd1234efgh
+State: running
+SSH: ssh myapp.dcx
+Shortcuts: 2 defined (use 'dcx run --list' to view)
+
+Primary Container
+  ID: f00dfeedbeef
+  Name: myapp-abcd1234
+  Status: running
+  Config: 0123456789ab
+
+Container Details
+  Image: dcx/abcd1234efgh:uid-0123
+  Started: 2026-11-13T10:00:00Z
+  Running: true
+
+Configuration
+  Image: mcr.microsoft.com/devcontainers/go:1
+  Remote User: vscode
+  Workspace Folder: /workspaces/myapp
+  Features: ghcr.io/devcontainers/features/docker-in-docker:2, ghcr.io/devcontainers/features/node:1
+  Config Hash: 0123456789ab
+
+Labels
+  com.griffithind.dcx.build.method: image
+  com.griffithind.dcx.container.primary: true
+  com.griffithind.dcx.hash.config: 0123456789abcdef0123
+  com.griffithind.dcx.managed: true
+  com.griffithind.dcx.schema.version: 2
+  com.griffithind.dcx.workspace.id: abcd1234efgh
+  com.griffithind.dcx.workspace.name: myapp

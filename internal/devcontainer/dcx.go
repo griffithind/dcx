@@ -87,9 +87,9 @@ func (s Shortcut) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*Alias)(&s))
 }
 
-// GetDcxCustomizations extracts DCX customizations from a DevContainerConfig.
+// DcxCustomizations extracts DCX customizations from a DevContainerConfig.
 // Returns nil if no customizations.dcx section exists.
-func GetDcxCustomizations(cfg *DevContainerConfig) *DcxCustomizations {
+func (cfg *DevContainerConfig) DcxCustomizations() *DcxCustomizations {
 	if cfg == nil || cfg.Customizations == nil {
 		return nil
 	}

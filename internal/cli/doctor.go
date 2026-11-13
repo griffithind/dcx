@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/griffithind/dcx/internal/report"
-	"github.com/griffithind/dcx/internal/service"
 	"os"
 	"runtime"
 
@@ -55,7 +54,8 @@ type CheckResult struct {
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx, stop := commandContext()
+	defer stop()
 
 	// Determine what to check
 	checkSystemReqs := !doctorConfig
@@ -177,7 +177,7 @@ func runConfigChecks(ctx context.Context) []CheckResult {
 	}
 	results = append(results, CheckResult{Name: "Config Syntax", OK: true, Message: "valid JSON"})
 
-	svc := service.NewDevContainerService(container.NewDockerCLI(), report.Discard, workspacePath, configPath, verbose)
+	svc := newService(container.NewDockerCLI(), report.Discard)
 	resolved, err := svc.Load(ctx)
 	if err != nil {
 		return append(results, CheckResult{
@@ -407,7 +407,7 @@ func checkCompose(ctx context.Context) CheckResult {
 }
 
 func checkSELinux() CheckResult {
-	mode, err := selinux.GetMode()
+	mode, err := selinux.CurrentMode()
 	if err != nil {
 		return CheckResult{
 			Name:    "SELinux",

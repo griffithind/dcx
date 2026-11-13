@@ -64,7 +64,7 @@ func TestIdentifiers(t *testing.T) {
 				workspacePath: tt.workspacePath,
 			}
 
-			ids := svc.Identifiers()
+			ids := svc.Identity()
 			assert.NotEmpty(t, ids.WorkspaceID)
 			assert.Contains(t, ids.SSHHost, tt.wantSSHSuffix)
 		})
@@ -139,7 +139,7 @@ func TestStateManagerIntegration(t *testing.T) {
 			mock := &mockContainerClient{containers: tt.containers}
 			sm := state.NewStateManager(mock)
 
-			gotState, _, err := sm.GetState(context.Background(), "test-ws")
+			gotState, _, err := sm.State(context.Background(), "test-ws")
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantState, gotState)
 		})

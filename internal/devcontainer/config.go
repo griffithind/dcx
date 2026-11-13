@@ -125,11 +125,6 @@ type HostRequirements struct {
 	GPU     interface{} `json:"gpu,omitempty"` // bool or GPURequirement
 }
 
-// GetDockerComposeFiles returns the docker compose file paths as a slice.
-func (c *DevContainerConfig) GetDockerComposeFiles() []string {
-	return c.DockerComposeFile
-}
-
 // IsComposePlan returns true if this config uses docker compose.
 func (c *DevContainerConfig) IsComposePlan() bool {
 	return len(c.DockerComposeFile) > 0
@@ -289,9 +284,8 @@ func ParseWorkspaceMount(spec string) *Mount {
 	}
 	return &m
 }
-
-// GetPortAttribute returns the attributes for a specific port.
-func (c *DevContainerConfig) GetPortAttribute(port string) *PortAttribute {
+// PortAttributeFor returns the attributes for a specific port.
+func (c *DevContainerConfig) PortAttributeFor(port string) *PortAttribute {
 	if c.PortsAttributes == nil {
 		return nil
 	}

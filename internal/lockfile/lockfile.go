@@ -48,7 +48,7 @@ type LockedFeature struct {
 //
 // Per the spec, an empty file signals "initialize lockfile on build completion".
 func Load(configPath string) (*Lockfile, bool, error) {
-	lockfilePath := GetPath(configPath)
+	lockfilePath := Path(configPath)
 
 	data, err := os.ReadFile(lockfilePath)
 	if err != nil {
@@ -78,7 +78,7 @@ func Load(configPath string) (*Lockfile, bool, error) {
 
 // Save writes the lockfile to disk.
 func (l *Lockfile) Save(configPath string) error {
-	lockfilePath := GetPath(configPath)
+	lockfilePath := Path(configPath)
 
 	data, err := json.MarshalIndent(l, "", "  ")
 	if err != nil {
@@ -99,7 +99,7 @@ func (l *Lockfile) Save(configPath string) error {
 // Per the spec:
 //   - .devcontainer.json → .devcontainer-lock.json
 //   - devcontainer.json → devcontainer-lock.json
-func GetPath(configPath string) string {
+func Path(configPath string) string {
 	dir := filepath.Dir(configPath)
 	base := filepath.Base(configPath)
 

@@ -58,16 +58,16 @@ func (c *ContainerInfo) IsSingleContainer() bool {
 	return c != nil && (c.Plan == BuildMethodImage || c.Plan == BuildMethodDockerfile)
 }
 
-// GetComposeProject returns the compose project name, falling back to the provided default.
-func (c *ContainerInfo) GetComposeProject(defaultProject string) string {
+// ComposeProjectOr returns the compose project name, falling back to the provided default.
+func (c *ContainerInfo) ComposeProjectOr(defaultProject string) string {
 	if c != nil && c.ComposeProject != "" {
 		return c.ComposeProject
 	}
 	return defaultProject
 }
 
-// GetConfigDir returns the config directory from labels, falling back to the provided default.
-func (c *ContainerInfo) GetConfigDir(defaultDir string) string {
+// ConfigDirOr returns the config directory from labels, falling back to the provided default.
+func (c *ContainerInfo) ConfigDirOr(defaultDir string) string {
 	if c != nil && c.Labels != nil && c.Labels.ConfigPath != "" {
 		return filepath.Dir(c.Labels.ConfigPath)
 	}

@@ -34,7 +34,7 @@ func Deploy(ctx context.Context, engine container.Engine, containerName string) 
 
 func deployTo(ctx context.Context, engine container.Engine, containerName, binaryPath string) (bool, error) {
 	arch := containerArch(ctx, engine, containerName)
-	binary, err := dcxembed.GetBinary(arch)
+	binary, err := dcxembed.Binary(arch)
 	if err != nil || len(binary) == 0 {
 		return false, fmt.Errorf("no agent binary available for architecture %s: %v", arch, err)
 	}

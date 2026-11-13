@@ -16,7 +16,7 @@ import (
 
 func agentBinary(t *testing.T) []byte {
 	t.Helper()
-	bin, err := dcxembed.GetBinary("amd64")
+	bin, err := dcxembed.Binary("amd64")
 	if err != nil || len(bin) == 0 {
 		t.Skip("embedded agent binaries not built (run 'make build')")
 	}

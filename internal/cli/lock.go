@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
@@ -48,15 +45,10 @@ func init() {
 }
 
 func runLock(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	docker, err := container.NewDocker()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
-	}
-
-	// Create devcontainer service
-	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
+	// Locking resolves features from registries; it needs no Docker daemon.
+	ctx, stop := commandContext()
+	defer stop()
+	svc := newService(container.NewDockerCLI(), ui.Reporter())
 
 	// Determine lock mode
 	mode := service.LockModeGenerate

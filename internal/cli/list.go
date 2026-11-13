@@ -1,14 +1,9 @@
 package cli
 
 import (
-	"context"
-	"fmt"
-	"sort"
 	"strings"
-	"time"
 
-	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/state"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -30,142 +25,51 @@ Examples:
 	RunE: runListEnvironments,
 }
 
-// EnvironmentInfo represents a dcx-managed environment for listing.
-type EnvironmentInfo struct {
-	WorkspaceID   string          `json:"workspaceID"`
-	ProjectName   string          `json:"projectName,omitempty"`
-	WorkspacePath string          `json:"workspacePath"`
-	State         string          `json:"state"`
-	Plan          string          `json:"plan"`
-	Containers    []ContainerItem `json:"containers"`
-	CreatedAt     time.Time       `json:"createdAt"`
-}
-
-// ContainerItem represents a container in the environment.
-type ContainerItem struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	IsPrimary bool      `json:"isPrimary"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
 func runListEnvironments(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
-	docker, err := container.NewDocker()
+	cliCtx, err := NewCLIContext()
 	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
+		return err
 	}
+	defer cliCtx.Close()
 
-	// List all dcx-managed containers
-	containers, err := docker.ListContainersWithLabels(ctx, map[string]string{
-		state.LabelManaged: "true",
-	})
+	envs, err := cliCtx.Service.List(cliCtx.Ctx, listShowAll)
 	if err != nil {
-		return fmt.Errorf("failed to list containers: %w", err)
+		return err
 	}
+	return renderList(envs, listShowAll)
+}
 
-	// Group containers by environment
-	envMap := make(map[string]*EnvironmentInfo)
-	for _, cont := range containers {
-		lbls := state.ContainerLabelsFromMap(cont.Labels)
-
-		// Skip non-running containers unless --all is specified
-		if !listShowAll && !cont.Running {
-			continue
-		}
-
-		workspaceID := lbls.WorkspaceID
-		if workspaceID == "" {
-			continue
-		}
-
-		env, exists := envMap[workspaceID]
-		if !exists {
-			env = &EnvironmentInfo{
-				WorkspaceID:   workspaceID,
-				ProjectName:   lbls.WorkspaceName,
-				WorkspacePath: lbls.WorkspacePath,
-				Plan:          lbls.BuildMethod,
-				Containers:    []ContainerItem{},
-				CreatedAt:     cont.Created,
-			}
-			envMap[workspaceID] = env
-		}
-
-		// Add container to environment
-		env.Containers = append(env.Containers, ContainerItem{
-			ID:        shortID(cont.ID),
-			Name:      cont.Name,
-			Status:    cont.State,
-			IsPrimary: lbls.IsPrimary,
-			CreatedAt: cont.Created,
-		})
-		// The environment is as old as its oldest container.
-		if !cont.Created.IsZero() && (env.CreatedAt.IsZero() || cont.Created.Before(env.CreatedAt)) {
-			env.CreatedAt = cont.Created
-		}
-	}
-
-	// Determine state for each environment
-	stateMgr := state.NewStateManager(docker)
-	for _, env := range envMap {
-		s, _, _ := stateMgr.GetState(ctx, env.WorkspaceID)
-		env.State = string(s)
-	}
-
-	// Convert map to slice and sort by workspace path
-	environments := make([]*EnvironmentInfo, 0, len(envMap))
-	for _, env := range envMap {
-		environments = append(environments, env)
-	}
-	sort.Slice(environments, func(i, j int) bool {
-		return environments[i].WorkspacePath < environments[j].WorkspacePath
-	})
-
-	// Text output mode
-	if len(environments) == 0 {
+// renderList prints environments as a table.
+func renderList(envs []service.Environment, all bool) error {
+	if len(envs) == 0 {
 		ui.Println("No dcx-managed environments found.")
-		if !listShowAll {
+		if !all {
 			ui.Println(ui.Dim("Use --all to include stopped environments."))
 		}
 		return nil
 	}
 
 	headers := []string{"Name", "State", "Containers", "Workspace"}
-	var rows [][]string
-	for _, env := range environments {
-		// Build container summary
-		containerNames := make([]string, 0, len(env.Containers))
-		for _, cont := range env.Containers {
-			name := cont.Name
-			if cont.IsPrimary {
-				name = name + "*"
+	rows := make([][]string, 0, len(envs))
+	for _, env := range envs {
+		names := make([]string, 0, len(env.Containers))
+		for _, c := range env.Containers {
+			name := c.Name
+			if c.IsPrimary {
+				name += "*"
 			}
-			containerNames = append(containerNames, name)
+			names = append(names, name)
 		}
-
-		// Truncate workspace path for display
 		workspace := env.WorkspacePath
 		if len(workspace) > 50 {
 			workspace = "..." + workspace[len(workspace)-47:]
 		}
-
-		// Use project name as identifier if available
-		identifier := env.WorkspaceID
-		if env.ProjectName != "" {
-			identifier = env.ProjectName
+		name := env.Name
+		if name == "" {
+			name = env.WorkspaceID
 		}
-
-		rows = append(rows, []string{
-			identifier,
-			formatListState(env.State),
-			strings.Join(containerNames, ", "),
-			ui.Code(workspace),
-		})
+		rows = append(rows, []string{name, formatListState(string(env.State)), strings.Join(names, ", "), ui.Code(workspace)})
 	}
-
 	return ui.RenderTable(headers, rows)
 }
 

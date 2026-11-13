@@ -29,8 +29,8 @@ type ComposeProject struct {
 // cannot load an unrelated compose file.
 func ExistingComposeProject(info *state.ContainerInfo, defaultProject, defaultDir string) ComposeProject {
 	p := ComposeProject{
-		Name: info.GetComposeProject(defaultProject),
-		Dir:  info.GetConfigDir(defaultDir),
+		Name: info.ComposeProjectOr(defaultProject),
+		Dir:  info.ConfigDirOr(defaultDir),
 	}
 	if info == nil || info.Labels == nil {
 		return p

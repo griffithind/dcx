@@ -51,7 +51,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 		err := json.Unmarshal([]byte(input), &cfg)
 		require.NoError(t, err)
 
-		assert.Equal(t, []string{"docker-compose.yml", "docker-compose.override.yml"}, cfg.GetDockerComposeFiles())
+		assert.Equal(t, []string{"docker-compose.yml", "docker-compose.override.yml"}, []string(cfg.DockerComposeFile))
 		assert.Equal(t, "app", cfg.Service)
 		assert.Equal(t, []string{"app", "db"}, cfg.RunServices)
 		assert.True(t, cfg.IsComposePlan())
@@ -137,7 +137,7 @@ func TestSpecPropertyParsing(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"3000:3000", "5000:5000"}, specs(appPorts))
 
-		attr := cfg.GetPortAttribute("3000")
+		attr := cfg.PortAttributeFor("3000")
 		require.NotNil(t, attr)
 		assert.Equal(t, "Web", attr.Label)
 		assert.Equal(t, "http", attr.Protocol)

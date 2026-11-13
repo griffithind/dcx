@@ -277,7 +277,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 	image := baseImage
 
 	if len(r.resolved.Features) > 0 {
-		baseID, err := r.engine.GetImageID(ctx, image)
+		baseID, err := r.engine.ImageID(ctx, image)
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect base image %s: %w", image, err)
 		}
@@ -285,7 +285,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 			r.resolved.RemoteUser, r.resolved.ContainerUser)
 
 		baseImageMetadata := ""
-		if labels, err := r.engine.GetImageLabels(ctx, image); err == nil {
+		if labels, err := r.engine.ImageLabels(ctx, image); err == nil {
 			baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
 		}
 		image, err = r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
@@ -305,7 +305,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, rebuild
 	}
 
 	if r.resolved.ShouldUpdateUID {
-		imageID, err := r.engine.GetImageID(ctx, image)
+		imageID, err := r.engine.ImageID(ctx, image)
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect image %s: %w", image, err)
 		}
@@ -454,7 +454,7 @@ func (r *Provisioner) applyFeatureRequirements(s *ContainerSpec) {
 	if len(r.resolved.Features) == 0 {
 		return
 	}
-	reqs := features.GetSecurityRequirements(r.resolved.Features)
+	reqs := features.CollectSecurityRequirements(r.resolved.Features)
 	if reqs.Privileged || len(reqs.Capabilities) > 0 {
 		r.report.Warnf("Features require elevated permissions:")
 		for _, name := range reqs.FeatureNames {

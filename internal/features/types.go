@@ -293,8 +293,8 @@ func ParseFeatureSource(id string) (FeatureSource, error) {
 	return ref, nil
 }
 
-// GetOptionValue returns the effective value for an option.
-func (f *Feature) GetOptionValue(name string) interface{} {
+// OptionValue returns the effective value for an option.
+func (f *Feature) OptionValue(name string) interface{} {
 	// Check user-specified options first
 	if val, ok := f.Options[name]; ok {
 		return val
@@ -310,8 +310,8 @@ func (f *Feature) GetOptionValue(name string) interface{} {
 	return nil
 }
 
-// GetEnvVars returns environment variables for the feature options.
-func (f *Feature) GetEnvVars() map[string]string {
+// EnvVars returns environment variables for the feature options.
+func (f *Feature) EnvVars() map[string]string {
 	env := make(map[string]string)
 
 	if f.Metadata == nil {
@@ -320,7 +320,7 @@ func (f *Feature) GetEnvVars() map[string]string {
 
 	// Add option values as environment variables
 	for name := range f.Metadata.Options {
-		val := f.GetOptionValue(name)
+		val := f.OptionValue(name)
 		if val != nil {
 			// Normalize option name per devcontainer spec
 			envName := NormalizeOptionName(name)

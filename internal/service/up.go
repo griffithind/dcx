@@ -31,7 +31,7 @@ const phaseReady = "ready"
 type upRun struct {
 	opts     UpOptions
 	resolved *devcontainer.ResolvedDevContainer
-	ids      *Identifiers
+	ids      *devcontainer.Identity
 
 	action   upAction
 	state    state.ContainerState
@@ -59,9 +59,9 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	if err != nil {
 		return err
 	}
-	ids := s.Identifiers()
+	ids := s.Identity()
 
-	currentState, existing, err := s.stateManager.GetStateWithHash(ctx, resolved.ID, resolved.ConfigHash)
+	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -223,7 +223,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 			// Never remove named volumes when recreating: they hold user
 			// data that must survive a config change. Only an explicit
 			// `dcx down --volumes` removes them.
-			if err := s.DownWithIDs(ctx, r.ids.ProjectName, r.resolved.ID, DownOptions{}); err != nil {
+			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.ID, DownOptions{}); err != nil {
 				return fmt.Errorf("failed to remove existing environment: %w", err)
 			}
 		}
@@ -235,7 +235,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 		r.started = true
 	}
 
-	_, info, err := s.stateManager.GetState(ctx, r.resolved.ID)
+	_, info, err := s.stateManager.State(ctx, r.resolved.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}

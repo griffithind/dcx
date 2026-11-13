@@ -48,7 +48,7 @@ type StateValidationResult struct {
 // ValidateState checks if the current state meets the specified requirements.
 // Returns an error if requirements are not met.
 func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValidationResult, error) {
-	currentState, containerInfo, err := cliCtx.GetState()
+	currentState, containerInfo, err := cliCtx.State()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
@@ -131,4 +131,3 @@ func RequireExistingContainer(cliCtx *CLIContext) (*state.ContainerInfo, error) 
 	}
 	return result.ContainerInfo, nil
 }
-

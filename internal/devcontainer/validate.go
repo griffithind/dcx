@@ -70,7 +70,7 @@ func Validate(cfg *DevContainerConfig) error {
 
 	// Compose-specific validation
 	if hasCompose {
-		files := cfg.GetDockerComposeFiles()
+		files := cfg.DockerComposeFile
 		if len(files) == 0 {
 			errs = append(errs, ValidationError{
 				Field:   "dockerComposeFile",

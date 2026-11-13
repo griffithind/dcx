@@ -66,7 +66,7 @@ func TestParseDevcontainerJSON(t *testing.T) {
 			input: `{"dockerComposeFile": ["docker-compose.yml"], "service": "app"}`,
 			check: func(t *testing.T, cfg *DevContainerConfig) {
 				// Use getter since DockerComposeFile is interface{} type
-				files := cfg.GetDockerComposeFiles()
+				files := []string(cfg.DockerComposeFile)
 				assert.Equal(t, []string{"docker-compose.yml"}, files)
 				assert.Equal(t, "app", cfg.Service)
 			},

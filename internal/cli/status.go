@@ -5,8 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/ssh/hostconfig"
+	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -33,143 +32,92 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	// Initialize CLI context
 	cliCtx, err := NewCLIContext()
 	if err != nil {
 		return err
 	}
 	defer cliCtx.Close()
 
-	ids := cliCtx.Identifiers
-
-	// DCX customizations will be loaded later with cfg
-	var dcxCustom *devcontainer.DcxCustomizations
-
-	// Try to load config and compute hash for staleness detection.
-	//
-	// Staleness detection MUST use the same hash as `dcx up` produces at
-	// container creation time (devcontainer.ComputeConfigHash covers the
-	// full set of build inputs: devcontainer.json, Dockerfile, compose
-	// files, features). The resolved config carries that hash after
-	// Service.Load, so routing status through the same Load path keeps
-	// `dcx status` and `dcx up` in lockstep.
-	//
-	// Load can fail (features unreachable offline, invalid json, etc.). We
-	// degrade gracefully to a container-state-only view in that case rather
-	// than returning an incorrect "stale" verdict.
-	var currentState state.ContainerState
-	var containerInfo *state.ContainerInfo
-	var cfg *devcontainer.DevContainerConfig
-
-	// Attempt a resolve to pick up the full config hash + dcx customizations.
-	resolved, resolveErr := cliCtx.Service.Load(cliCtx.Ctx)
-	if resolveErr == nil {
-		cfg = resolved.RawConfig
-		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
-		currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithHash(cliCtx.Ctx, ids.WorkspaceID, resolved.ConfigHash)
-	} else if loaded, _, lerr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath()); lerr == nil {
-		cfg = loaded
-		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
-		currentState, containerInfo, err = cliCtx.GetState()
-	} else {
-		currentState, containerInfo, err = cliCtx.GetState()
-	}
-
+	report, err := cliCtx.Service.Status(cliCtx.Ctx, statusDetailed)
 	if err != nil {
-		return fmt.Errorf("failed to get state: %w", err)
+		return err
+	}
+	renderStatus(report, statusDetailed)
+	return nil
+}
+
+// renderStatus prints a status report.
+func renderStatus(r *service.StatusReport, detailed bool) {
+	label := func(indent, name, value string) { ui.Printf("%s%s", indent, ui.FormatLabel(name, value)) }
+
+	label("", "Workspace", ui.Code(r.WorkspacePath))
+	if r.Identity.ResourceName != "" {
+		label("", "Project", r.Identity.ResourceName)
+	}
+	label("", "Workspace ID", r.Identity.WorkspaceID)
+	label("", "State", ui.StateColor(string(r.State)))
+	switch {
+	case r.SSHAlias != "":
+		label("", "SSH", ui.Code("ssh "+r.SSHAlias))
+	case r.State != state.StateAbsent:
+		label("", "SSH", ui.Dim("not configured (run 'dcx up' to configure)"))
+	}
+	if r.Shortcuts > 0 {
+		label("", "Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", r.Shortcuts))
 	}
 
-	// Text output mode
-	ui.Printf("%s", ui.FormatLabel("Workspace", ui.Code(cliCtx.WorkspacePath())))
-	if ids.ProjectName != "" {
-		ui.Printf("%s", ui.FormatLabel("Project", ids.ProjectName))
-	}
-	ui.Printf("%s", ui.FormatLabel("Workspace ID", ids.WorkspaceID))
-	ui.Printf("%s", ui.FormatLabel("State", ui.StateColor(string(currentState))))
-
-	// Show SSH status
-	if aliases := sshAliases(containerInfo); len(aliases) > 0 {
-		ui.Printf("%s", ui.FormatLabel("SSH", ui.Code(fmt.Sprintf("ssh %s", aliases[0]))))
-	} else if currentState != state.StateAbsent {
-		ui.Printf("%s", ui.FormatLabel("SSH", ui.Dim("not configured (run 'dcx up' to configure)")))
-	}
-
-	// Show shortcuts count
-	if dcxCustom != nil && len(dcxCustom.Shortcuts) > 0 {
-		ui.Printf("%s", ui.FormatLabel("Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", len(dcxCustom.Shortcuts))))
-	}
-
-	// Container details
-	if containerInfo != nil {
+	if c := r.Container; c != nil {
 		ui.Println("")
 		ui.Println(ui.Bold("Primary Container"))
-
-		ui.Printf("  %s", ui.FormatLabel("ID", shortID(containerInfo.ID)))
-		ui.Printf("  %s", ui.FormatLabel("Name", containerInfo.Name))
-		ui.Printf("  %s", ui.FormatLabel("Status", containerInfo.Status))
-		if containerInfo.ConfigHash != "" {
-			ui.Printf("  %s", ui.FormatLabel("Config", shortID(containerInfo.ConfigHash)))
+		label("  ", "ID", shortID(c.ID))
+		label("  ", "Name", c.Name)
+		label("  ", "Status", c.Status)
+		if c.ConfigHash != "" {
+			label("  ", "Config", shortID(c.ConfigHash))
 		}
-
-		// Detailed mode: show more container info
-		if statusDetailed {
-			fullContainer, inspectErr := cliCtx.Docker.InspectContainer(cliCtx.Ctx, containerInfo.ID)
-			if inspectErr == nil {
-				ui.Println("")
-				ui.Println(ui.Bold("Container Details"))
-				ui.Printf("  %s", ui.FormatLabel("Image", fullContainer.Image))
-				if fullContainer.StartedAt != "" {
-					ui.Printf("  %s", ui.FormatLabel("Started", fullContainer.StartedAt))
-				}
-				ui.Printf("  %s", ui.FormatLabel("Running", fmt.Sprintf("%t", containerInfo.Running)))
+		if detailed && r.Image != "" {
+			ui.Println("")
+			ui.Println(ui.Bold("Container Details"))
+			label("  ", "Image", r.Image)
+			if r.StartedAt != "" {
+				label("  ", "Started", r.StartedAt)
 			}
+			label("  ", "Running", fmt.Sprintf("%t", c.Running))
 		}
 	}
 
-	// Detailed mode: show configuration
-	if statusDetailed && cfg != nil {
+	if cfg := r.Config; detailed && cfg != nil {
 		ui.Println("")
 		ui.Println(ui.Bold("Configuration"))
-		if cfg.Image != "" {
-			ui.Printf("  %s", ui.FormatLabel("Image", cfg.Image))
+		optional := func(name, value string) {
+			if value != "" {
+				label("  ", name, value)
+			}
 		}
+		optional("Image", cfg.Image)
 		if cfg.Build != nil {
-			if cfg.Build.Dockerfile != "" {
-				ui.Printf("  %s", ui.FormatLabel("Dockerfile", cfg.Build.Dockerfile))
-			}
-			if cfg.Build.Context != "" {
-				ui.Printf("  %s", ui.FormatLabel("Build Context", cfg.Build.Context))
-			}
+			optional("Dockerfile", cfg.Build.Dockerfile)
+			optional("Build Context", cfg.Build.Context)
 		}
-		if composeFiles := cfg.GetDockerComposeFiles(); len(composeFiles) > 0 {
-			ui.Printf("  %s", ui.FormatLabel("Compose Files", strings.Join(composeFiles, ", ")))
+		optional("Compose Files", strings.Join(cfg.DockerComposeFile, ", "))
+		optional("Service", cfg.Service)
+		optional("Remote User", cfg.RemoteUser)
+		optional("Workspace Folder", cfg.WorkspaceFolder)
+		features := make([]string, 0, len(cfg.Features))
+		for f := range cfg.Features {
+			features = append(features, f)
 		}
-		if cfg.Service != "" {
-			ui.Printf("  %s", ui.FormatLabel("Service", cfg.Service))
-		}
-		if cfg.RemoteUser != "" {
-			ui.Printf("  %s", ui.FormatLabel("Remote User", cfg.RemoteUser))
-		}
-		if cfg.WorkspaceFolder != "" {
-			ui.Printf("  %s", ui.FormatLabel("Workspace Folder", cfg.WorkspaceFolder))
-		}
-		if len(cfg.Features) > 0 {
-			featureList := make([]string, 0, len(cfg.Features))
-			for f := range cfg.Features {
-				featureList = append(featureList, f)
-			}
-			ui.Printf("  %s", ui.FormatLabel("Features", strings.Join(featureList, ", ")))
-		}
-		if resolved != nil && resolved.ConfigHash != "" {
-			ui.Printf("  %s", ui.FormatLabel("Config Hash", shortID(resolved.ConfigHash)))
+		sort.Strings(features)
+		optional("Features", strings.Join(features, ", "))
+		if r.ConfigHash != "" {
+			optional("Config Hash", shortID(r.ConfigHash))
 		}
 	}
 
-	// Detailed mode: show labels
-	if statusDetailed && containerInfo != nil {
-		labelMap := containerInfo.Labels.ToMap()
-		var keys []string
-		for k := range labelMap {
+	if detailed && r.Container != nil && r.Container.Labels != nil {
+		labels := r.Container.Labels.ToMap()
+		keys := make([]string, 0, len(labels))
+		for k := range labels {
 			if strings.HasPrefix(k, state.Prefix+".") {
 				keys = append(keys, k)
 			}
@@ -179,20 +127,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			ui.Println("")
 			ui.Println(ui.Bold("Labels"))
 			for _, k := range keys {
-				ui.Printf("  %s: %s", ui.Dim(k), labelMap[k])
+				ui.Printf("  %s: %s", ui.Dim(k), labels[k])
 			}
 		}
 	}
-
-	return nil
-}
-
-// sshAliases returns the SSH aliases configured for a container.
-func sshAliases(info *state.ContainerInfo) []string {
-	if info == nil {
-		return nil
-	}
-	return hostconfig.Aliases(info.Name)
 }
 
 // shortID shortens a container ID or hash for display. Values that are

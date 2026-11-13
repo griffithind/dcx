@@ -39,7 +39,8 @@ func init() {
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx, stop := commandContext()
+	defer stop()
 
 	docker, err := container.NewDocker()
 	if err != nil {
@@ -104,7 +105,7 @@ func showCleanStats(ctx context.Context, docker *container.Docker) error {
 	ui.Println("")
 
 	// Show derived images
-	count, size, err := docker.GetDerivedImageStats(ctx)
+	count, size, err := docker.DerivedImageStats(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get derived image stats: %w", err)
 	}

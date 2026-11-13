@@ -237,6 +237,29 @@ Regression tests: env patch (unit), lock modes, feature cache, and two e2e tests
 - **Rename:** `internal/ssh/server` → `internal/agent`, the dcx-agent itself. The depguard rules and `CLAUDE.md` follow.
 - **Size:** the service drops from about 1,450 to about 1,100 lines across `devcontainer.go` and `up.go`. Service coverage dips from 33% to 28%, because tested agent code moved out; agentctl is at 67%. What remains is orchestration, config loading, image-metadata merge, environment setup, SSH config and `Lock`.
 
+**Step 6 (thin CLI and renames): done.**
+- **Status and list data come from the service.** `Service.Status()` and `Service.List()` return data and the CLI only renders it. `runStatus` (cyclomatic 35) and the list grouping logic are gone from the CLI, and status now lists features in sorted order. Golden tests in `internal/cli/testdata` pin the status (normal, detailed, absent) and list output; `Service.List` has a fake-engine test.
+- **Composition root:** `cli/context.go` holds `commandContext` (Ctrl-C aware) and `newService`. No command builds its own service any more, and none uses `context.Background()`, so Ctrl-C cancels `lock`, `doctor`, `debug`, `clean` and `ssh info` too. `lock` and `config` no longer require a running Docker daemon.
+- **Identity:** `service.Identifiers` and `devcontainer.DevContainerID` became one `devcontainer.Identity{WorkspaceID, Name, ResourceName, SSHHost}`, read through `Service.Identity()`. "ProjectName", which meant two things, is now `ResourceName`; status still labels it "Project" (scripts and tests parse that line). When the config is unreadable, the resource name now comes from the directory name instead of being empty.
+- **Get prefixes dropped:** `ImageID`/`ImageLabels`/`Logs` (Engine), `StateManager`, `State`/`StateWithHash`, `ComposeProjectOr`/`ConfigDirOr`, `lockfile.Path`, `dcxembed.Binary`, `Feature.EnvVars`/`OptionValue`, `DerivedImageStats`, `cfg.DcxCustomizations()` (now a method), `selinux.CurrentMode` and `features.CollectSecurityRequirements` (the last two avoid clashing with type names). `GetDockerComposeFiles` is gone (use the field), and `GetPortAttribute` is now `PortAttributeFor`. The only remaining `Get*` functions are e2e helpers.
+- **Not done:** per-command option structs. Cobra flags are still package globals, but only `context.go` reads the workspace and config ones.
+
+## Where this leaves the codebase
+
+All six steps are done. Compared with this audit's starting point:
+- the confirmed bugs (two root injections among them) are fixed, with regression tests;
+- about 1,500 lines of dead code are gone;
+- only `container/docker.go` runs `docker`, enforced by lint;
+- `up` makes one decision, and stop/restart and the agent each have one owner;
+- the CLI renders service data and has golden tests;
+- the vocabulary matches what the code does.
+
+Still open:
+- image metadata for Dockerfile and compose bases;
+- `waitFor` (everything runs in the foreground);
+- a friendly "not running" message for plain `ssh`;
+- `cli` and `container` coverage (thin rendering and Docker CLI glue, best covered by the e2e suite).
+
 ## 5. Recommended plan
 
 Each step ships on its own, in this order:

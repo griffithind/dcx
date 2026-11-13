@@ -19,7 +19,7 @@ type Engine interface {
 	// BuildImage builds opts (paths already absolute) and tags it opts.Tag.
 	BuildImage(ctx context.Context, opts DockerfileBuildOptions) error
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
-	GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
+	ImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
 }
 
 // DockerfileBuildOptions contains options for building from a Dockerfile.

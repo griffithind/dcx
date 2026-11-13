@@ -24,8 +24,8 @@ import (
 
 // DevContainerService provides high-level operations for devcontainer environments.
 type DevContainerService struct {
-	idsOnce sync.Once
-	ids     *Identifiers
+	idOnce   sync.Once
+	identity *devcontainer.Identity
 
 	engine        container.Engine
 	report        report.Reporter
@@ -58,29 +58,19 @@ func NewDevContainerService(engine container.Engine, rep report.Reporter, worksp
 	}
 }
 
-// Identifiers contains the core identifiers for a workspace.
-type Identifiers struct {
-	ProjectName string
-	WorkspaceID string
-	SSHHost     string
-}
-
-// Identifiers returns the workspace's identifiers, computed once per
-// service. The workspace ID depends only on the path; the resource name
-// and SSH alias use devcontainer.json's name, so when the config cannot be
-// read they fall back to the ID.
-func (s *DevContainerService) Identifiers() *Identifiers {
-	s.idsOnce.Do(func() {
+// Identity returns the workspace's identity, computed once per service.
+// The workspace ID depends only on the path; the name, resource name and
+// SSH alias come from devcontainer.json when it can be read, and from the
+// directory name otherwise.
+func (s *DevContainerService) Identity() *devcontainer.Identity {
+	s.idOnce.Do(func() {
 		cfg, _, err := devcontainer.Load(s.workspacePath, s.configPath)
 		if err != nil {
-			id := devcontainer.ComputeID(s.workspacePath)
-			s.ids = &Identifiers{WorkspaceID: id, SSHHost: id + devcontainer.SSHHostSuffix}
-			return
+			cfg = nil
 		}
-		dcID := devcontainer.ComputeDevContainerID(s.workspacePath, cfg)
-		s.ids = &Identifiers{ProjectName: dcID.ProjectName, WorkspaceID: dcID.ID, SSHHost: dcID.SSHHost}
+		s.identity = devcontainer.ComputeIdentity(s.workspacePath, cfg)
 	})
-	return s.ids
+	return s.identity
 }
 
 // SSHAlias returns the alias `ssh` reaches this workspace by: the first
@@ -88,8 +78,8 @@ func (s *DevContainerService) Identifiers() *Identifiers {
 // "<container>.dcx" when another workspace already uses that name), or the
 // default alias when no block exists yet.
 func (s *DevContainerService) SSHAlias(ctx context.Context) string {
-	ids := s.Identifiers()
-	if _, info, err := s.stateManager.GetState(ctx, ids.WorkspaceID); err == nil && info != nil {
+	ids := s.Identity()
+	if _, info, err := s.stateManager.State(ctx, ids.WorkspaceID); err == nil && info != nil {
 		if aliases := hostconfig.Aliases(info.Name); len(aliases) > 0 {
 			return aliases[0]
 		}
@@ -97,8 +87,8 @@ func (s *DevContainerService) SSHAlias(ctx context.Context) string {
 	return ids.SSHHost
 }
 
-// GetStateManager returns the state manager for direct access when needed.
-func (s *DevContainerService) GetStateManager() *state.StateManager {
+// StateManager returns the state manager for direct access when needed.
+func (s *DevContainerService) StateManager() *state.StateManager {
 	return s.stateManager
 }
 
@@ -199,13 +189,13 @@ func (s *DevContainerService) mergeImageMetadata(ctx context.Context, cfg *devco
 		return cfg
 	}
 
-	labels, err := s.engine.GetImageLabels(ctx, imageRef)
+	labels, err := s.engine.ImageLabels(ctx, imageRef)
 	if err != nil && pull {
 		s.report.Infof("Pulling image: %s", imageRef)
 		if perr := s.engine.PullImageWithProgress(ctx, imageRef, io.Discard); perr != nil {
 			s.report.Warnf("Could not pull %s to read its metadata: %v", imageRef, perr)
 		} else {
-			labels, err = s.engine.GetImageLabels(ctx, imageRef)
+			labels, err = s.engine.ImageLabels(ctx, imageRef)
 		}
 	}
 	if err != nil {
@@ -376,7 +366,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 // writes the ~/.ssh/config block pointing at 127.0.0.1:<port>.
 func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
 	if containerInfo == nil {
-		_, containerInfo, _ = s.stateManager.GetState(ctx, resolved.ID)
+		_, containerInfo, _ = s.stateManager.State(ctx, resolved.ID)
 	}
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
@@ -388,7 +378,7 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 		user = "root"
 	}
 
-	ids := s.Identifiers()
+	ids := s.Identity()
 
 	// Discover the host-side ephemeral port Docker picked for our listener.
 	port, err := s.engine.PortMapping(ctx, containerInfo.Name, agentproto.ListenPort, "tcp")
@@ -432,7 +422,7 @@ type DownOptions = container.DownOptions
 
 // DownWithIDs removes the environment using just project name and workspace ID.
 func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
-	currentState, containerInfo, err := s.stateManager.GetState(ctx, workspaceID)
+	currentState, containerInfo, err := s.stateManager.State(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -560,7 +550,7 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 	if len(cfg.Features) == 0 {
 		return &LockResult{
 			Action:       LockActionNoFeatures,
-			LockfilePath: lockfile.GetPath(configPath),
+			LockfilePath: lockfile.Path(configPath),
 		}, nil
 	}
 
@@ -574,7 +564,7 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 	// spec's "initialize me" marker) is not a lockfile either.
 	if opts.Mode != LockModeGenerate && existingLockfile == nil {
 		if initMarker {
-			return nil, fmt.Errorf("lockfile %s is empty: run 'dcx lock' to generate it", lockfile.GetPath(configPath))
+			return nil, fmt.Errorf("lockfile %s is empty: run 'dcx lock' to generate it", lockfile.Path(configPath))
 		}
 		return nil, fmt.Errorf("lockfile not found: run 'dcx lock' to generate one")
 	}
@@ -605,7 +595,7 @@ func (s *DevContainerService) Lock(ctx context.Context, opts LockOptions) (*Lock
 
 	// Generate new lockfile from resolved features
 	newLockfile := features.GenerateLockfile(resolvedFeatures)
-	lockfilePath := lockfile.GetPath(configPath)
+	lockfilePath := lockfile.Path(configPath)
 
 	// Handle based on mode
 	switch opts.Mode {

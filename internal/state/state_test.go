@@ -25,4 +25,3 @@ func TestContainerStateString(t *testing.T) {
 		})
 	}
 }
-

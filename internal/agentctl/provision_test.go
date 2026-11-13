@@ -122,7 +122,7 @@ func TestLaunchTimeoutIncludesAgentLog(t *testing.T) {
 			return nil
 		},
 		Outputs: map[string]string{
-			strings.Join(ownerQuery, " "): "1000:1001",
+			strings.Join(ownerQuery, " "):      "1000:1001",
 			"tail -n 20 " + agentproto.LogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n",
 		},
 	}

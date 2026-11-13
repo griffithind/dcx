@@ -25,11 +25,11 @@ type Engine interface {
 	CreateContainer(ctx context.Context, spec ContainerSpec) (string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	PortMapping(ctx context.Context, containerName string, containerPort int, proto string) (int, error)
-	GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
+	Logs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error)
 
 	ImageExists(ctx context.Context, imageRef string) (bool, error)
-	GetImageID(ctx context.Context, imageRef string) (string, error)
-	GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
+	ImageID(ctx context.Context, imageRef string) (string, error)
+	ImageLabels(ctx context.Context, imageRef string) (map[string]string, error)
 	PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error
 	BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error
 

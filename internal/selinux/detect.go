@@ -35,8 +35,8 @@ func (m Mode) IsEnforcing() bool {
 	return m == ModeEnforcing
 }
 
-// GetMode returns the current SELinux mode.
-func GetMode() (Mode, error) {
+// CurrentMode returns the current SELinux mode.
+func CurrentMode() (Mode, error) {
 	// SELinux only exists on Linux
 	if runtime.GOOS != "linux" {
 		return ModeDisabled, nil

@@ -147,7 +147,7 @@ func TestFeature_GetEnvVars(t *testing.T) {
 		},
 	}
 
-	env := feature.GetEnvVars()
+	env := feature.EnvVars()
 
 	// Should have user-specified values
 	assert.Equal(t, "1.19", env["VERSION"])
@@ -292,7 +292,7 @@ func TestFeatureOptionsHandling(t *testing.T) {
 		},
 	}
 
-	env := feature.GetEnvVars()
+	env := feature.EnvVars()
 
 	// User-specified values should be set
 	assert.Equal(t, "testuser", env["USERNAME"])
@@ -358,7 +358,7 @@ func TestFeatureOptionsWithBooleans(t *testing.T) {
 				},
 			}
 
-			env := feature.GetEnvVars()
+			env := feature.EnvVars()
 			for k, v := range tt.expected {
 				assert.Equal(t, v, env[k])
 			}
@@ -438,7 +438,7 @@ func TestNormalizeOptionName(t *testing.T) {
 	}
 }
 
-// TestGetEnvVarsWithNormalization tests that GetEnvVars uses normalized option names.
+// TestGetEnvVarsWithNormalization tests that EnvVars uses normalized option names.
 func TestGetEnvVarsWithNormalization(t *testing.T) {
 	feature := &Feature{
 		ID: "test-feature",
@@ -465,7 +465,7 @@ func TestGetEnvVarsWithNormalization(t *testing.T) {
 		},
 	}
 
-	env := feature.GetEnvVars()
+	env := feature.EnvVars()
 
 	// Options should be normalized
 	assert.Equal(t, "value1", env["MY_OPTION"])

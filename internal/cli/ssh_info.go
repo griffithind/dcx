@@ -49,14 +49,15 @@ type sshInfo struct {
 }
 
 func runSSHInfo(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx, stop := commandContext()
+	defer stop()
 
 	// Docker is optional here: identifiers and host-key details work without
 	// it, and the port lookup below is best-effort.
 	docker := containerPkg.NewDockerCLI()
-	svc := service.NewDevContainerService(docker, sshInfoReporter(), workspacePath, configPath, verbose)
+	svc := newService(docker, sshInfoReporter())
 
-	ids := svc.Identifiers()
+	ids := svc.Identity()
 
 	hostKeyPath, signer, err := dcxssh.LoadHostKey(ids.WorkspaceID)
 	if err != nil {
@@ -138,7 +139,7 @@ func runSSHDoctor(ctx context.Context, info sshInfo) error {
 }
 
 func resolveContainerName(ctx context.Context, svc *service.DevContainerService, workspaceID string) string {
-	_, info, err := svc.GetStateManager().GetState(ctx, workspaceID)
+	_, info, err := svc.StateManager().State(ctx, workspaceID)
 	if err != nil || info == nil {
 		return ""
 	}

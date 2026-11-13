@@ -470,8 +470,8 @@ func TestFeatureSecurityRequirementsIntegration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test GetSecurityRequirements
-			reqs := features.GetSecurityRequirements(tt.features)
+			// Test CollectSecurityRequirements
+			reqs := features.CollectSecurityRequirements(tt.features)
 			assert.Equal(t, tt.wantPrivileged, reqs.Privileged, "privileged mismatch")
 			assert.ElementsMatch(t, tt.wantCaps, reqs.Capabilities, "capabilities mismatch")
 			assert.ElementsMatch(t, tt.wantSecurityOpts, reqs.SecurityOpts, "security opts mismatch")
@@ -542,7 +542,7 @@ func TestFeatureSecurityWarnings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reqs := features.GetSecurityRequirements(tt.features)
+			reqs := features.CollectSecurityRequirements(tt.features)
 			assert.ElementsMatch(t, tt.wantFeatureNames, reqs.FeatureNames, "feature names mismatch")
 		})
 	}

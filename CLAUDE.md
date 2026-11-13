@@ -60,15 +60,17 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | File | Purpose |
 |------|---------|
 | `root.go` | Root command, global flags (`--workspace`, `--config`, `--quiet`, `--verbose`) |
-| `context.go` | `CLIContext` - shared init for Docker client, Service, Identifiers |
+| `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newService`, `CLIContext` (Docker, Service, Identity) |
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
 | `status.go`, `logs.go`, `list.go` | Information commands |
 
+Commands get their context, engine and service from `context.go` (`NewCLIContext`, or `commandContext` + `newService` for commands that must work without a Docker daemon); they never construct a service or Docker client themselves.
+
 **CLI Pattern:**
 ```go
-cliCtx, err := NewCLIContext()  // Init Docker, Service, Identifiers
+cliCtx, err := NewCLIContext()  // Init Docker, Service, Identity
 if err != nil { return err }
 defer cliCtx.Close()            // Always cleanup
 return cliCtx.Service.Up(...)   // Delegate to service
@@ -83,6 +85,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 - `Load()` / `LoadWithOptions()` - Resolve devcontainer configuration
 - `Stop()` / `Restart()` - Stop (honouring `shutdownAction`), or stop and bring up again through `Up`
 - `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
+- `Status()` / `List()` - Data for `dcx status` / `dcx list`; the CLI only renders it (golden tests in `internal/cli/testdata`)
 - `Down()` / `DownWithIDs()` - Remove containers
 - `Build()` - Build images without starting
 - `Lock()` - Generate/verify lockfile
@@ -234,10 +237,10 @@ ResolvedDevContainer
 ```
 CLI: dcx up
     ↓ NewCLIContext()
-CLIContext (Docker, Service, Identifiers)
+CLIContext (Docker, Service, Identity)
     ↓ Service.Up()
     ├─ Load() → ResolvedDevContainer
-    ├─ StateManager.GetState() → check labels
+    ├─ StateManager.State() → check labels
     ├─ If stale: Down() first
     ├─ Provisioner.Up()
     │   ├─ ImagePlan: Pull image
@@ -254,7 +257,7 @@ CLIContext (Docker, Service, Identifiers)
 
 ### State Detection
 ```
-StateManager.GetState()
+StateManager.State()
     ↓ Docker.ListContainers(labels)
 Find containers with workspace.id or workspace.name
     ↓ Find primary container
@@ -272,7 +275,7 @@ cliCtx, err := NewCLIContext()
 defer cliCtx.Close()
 // cliCtx.Docker - Docker CLI engine, passed into the service
 // cliCtx.Service - DevContainerService
-// cliCtx.Identifiers - project/workspace IDs
+// cliCtx.Identity - workspace ID, resource name, SSH alias (devcontainer.Identity)
 ```
 
 ### Strategy Pattern (Provisioner)

@@ -52,7 +52,7 @@ func TestGetStateWithHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithHash(
+		state, _, err := mgr.StateWithHash(
 			context.Background(), "test-workspace", "new-hash")
 
 		require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestGetStateWithHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithHash(
+		state, _, err := mgr.StateWithHash(
 			context.Background(), "test-workspace", "same-hash")
 
 		require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestGetStateWithHash(t *testing.T) {
 		client := &mockContainerClient{}
 
 		mgr := NewStateManager(client)
-		state, info, err := mgr.GetStateWithHash(
+		state, info, err := mgr.StateWithHash(
 			context.Background(), "test-workspace", "any-hash")
 
 		require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestGetStateWithHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithHash(
+		state, _, err := mgr.StateWithHash(
 			context.Background(), "test-workspace", "any-hash")
 
 		require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestGetStateWithHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithHash(
+		state, _, err := mgr.StateWithHash(
 			context.Background(), "test-workspace", "hash-after-dockerfile-change")
 
 		require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestLegacyHashIsNotStale(t *testing.T) {
 		},
 	}}}
 
-	state, info, err := NewStateManager(client).GetStateWithHash(context.Background(), "ws", "new-hash")
+	state, info, err := NewStateManager(client).StateWithHash(context.Background(), "ws", "new-hash")
 	require.NoError(t, err)
 	assert.Equal(t, StateRunning, state)
 	assert.True(t, info.IsLegacyHash())

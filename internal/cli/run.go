@@ -60,7 +60,7 @@ func runRunCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get DCX customizations
-	dcxCustom := devcontainer.GetDcxCustomizations(cfg)
+	dcxCustom := cfg.DcxCustomizations()
 
 	// Handle --list flag
 	if runList {

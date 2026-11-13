@@ -123,7 +123,7 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 	featureDir := fmt.Sprintf("feature_%d", index)
 
 	// Set option environment variables as build args (not persisted in image)
-	envVars := feature.GetEnvVars()
+	envVars := feature.EnvVars()
 	for _, key := range sortedKeys(envVars) {
 		fmt.Fprintf(sb, "ARG %s=%s\n", key, dockerfileQuote(envVars[key]))
 	}
@@ -184,8 +184,8 @@ type SecurityRequirements struct {
 	FeatureNames []string // Features that require elevated privileges
 }
 
-// GetSecurityRequirements returns all security requirements from features.
-func GetSecurityRequirements(features []*Feature) SecurityRequirements {
+// CollectSecurityRequirements returns all security requirements from features.
+func CollectSecurityRequirements(features []*Feature) SecurityRequirements {
 	reqs := SecurityRequirements{}
 
 	capMap := make(map[string]bool)

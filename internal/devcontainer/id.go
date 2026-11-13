@@ -7,20 +7,21 @@ import (
 	"strings"
 )
 
-// DevContainerID is a lightweight identifier for quick lookups.
-// Use this when you don't need the full ResolvedDevContainer.
-type DevContainerID struct {
-	// ID is the stable workspace identifier (hash of workspace path).
-	ID string
+// Identity names a workspace: how dcx finds its containers, names its
+// Docker resources and aliases it for SSH.
+type Identity struct {
+	// WorkspaceID is the stable workspace identifier (hash of its path).
+	WorkspaceID string
 
-	// Name is the human-readable name (from config or directory name).
+	// Name is the human-readable name (devcontainer.json name, or the
+	// directory name).
 	Name string
 
-	// ProjectName is the Docker resource name (container name and default
-	// compose project): "<sanitized name>-<id prefix>", unique per workspace.
-	ProjectName string
+	// ResourceName is the Docker container name and default compose
+	// project: "<sanitized name>-<id prefix>", unique per workspace.
+	ResourceName string
 
-	// SSHHost is the SSH hostname (name.dcx or id.dcx).
+	// SSHHost is the preferred SSH alias ("<name>.dcx", or "<id>.dcx").
 	SSHHost string
 }
 
@@ -65,9 +66,9 @@ func ComputeName(workspacePath string, cfg *DevContainerConfig) string {
 	return filepath.Base(workspacePath)
 }
 
-// ComputeDevContainerID creates a DevContainerID from workspace path and config.
-// The ProjectName is derived from the devcontainer.json name field (sanitized).
-func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevContainerID {
+// ComputeIdentity derives a workspace's identity from its path and config
+// (cfg may be nil when the config cannot be read).
+func ComputeIdentity(workspacePath string, cfg *DevContainerConfig) *Identity {
 	id := ComputeID(workspacePath)
 
 	name := filepath.Base(workspacePath)
@@ -85,11 +86,11 @@ func ComputeDevContainerID(workspacePath string, cfg *DevContainerConfig) *DevCo
 	}
 	sshHost = sshHost + SSHHostSuffix
 
-	return &DevContainerID{
-		ID:          id,
-		Name:        name,
-		ProjectName: ResourceName(name, id),
-		SSHHost:     sshHost,
+	return &Identity{
+		WorkspaceID:  id,
+		Name:         name,
+		ResourceName: ResourceName(name, id),
+		SSHHost:      sshHost,
 	}
 }
 

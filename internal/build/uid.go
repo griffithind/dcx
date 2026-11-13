@@ -84,7 +84,7 @@ func (b *Builder) BuildUIDUpdate(ctx context.Context, opts UIDBuildOptions) (str
 	// Get metadata from base image if not provided
 	metadata := opts.Metadata
 	if metadata == "" {
-		labels, err := b.engine.GetImageLabels(ctx, opts.BaseImage)
+		labels, err := b.engine.ImageLabels(ctx, opts.BaseImage)
 		if err == nil && labels != nil {
 			metadata = labels[devcontainer.DevcontainerMetadataLabel]
 		}

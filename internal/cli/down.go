@@ -34,7 +34,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	defer cliCtx.Close()
 
-	if err := cliCtx.Service.DownWithIDs(cliCtx.Ctx, cliCtx.Identifiers.ProjectName, cliCtx.Identifiers.WorkspaceID, service.DownOptions{
+	if err := cliCtx.Service.DownWithIDs(cliCtx.Ctx, cliCtx.Identity.ResourceName, cliCtx.Identity.WorkspaceID, service.DownOptions{
 		RemoveVolumes: removeVolumes,
 		RemoveOrphans: removeOrphans,
 	}); err != nil {
@@ -42,7 +42,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 	// A user-requested down retires the workspace's SSH host key too (a
 	// recreate inside `dcx up` keeps it, so editors' pins stay valid).
-	if err := dcxssh.RemoveHostKey(cliCtx.Identifiers.WorkspaceID); err != nil {
+	if err := dcxssh.RemoveHostKey(cliCtx.Identity.WorkspaceID); err != nil {
 		ui.Warning("Failed to remove SSH host key: %v", err)
 	}
 	return nil

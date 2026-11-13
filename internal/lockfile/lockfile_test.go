@@ -38,9 +38,9 @@ func TestGetPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.configPath, func(t *testing.T) {
-			result := GetPath(tt.configPath)
+			result := Path(tt.configPath)
 			if result != tt.expected {
-				t.Errorf("GetPath(%q) = %q, want %q", tt.configPath, result, tt.expected)
+				t.Errorf("Path(%q) = %q, want %q", tt.configPath, result, tt.expected)
 			}
 		})
 	}
@@ -180,7 +180,7 @@ func TestLockfileSaveLoad(t *testing.T) {
 	}
 
 	// Verify file exists
-	lockfilePath := GetPath(configPath)
+	lockfilePath := Path(configPath)
 	if _, err := os.Stat(lockfilePath); err != nil {
 		t.Fatalf("lockfile not created: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestLockfileLoadEmptyFile(t *testing.T) {
 
 	// Create empty lockfile (init marker per spec)
 	configPath := filepath.Join(tmpDir, "devcontainer.json")
-	lockfilePath := GetPath(configPath)
+	lockfilePath := Path(configPath)
 	if err := os.WriteFile(lockfilePath, []byte(""), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/container"
-	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -113,7 +112,8 @@ type StalenessDebug struct {
 }
 
 func runDebug(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx, stop := commandContext()
+	defer stop()
 
 	debug := &DebugInfo{
 		Version: "dev",
@@ -170,7 +170,7 @@ func getDockerInfo(ctx context.Context) DockerInfo {
 func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	// Resolve exactly as `dcx up` does (discovery, substitution, image
 	// metadata, lockfile), so debug output cannot disagree with up.
-	svc := service.NewDevContainerService(container.NewDockerCLI(), debugReporter(), workspacePath, configPath, verbose)
+	svc := newService(container.NewDockerCLI(), debugReporter())
 	resolved, err := svc.Load(ctx)
 	if err != nil {
 		return err
@@ -217,9 +217,9 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 		return
 	}
 
-	svc := service.NewDevContainerService(docker, debugReporter(), workspacePath, configPath, verbose)
+	svc := newService(docker, debugReporter())
 
-	ids := svc.Identifiers()
+	ids := svc.Identity()
 
 	// Try to find container by workspace ID
 	workspaceID := debug.Workspace.ID
@@ -227,7 +227,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 		workspaceID = ids.WorkspaceID
 	}
 
-	s, info, _ := svc.GetStateManager().GetState(ctx, workspaceID)
+	s, info, _ := svc.StateManager().State(ctx, workspaceID)
 
 	debug.Container = ContainerDebug{
 		Found: info != nil,

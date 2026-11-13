@@ -22,7 +22,7 @@ func stopTestService(t *testing.T, running bool, shutdownAction string) (*DevCon
 		require.NoError(t, os.WriteFile(filepath.Join(svc.workspacePath, ".devcontainer", "devcontainer.json"),
 			[]byte(`{"name": "svc-test", "image": "alpine:latest", "shutdownAction": "`+shutdownAction+`"}`), 0o644))
 	}
-	ids := svc.Identifiers()
+	ids := svc.Identity()
 	labels := state.NewContainerLabels()
 	labels.WorkspaceID = ids.WorkspaceID
 	labels.BuildMethod = state.BuildMethodImage

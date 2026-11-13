@@ -48,8 +48,8 @@ func NewStateManager(client ContainerClient) *StateManager {
 	return &StateManager{client: client}
 }
 
-// GetState determines the current state of the devcontainer environment.
-func (m *StateManager) GetState(ctx context.Context, workspaceID string) (ContainerState, *ContainerInfo, error) {
+// State determines the current state of the devcontainer environment.
+func (m *StateManager) State(ctx context.Context, workspaceID string) (ContainerState, *ContainerInfo, error) {
 	containers, err := m.client.ListContainersWithLabels(ctx, map[string]string{
 		LabelWorkspaceID: workspaceID,
 	})
@@ -121,8 +121,8 @@ func (c *ContainerInfo) IsLegacyHash() bool {
 }
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
-func (m *StateManager) GetStateWithHash(ctx context.Context, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
-	state, info, err := m.GetState(ctx, workspaceID)
+func (m *StateManager) StateWithHash(ctx context.Context, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
+	state, info, err := m.State(ctx, workspaceID)
 	if err != nil || info == nil {
 		return state, info, err
 	}

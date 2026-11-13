@@ -105,7 +105,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		resolved.Plan = plan
 
 	case PlanTypeCompose:
-		composeFiles := opts.Config.GetDockerComposeFiles()
+		composeFiles := opts.Config.DockerComposeFile
 		absolutePaths := make([]string, len(composeFiles))
 		for i, f := range composeFiles {
 			absolutePaths[i] = filepath.Join(resolved.ConfigDir, f)
@@ -200,7 +200,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	}
 
 	// Extract secrets from DCX customizations
-	if dcxConfig := GetDcxCustomizations(opts.Config); dcxConfig != nil {
+	if dcxConfig := opts.Config.DcxCustomizations(); dcxConfig != nil {
 		if len(dcxConfig.Secrets) > 0 {
 			resolved.RuntimeSecrets = dcxConfig.Secrets
 		}

@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -25,18 +27,33 @@ type CLIContext struct {
 	// Service is the devcontainer service for devcontainer operations.
 	Service *service.DevContainerService
 
-	// Identifiers contains the workspace identifiers (project name, workspace ID, etc.).
-	Identifiers *service.Identifiers
+	// Identity names the workspace (ID, resource name, SSH alias).
+	Identity *devcontainer.Identity
 
 	stop context.CancelFunc
 }
 
-// NewCLIContext creates and initializes a CLIContext with Docker client,
-// service, and identifiers. The caller must call Close() when done.
+// This file is the CLI's composition root: commands get their context,
+// engine and service from here rather than building their own.
+
+// commandContext returns the context for a command: Ctrl-C / SIGTERM
+// cancel it, so hooks, builds, feature fetches and remote commands stop
+// (every step of Up is safe to run again). Call stop when done.
+func commandContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// newService builds the DevContainerService for the global workspace and
+// config flags. It is the only place the CLI constructs one.
+func newService(engine container.Engine, rep report.Reporter) *service.DevContainerService {
+	return service.NewDevContainerService(engine, rep, workspacePath, configPath, verbose)
+}
+
+// NewCLIContext creates the context, Docker engine (checking the daemon is
+// reachable), service and identifiers for a command that talks to Docker.
+// The caller must call Close() when done.
 func NewCLIContext() (*CLIContext, error) {
-	// Ctrl-C / SIGTERM cancel the operation: hooks and remote commands are
-	// stopped and Up returns early. Every step of Up is safe to run again.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := commandContext()
 
 	docker, err := container.NewDocker()
 	if err != nil {
@@ -44,18 +61,15 @@ func NewCLIContext() (*CLIContext, error) {
 		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
 	}
 
-	// Create service
-	svc := service.NewDevContainerService(docker, ui.Reporter(), workspacePath, configPath, verbose)
-
-	// Get identifiers
-	ids := svc.Identifiers()
+	svc := newService(docker, ui.Reporter())
+	ids := svc.Identity()
 
 	return &CLIContext{
-		stop:        stop,
-		Ctx:         ctx,
-		Docker:      docker,
-		Service:     svc,
-		Identifiers: ids,
+		stop:     stop,
+		Ctx:      ctx,
+		Docker:   docker,
+		Service:  svc,
+		Identity: ids,
 	}, nil
 }
 
@@ -65,20 +79,10 @@ func (c *CLIContext) Close() {
 	if c.stop != nil {
 		c.stop()
 	}
-
 }
 
-// GetState retrieves the current container state.
-func (c *CLIContext) GetState() (state.ContainerState, *state.ContainerInfo, error) {
-	return c.Service.GetStateManager().GetState(c.Ctx, c.Identifiers.WorkspaceID)
+// State retrieves the current container state.
+func (c *CLIContext) State() (state.ContainerState, *state.ContainerInfo, error) {
+	return c.Service.StateManager().State(c.Ctx, c.Identity.WorkspaceID)
 }
 
-// WorkspacePath returns the current workspace path.
-func (c *CLIContext) WorkspacePath() string {
-	return workspacePath
-}
-
-// ConfigPath returns the current config path.
-func (c *CLIContext) ConfigPath() string {
-	return configPath
-}

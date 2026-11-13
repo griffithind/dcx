@@ -27,8 +27,8 @@ var (
 	decompressArm64Ok bool
 )
 
-// GetBinary returns the decompressed Linux agent binary for the given architecture.
-func GetBinary(arch string) ([]byte, error) {
+// Binary returns the decompressed Linux agent binary for the given architecture.
+func Binary(arch string) ([]byte, error) {
 	decompressOnce.Do(func() {
 		if len(agentLinuxAmd64Compressed) > 0 {
 			if data, err := decompress(agentLinuxAmd64Compressed); err == nil {

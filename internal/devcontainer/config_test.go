@@ -130,7 +130,7 @@ func TestGetDockerComposeFiles(t *testing.T) {
 		cfg := &DevContainerConfig{
 			DockerComposeFile: StringOrSlice{"docker-compose.yml"},
 		}
-		files := cfg.GetDockerComposeFiles()
+		files := []string(cfg.DockerComposeFile)
 		assert.Equal(t, []string{"docker-compose.yml"}, files)
 	})
 
@@ -138,13 +138,13 @@ func TestGetDockerComposeFiles(t *testing.T) {
 		cfg := &DevContainerConfig{
 			DockerComposeFile: StringOrSlice{"docker-compose.yml", "docker-compose.dev.yml"},
 		}
-		files := cfg.GetDockerComposeFiles()
+		files := []string(cfg.DockerComposeFile)
 		assert.Equal(t, []string{"docker-compose.yml", "docker-compose.dev.yml"}, files)
 	})
 
 	t.Run("nil returns nil", func(t *testing.T) {
 		cfg := &DevContainerConfig{}
-		files := cfg.GetDockerComposeFiles()
+		files := []string(cfg.DockerComposeFile)
 		assert.Nil(t, files)
 	})
 }

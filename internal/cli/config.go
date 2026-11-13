@@ -8,7 +8,6 @@ import (
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -70,14 +69,9 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	// Progress output is discarded so it cannot corrupt the printed config.
-	docker, err := container.NewDocker()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
-	}
+	svc := newService(container.NewDockerCLI(), report.Discard)
 
-	svc := service.NewDevContainerService(docker, report.Discard, workspacePath, configPath, verbose)
-
-	ids := svc.Identifiers()
+	ids := svc.Identity()
 
 	// Resolve the configuration so the reported ConfigHash matches what
 	// `dcx up` stamps into the container label — ComputeConfigHash covers

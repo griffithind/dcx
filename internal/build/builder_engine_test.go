@@ -25,7 +25,7 @@ func (f *fakeEngine) ImageExists(_ context.Context, ref string) (bool, error) {
 	return f.images[ref], nil
 }
 
-func (f *fakeEngine) GetImageLabels(context.Context, string) (map[string]string, error) {
+func (f *fakeEngine) ImageLabels(context.Context, string) (map[string]string, error) {
 	return nil, nil
 }
 

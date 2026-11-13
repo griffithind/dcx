@@ -277,8 +277,8 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 	return true, nil
 }
 
-// GetImageLabels returns the labels for an image.
-func (d *Docker) GetImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
+// ImageLabels returns the labels for an image.
+func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "json", imageRef)
 	output, err := cmd.Output()
 	if err != nil {
@@ -300,8 +300,8 @@ func (d *Docker) GetImageLabels(ctx context.Context, imageRef string) (map[strin
 	return results[0].Config.Labels, nil
 }
 
-// GetImageID returns the ID of an image.
-func (d *Docker) GetImageID(ctx context.Context, imageRef string) (string, error) {
+// ImageID returns the ID of an image.
+func (d *Docker) ImageID(ctx context.Context, imageRef string) (string, error) {
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", imageRef)
 	output, err := cmd.Output()
 	if err != nil {
@@ -628,8 +628,8 @@ func (d *Docker) CleanupDanglingImages(ctx context.Context) (*CleanupResult, err
 	return result, nil
 }
 
-// GetDerivedImageStats returns statistics about derived images.
-func (d *Docker) GetDerivedImageStats(ctx context.Context) (count int, totalSize int64, err error) {
+// DerivedImageStats returns statistics about derived images.
+func (d *Docker) DerivedImageStats(ctx context.Context) (count int, totalSize int64, err error) {
 	images, err := d.listImages(ctx)
 	if err != nil {
 		return 0, 0, err
@@ -652,8 +652,8 @@ type LogsOptions struct {
 	Tail       string // Number of lines or "all"
 }
 
-// GetLogs retrieves logs from a container.
-func (d *Docker) GetLogs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
+// Logs retrieves logs from a container.
+func (d *Docker) Logs(ctx context.Context, containerID string, opts LogsOptions) (io.ReadCloser, error) {
 	args := []string{"logs"}
 	if opts.Follow {
 		args = append(args, "-f")
