@@ -206,6 +206,14 @@ Errors are mostly wrapped consistently, and there are no panics apart from B11.
 
 Regression tests: env patch (unit), lock modes, feature cache, and two e2e tests. Run against main's binary, the e2e tests fail, and one reproduces the root injection (`/tmp/pwned-probe` created).
 
+**Step 2 (deletion pass): done.** About 1,400 net lines removed:
+- **Labels:** the 13 labels dcx never wrote are gone, along with the legacy `io.github.dcx.` prefix handling and `debug`'s legacy-label notice.
+- **`state`:** `StateStopped` is gone, along with the test-only helpers, the recovery types and the three unused `ContainerClient` methods (now on `Engine`). `GetStateWithProject*` became `GetState`/`GetStateWithHash` without the ignored parameter.
+- **`container`:** removed `ContainerRuntime`, `ContainerInfo`, `ExecOptions`, `ImageBuildOptions`/`BuildImage` (and `sshAgentAvailable` with it), `KillContainer`, `SimpleExecInContainer`, `CopyToContainer`, `ExecResult`, and `UnifiedRuntime.Stop`/`Down`.
+- **Elsewhere:** removed `CLIBuilder.ResolveImage`, `ResolvedDevContainer.Labels` (`devcontainer` no longer imports `state`), `LifecycleHooks`/`HookCommand`, `lastResolved`, the no-op `Service.Close` and `HasSSHConfig` (its tests now cover `Aliases`).
+- **Tests:** about 20 tautological tests deleted; added a real `parseImageSize` test.
+- **Text:** history comments rewritten to say what the code does. Help text, stale comments and `CLAUDE.md` fixed (agent entry point, state enum, label list).
+
 ## 5. Recommended plan
 
 Each step ships on its own, in this order:

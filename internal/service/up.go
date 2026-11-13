@@ -60,7 +60,7 @@ func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
 	}
 	ids, _ := s.GetIdentifiers()
 
-	currentState, existing, err := s.stateManager.GetStateWithProjectAndHash(ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
+	currentState, existing, err := s.stateManager.GetStateWithHash(ctx, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}
@@ -195,7 +195,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 		r.started = true
 	}
 
-	_, info, err := s.stateManager.GetStateWithProject(ctx, r.ids.ProjectName, r.resolved.ID)
+	_, info, err := s.stateManager.GetState(ctx, r.resolved.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get container info: %w", err)
 	}

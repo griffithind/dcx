@@ -1,6 +1,6 @@
 // Package main provides the entry point for dcx-agent.
-// This is a minimal binary that runs inside containers to provide SSH server
-// and agent proxy functionality.
+// It runs inside dcx containers: the SSH server (sessions, SFTP, agent and
+// port forwarding), plus the setup and ping helpers dcx calls.
 package main
 
 import (

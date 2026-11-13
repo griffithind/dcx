@@ -87,7 +87,7 @@ type HookRunner struct {
 }
 
 // NewHookRunner creates a new hook runner.
-// workspaceID is the environment key for SSH proxy directory.
+// workspaceID locates the workspace's pinned SSH host key.
 func NewHookRunner(ports sshclient.PortResolver, rep report.Reporter, containerID string, workspacePath string, cfg *devcontainer.DevContainerConfig, workspaceID string) *HookRunner {
 	r := &HookRunner{
 		ports:         ports,

@@ -66,8 +66,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if resolveErr == nil {
 		cfg = resolved.RawConfig
 		dcxCustom = devcontainer.GetDcxCustomizations(cfg)
-		currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithProjectAndHash(
-			cliCtx.Ctx, ids.ProjectName, ids.WorkspaceID, resolved.ConfigHash)
+		currentState, containerInfo, err = cliCtx.Service.GetStateManager().GetStateWithHash(cliCtx.Ctx, ids.WorkspaceID, resolved.ConfigHash)
 	} else if loaded, _, lerr := devcontainer.Load(cliCtx.WorkspacePath(), cliCtx.ConfigPath()); lerr == nil {
 		cfg = loaded
 		dcxCustom = devcontainer.GetDcxCustomizations(cfg)

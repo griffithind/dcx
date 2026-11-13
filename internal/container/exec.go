@@ -87,9 +87,3 @@ func ExecOutput(ctx context.Context, containerID string, cmd []string, user stri
 	return buf.String(), exitCode, err
 }
 
-// ExecResult contains the result of a command execution.
-type ExecResult struct {
-	ExitCode int
-	Stdout   []byte
-	Stderr   []byte
-}

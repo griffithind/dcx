@@ -98,13 +98,12 @@ type HashesDebug struct {
 }
 
 type ContainerDebug struct {
-	Found        bool              `json:"found"`
-	ID           string            `json:"id,omitempty"`
-	Name         string            `json:"name,omitempty"`
-	State        string            `json:"state,omitempty"`
-	Running      bool              `json:"running,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	LegacyLabels bool              `json:"legacy_labels,omitempty"`
+	Found   bool              `json:"found"`
+	ID      string            `json:"id,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	State   string            `json:"state,omitempty"`
+	Running bool              `json:"running,omitempty"`
+	Labels  map[string]string `json:"labels,omitempty"`
 }
 
 type StalenessDebug struct {
@@ -172,7 +171,6 @@ func populateConfigDebug(ctx context.Context, debug *DebugInfo) error {
 	// Resolve exactly as `dcx up` does (discovery, substitution, image
 	// metadata, lockfile), so debug output cannot disagree with up.
 	svc := service.NewDevContainerService(container.NewDockerCLI(), debugReporter(), workspacePath, configPath, verbose)
-	defer svc.Close()
 	resolved, err := svc.Load(ctx)
 	if err != nil {
 		return err
@@ -220,7 +218,6 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 	}
 
 	svc := service.NewDevContainerService(docker, debugReporter(), workspacePath, configPath, verbose)
-	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
@@ -233,7 +230,7 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 		workspaceID = ids.WorkspaceID
 	}
 
-	s, info, _ := svc.GetStateManager().GetStateWithProject(ctx, ids.ProjectName, workspaceID)
+	s, info, _ := svc.GetStateManager().GetState(ctx, workspaceID)
 
 	debug.Container = ContainerDebug{
 		Found: info != nil,
@@ -247,7 +244,6 @@ func populateContainerDebug(ctx context.Context, debug *DebugInfo) {
 
 		// Get labels
 		debug.Container.Labels = info.Labels.ToMap()
-		debug.Container.LegacyLabels = info.Labels.SchemaVersion == "" || info.Labels.SchemaVersion == "1"
 
 		// Check staleness
 		if debug.Config.Hashes.Config != "" {
@@ -336,11 +332,6 @@ func outputDebugTable(debug *DebugInfo) error {
 		ui.Printf("  Name:    %s", debug.Container.Name)
 		ui.Printf("  State:   %s", debug.Container.State)
 		ui.Printf("  Running: %v", debug.Container.Running)
-		if debug.Container.LegacyLabels {
-			ui.Printf("  Labels:  Using legacy format (io.github.dcx)")
-		} else {
-			ui.Printf("  Labels:  Using new format (com.griffithind.dcx)")
-		}
 		ui.Println("")
 
 		// Show key labels
@@ -387,13 +378,6 @@ func outputDebugTable(debug *DebugInfo) error {
 		} else {
 			ui.Println("  Run 'dcx up --recreate' to update the container")
 		}
-		ui.Println("")
-	}
-
-	// Label migration notice
-	if debug.Container.Found && debug.Container.LegacyLabels {
-		ui.Println("Note: Container uses legacy labels.")
-		ui.Println("Run 'dcx up --recreate' to migrate to new label format.")
 		ui.Println("")
 	}
 

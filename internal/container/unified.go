@@ -20,7 +20,7 @@ import (
 	"github.com/griffithind/dcx/internal/state"
 )
 
-// UnifiedRuntime implements ContainerRuntime for all plan types.
+// UnifiedRuntime creates and starts the environment for all plan types.
 // It handles image-based, Dockerfile-based, and compose-based devcontainers
 // through a single unified implementation.
 type UnifiedRuntime struct {
@@ -622,22 +622,6 @@ func (r *UnifiedRuntime) Start(ctx context.Context) error {
 	return r.engine.StartContainer(ctx, r.containerName)
 }
 
-// Stop implements ContainerRuntime.Stop.
-func (r *UnifiedRuntime) Stop(ctx context.Context) error {
-	if plan, ok := r.composePlan(); ok {
-		return r.composeProject(plan).Stop(ctx)
-	}
-	return r.engine.StopContainer(ctx, r.containerName, nil)
-}
-
-// Down implements ContainerRuntime.Down.
-func (r *UnifiedRuntime) Down(ctx context.Context, opts DownOptions) error {
-	if plan, ok := r.composePlan(); ok {
-		return r.composeProject(plan).Down(ctx, opts)
-	}
-	return r.engine.RemoveContainer(ctx, r.containerName, true, opts.RemoveVolumes)
-}
-
 // Build implements ContainerRuntime.Build.
 func (r *UnifiedRuntime) Build(ctx context.Context, opts BuildOptions) error {
 	if r.resolved == nil {
@@ -819,5 +803,3 @@ func (r *UnifiedRuntime) getComposeBaseImage(ctx context.Context, plan *devconta
 	return fmt.Sprintf("%s-%s", projectName, serviceName), nil
 }
 
-// Ensure UnifiedRuntime implements ContainerRuntime.
-var _ ContainerRuntime = (*UnifiedRuntime)(nil)

@@ -2,14 +2,10 @@ package devcontainer
 
 import (
 	"github.com/griffithind/dcx/internal/features"
-	"github.com/griffithind/dcx/internal/state"
 )
 
 // ResolvedDevContainer represents a fully resolved devcontainer configuration.
 // This is the central domain object containing everything needed to create/run a container.
-//
-// This struct replaces the previous Workspace + ResolvedConfig nested structure,
-// flattening all fields into a single coherent type aligned with devcontainer terminology.
 //
 // ACCESS PATTERN:
 //   - Use resolved fields (e.g., RemoteUser, ContainerEnv) for values that have been
@@ -156,11 +152,6 @@ type ResolvedDevContainer struct {
 
 	// ShouldUpdateUID indicates whether UID update layer is needed.
 	ShouldUpdateUID bool
-
-	// === Labels ===
-
-	// Labels are the container labels to apply.
-	Labels *state.ContainerLabels
 }
 
 // PortForward represents a port forwarding configuration.
@@ -177,32 +168,6 @@ type PortForward struct {
 	// the mapping is unique per container and discovered post-create via
 	// `docker port`.
 	EphemeralHostPort bool
-}
-
-// LifecycleHooks contains all lifecycle hook commands.
-type LifecycleHooks struct {
-	Initialize    []HookCommand
-	OnCreate      []HookCommand
-	UpdateContent []HookCommand
-	PostCreate    []HookCommand
-	PostStart     []HookCommand
-	PostAttach    []HookCommand
-	WaitFor       string // Which hook to wait for before considering ready
-
-	// Feature hooks (run before devcontainer hooks)
-	FeatureOnCreate      []HookCommand
-	FeatureUpdateContent []HookCommand
-	FeaturePostCreate    []HookCommand
-	FeaturePostStart     []HookCommand
-	FeaturePostAttach    []HookCommand
-}
-
-// HookCommand represents a single lifecycle hook command.
-type HookCommand struct {
-	Name     string   // Command name (for map-style commands)
-	Command  string   // Shell command (if string format)
-	Args     []string // Command args (if array format)
-	Parallel bool     // Run in parallel with other named commands
 }
 
 // GPURequirements specifies GPU requirements for the container.
@@ -240,7 +205,6 @@ func NewResolvedDevContainer() *ResolvedDevContainer {
 		ContainerEnv:   make(map[string]string),
 		RemoteEnv:      make(map[string]string),
 		Customizations: make(map[string]interface{}),
-		Labels:         state.NewContainerLabels(),
 		RuntimeSecrets: make(map[string]SecretConfig),
 		BuildSecrets:   make(map[string]SecretConfig),
 	}

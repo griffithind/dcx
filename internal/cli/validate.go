@@ -11,7 +11,7 @@ import (
 type StateRequirement int
 
 const (
-	// RequireRunning means the container must be running (for exec, shell, run).
+	// RequireRunning means the container must be running (for ssh, run).
 	RequireRunning StateRequirement = iota
 
 	// RequireExists means the container must exist in any state (for logs, stop).
@@ -103,13 +103,14 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 	return result, nil
 }
 
-// RequireRunningContainer is a convenience function for exec-like commands.
+// RequireRunningContainer is a convenience function for commands that
+// connect to the container (ssh, run).
 // It validates the container is running and returns the container info.
 func RequireRunningContainer(cliCtx *CLIContext) (*state.ContainerInfo, error) {
 	result, err := ValidateState(cliCtx, StateValidationOptions{
 		Requirement: RequireRunning,
 		WarnOnStale: true,
-		AllowStale:  true, // Allow stale with warning for exec
+		AllowStale:  true, // a stale container still accepts sessions
 	})
 	if err != nil {
 		return nil, err

@@ -76,7 +76,6 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	svc := service.NewDevContainerService(docker, report.Discard, workspacePath, configPath, verbose)
-	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
 	if err != nil {

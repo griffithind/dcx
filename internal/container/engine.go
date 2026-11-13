@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -14,6 +15,9 @@ import (
 // maintenance commands (clean, list) use *Docker directly.
 type Engine interface {
 	state.ContainerClient
+	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
+	StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error
+	RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error
 
 	Info(ctx context.Context) (*SystemInfo, error)
 

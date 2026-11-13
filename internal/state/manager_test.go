@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,7 +11,6 @@ import (
 // mockContainerClient is a test double for ContainerClient.
 type mockContainerClient struct {
 	containers []ContainerSummary
-	details    *ContainerDetails
 	listErr    error
 }
 
@@ -37,19 +35,7 @@ func (m *mockContainerClient) ListContainersWithLabels(_ context.Context, labels
 	return result, nil
 }
 
-func (m *mockContainerClient) InspectContainer(_ context.Context, _ string) (*ContainerDetails, error) {
-	return m.details, nil
-}
-
-func (m *mockContainerClient) StopContainer(_ context.Context, _ string, _ *time.Duration) error {
-	return nil
-}
-
-func (m *mockContainerClient) RemoveContainer(_ context.Context, _ string, _, _ bool) error {
-	return nil
-}
-
-func TestGetStateWithProjectAndHash(t *testing.T) {
+func TestGetStateWithHash(t *testing.T) {
 	t.Run("returns stale when config hash differs", func(t *testing.T) {
 		client := &mockContainerClient{
 			containers: []ContainerSummary{
@@ -66,8 +52,8 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithProjectAndHash(
-			context.Background(), "", "test-workspace", "new-hash")
+		state, _, err := mgr.GetStateWithHash(
+			context.Background(), "test-workspace", "new-hash")
 
 		require.NoError(t, err)
 		assert.Equal(t, StateStale, state)
@@ -89,8 +75,8 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithProjectAndHash(
-			context.Background(), "", "test-workspace", "same-hash")
+		state, _, err := mgr.GetStateWithHash(
+			context.Background(), "test-workspace", "same-hash")
 
 		require.NoError(t, err)
 		assert.Equal(t, StateRunning, state)
@@ -100,8 +86,8 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 		client := &mockContainerClient{}
 
 		mgr := NewStateManager(client)
-		state, info, err := mgr.GetStateWithProjectAndHash(
-			context.Background(), "", "test-workspace", "any-hash")
+		state, info, err := mgr.GetStateWithHash(
+			context.Background(), "test-workspace", "any-hash")
 
 		require.NoError(t, err)
 		assert.Equal(t, StateAbsent, state)
@@ -122,8 +108,8 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithProjectAndHash(
-			context.Background(), "", "test-workspace", "any-hash")
+		state, _, err := mgr.GetStateWithHash(
+			context.Background(), "test-workspace", "any-hash")
 
 		require.NoError(t, err)
 		assert.Equal(t, StateRunning, state, "should not report stale when no stored hash exists")
@@ -148,8 +134,8 @@ func TestGetStateWithProjectAndHash(t *testing.T) {
 		}
 
 		mgr := NewStateManager(client)
-		state, _, err := mgr.GetStateWithProjectAndHash(
-			context.Background(), "", "test-workspace", "hash-after-dockerfile-change")
+		state, _, err := mgr.GetStateWithHash(
+			context.Background(), "test-workspace", "hash-after-dockerfile-change")
 
 		require.NoError(t, err)
 		assert.Equal(t, StateStale, state)
@@ -196,7 +182,7 @@ func TestLegacyHashIsNotStale(t *testing.T) {
 		},
 	}}}
 
-	state, info, err := NewStateManager(client).GetStateWithProjectAndHash(context.Background(), "", "ws", "new-hash")
+	state, info, err := NewStateManager(client).GetStateWithHash(context.Background(), "ws", "new-hash")
 	require.NoError(t, err)
 	assert.Equal(t, StateRunning, state)
 	assert.True(t, info.IsLegacyHash())

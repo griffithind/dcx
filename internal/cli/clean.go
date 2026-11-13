@@ -41,7 +41,6 @@ func init() {
 func runClean(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Initialize Docker client (uses singleton)
 	docker, err := container.NewDocker()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Docker: %w", err)

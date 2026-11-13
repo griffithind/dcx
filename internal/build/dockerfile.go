@@ -175,25 +175,3 @@ func (b *CLIBuilder) GetImageLabels(ctx context.Context, imageRef string) (map[s
 	return results[0].Config.Labels, nil
 }
 
-// ResolveImage ensures an image is available locally, pulling if necessary.
-func (b *CLIBuilder) ResolveImage(ctx context.Context, imageRef string, pull bool, progress io.Writer) error {
-	exists, err := b.ImageExists(ctx, imageRef)
-	if err != nil {
-		return fmt.Errorf("failed to check image: %w", err)
-	}
-
-	if !exists || pull {
-		if progress != nil {
-			_, _ = fmt.Fprintf(progress, "Pulling image: %s\n", imageRef)
-		}
-		if err := b.PullImage(ctx, imageRef, progress); err != nil {
-			// If pull fails and image exists locally, that's ok
-			if exists {
-				return nil
-			}
-			return fmt.Errorf("failed to pull image: %w", err)
-		}
-	}
-
-	return nil
-}

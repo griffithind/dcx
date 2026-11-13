@@ -53,7 +53,7 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 
 ### Entry Points
 - `cmd/dcx/main.go` - Main CLI bootstrap, calls `cli.Execute()`
-- `cmd/dcx-agent/main.go` - Agent binary bootstrap, calls `agent.Execute()`
+- `cmd/dcx-agent/main.go` - Agent binary bootstrap, calls `server.Execute()` (`internal/ssh/server`)
 - `agent-embed.go` - Embedded agent binaries via `//go:embed bin/dcx-agent-linux-*.gz`
 
 ### CLI Layer (`internal/cli/`)
@@ -141,7 +141,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | File | Purpose |
 |------|---------|
 | `manager.go` | `StateManager` - detects state via Docker labels |
-| `state.go` | `ContainerState` enum (Absent, Created, Running, Stopped, Stale, Broken) |
+| `state.go` | `ContainerState` enum (Absent, Created, Running, Stale, Broken) and `DeterminePlanAction` |
 | `labels.go` | `ContainerLabels` struct, label schema (prefix: `com.griffithind.dcx`) |
 
 #### Features (`internal/features/`)
@@ -165,7 +165,6 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/ssh/` - Host keys, known_hosts, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only), `server` (the agent)
 - `internal/compose/` - Docker Compose override file generation
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
-- `internal/agent/` - Agent CLI and SSH server implementation
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
 - `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
@@ -183,8 +182,7 @@ type ResolvedDevContainer struct {
     ContainerEnv, RemoteEnv map[string]string    // Environment
     Mounts []Mount                               // Volume mounts
     Features []*features.Feature                 // Resolved features
-    Hashes *ContentHashes                        // For staleness detection
-    Labels *state.ContainerLabels                // Container labels
+    ConfigHash string                            // Staleness key (hash.config label)
 }
 ```
 
@@ -197,20 +195,21 @@ Sealed interface with three implementations:
 ### ContainerState (`state/state.go`)
 ```go
 StateAbsent   // No managed containers
-StateCreated  // Exists but stopped
+StateCreated  // Exists but not running (created or stopped)
 StateRunning  // Primary container running
-StateStopped  // Explicitly stopped
 StateStale    // Config hash changed - needs rebuild
 StateBroken   // Inconsistent state
 ```
 
 ### ContainerLabels (`state/labels.go`)
 All state persisted in Docker labels (prefix `com.griffithind.dcx`):
-- `workspace.id`, `workspace.name`, `workspace.path`
-- `hash.config` (staleness key), `hash.version`
-- `build.method` (image/dockerfile/compose)
-- `compose.project`, `compose.service`, `container.primary`
-- `features.installed`, `features.config`
+- `schema.version`, `managed`
+- `workspace.id`, `workspace.name`, `workspace.path`, `config.path`
+- `hash.config` (staleness key), `hash.version`, `lifecycle.markers`
+- `build.method` (image/dockerfile/compose), `build.base.image`, `build.derived.image`, `features.installed`
+- `compose.project`, `compose.service`, `container.primary` (plus compose's own `config_files`/`working_dir`, read only)
+
+Labels are immutable after create: only add one if `buildLabels` writes it.
 
 ## Data Flows
 

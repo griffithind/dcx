@@ -7,11 +7,6 @@
 //
 // Blocks written to ~/.ssh/config by older dcx versions are moved into the
 // include file the next time that workspace's block is written.
-//
-// Before the TCP transport, the block used `ProxyCommand dcx ssh --stdio …`
-// which only worked for clients that shelled out to OpenSSH. This file now
-// emits a plain `HostName/Port` block so any SSH-speaking client works
-// without ProxyCommand plumbing.
 package hostconfig
 
 import (
@@ -274,11 +269,6 @@ func RemoveSSHConfig(containerName string) error {
 			return removeIfPresent(main, containerName)
 		})
 	})
-}
-
-// HasSSHConfig checks if an SSH config entry exists for a container.
-func HasSSHConfig(containerName string) bool {
-	return Aliases(containerName) != nil
 }
 
 // getDCXConfigPath returns the path of the include file holding dcx's blocks.

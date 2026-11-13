@@ -30,7 +30,6 @@ import (
 )
 
 // DevContainerService provides high-level operations for devcontainer environments.
-// This replaces the previous EnvironmentService in internal/orchestrator.
 type DevContainerService struct {
 	engine        container.Engine
 	report        report.Reporter
@@ -42,7 +41,6 @@ type DevContainerService struct {
 	verbose       bool
 
 	// Cached resolved devcontainer from last operation
-	lastResolved *devcontainer.ResolvedDevContainer
 }
 
 // NewDevContainerService creates a new devcontainer service backed by the
@@ -62,11 +60,6 @@ func NewDevContainerService(engine container.Engine, rep report.Reporter, worksp
 		configPath:    configPath,
 		verbose:       verbose,
 	}
-}
-
-// Close releases resources held by the service.
-func (s *DevContainerService) Close() {
-	// No additional resources to clean up
 }
 
 // Identifiers contains the core identifiers for a workspace.
@@ -108,7 +101,7 @@ func (s *DevContainerService) SSHAlias(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	if _, info, err := s.stateManager.GetStateWithProject(ctx, ids.ProjectName, ids.WorkspaceID); err == nil && info != nil {
+	if _, info, err := s.stateManager.GetState(ctx, ids.WorkspaceID); err == nil && info != nil {
 		if aliases := hostconfig.Aliases(info.Name); len(aliases) > 0 {
 			return aliases[0]
 		}
@@ -165,9 +158,7 @@ func (s *DevContainerService) Plan(ctx context.Context, opts PlanOptions) (*Plan
 		return nil, err
 	}
 
-	ids, _ := s.GetIdentifiers()
-	currentState, containerInfo, err := s.stateManager.GetStateWithProjectAndHash(
-		ctx, ids.ProjectName, resolved.ID, resolved.ConfigHash)
+	currentState, containerInfo, err := s.stateManager.GetStateWithHash(ctx, resolved.ID, resolved.ConfigHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
@@ -246,7 +237,6 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 		return nil, fmt.Errorf("failed to resolve devcontainer: %w", err)
 	}
 
-	s.lastResolved = resolved
 	return resolved, nil
 }
 
@@ -585,8 +575,7 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 // writes the ~/.ssh/config block pointing at 127.0.0.1:<port>.
 func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) error {
 	if containerInfo == nil {
-		ids, _ := s.GetIdentifiers()
-		_, containerInfo, _ = s.stateManager.GetStateWithProject(ctx, ids.ProjectName, resolved.ID)
+		_, containerInfo, _ = s.stateManager.GetState(ctx, resolved.ID)
 	}
 	if containerInfo == nil {
 		return fmt.Errorf("no primary container found")
@@ -781,7 +770,7 @@ type DownOptions = container.DownOptions
 
 // DownWithIDs removes the environment using just project name and workspace ID.
 func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, workspaceID string, opts DownOptions) error {
-	currentState, containerInfo, err := s.stateManager.GetStateWithProject(ctx, projectName, workspaceID)
+	currentState, containerInfo, err := s.stateManager.GetState(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to get state: %w", err)
 	}

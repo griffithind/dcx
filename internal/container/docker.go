@@ -1,6 +1,6 @@
-// Package container provides container runtime management for devcontainers.
-// This package replaces the previous internal/docker and internal/runner packages
-// with clearer naming (Docker, ContainerRuntime).
+// Package container is dcx's container engine layer: the Engine interface,
+// its Docker CLI implementation, and the runtime that builds images and
+// creates the environment from a ContainerSpec.
 package container
 
 import (
@@ -9,10 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -366,21 +363,6 @@ func (d *Docker) RemoveContainer(ctx context.Context, containerID string, force,
 	return nil
 }
 
-// KillContainer sends a signal to a container using Docker CLI.
-func (d *Docker) KillContainer(ctx context.Context, containerID, signal string) error {
-	args := []string{"kill"}
-	if signal != "" {
-		args = append(args, "-s", signal)
-	}
-	args = append(args, containerID)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to kill container: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
 // CreateContainer creates (but does not start) the container described by
 // spec and returns its ID.
 func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (string, error) {
@@ -499,80 +481,6 @@ func formatMount(m *devcontainer.Mount) string {
 	}
 
 	return strings.Join(parts, ",")
-}
-
-// ImageBuildOptions contains options for building a Docker image.
-type ImageBuildOptions struct {
-	Tag        string
-	Dockerfile string
-	Context    string
-	Args       map[string]string
-	Target     string
-	CacheFrom  []string
-	ConfigDir  string
-	Stdout     io.Writer
-	Stderr     io.Writer
-}
-
-// BuildImage builds a Docker image from a Dockerfile.
-func (d *Docker) BuildImage(ctx context.Context, opts ImageBuildOptions) error {
-	configDir := opts.ConfigDir
-	if configDir == "" {
-		configDir = "."
-	}
-
-	contextPath := opts.Context
-	if contextPath == "" {
-		contextPath = configDir
-	} else if !filepath.IsAbs(contextPath) {
-		contextPath = filepath.Join(configDir, contextPath)
-	}
-
-	args := []string{"build"}
-
-	if opts.Tag != "" {
-		args = append(args, "-t", opts.Tag)
-	}
-
-	if opts.Dockerfile != "" {
-		dockerfilePath := opts.Dockerfile
-		if !filepath.IsAbs(dockerfilePath) {
-			dockerfilePath = filepath.Join(configDir, dockerfilePath)
-		}
-		args = append(args, "-f", dockerfilePath)
-	}
-
-	if opts.Target != "" {
-		args = append(args, "--target", opts.Target)
-	}
-
-	for key, value := range opts.Args {
-		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", key, value))
-	}
-
-	for _, cache := range opts.CacheFrom {
-		args = append(args, "--cache-from", cache)
-	}
-
-	if sshAgentAvailable() {
-		args = append(args, "--ssh", "default")
-	}
-
-	args = append(args, contextPath)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	if opts.Stdout != nil {
-		cmd.Stdout = opts.Stdout
-	} else {
-		cmd.Stdout = io.Discard
-	}
-	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
-	} else {
-		cmd.Stderr = io.Discard
-	}
-
-	return cmd.Run()
 }
 
 // CleanupResult contains statistics about cleaned up resources.
@@ -775,26 +683,6 @@ func (d *Docker) GetLogs(ctx context.Context, containerID string, opts LogsOptio
 	return pr, nil
 }
 
-// SimpleExecOptions contains options for simple exec operations.
-type SimpleExecOptions struct {
-	User string
-	Cmd  []string
-}
-
-// SimpleExecInContainer runs a command in a container and returns the combined output.
-// This is a simplified version for internal use by helper operations.
-func (d *Docker) SimpleExecInContainer(ctx context.Context, containerName string, opts SimpleExecOptions) ([]byte, error) {
-	args := []string{"exec"}
-	if opts.User != "" {
-		args = append(args, "--user", opts.User)
-	}
-	args = append(args, containerName)
-	args = append(args, opts.Cmd...)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	return cmd.CombinedOutput()
-}
-
 // ExecInContainer runs a command in a container and returns non-nil error
 // if it exits non-zero. Used by host-side callers that only care about
 // exit status (e.g. liveness probes).
@@ -835,15 +723,6 @@ func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []st
 func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error) {
 	args := append([]string{"exec", containerName}, argv...)
 	return exec.CommandContext(ctx, "docker", args...).Output()
-}
-
-// CopyToContainer copies a file to a container.
-func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
-	cmd := exec.CommandContext(ctx, "docker", "cp", src, containerName+":"+dest)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker cp failed: %w, output: %s", err, output)
-	}
-	return nil
 }
 
 // ChmodInContainer changes file permissions inside a container.
@@ -910,20 +789,3 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 	return nil
 }
 
-// sshAgentAvailable reports whether $SSH_AUTH_SOCK is a reachable agent
-// socket, so builds can forward it (`--ssh default`).
-func sshAgentAvailable() bool {
-	sock := os.Getenv("SSH_AUTH_SOCK")
-	if sock == "" {
-		return false
-	}
-	if info, err := os.Stat(sock); err != nil || info.Mode()&os.ModeSocket == 0 {
-		return false
-	}
-	conn, err := net.Dial("unix", sock)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}

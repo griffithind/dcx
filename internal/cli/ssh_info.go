@@ -55,7 +55,6 @@ func runSSHInfo(cmd *cobra.Command, args []string) error {
 	// it, and the port lookup below is best-effort.
 	docker := containerPkg.NewDockerCLI()
 	svc := service.NewDevContainerService(docker, sshInfoReporter(), workspacePath, configPath, verbose)
-	defer svc.Close()
 
 	ids, err := svc.GetIdentifiers()
 	if err != nil {

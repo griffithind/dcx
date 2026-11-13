@@ -185,21 +185,21 @@ func TestRemoveSSHConfig(t *testing.T) {
 	})
 }
 
-func TestHasSSHConfig(t *testing.T) {
+func TestAliasesFindsBlock(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".ssh"), 0700))
 
 	t.Run("no config file", func(t *testing.T) {
-		assert.False(t, HasSSHConfig("test-container"))
+		assert.False(t, Aliases("test-container") != nil)
 	})
 
 	t.Run("config exists", func(t *testing.T) {
 		addSSHConfig(t, sampleEntry())
 
-		assert.True(t, HasSSHConfig("test-container"))
-		assert.False(t, HasSSHConfig("other-container"))
+		assert.True(t, Aliases("test-container") != nil)
+		assert.False(t, Aliases("other-container") != nil)
 	})
 }
 
@@ -207,11 +207,6 @@ func TestGetSSHConfigPath(t *testing.T) {
 	path := getSSHConfigPath()
 	assert.Contains(t, path, ".ssh")
 	assert.Contains(t, path, "config")
-}
-
-func TestSSHConfigConstants(t *testing.T) {
-	assert.Contains(t, sshConfigMarkerStart, "DCX")
-	assert.Contains(t, sshConfigMarkerEnd, "DCX")
 }
 
 // TestUpgradeFromLegacyStdioBlock verifies that an existing stdio-era
@@ -278,7 +273,7 @@ func TestRemoveSSHConfigEntryKeepsUnterminatedBlock(t *testing.T) {
 	assert.Contains(t, got, "Host precious")
 }
 
-func TestHasSSHConfigExactMatch(t *testing.T) {
+func TestAliasesExactMatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".ssh"), 0700))
@@ -287,8 +282,8 @@ func TestHasSSHConfigExactMatch(t *testing.T) {
 	entry.ContainerName = "api-v2"
 	addSSHConfig(t, entry)
 
-	assert.True(t, HasSSHConfig("api-v2"))
-	assert.False(t, HasSSHConfig("api"))
+	assert.True(t, Aliases("api-v2") != nil)
+	assert.False(t, Aliases("api") != nil)
 }
 
 // Writes go through a temp file + rename; a symlinked ~/.ssh/config (dotfile

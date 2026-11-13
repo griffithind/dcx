@@ -38,7 +38,6 @@ func NewCLIContext() (*CLIContext, error) {
 	// stopped and Up returns early. Every step of Up is safe to run again.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	// Initialize Docker client (uses singleton)
 	docker, err := container.NewDocker()
 	if err != nil {
 		stop()
@@ -51,7 +50,6 @@ func NewCLIContext() (*CLIContext, error) {
 	// Get identifiers
 	ids, err := svc.GetIdentifiers()
 	if err != nil {
-		svc.Close()
 		stop()
 		return nil, fmt.Errorf("failed to get identifiers: %w", err)
 	}
@@ -68,9 +66,6 @@ func NewCLIContext() (*CLIContext, error) {
 // Close releases resources held by the CLIContext.
 // Always call this when done, typically with defer.
 func (c *CLIContext) Close() {
-	if c.Service != nil {
-		c.Service.Close()
-	}
 	if c.stop != nil {
 		c.stop()
 	}
@@ -79,11 +74,7 @@ func (c *CLIContext) Close() {
 
 // GetState retrieves the current container state.
 func (c *CLIContext) GetState() (state.ContainerState, *state.ContainerInfo, error) {
-	return c.Service.GetStateManager().GetStateWithProject(
-		c.Ctx,
-		c.Identifiers.ProjectName,
-		c.Identifiers.WorkspaceID,
-	)
+	return c.Service.GetStateManager().GetState(c.Ctx, c.Identifiers.WorkspaceID)
 }
 
 // WorkspacePath returns the current workspace path.

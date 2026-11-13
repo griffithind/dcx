@@ -5,21 +5,11 @@ import (
 	"time"
 )
 
-// ContainerClient is the interface for container operations needed by the state manager.
-// This avoids a dependency on the container package and allows for easier testing.
+// ContainerClient is what the state manager needs from the container
+// engine: listing containers by label. Keeping it this small avoids a
+// dependency on the container package.
 type ContainerClient interface {
-	// ListContainersWithLabels returns containers matching label filters.
-	// Returns a list of container summaries with ID, Name, State, and Labels.
 	ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]ContainerSummary, error)
-
-	// InspectContainer returns detailed information about a container.
-	InspectContainer(ctx context.Context, containerID string) (*ContainerDetails, error)
-
-	// StopContainer stops a running container.
-	StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error
-
-	// RemoveContainer removes a container.
-	RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error
 }
 
 // ContainerSummary is a minimal container summary returned by ListContainersWithLabels.
@@ -48,8 +38,7 @@ type ContainerDetails struct {
 	Env []string
 }
 
-// StateManager handles state detection and management for devcontainer environments.
-// This replaces the previous containerstate.Manager with clearer naming.
+// StateManager detects the state of a workspace's containers from their labels.
 type StateManager struct {
 	client ContainerClient
 }
@@ -76,7 +65,7 @@ func (m *StateManager) GetState(ctx context.Context, workspaceID string) (Contai
 	// Find the primary container
 	var primary *ContainerSummary
 	for i := range containers {
-		if IsPrimaryContainer(containers[i].Labels) {
+		if containers[i].Labels[LabelIsPrimary] == "true" {
 			primary = &containers[i]
 			break
 		}
@@ -122,18 +111,6 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 	}
 }
 
-// GetStateWithProject returns the state of the workspace's containers.
-//
-// Containers are always identified by the workspace ID label, which is
-// independent of names, so environments created by older dcx versions
-// (whose container/project names were derived from "name" alone) are still
-// found. projectName is accepted for API compatibility and not used for the
-// lookup.
-func (m *StateManager) GetStateWithProject(ctx context.Context, projectName, workspaceID string) (ContainerState, *ContainerInfo, error) {
-	_ = projectName
-	return m.GetState(ctx, workspaceID)
-}
-
 // CurrentHashVersion is stamped on containers as LabelHashVersion.
 const CurrentHashVersion = "2"
 
@@ -144,8 +121,8 @@ func (c *ContainerInfo) IsLegacyHash() bool {
 }
 
 // GetStateWithProjectAndHash combines project lookup with hash check.
-func (m *StateManager) GetStateWithProjectAndHash(ctx context.Context, projectName, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
-	state, info, err := m.GetStateWithProject(ctx, projectName, workspaceID)
+func (m *StateManager) GetStateWithHash(ctx context.Context, workspaceID, currentConfigHash string) (ContainerState, *ContainerInfo, error) {
+	state, info, err := m.GetState(ctx, workspaceID)
 	if err != nil || info == nil {
 		return state, info, err
 	}

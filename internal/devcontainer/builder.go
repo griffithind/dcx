@@ -10,12 +10,10 @@ import (
 
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
-	"github.com/griffithind/dcx/internal/state"
 	"gopkg.in/yaml.v3"
 )
 
 // Builder constructs a ResolvedDevContainer from configuration and resolves all references.
-// This replaces the previous workspace.Builder.
 type Builder struct {
 	logger *slog.Logger
 	report report.Reporter
@@ -231,7 +229,6 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 	b.populateBuildDecisions(resolved, opts.Config)
 
 	// Initialize labels
-	resolved.Labels = state.NewContainerLabels()
 
 	return resolved, nil
 }

@@ -27,9 +27,10 @@ var rootCmd = &cobra.Command{
 	Long: `dcx is a CLI that parses, validates, and runs devcontainers
 with full support for docker compose and Features.
 
-It uses the Docker Engine API and docker compose CLI directly, without
-requiring the @devcontainers/cli. Container state is tracked using labels,
-enabling offline-safe operations for start/stop/exec commands.`,
+It drives the docker and docker compose CLIs directly, without the
+@devcontainers/cli, and tracks all state in container labels. Sessions go
+over SSH to a small agent inside the container: use 'dcx ssh' or plain
+'ssh <alias>'.`,
 	Version: version.Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Cobra has parsed the flags by now, so --quiet/--verbose/--no-color

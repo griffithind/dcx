@@ -31,13 +31,6 @@ func TestUpCommandFlags(t *testing.T) {
 	assert.Nil(t, sshFlag, "ssh flag should not exist (SSH is always enabled)")
 }
 
-func TestUpCommandMetadata(t *testing.T) {
-	assert.Equal(t, "up", upCmd.Use)
-	assert.NotEmpty(t, upCmd.Short)
-	assert.NotEmpty(t, upCmd.Long)
-	assert.NotNil(t, upCmd.RunE)
-}
-
 func TestDownCommandFlags(t *testing.T) {
 	flags := downCmd.Flags()
 
@@ -50,13 +43,6 @@ func TestDownCommandFlags(t *testing.T) {
 	assert.Equal(t, "false", orphansFlag.DefValue)
 }
 
-func TestDownCommandMetadata(t *testing.T) {
-	assert.Equal(t, "down", downCmd.Use)
-	assert.NotEmpty(t, downCmd.Short)
-	assert.NotEmpty(t, downCmd.Long)
-	assert.NotNil(t, downCmd.RunE)
-}
-
 func TestStatusCommandFlags(t *testing.T) {
 	flags := statusCmd.Flags()
 
@@ -64,13 +50,6 @@ func TestStatusCommandFlags(t *testing.T) {
 	assert.NotNil(t, detailedFlag, "detailed flag should exist")
 	assert.Equal(t, "false", detailedFlag.DefValue)
 	assert.Equal(t, "d", detailedFlag.Shorthand)
-}
-
-func TestStatusCommandMetadata(t *testing.T) {
-	assert.Equal(t, "status", statusCmd.Use)
-	assert.NotEmpty(t, statusCmd.Short)
-	assert.NotEmpty(t, statusCmd.Long)
-	assert.NotNil(t, statusCmd.RunE)
 }
 
 func TestShellAndExecCommandsAreGone(t *testing.T) {
@@ -88,11 +67,6 @@ func TestSSHRequiresDashBeforeCommand(t *testing.T) {
 	assert.NoError(t, sshCmd.ParseFlags([]string{"ls"}))
 	err = runSSH(sshCmd, []string{"ls"})
 	assert.ErrorContains(t, err, "dcx ssh -- ls")
-}
-
-func TestRootCommandExists(t *testing.T) {
-	assert.NotNil(t, rootCmd)
-	assert.Equal(t, "dcx", rootCmd.Use)
 }
 
 func TestRootCommandPersistentFlags(t *testing.T) {

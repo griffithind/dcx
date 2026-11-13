@@ -6,7 +6,7 @@ import (
 )
 
 // DcxCustomizations represents DCX-specific settings from customizations.dcx
-// in devcontainer.json. This replaces the old separate dcx.json file.
+// in devcontainer.json.
 type DcxCustomizations struct {
 	// Shortcuts defines command aliases for the 'run' command.
 	Shortcuts map[string]Shortcut `json:"shortcuts,omitempty"`

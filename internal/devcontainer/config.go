@@ -1,9 +1,6 @@
-// Package devcontainer provides types and utilities for parsing, validating,
-// and working with devcontainer.json configurations.
-//
-// This package is the core domain package for DCX, establishing "Dev Container"
-// as the central concept. It replaces the previous internal/config package
-// with clearer naming and organization.
+// Package devcontainer parses, substitutes and resolves devcontainer.json
+// into a ResolvedDevContainer, the input to everything that builds and runs
+// the environment.
 package devcontainer
 
 import (

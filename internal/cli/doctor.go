@@ -179,7 +179,6 @@ func runConfigChecks(ctx context.Context) []CheckResult {
 	results = append(results, CheckResult{Name: "Config Syntax", OK: true, Message: "valid JSON"})
 
 	svc := service.NewDevContainerService(container.NewDockerCLI(), report.Discard, workspacePath, configPath, verbose)
-	defer svc.Close()
 	resolved, err := svc.Load(ctx)
 	if err != nil {
 		return append(results, CheckResult{
