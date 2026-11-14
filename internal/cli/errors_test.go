@@ -24,7 +24,7 @@ func TestCommandsFailClearlyOnBadConfigs(t *testing.T) {
 		{"missing config", "", "devcontainer.json"},
 		{"invalid JSON", "{\n\t\"name\": \"x\"\n\t\"image\": \"alpine:3\"\n}", "devcontainer.json"},
 		{"image that cannot be pulled", `{"image": "registry.invalid/nope:v999"}`, "registry.invalid/nope:v999"},
-		{"two plans", `{"image": "alpine:3", "build": {"dockerfile": "Dockerfile"}}`, "set only one of image, build or dockerComposeFile"},
+		{"compose with image", `{"image": "alpine:3", "dockerComposeFile": "c.yml", "service": "app"}`, "dockerComposeFile cannot be combined with image or build"},
 	} {
 		for name, run := range commands {
 			t.Run(tc.name+"/"+name, func(t *testing.T) {

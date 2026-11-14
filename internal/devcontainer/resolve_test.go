@@ -21,7 +21,7 @@ func TestResolveWorkspaceRejectsAmbiguousConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := ResolveWorkspace(context.Background(), ResolveOptions{WorkspacePath: ws})
-	if err == nil || !strings.Contains(err.Error(), "set only one of image, build or dockerComposeFile (found dockerComposeFile, image)") {
+	if err == nil || !strings.Contains(err.Error(), "dockerComposeFile cannot be combined with image or build (found dockerComposeFile, image)") {
 		t.Fatalf("want an ambiguity error, got %v", err)
 	}
 }

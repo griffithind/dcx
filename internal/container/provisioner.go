@@ -310,8 +310,16 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 	// config (a label set here replaces the one the build inherits).
 	metadata, _ := build.GenerateMetadataLabel(r.resolved.MetadataLabel, nil, r.resolved.Local)
 
+	// With both image and build, the built image is also tagged as image
+	// (the reference implementation's behaviour).
+	var extraTags []string
+	if r.resolved.Local != nil && r.resolved.Local.Image != "" {
+		extraTags = []string{r.resolved.Local.Image}
+	}
+
 	_, err := r.builder.BuildFromDockerfile(ctx, build.DockerfileBuildOptions{
 		Tag:        imageTag,
+		ExtraTags:  extraTags,
 		Dockerfile: dockerfilePath,
 		Context:    buildCtx,
 		Args:       buildArgs,
@@ -478,11 +486,16 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 }
 
 // workspaceMount returns the workspace mount of a single-container plan:
-// workspaceMount from the config, or a bind of the local workspace.
+// workspaceMount from the config (none when it is ""), or a bind of the
+// local workspace. Validate has rejected a workspaceMount that does not
+// parse.
 func (r *Provisioner) workspaceMount() *devcontainer.Mount {
 	var m *devcontainer.Mount
-	if r.resolved.WorkspaceMount != "" {
-		m = devcontainer.ParseWorkspaceMount(r.resolved.WorkspaceMount)
+	if spec := r.resolved.WorkspaceMount; spec != nil {
+		if *spec == "" {
+			return nil
+		}
+		m, _ = devcontainer.ParseWorkspaceMount(*spec)
 	}
 	if m == nil && r.resolved.LocalRoot != "" && r.resolved.WorkspaceFolder != "" {
 		m = &devcontainer.Mount{Type: "bind", Source: r.resolved.LocalRoot, Target: r.resolved.WorkspaceFolder}

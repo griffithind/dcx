@@ -59,14 +59,6 @@ func TestRejectsOtherTypes(t *testing.T) {
 	assert.Error(t, json.Unmarshal([]byte(`42`), &c))
 }
 
-func TestSubstitute(t *testing.T) {
-	up := func(s string) string { return s + "!" }
-	c := parse(t, `{"a": "x", "b": ["y", "z"]}`).Substitute(up)
-	assert.Equal(t, []Step{{Name: "a", Shell: "x!"}, {Name: "b", Argv: []string{"y!", "z!"}}}, c.Steps())
-	var absent *Command
-	assert.Nil(t, absent.Substitute(up))
-}
-
 func TestStepString(t *testing.T) {
 	assert.Equal(t, "echo hello", Step{Argv: []string{"echo", "hello"}}.String())
 	assert.Equal(t, "[install] npm install", Step{Name: "install", Argv: []string{"npm", "install"}}.String())

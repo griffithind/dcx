@@ -110,7 +110,7 @@ func TestStatusFallsBackToTheRawConfig(t *testing.T) {
 
 	r, err := svc.Status(context.Background(), false)
 	require.NoError(t, err)
-	assert.Contains(t, r.ConfigError, "set only one of image, build or dockerComposeFile")
+	assert.Contains(t, r.ConfigError, "dockerComposeFile cannot be combined with image or build")
 	assert.Empty(t, r.ConfigHash, "staleness is not judged without a resolved config")
 	assert.Equal(t, state.StateRunning, r.State, "the container state is still reported")
 	require.NotNil(t, r.Config)

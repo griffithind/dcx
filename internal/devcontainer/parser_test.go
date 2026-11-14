@@ -83,7 +83,7 @@ func TestParseDevcontainerJSON(t *testing.T) {
 			name:  "with containerEnv and remoteEnv",
 			input: `{"image": "alpine", "containerEnv": {"FOO": "bar"}, "remoteEnv": {"BAZ": "qux", "GONE": null}}`,
 			check: func(t *testing.T, cfg *DevContainerConfig) {
-				assert.Equal(t, map[string]string{"FOO": "bar"}, cfg.ContainerEnv)
+				assert.Equal(t, StringMap{"FOO": "bar"}, cfg.ContainerEnv)
 				require.NotNil(t, cfg.RemoteEnv["BAZ"])
 				assert.Equal(t, "qux", *cfg.RemoteEnv["BAZ"])
 				gone, present := cfg.RemoteEnv["GONE"]

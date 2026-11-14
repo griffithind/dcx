@@ -169,18 +169,32 @@ func buildPlan(cfg *DevContainerConfig, configPath, resourceName string) Executi
 	configDir := filepath.Dir(configPath)
 	switch cfg.PlanType() {
 	case PlanTypeDockerfile:
-		contextPath := configDir
-		if cfg.Build.Context != "" {
-			contextPath = filepath.Join(configDir, cfg.Build.Context)
+		// Paths are relative to the config file's directory (absolute ones
+		// are kept). Without a context, the context is the Dockerfile's
+		// directory; without a dockerfile (a dcx extension), the
+		// Dockerfile is <context>/Dockerfile.
+		fromConfig := func(p string) string {
+			if filepath.IsAbs(p) {
+				return filepath.Clean(p)
+			}
+			return filepath.Join(configDir, p)
 		}
-		dockerfilePath := filepath.Join(contextPath, "Dockerfile")
-		if cfg.Build.Dockerfile != "" {
-			dockerfilePath = filepath.Join(configDir, cfg.Build.Dockerfile)
+		var contextPath, dockerfilePath string
+		switch {
+		case cfg.Build.Dockerfile != "":
+			dockerfilePath = fromConfig(cfg.Build.Dockerfile)
+			contextPath = filepath.Dir(dockerfilePath)
+			if cfg.Build.Context != "" {
+				contextPath = fromConfig(cfg.Build.Context)
+			}
+		default:
+			contextPath = fromConfig(cfg.Build.Context)
+			dockerfilePath = filepath.Join(contextPath, "Dockerfile")
 		}
 		plan := NewDockerfilePlan(dockerfilePath, contextPath)
 		plan.Args = cfg.Build.Args
 		plan.Target = cfg.Build.Target
-		plan.CacheFrom = cfg.Build.CacheFrom
+		plan.CacheFrom = cfg.Build.CacheFrom.List()
 		plan.Options = cfg.Build.Options
 		return plan
 	case PlanTypeCompose:

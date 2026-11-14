@@ -54,8 +54,9 @@ type ResolvedDevContainer struct {
 	// WorkspaceFolder is the path inside the container.
 	WorkspaceFolder string
 
-	// WorkspaceMount is the mount specification for the workspace.
-	WorkspaceMount string
+	// WorkspaceMount is the workspaceMount specification: nil for the
+	// default bind of the workspace, "" for no workspace mount.
+	WorkspaceMount *string
 
 	// === User Configuration ===
 

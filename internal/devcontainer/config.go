@@ -40,7 +40,9 @@ type DevContainerConfig struct {
 
 	// Workspace configuration
 	WorkspaceFolder string `json:"workspaceFolder,omitempty"`
-	WorkspaceMount  string `json:"workspaceMount,omitempty"`
+	// WorkspaceMount replaces the default workspace bind mount; "" means
+	// no workspace mount at all (nil: the default).
+	WorkspaceMount *string `json:"workspaceMount,omitempty"`
 
 	// User configuration
 	RemoteUser          string `json:"remoteUser,omitempty"`
@@ -48,8 +50,8 @@ type DevContainerConfig struct {
 	UpdateRemoteUserUID *bool  `json:"updateRemoteUserUID,omitempty"` // Auto-update UID to match host user
 
 	// Environment variables
-	ContainerEnv map[string]string  `json:"containerEnv,omitempty"`
-	RemoteEnv    map[string]*string `json:"remoteEnv,omitempty"` // null unsets the variable
+	ContainerEnv StringMap         `json:"containerEnv,omitempty"`
+	RemoteEnv    NullableStringMap `json:"remoteEnv,omitempty"` // null unsets the variable
 
 	// Features
 	Features                    map[string]interface{} `json:"features,omitempty"`
@@ -112,7 +114,10 @@ func (c *DevContainerConfig) PlanType() PlanType {
 	if len(c.DockerComposeFile) > 0 {
 		return PlanTypeCompose
 	}
-	if c.Build != nil {
+	// A build without a dockerfile next to an image is an image config
+	// (the reference implementation's rule); on its own it builds
+	// <context>/Dockerfile.
+	if c.Build != nil && (c.Build.Dockerfile != "" || c.Image == "") {
 		return PlanTypeDockerfile
 	}
 	return PlanTypeImage
@@ -120,12 +125,12 @@ func (c *DevContainerConfig) PlanType() PlanType {
 
 // BuildConfig represents the build configuration for a devcontainer.
 type BuildConfig struct {
-	Dockerfile string            `json:"dockerfile,omitempty"`
-	Context    string            `json:"context,omitempty"`
-	Args       map[string]string `json:"args,omitempty"`
-	Target     string            `json:"target,omitempty"`
-	CacheFrom  []string          `json:"cacheFrom,omitempty"`
-	Options    []string          `json:"options,omitempty"`
+	Dockerfile string         `json:"dockerfile,omitempty"`
+	Context    string         `json:"context,omitempty"`
+	Args       StringMap      `json:"args,omitempty"`
+	Target     string         `json:"target,omitempty"`
+	CacheFrom  *StringOrArray `json:"cacheFrom,omitempty"`
+	Options    []string       `json:"options,omitempty"`
 }
 
 // HostRequirements specifies host machine requirements.
@@ -163,10 +168,10 @@ func ParseMountString(spec string) (Mount, error) { return mount.Parse(spec) }
 
 // ParseWorkspaceMount parses a workspace mount string into a Mount, or
 // returns nil if it is invalid.
-func ParseWorkspaceMount(spec string) *Mount {
+func ParseWorkspaceMount(spec string) (*Mount, error) {
 	m, err := ParseMountString(spec)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &m
+	return &m, nil
 }

@@ -51,9 +51,13 @@ const (
 // config, doctor and the golden tests all resolve through it.
 func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevContainer, error) {
 	rep := report.OrDiscard(opts.Report)
-	local, configPath, err := Load(opts.WorkspacePath, opts.ConfigPath)
+	loaded, err := LoadConfig(opts.WorkspacePath, opts.ConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+	local, configPath := loaded.Config, loaded.Path
+	for _, w := range loaded.Warnings {
+		rep.Warnf("%s: %s", configPath, w)
 	}
 	// Ambiguous configs (image and dockerComposeFile, …) used to resolve
 	// silently by an internal precedence.
@@ -61,13 +65,10 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		return nil, fmt.Errorf("invalid configuration %s: %w", configPath, err)
 	}
 	metaImage := metadataImage(local, configPath)
-	metaLabel, imageConfigs := imageMetadata(ctx, metaImage, opts.Images, rep)
 	// Image metadata gets the same substitution as devcontainer.json: a
 	// prebuilt image's feature mounts name volumes with ${devcontainerId}.
-	subCtx := NewSubstitutionContext(opts.WorkspacePath, configPath, local)
-	for i := range imageConfigs {
-		SubstituteConfig(&imageConfigs[i], subCtx)
-	}
+	subCtx := NewSubstitutionContext(opts.WorkspacePath, configPath, loaded.Raw)
+	metaLabel, imageConfigs := imageMetadata(ctx, metaImage, opts.Images, subCtx, rep)
 	cfg := MergeMetadata(local, imageConfigs)
 
 	var lf *lockfile.Lockfile
@@ -78,14 +79,8 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		}
 	}
 
-	// The staleness key is computed from the file as written.
-	raw, err := ParseFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-
 	resolved, err := NewBuilder(rep).Build(ctx, BuilderOptions{
-		Raw:           raw,
+		Raw:           loaded.Raw, // the staleness key: the file as written
 		ConfigPath:    configPath,
 		WorkspaceRoot: opts.WorkspacePath,
 		Config:        cfg,
@@ -105,7 +100,7 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 // imageMetadata returns the devcontainer.metadata label of image (see
 // metadataImage: the image, or the base image a Dockerfile or compose
 // service builds FROM) and its parsed entries.
-func imageMetadata(ctx context.Context, image string, images ImageMetadataSource, rep report.Reporter) (string, []DevContainerConfig) {
+func imageMetadata(ctx context.Context, image string, images ImageMetadataSource, subCtx *SubstitutionContext, rep report.Reporter) (string, []DevContainerConfig) {
 	if images == nil || image == "" {
 		return "", nil
 	}
@@ -114,10 +109,13 @@ func imageMetadata(ctx context.Context, image string, images ImageMetadataSource
 		// Not available locally (and not pulled): resolve without it.
 		return "", nil
 	}
-	imageConfigs, err := ParseImageMetadata(label)
+	imageConfigs, warnings, err := parseImageMetadata(label, subCtx)
 	if err != nil {
 		rep.Warnf("Ignoring invalid devcontainer.metadata of %s: %v", image, err)
 		return "", nil
+	}
+	for _, w := range warnings {
+		rep.Warnf("devcontainer.metadata of %s: %s", image, w)
 	}
 	return label, imageConfigs
 }

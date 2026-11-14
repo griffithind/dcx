@@ -95,6 +95,24 @@ func TestDockerfileBuildHonoursPullAndNoCache(t *testing.T) {
 	assert.True(t, fake.Builds[0].NoCache, "--no-cache bypasses BuildKit's cache")
 }
 
+// With both image and build, the built image is also tagged as image, as
+// the reference implementation does (compat C10).
+func TestDockerfileBuildIsAlsoTaggedAsImage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fake := &containertest.Fake{}
+	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
+		Identity:  devcontainer.Identity{WorkspaceID: "ws1234567890", ResourceName: "app-ws123456"},
+		ConfigDir: "/w/.devcontainer",
+		Plan:      devcontainer.NewDockerfilePlan("Dockerfile", "."),
+		Config:    &devcontainer.DevContainerConfig{},
+		Local:     &devcontainer.DevContainerConfig{Image: "myorg/dev:latest"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, prov.Build(context.Background(), container.BuildOptions{}))
+	require.NotEmpty(t, fake.Builds)
+	assert.Equal(t, []string{"myorg/dev:latest"}, fake.Builds[0].ExtraTags)
+}
+
 // The UID layer ends with the image's own USER (F5): it used to end with
 // the remote user, so the keep-alive, feature entrypoints and compose
 // commands ran as that user.

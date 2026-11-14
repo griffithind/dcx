@@ -128,27 +128,6 @@ func (c *Command) step(name string) (Step, bool) {
 // Parallel reports whether the steps run in parallel (the named form).
 func (c *Command) Parallel() bool { return c != nil && c.Named != nil }
 
-// Substitute returns a copy of c with sub applied to every string.
-func (c *Command) Substitute(sub func(string) string) *Command {
-	if c == nil {
-		return nil
-	}
-	out := Command{Shell: sub(c.Shell)}
-	if c.Argv != nil {
-		out.Argv = make([]string, len(c.Argv))
-		for i, a := range c.Argv {
-			out.Argv[i] = sub(a)
-		}
-	}
-	if c.Named != nil {
-		out.Named = make(map[string]Command, len(c.Named))
-		for name, cmd := range c.Named {
-			out.Named[name] = *cmd.Substitute(sub)
-		}
-	}
-	return &out
-}
-
 // String renders a step for display.
 func (s Step) String() string {
 	text := s.Shell

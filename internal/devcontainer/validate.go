@@ -43,27 +43,20 @@ func (e ValidationErrors) Error() string {
 func Validate(cfg *DevContainerConfig) error {
 	var errs ValidationErrors
 
-	// Must have exactly one of: image, build, or dockerComposeFile
+	// One of image, build or dockerComposeFile. image and build together
+	// are fine: the image is built and also tagged as image (or, for a
+	// build without a dockerfile, the image is used), as in the reference
+	// implementation. Compose with either is ambiguous.
 	hasImage := cfg.Image != ""
 	hasBuild := cfg.Build != nil
 	hasCompose := cfg.DockerComposeFile != nil
 
-	count := 0
-	if hasImage {
-		count++
-	}
-	if hasBuild {
-		count++
-	}
-	if hasCompose {
-		count++
-	}
-
-	if count == 0 {
+	switch {
+	case !hasImage && !hasBuild && !hasCompose:
 		errs = append(errs, ValidationError{
 			Message: "must specify one of: image, build, or dockerComposeFile",
 		})
-	} else if count > 1 {
+	case hasCompose && (hasImage || hasBuild):
 		set := []string{}
 		for name, ok := range map[string]bool{"image": hasImage, "build": hasBuild, "dockerComposeFile": hasCompose} {
 			if ok {
@@ -72,7 +65,7 @@ func Validate(cfg *DevContainerConfig) error {
 		}
 		sort.Strings(set)
 		errs = append(errs, ValidationError{
-			Message: "set only one of image, build or dockerComposeFile (found " + strings.Join(set, ", ") + ")",
+			Message: "dockerComposeFile cannot be combined with image or build (found " + strings.Join(set, ", ") + ")",
 		})
 	}
 
@@ -95,7 +88,7 @@ func Validate(cfg *DevContainerConfig) error {
 	}
 
 	// Build-specific validation
-	if hasBuild {
+	if cfg.PlanType() == PlanTypeDockerfile {
 		if cfg.Build.Dockerfile == "" && cfg.Build.Context == "" {
 			errs = append(errs, ValidationError{
 				Field:   "build",
@@ -110,6 +103,12 @@ func Validate(cfg *DevContainerConfig) error {
 			Field:   "workspaceFolder",
 			Message: "must be an absolute path",
 		})
+	}
+
+	if cfg.WorkspaceMount != nil && *cfg.WorkspaceMount != "" {
+		if _, err := ParseWorkspaceMount(*cfg.WorkspaceMount); err != nil {
+			errs = append(errs, ValidationError{Field: "workspaceMount", Message: err.Error()})
+		}
 	}
 
 	if len(errs) > 0 {

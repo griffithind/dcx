@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetermineContainerWorkspaceFolder(t *testing.T) {
@@ -112,11 +113,11 @@ func TestSubstitute(t *testing.T) {
 			name:  "localEnv with value",
 			input: "${localEnv:HOME}/test",
 			ctx: &SubstitutionContext{
-				LocalEnv: func(key string) string {
+				LookupEnv: func(key string) (string, bool) {
 					if key == "HOME" {
-						return "/home/testuser"
+						return "/home/testuser", true
 					}
-					return ""
+					return "", false
 				},
 			},
 			want: "/home/testuser/test",
@@ -125,9 +126,47 @@ func TestSubstitute(t *testing.T) {
 			name:  "localEnv with default",
 			input: "${localEnv:MISSING:defaultvalue}",
 			ctx: &SubstitutionContext{
-				LocalEnv: func(key string) string { return "" },
+				LookupEnv: func(key string) (string, bool) { return "", false },
 			},
 			want: "defaultvalue",
+		},
+		{
+			// The default applies only when the variable is unset.
+			name:  "localEnv set to empty keeps empty",
+			input: "${localEnv:EMPTY:docker.io}/app",
+			ctx: &SubstitutionContext{
+				LookupEnv: func(key string) (string, bool) { return "", key == "EMPTY" },
+			},
+			want: "/app",
+		},
+		{
+			name:  "default may contain colons",
+			input: "${localEnv:URL:http://localhost:8080}",
+			ctx:   &SubstitutionContext{LookupEnv: func(string) (string, bool) { return "", false }},
+			want:  "http://localhost:8080",
+		},
+		{
+			// One pass: a value that itself looks like a reference is not
+			// expanded again.
+			name:  "substituted values are not re-expanded",
+			input: "${localEnv:TRICKY}",
+			ctx: &SubstitutionContext{
+				UserHome:  "/home/me",
+				LookupEnv: func(string) (string, bool) { return "${userHome}", true },
+			},
+			want: "${userHome}",
+		},
+		{
+			name:  "unknown references and a nameless localEnv are kept",
+			input: "${nope} ${localEnv}",
+			ctx:   &SubstitutionContext{},
+			want:  "${nope} ${localEnv}",
+		},
+		{
+			name:  "basename of the compose default / is empty",
+			input: "[${containerWorkspaceFolderBasename}]",
+			ctx:   &SubstitutionContext{ContainerWorkspaceFolder: "/"},
+			want:  "[]",
 		},
 		{
 			// Resolved at exec time (ResolveContainerEnvRefs), not here.
@@ -157,17 +196,19 @@ func TestSubstitute(t *testing.T) {
 
 func TestResolveContainerEnvRefs(t *testing.T) {
 	got := ResolveContainerEnvRefs(map[string]string{
-		"PATH":    "${containerEnv:PATH}:/custom/bin",
-		"MISSING": "${containerEnv:NOPE:fallback}",
-		"EMPTY":   "x${containerEnv:NOPE}y",
-		"PLAIN":   "keep ${SHELL_VAR} as-is",
-	}, map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
+		"PATH":     "${containerEnv:PATH}:/custom/bin",
+		"MISSING":  "${containerEnv:NOPE:fallback}",
+		"EMPTY":    "x${containerEnv:NOPE}y",
+		"SETEMPTY": "${containerEnv:BLANK:fallback}",
+		"PLAIN":    "keep ${SHELL_VAR} as-is",
+	}, map[string]string{"PATH": "/usr/local/bin:/usr/bin", "BLANK": ""})
 
 	want := map[string]string{
-		"PATH":    "/usr/local/bin:/usr/bin:/custom/bin",
-		"MISSING": "fallback",
-		"EMPTY":   "xy",
-		"PLAIN":   "keep ${SHELL_VAR} as-is",
+		"PATH":     "/usr/local/bin:/usr/bin:/custom/bin",
+		"MISSING":  "fallback",
+		"EMPTY":    "xy",
+		"SETEMPTY": "",
+		"PLAIN":    "keep ${SHELL_VAR} as-is",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
@@ -204,29 +245,37 @@ func TestLoadSubstitutesWithExplicitConfigPath(t *testing.T) {
 	}
 }
 
-// Feature options are substituted once, with the full context (D4): they
-// used to get a second, localEnv-only pass at Dockerfile time, so
-// ${devcontainerId} reached install scripts unexpanded.
-func TestSubstituteConfigFeatureOptions(t *testing.T) {
+// Every string of the config is substituted once, with the full context:
+// feature options (they reach install scripts and the staleness key),
+// customizations and the other properties the reference implementation
+// substitutes, while numbers and booleans are left alone.
+func TestLoadSubstitutesEveryString(t *testing.T) {
 	t.Setenv("DCX_TEST_VERSION", "20")
-	cfg := &DevContainerConfig{Features: map[string]interface{}{
-		"ghcr.io/devcontainers/features/node:1": map[string]interface{}{
-			"version": "${localEnv:DCX_TEST_VERSION}",
-			"cache":   "/cache/${devcontainerId}",
-			"enabled": true,
-		},
-		"ghcr.io/devcontainers/features/git:1": true,
-	}}
+	t.Setenv("DCX_TEST_MEM", "8gb")
 	ws := t.TempDir()
-	SubstituteConfig(cfg, NewSubstitutionContext(ws, "", cfg))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, ".devcontainer"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "devcontainer.json"), []byte(`{
+		"image": "alpine:3",
+		"features": {
+			"ghcr.io/devcontainers/features/node:1": {"version": "${localEnv:DCX_TEST_VERSION}", "cache": "/cache/${devcontainerId}", "enabled": true},
+			"ghcr.io/devcontainers/features/git:1": true
+		},
+		"hostRequirements": {"memory": "${localEnv:DCX_TEST_MEM}"},
+		"customizations": {"dcx": {"secrets": {"TOKEN": "cat ${localWorkspaceFolder}/token"}}},
+		"containerEnv": {"PORT": 3000}
+	}`), 0o644))
+
+	loaded, err := LoadConfig(ws, "")
+	require.NoError(t, err)
+	cfg := loaded.Config
 	opts := cfg.Features["ghcr.io/devcontainers/features/node:1"].(map[string]interface{})
-	if opts["version"] != "20" {
-		t.Errorf("version = %v", opts["version"])
-	}
-	if opts["cache"] != "/cache/"+ComputeID(ws) {
-		t.Errorf("cache = %v, want the devcontainer ID substituted", opts["cache"])
-	}
-	if opts["enabled"] != true || cfg.Features["ghcr.io/devcontainers/features/git:1"] != true {
-		t.Error("non-string options are left alone")
-	}
+	assert.Equal(t, "20", opts["version"])
+	assert.Equal(t, "/cache/"+ComputeID(ws), opts["cache"])
+	assert.Equal(t, true, opts["enabled"])
+	assert.Equal(t, true, cfg.Features["ghcr.io/devcontainers/features/git:1"])
+	assert.Equal(t, "8gb", cfg.HostRequirements.Memory)
+	assert.Equal(t, SecretConfig("cat "+ws+"/token"), cfg.DcxCustomizations().Secrets["TOKEN"])
+	assert.Equal(t, "3000", cfg.ContainerEnv["PORT"])
+
+	assert.Equal(t, "${localEnv:DCX_TEST_MEM}", loaded.Raw.HostRequirements.Memory, "Raw is the file as written")
 }

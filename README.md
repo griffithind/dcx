@@ -530,8 +530,27 @@ Changes since 0.7 that affect existing setups:
   --json` does.
 - `dcx upgrade` verifies the release's checksums and no longer replaces a
   development or newer build unless given `--force`.
-- A config that sets more than one of `image`, `build` and
-  `dockerComposeFile` is rejected instead of silently picking one.
+- `dockerComposeFile` together with `image` or `build` is rejected instead
+  of silently picking one. `image` with `build` is accepted, as in the
+  official CLI: the image is built and also tagged as `image` (a `build`
+  without a `dockerfile` next to `image` is ignored).
+- Read like the official devcontainers/cli: numbers and booleans in
+  `containerEnv`, `remoteEnv` and `build.args`, a string `build.cacheFrom`,
+  legacy `dockerFile`/`context` next to a `build` object, and a UTF-8 BOM
+  are accepted. Property names are case-sensitive (`"Image"` is ignored,
+  with a warning). Every string is variable-substituted once, including
+  `customizations` and `hostRequirements`.
+- Without `build.context`, the build context is the Dockerfile's directory
+  (it was the config's directory); absolute `dockerfile`/`context` paths
+  are used as they are.
+- `"workspaceMount": ""` means no workspace mount, and an invalid
+  `workspaceMount` is an error.
+- `${localEnv:VAR:default}` uses the default only when `VAR` is unset (a
+  variable set to an empty string gives the empty string).
+- Image metadata no longer supplies `workspaceFolder`, `workspaceMount`,
+  `runArgs` or `features` (the official CLI ignores them there), and one
+  bad property in an image's `devcontainer.metadata` drops only that
+  property, with a warning.
 - `forwardPorts` and `appPort` entries without a host address are
   published on `127.0.0.1` only (`forwardPorts` used to bind every
   interface, and `appPort` failed to create). Write `"0.0.0.0:3000:3000"`

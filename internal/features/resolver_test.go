@@ -1,6 +1,10 @@
 package features
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestExtractDigestFromResolved(t *testing.T) {
 	tests := []struct {
@@ -57,5 +61,22 @@ func TestExtractDigestFromResolved(t *testing.T) {
 				t.Errorf("extractDigestFromResolved(%q) = %q, want %q", tt.resolved, result, tt.expected)
 			}
 		})
+	}
+}
+
+// devcontainer-feature.json is JSONC, as the reference implementation
+// reads it (compat F13).
+func TestLoadMetadataAcceptsJSONC(t *testing.T) {
+	dir := t.TempDir()
+	data := "\xEF\xBB\xBF{\n  // a comment\n  \"id\": \"hello\",\n  \"version\": \"1.0.0\",\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "devcontainer-feature.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md, err := (&Resolver{}).loadMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.ID != "hello" || md.Version != "1.0.0" {
+		t.Errorf("got %+v", md)
 	}
 }

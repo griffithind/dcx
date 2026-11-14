@@ -36,6 +36,10 @@ type DockerfileBuildOptions struct {
 	// Tag is the image tag to apply.
 	Tag string
 
+	// ExtraTags are further tags (devcontainer.json's image, when it is
+	// set together with build).
+	ExtraTags []string
+
 	// Dockerfile is the path to the Dockerfile.
 	Dockerfile string
 

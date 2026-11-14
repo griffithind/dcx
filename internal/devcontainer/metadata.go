@@ -2,6 +2,9 @@ package devcontainer
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -10,41 +13,105 @@ const DevcontainerMetadataLabel = "devcontainer.metadata"
 
 // ParseImageMetadata parses the devcontainer.metadata label value: a JSON
 // array of configuration objects, or (as the reference implementation also
-// accepts) a single object.
+// accepts) a single object. Properties that do not decode are skipped (see
+// parseImageMetadata).
 func ParseImageMetadata(labelValue string) ([]DevContainerConfig, error) {
+	configs, _, err := parseImageMetadata(labelValue, nil)
+	return configs, err
+}
+
+// parseImageMetadata parses a devcontainer.metadata label, substituting
+// variables in each entry when ctx is set. Like the reference
+// implementation, which uses entries loosely, it keeps what it can: an
+// entry that is not an object, or a property whose value does not decode
+// ("init": "true"), is skipped with a warning instead of dropping the whole
+// label.
+func parseImageMetadata(labelValue string, ctx *SubstitutionContext) ([]DevContainerConfig, []string, error) {
 	if strings.TrimSpace(labelValue) == "" {
-		return nil, nil
+		return nil, nil, nil
+	}
+	tree, err := parseTree([]byte(labelValue))
+	if err != nil {
+		return nil, nil, err
+	}
+	var entries []any
+	switch v := tree.(type) {
+	case []any:
+		entries = v
+	case map[string]any:
+		entries = []any{v}
+	default:
+		return nil, nil, fmt.Errorf("not a JSON array or object")
 	}
 	var configs []DevContainerConfig
-	arrErr := json.Unmarshal([]byte(labelValue), &configs)
-	if arrErr == nil {
-		return configs, nil
+	var warnings []string
+	for i, e := range entries {
+		obj, ok := e.(map[string]any)
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("entry %d is not an object; ignored", i))
+			continue
+		}
+		for _, w := range dropMiscasedKeys(obj, reflect.TypeOf(DevContainerConfig{}), "") {
+			warnings = append(warnings, fmt.Sprintf("entry %d: %s", i, w))
+		}
+		if ctx != nil {
+			obj = substituteTree(obj, ctx).(map[string]any)
+		}
+		cfg, dropped := decodeTolerant(obj)
+		for _, k := range dropped {
+			warnings = append(warnings, fmt.Sprintf("entry %d: ignoring %q (unexpected value)", i, k))
+		}
+		configs = append(configs, cfg)
 	}
-	var single DevContainerConfig
-	if err := json.Unmarshal([]byte(labelValue), &single); err == nil {
-		return []DevContainerConfig{single}, nil
+	return configs, warnings, nil
+}
+
+// decodeTolerant decodes obj, leaving out the properties whose values do
+// not decode; it returns their names.
+func decodeTolerant(obj map[string]any) (DevContainerConfig, []string) {
+	var cfg DevContainerConfig
+	if decodeTree(obj, &cfg) == nil {
+		return cfg, nil
 	}
-	return nil, arrErr
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	kept := map[string]any{}
+	var dropped []string
+	for _, k := range keys {
+		var probe DevContainerConfig
+		if decodeTree(map[string]any{k: obj[k]}, &probe) != nil {
+			dropped = append(dropped, k)
+			continue
+		}
+		kept[k] = obj[k]
+	}
+	cfg = DevContainerConfig{}
+	_ = decodeTree(kept, &cfg)
+	return cfg, dropped
 }
 
 // MergeMetadata merges image metadata (devcontainer.metadata label entries,
 // in image-layer order) with the local devcontainer.json, which is applied
 // as the final layer. Merge rules follow the spec:
 //
-//   - remoteUser, containerUser, workspaceFolder, workspaceMount, waitFor,
-//     userEnvProbe, shutdownAction, overrideCommand, updateRemoteUserUID:
-//     last value wins
+//   - remoteUser, containerUser, waitFor, userEnvProbe, shutdownAction,
+//     overrideCommand, updateRemoteUserUID: last value wins
 //   - init, privileged: true if any layer sets true
-//   - capAdd, securityOpt, forwardPorts, runArgs: union
+//   - capAdd, securityOpt, forwardPorts: union
 //   - mounts: last wins per target
-//   - containerEnv, remoteEnv, portsAttributes, features: last wins per key
+//   - containerEnv, remoteEnv, portsAttributes: last wins per key
 //   - otherPortsAttributes: last wins
 //   - hostRequirements: the larger of each
 //   - customizations: tool-specific merge, local wins (dcx's own are never
 //     taken from an image)
 //
-// Properties that only make sense locally (name, image, build, compose)
-// come from the local config. Lifecycle commands are not merged here: each
+// Everything else (name, image, build, compose, workspaceFolder,
+// workspaceMount, runArgs, features, ...) comes from the local config only,
+// as in the reference implementation, which takes only the properties
+// above from image metadata. Lifecycle commands are not merged here: each
 // layer's hooks run in order (see resolveHooks). The inputs are never
 // modified.
 func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig) *DevContainerConfig {
@@ -60,8 +127,8 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 	layers = append(layers, local)
 
 	merged.ContainerEnv, merged.RemoteEnv = nil, nil
-	merged.PortsAttributes, merged.Features = nil, nil
-	merged.CapAdd, merged.SecurityOpt, merged.RunArgs = nil, nil, nil
+	merged.PortsAttributes = nil
+	merged.CapAdd, merged.SecurityOpt = nil, nil
 	merged.ForwardPorts, merged.Mounts = nil, nil
 	merged.Init, merged.Privileged = nil, nil
 	merged.HostRequirements = nil
@@ -90,8 +157,6 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 	for _, l := range layers {
 		lastString(&merged.RemoteUser, l.RemoteUser)
 		lastString(&merged.ContainerUser, l.ContainerUser)
-		lastString(&merged.WorkspaceFolder, l.WorkspaceFolder)
-		lastString(&merged.WorkspaceMount, l.WorkspaceMount)
 		lastString(&merged.WaitFor, l.WaitFor)
 		lastString(&merged.UserEnvProbe, l.UserEnvProbe)
 		lastString(&merged.ShutdownAction, l.ShutdownAction)
@@ -102,7 +167,6 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 
 		merged.CapAdd = unionStrings(merged.CapAdd, l.CapAdd)
 		merged.SecurityOpt = unionStrings(merged.SecurityOpt, l.SecurityOpt)
-		merged.RunArgs = unionStrings(merged.RunArgs, l.RunArgs)
 		merged.ForwardPorts = merged.ForwardPorts.union(l.ForwardPorts)
 		for _, m := range l.Mounts {
 			merged.Mounts = mergeMountByTarget(merged.Mounts, m)
@@ -115,7 +179,6 @@ func MergeMetadata(local *DevContainerConfig, imageConfigs []DevContainerConfig)
 		if l.OtherPortsAttributes != nil {
 			merged.OtherPortsAttributes = l.OtherPortsAttributes
 		}
-		merged.Features = mergeMap(merged.Features, l.Features)
 	}
 
 	// Customizations: start from a copy of the local ones (which win) and

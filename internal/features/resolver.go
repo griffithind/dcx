@@ -21,6 +21,7 @@ import (
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/registryauth"
 	"github.com/griffithind/dcx/internal/report"
+	"github.com/tidwall/jsonc"
 )
 
 // httpClient is the HTTP client with timeout for registry requests.
@@ -638,6 +639,8 @@ func (r *Resolver) loadMetadata(path string) (*FeatureMetadata, error) {
 		return nil, fmt.Errorf("failed to read devcontainer-feature.json: %w", err)
 	}
 
+	// JSONC, like devcontainer.json (comments, trailing commas, a BOM).
+	data = jsonc.ToJSON(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}))
 	var metadata FeatureMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to parse devcontainer-feature.json: %w", err)

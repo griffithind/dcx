@@ -34,7 +34,7 @@ func TestParseImageMetadata(t *testing.T) {
 			wantCount:  2,
 			check: func(t *testing.T, configs []DevContainerConfig) {
 				assert.Equal(t, "vscode", configs[0].RemoteUser)
-				assert.Equal(t, map[string]string{"FOO": "bar"}, configs[1].ContainerEnv)
+				assert.Equal(t, StringMap{"FOO": "bar"}, configs[1].ContainerEnv)
 			},
 		},
 		{
@@ -264,7 +264,7 @@ func TestMergeMetadata(t *testing.T) {
 			},
 		},
 		{
-			name: "features merge",
+			name: "features come from local only",
 			local: &DevContainerConfig{
 				Image: "alpine",
 				Features: map[string]interface{}{
@@ -280,10 +280,12 @@ func TestMergeMetadata(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, merged *DevContainerConfig) {
+				// Features come from devcontainer.json only (the reference
+				// implementation never takes them from image metadata).
 				_, hasLocalFeature := merged.Features["local-feature"]
 				_, hasImageFeature := merged.Features["image-feature"]
 				assert.True(t, hasLocalFeature)
-				assert.True(t, hasImageFeature)
+				assert.False(t, hasImageFeature)
 			},
 		},
 		{
@@ -308,7 +310,7 @@ func TestMergeMetadata(t *testing.T) {
 			},
 		},
 		{
-			name: "workspaceFolder from image if not in local",
+			name: "workspaceFolder never comes from image metadata",
 			local: &DevContainerConfig{
 				Image: "alpine",
 			},
@@ -318,7 +320,7 @@ func TestMergeMetadata(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, merged *DevContainerConfig) {
-				assert.Equal(t, "/home/vscode/workspace", merged.WorkspaceFolder)
+				assert.Empty(t, merged.WorkspaceFolder)
 			},
 		},
 		{
@@ -419,8 +421,8 @@ func TestMergeMetadataDoesNotMutateLocal(t *testing.T) {
 		Customizations: map[string]interface{}{"vscode": map[string]interface{}{"extensions": []interface{}{"b"}}},
 	}})
 
-	assert.Equal(t, map[string]string{"A": "local", "B": "image"}, merged.ContainerEnv)
-	assert.Equal(t, map[string]string{"A": "local"}, local.ContainerEnv)
+	assert.Equal(t, StringMap{"A": "local", "B": "image"}, merged.ContainerEnv)
+	assert.Equal(t, StringMap{"A": "local"}, local.ContainerEnv)
 	exts := local.Customizations["vscode"].(map[string]interface{})["extensions"].([]interface{})
 	assert.Equal(t, []interface{}{"a"}, exts)
 }

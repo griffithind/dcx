@@ -203,21 +203,6 @@ func (p Port) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.Spec)
 }
 
-// substitute applies sub to the string entries.
-func (l PortList) substitute(sub func(string) string) PortList {
-	if l == nil {
-		return nil
-	}
-	out := make(PortList, len(l))
-	for i, p := range l {
-		if !p.number {
-			p.Spec = sub(p.Spec)
-		}
-		out[i] = p
-	}
-	return out
-}
-
 // union appends the entries of b not already in l (by spec).
 func (l PortList) union(b PortList) PortList {
 	for _, p := range b {

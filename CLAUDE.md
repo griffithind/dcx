@@ -149,7 +149,8 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
 | `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
-| `substitute.go` | Variable substitution (see "Variable Substitution") |
+| `tree.go` | The JSONC tree a config is read into (BOM, case-sensitive keys), `Substitute` (one pass over every string), decoding |
+| `substitute.go` | `SubstitutionContext`, `ResolveContainerEnvRefs` (exec-time `${containerEnv:…}`) |
 | `resolve.go` | `ResolveWorkspace()` - the one resolution pipeline (load, image metadata via `ImageMetadataSource`, lockfile, build) |
 | `builder.go` | `Builder.Build()` - the build step of `ResolveWorkspace` |
 | `id.go` | `NewIdentity` / `LoadIdentity` - the only place the workspace identity is computed |
@@ -255,7 +256,7 @@ Labels are immutable after create: only add one if `buildLabels` writes it.
 devcontainer.json (JSONC)
     ↓ Parse()
 DevContainerConfig
-    ↓ SubstituteConfig() — exactly once, in devcontainer.Load (also with --config)
+    ↓ LoadConfig: JSONC tree → Raw; every string substituted once (substituteTree) → Local
 DevContainerConfig (substituted)               — Local
     ↓ metadataImage: the image, or the FROM of a Dockerfile / compose build (baseimage.go)
     ↓ its devcontainer.metadata (ImageMetadataSource), variable-substituted
@@ -453,7 +454,8 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Library code never constructs a Docker client; it receives a `container.Engine` (`build` uses the narrower `build.Engine`). Only `container/docker.go` runs `docker` (depguard enforces it); add an Engine method rather than calling `os/exec`. Use `containertest.Fake` in unit tests.
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
-- Variable substitution happens once, in `devcontainer.Load` (`NewSubstitutionContext` + `SubstituteConfig`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
+- Variable substitution happens once, in `devcontainer.LoadConfig`, over every string of the JSON tree before it is decoded (image metadata likewise, in `parseImageMetadata`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
+- Compatibility with devcontainers/cli is tracked in `docs/compat-review.md`; read it before changing resolution, features or the runtime.
 - Container runtime settings live in `container.ContainerSpec`, rendered by both engines; run `docker compose` only through `container.ComposeProject`.
 - Parse mounts with `mount.Parse` (`devcontainer.ParseMountString`) and ports with `ParsePortSpec`; lifecycle commands are `*lifecyclecmd.Command`; don't add new parsers or `interface{}` config fields.
 - Typed config fields must marshal back to the JSON they were read from: the config hash (`TestConfigHashEncodingIsStable`) is the staleness key.

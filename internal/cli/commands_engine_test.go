@@ -51,7 +51,7 @@ func TestDoctorFailsOnABrokenConfig(t *testing.T) {
 	var err error
 	out := captureUI(t, func() { err = runDoctor(doctorCmd, nil) })
 	require.Error(t, err)
-	assert.Contains(t, out, "set only one of image, build or dockerComposeFile")
+	assert.Contains(t, out, "dockerComposeFile cannot be combined with image or build")
 	assert.NotContains(t, out, "System Requirements", "--config-only skips the system checks")
 }
 

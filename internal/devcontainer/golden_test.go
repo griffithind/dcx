@@ -169,7 +169,7 @@ func TestResolveGolden(t *testing.T) {
 			view := goldenView{
 				Name: resolved.Name, Plan: planView(resolved.Plan), BaseImage: resolved.BaseImage, MetadataImage: resolved.MetadataImage,
 				ResourceName: resolved.ResourceName, SSHHost: resolved.SSHHost, OverrideCommand: resolved.OverrideCommand, WorkspaceFolder: resolved.WorkspaceFolder,
-				WorkspaceMount: resolved.WorkspaceMount, RemoteUser: resolved.RemoteUser,
+				WorkspaceMount: derefString(resolved.WorkspaceMount), RemoteUser: resolved.RemoteUser,
 				ContainerUser: resolved.ContainerUser, EffectiveUser: resolved.EffectiveUser,
 				ContainerEnv: resolved.ContainerEnv, RemoteEnv: resolved.RemoteEnv,
 				Mounts: resolved.Mounts, CapAdd: resolved.CapAdd, SecurityOpt: resolved.SecurityOpt,
@@ -209,4 +209,11 @@ func TestResolveGolden(t *testing.T) {
 			}
 		})
 	}
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

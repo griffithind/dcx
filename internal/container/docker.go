@@ -928,6 +928,7 @@ func buildArgs(opts build.DockerfileBuildOptions) []string {
 	if opts.Tag != "" {
 		add("-t", opts.Tag)
 	}
+	add("-t", opts.ExtraTags...)
 	if opts.Dockerfile != "" {
 		add("-f", opts.Dockerfile)
 	}

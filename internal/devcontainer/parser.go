@@ -1,12 +1,10 @@
 package devcontainer
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/tidwall/jsonc"
+	"reflect"
 )
 
 // Standard locations for devcontainer.json
@@ -15,21 +13,47 @@ var configLocations = []string{
 	".devcontainer.json",
 }
 
-// Parse parses a devcontainer.json file from bytes.
+// Parse parses a devcontainer.json file from bytes (without substitution).
 func Parse(data []byte) (*DevContainerConfig, error) {
-	// Strip comments and trailing commas
-	stripped := jsonc.ToJSON(data)
+	_, cfg, _, err := parseConfig(data)
+	return cfg, err
+}
 
+// parseConfig parses JSONC into its generic tree (with mis-cased property
+// names removed, reported as warnings) and the typed config decoded from it.
+func parseConfig(data []byte) (map[string]any, *DevContainerConfig, []string, error) {
+	tree, err := parseTree(data)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to parse devcontainer.json: %w", err)
+	}
+	obj, ok := tree.(map[string]any)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("failed to parse devcontainer.json: not a JSON object")
+	}
+	warnings := dropMiscasedKeys(obj, reflect.TypeOf(DevContainerConfig{}), "")
+	cfg, err := decodeConfig(obj)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return obj, cfg, warnings, nil
+}
+
+// decodeConfig decodes a config tree, moving the legacy top-level
+// dockerFile/context into build as the reference implementation reads them:
+// a top-level dockerFile wins over build.dockerfile, and then the context is
+// the top-level one (build.args, target, ... still apply).
+func decodeConfig(tree map[string]any) (*DevContainerConfig, error) {
 	var cfg DevContainerConfig
-	if err := json.Unmarshal(stripped, &cfg); err != nil {
+	if err := decodeTree(tree, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse devcontainer.json: %w", err)
 	}
-	// The legacy top-level dockerFile/context mean build.dockerfile/context.
-	if cfg.LegacyDockerFile != "" && cfg.Build == nil {
-		cfg.Build = &BuildConfig{Dockerfile: cfg.LegacyDockerFile, Context: cfg.LegacyContext}
+	if cfg.LegacyDockerFile != "" {
+		if cfg.Build == nil {
+			cfg.Build = &BuildConfig{}
+		}
+		cfg.Build.Dockerfile, cfg.Build.Context = cfg.LegacyDockerFile, cfg.LegacyContext
 	}
 	cfg.LegacyDockerFile, cfg.LegacyContext = "", ""
-
 	return &cfg, nil
 }
 
@@ -98,11 +122,36 @@ func Resolve(workspacePath string) (string, error) {
 	return "", fmt.Errorf("no devcontainer.json found in %s (use --config for a file elsewhere)", workspacePath)
 }
 
+// Loaded is a devcontainer.json as written and as substituted.
+type Loaded struct {
+	// Path is the config file.
+	Path string
+	// Raw is the config as written (the staleness key's input).
+	Raw *DevContainerConfig
+	// Config is Raw with variables substituted.
+	Config *DevContainerConfig
+	// Warnings are problems that did not stop loading (ignored
+	// properties).
+	Warnings []string
+}
+
 // Load locates, parses and substitutes the devcontainer configuration.
-// Returns the config and the path it was loaded from. Substitution runs
-// exactly once here, whether the file was found automatically or given via
-// --config.
+// Returns the config and the path it was loaded from.
 func Load(workspacePath, configPath string) (*DevContainerConfig, string, error) {
+	loaded, err := LoadConfig(workspacePath, configPath)
+	if err != nil {
+		if loaded != nil {
+			return nil, loaded.Path, err
+		}
+		return nil, "", err
+	}
+	return loaded.Config, loaded.Path, nil
+}
+
+// LoadConfig locates and parses the devcontainer configuration, and
+// substitutes variables in every string of it, once, whether the file was
+// found automatically or given via --config.
+func LoadConfig(workspacePath, configPath string) (*Loaded, error) {
 	if configPath != "" {
 		if !filepath.IsAbs(configPath) {
 			configPath = filepath.Join(workspacePath, configPath)
@@ -110,18 +159,27 @@ func Load(workspacePath, configPath string) (*DevContainerConfig, string, error)
 	} else {
 		resolvedPath, err := Resolve(workspacePath)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		configPath = resolvedPath
 	}
+	loaded := &Loaded{Path: configPath}
 
-	cfg, err := ParseFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, configPath, err
+		return loaded, fmt.Errorf("failed to read %s: %w", configPath, err)
 	}
-
-	SubstituteConfig(cfg, NewSubstitutionContext(workspacePath, configPath, cfg))
-	return cfg, configPath, nil
+	tree, raw, warnings, err := parseConfig(data)
+	if err != nil {
+		return loaded, err
+	}
+	subCtx := NewSubstitutionContext(workspacePath, configPath, raw)
+	cfg, err := decodeConfig(substituteTree(tree, subCtx).(map[string]any))
+	if err != nil {
+		return loaded, err
+	}
+	loaded.Raw, loaded.Config, loaded.Warnings = raw, cfg, warnings
+	return loaded, nil
 }
 
 func isDir(path string) bool {
