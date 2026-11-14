@@ -29,12 +29,11 @@ func TestStopStartKeepsEnvironmentUsableE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"postStartCommand": "echo started >> /tmp/poststart.log"
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	execEcho := func(t *testing.T, marker string) {
 		t.Helper()
@@ -84,7 +83,7 @@ func TestRecreatePreservesComposeNamedVolumesE2E(t *testing.T) {
 	}`, name)
 	dockerComposeYAML := `services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
@@ -122,8 +121,7 @@ func TestSecretsDirIsTmpfsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:latest"))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
+	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
@@ -163,7 +161,7 @@ func TestAgentPrivilegeBoundariesE2E(t *testing.T) {
 		"updateRemoteUserUID": false
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	dockerfile := fmt.Sprintf(`FROM alpine:latest
+	dockerfile := fmt.Sprintf(`FROM alpine:3.24
 RUN adduser -D -u 1234 dev && adduser -D -u 1235 other \
  && mkdir -p /home/other/.ssh \
  && echo '%s' > /home/other/.ssh/authorized_keys \

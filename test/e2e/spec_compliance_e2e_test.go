@@ -19,7 +19,7 @@ func TestRemoteEnvE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"remoteEnv": {
 			"REMOTE_VAR_1": "remote-value-1",
@@ -64,7 +64,7 @@ func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {
 			"CONTAINER_VAR": "container-value",
@@ -76,10 +76,6 @@ func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
 		}
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -115,14 +111,10 @@ func TestOverrideCommandDefaultImageE2E(t *testing.T) {
 	// Without overrideCommand=true (or default true), this would exit immediately
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace"
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container - should succeed because overrideCommand defaults to true
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -148,7 +140,7 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	// "worked" because dcx silently dropped runArgs.)
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": false
 	}`, helpers.UniqueTestName(t))
@@ -175,17 +167,13 @@ func TestWaitForDefaultE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"onCreateCommand": "echo 'onCreate executed'",
 		"updateContentCommand": "echo 'updateContent executed'",
 		"postCreateCommand": "echo 'postCreate executed'"
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container
 	// With default waitFor=updateContentCommand, the up should wait for:

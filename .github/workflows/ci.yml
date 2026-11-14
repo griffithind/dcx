@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs CI first and publishes only when it passes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -29,6 +31,25 @@ jobs:
 
       - name: Deadcode
         run: make deadcode
+
+      - name: Unit tests
+        run: make test-unit
+
+      - name: Conformance tests
+        run: make test-conformance
+
+  # darwin binaries are released, so the host side is tested on macOS too
+  # (e2e needs a Docker daemon, which macOS runners lack).
+  unit-macos:
+    name: Unit tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Unit tests
         run: make test-unit

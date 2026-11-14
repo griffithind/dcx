@@ -3,9 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 
 	containerPkg "github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/report"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"

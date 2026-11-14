@@ -34,7 +34,7 @@ func TestAgentFilesRootOwnedE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	ws := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:latest"))
+	ws := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
 	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	c := helpers.ContainerName(t, ws)
@@ -64,13 +64,12 @@ func TestPlainSSHSessionParityE2E(t *testing.T) {
 
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {"BASE": "base-value"},
 		"remoteEnv": {"FROM_REMOTE": "remote-${containerEnv:BASE}"},
 		"postAttachCommand": "echo attached >> /tmp/attach.log"
 	}`, helpers.UniqueTestName(t)))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
 	alias := extractSSHHostname(t, stdout)
 
@@ -105,9 +104,8 @@ func TestNonRootRemoteUserSessionsE2E(t *testing.T) {
 		"remoteUser": "dev",
 		"updateRemoteUserUID": false
 	}`, helpers.UniqueTestName(t)))
-	dockerfile := "FROM alpine:latest\nRUN adduser -D dev && addgroup extra && addgroup dev extra\n"
+	dockerfile := "FROM alpine:3.24\nRUN adduser -D dev && addgroup extra && addgroup dev extra\n"
 	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "Dockerfile"), []byte(dockerfile), 0o644))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
 	alias := extractSSHHostname(t, stdout)
 
@@ -127,7 +125,7 @@ func TestSameNameWorkspacesGetDistinctAliasesE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	cfg := helpers.SimpleImageConfig(t, "alpine:latest")
+	cfg := helpers.SimpleImageConfig(t, "alpine:3.24")
 	first := helpers.CreateTempWorkspace(t, cfg)
 	second := helpers.CreateTempWorkspace(t, cfg)
 	require.NoError(t, os.WriteFile(filepath.Join(first, "marker"), []byte("first"), 0o644))

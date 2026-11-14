@@ -32,18 +32,13 @@ func TestComposeWorkflowE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// Setup cleanup
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Test initial state is absent
 	t.Run("initial_state_absent", func(t *testing.T) {
@@ -112,22 +107,18 @@ func TestComposeMultiServiceE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
     depends_on:
       - db
   db:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the environment
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -159,17 +150,13 @@ func TestComposeUpIdempotent(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// First up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -199,17 +186,13 @@ func TestComposeRecreate(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// First up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -240,17 +223,13 @@ func TestComposeContainerLabelsE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -323,43 +302,29 @@ func TestComposeLocalFeatureCachingE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// First up - features should be installed
-	t.Run("first_up_installs_features", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		assert.Contains(t, stdout, "Building derived image")
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	containerID := helpers.ContainerID(t, workspace)
+	imageID := helpers.ContainerImageID(t, workspace)
+
+	t.Run("second_up_keeps_the_container", func(t *testing.T) {
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Equal(t, containerID, helpers.ContainerID(t, workspace))
 	})
 
-	// Second up - should be cached (container already running)
-	t.Run("second_up_uses_running_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "already running")
-		assert.NotContains(t, stdout, "Building derived image")
-	})
-
-	// Verify feature is active
 	t.Run("feature_active", func(t *testing.T) {
 		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "feature installed")
 	})
 
-	// Down the environment
-	t.Run("down_removes_containers", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
-		assert.Contains(t, stdout, "removed")
-	})
+	t.Run("up_after_down_reuses_the_features_image", func(t *testing.T) {
+		helpers.RunDCXInDirSuccess(t, workspace, "down")
+		assert.Equal(t, "absent", helpers.GetContainerState(t, workspace))
 
-	// Up again - should use cached features image
-	t.Run("up_after_down_uses_cached_image", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		assert.Contains(t, stdout, "Using cached derived image")
-		assert.NotContains(t, stdout, "Building derived image")
-	})
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.NotEqual(t, containerID, helpers.ContainerID(t, workspace), "a new container")
+		assert.Equal(t, imageID, helpers.ContainerImageID(t, workspace), "from the cached image")
 
-	// Verify feature is still active after down/up cycle
-	t.Run("feature_still_active_after_cycle", func(t *testing.T) {
 		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "feature installed")
@@ -378,19 +343,13 @@ func TestComposeRemoteFeatureCachingE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// First up - features should be installed
-	t.Run("first_up_installs_features", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		assert.Contains(t, stdout, "Building derived image")
-	})
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	containerID := helpers.ContainerID(t, workspace)
 
-	// Second up - should return early, not rebuild
-	t.Run("second_up_uses_cache", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "already running")
-		assert.NotContains(t, stdout, "Building derived image")
-	})
+	// A second up changes nothing: same container, no rebuild.
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	assert.Contains(t, stdout, "already running")
+	assert.Equal(t, containerID, helpers.ContainerID(t, workspace))
 }
 
 // createComposeWorkspaceWithRemoteFeature creates a workspace with a remote feature.
@@ -488,7 +447,7 @@ echo "feature installed" > /tmp/feature-marker
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached

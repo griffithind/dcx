@@ -20,13 +20,8 @@ func TestSingleImageBasedE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create a temp workspace with image-based config
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Setup cleanup
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Test initial state is absent
 	t.Run("initial_state_absent", func(t *testing.T) {
@@ -92,7 +87,7 @@ func TestSingleDockerfileBasedE2E(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create Dockerfile
-	dockerfile := `FROM alpine:latest
+	dockerfile := `FROM alpine:3.24
 RUN echo "built from dockerfile" > /built-marker
 `
 	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
@@ -144,7 +139,7 @@ func TestSingleContainerWithMounts(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Mount Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace"
 	}`
 
@@ -154,10 +149,6 @@ func TestSingleContainerWithMounts(t *testing.T) {
 	testFile := filepath.Join(workspace, "test-file.txt")
 	err := os.WriteFile(testFile, []byte("mounted content"), 0644)
 	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -181,7 +172,7 @@ func TestSingleContainerRebuild(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create Dockerfile
-	dockerfile := `FROM alpine:latest
+	dockerfile := `FROM alpine:3.24
 RUN echo "version1" > /version
 `
 	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
@@ -211,7 +202,7 @@ RUN echo "version1" > /version
 	assert.Contains(t, stdout, "version1")
 
 	// Modify Dockerfile
-	dockerfile = `FROM alpine:latest
+	dockerfile = `FROM alpine:3.24
 RUN echo "version2" > /version
 `
 	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
@@ -231,12 +222,8 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -333,7 +320,7 @@ func TestBuildNoCacheE2E(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create Dockerfile with a marker
-	dockerfile := `FROM alpine:latest
+	dockerfile := `FROM alpine:3.24
 RUN echo "build-marker" > /build-marker
 `
 	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)

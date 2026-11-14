@@ -30,7 +30,7 @@ func TestRunArgsPassThroughE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"runArgs": ["--hostname=dcx-runargs", "-e", "FROM_RUNARGS=yes", "--label", "dcx.test.runargs=1", "--ulimit", "nofile=1024:2048", "--rm"]
 	}`, helpers.UniqueTestName(t))
@@ -56,7 +56,7 @@ func TestDevcontainerIDAndFeatureEnvE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"mounts": ["source=dcx-e2e-cache-${devcontainerId},target=/cache,type=volume"],
 		"features": {"./pathfeature": {}}

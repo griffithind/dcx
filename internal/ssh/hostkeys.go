@@ -15,17 +15,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/griffithind/dcx/internal/dcxhome"
 	gossh "golang.org/x/crypto/ssh"
 )
 
 // HostKeyDir returns the directory where per-workspace host keys live.
 // Callers should not assume the directory exists; EnsureHostKey creates it.
 func HostKeyDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".dcx", "hostkeys"), nil
+	return dcxhome.Path("hostkeys")
 }
 
 // HostKeyPath returns the absolute path to a workspace's host key file.

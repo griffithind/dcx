@@ -19,16 +19,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/griffithind/dcx/internal/dcxhome"
 	gossh "golang.org/x/crypto/ssh"
 )
 
 // KnownHostsPath returns the absolute path to ~/.dcx/known_hosts.
 func KnownHostsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".dcx", "known_hosts"), nil
+	return dcxhome.Path("known_hosts")
 }
 
 // HostKeyAlias returns the stable alias used in both ~/.ssh/config's

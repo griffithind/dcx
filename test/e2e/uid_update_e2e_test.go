@@ -41,10 +41,6 @@ func TestUIDUpdateE2E(t *testing.T) {
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the container
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.Contains(t, stdout, "Devcontainer started successfully")
@@ -111,10 +107,6 @@ func TestUIDUpdateDisabledE2E(t *testing.T) {
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -139,16 +131,12 @@ func TestUIDUpdateRootUserE2E(t *testing.T) {
 	// Create config with remoteUser: root
 	devcontainerJSON := `{
 		"name": "` + helpers.UniqueTestName(t) + `",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"remoteUser": "root",
 		"workspaceFolder": "/workspace"
 	}`
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -187,10 +175,6 @@ func TestUIDUpdateNoFeaturesE2E(t *testing.T) {
 	}`
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 

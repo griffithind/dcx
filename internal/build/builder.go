@@ -6,11 +6,11 @@ package build
 
 import (
 	"context"
-	"github.com/griffithind/dcx/internal/report"
 	"io"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/report"
 )
 
 // Engine is what builds need from the container engine. container.Engine

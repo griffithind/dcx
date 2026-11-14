@@ -4,15 +4,14 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/agentproto"
 	"os"
 	"os/exec"
 	"sync"
 
-	"github.com/griffithind/dcx/internal/report"
-
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecyclecmd"
+	"github.com/griffithind/dcx/internal/report"
 	sshclient "github.com/griffithind/dcx/internal/ssh/client"
 )
 

@@ -216,6 +216,30 @@
 - **F20:** unmodelled mount options pass through (compose: `bind.propagation`, `volume.subpath`/`nocopy`, tmpfs size and mode), and relative and `~` bind sources resolve.
 - **F21:** the `--hosts` limitation behind proxied ports is documented.
 
+**Step 5 (tests and CI): done.**
+- **T3:** `internal/dcxhome` (`DCX_HOME`, default `~/.dcx`) is the one place dcx's state directory is chosen: host keys, known_hosts, the fallback client key, locks and compose overrides. The e2e `TestMain` calls `helpers.Isolate`, which points `DCX_HOME` and `DCX_SSH_DIR` at temporary directories, so a run no longer touches the developer's `~/.dcx` or `~/.ssh`.
+- **T2:** `internal/features/registry_test.go` runs an `httptest` TLS registry with Bearer token auth: token scope, manifest and blob, layer digest mismatch, lockfile integrity mismatch, path traversal in a layer, and a lockfile pin that survives a moved tag (plus `GenerateLockfile` and `VerifyLockfile`). It found a real bug: nothing created `~/.cache/dcx/features`, so the first feature fetch on a fresh machine failed. `fetchInto` now creates it.
+- **T1, T4:** the github.com subtest and the duplicate agent test are gone. `helpers.Isolate` serves an in-process SSH agent holding a generated key, so agent forwarding runs everywhere, CI included, and the tests check that `ssh-add -l` lists that key.
+- **T5:** unit tests for `Status` (absent, current, drift, stale, raw-config fallback), secret mounting (contents, owners, modes, refused names), and feature staging. Staging now recreates symlinks and resolves a symlinked feature directory; links to directories used to fail.
+- **T6:** the vacuous `NotContains "Shortcuts:"` is gone, and `run --list`, the shortcut errors and completion are unit tests. `completion` writes through cobra's writer.
+- **T7:** `test/conformance` is rewritten: spec merge rules (single values, booleans, capAdd and securityOpt, env, mounts, ports, lifecycle commands, entrypoints, hostRequirements), workspace and compose defaults, substitution in config and image metadata, and Dockerfile base metadata, all through `ResolveWorkspace`.
+- **T8:** e2e images are pinned (`alpine:3.24`; node stays on `node:20-*`).
+- **T9:**
+  - `RunDCXInPTY` kills the session's process group after two minutes.
+  - `CreateTempWorkspace`, `CreateTempComposeWorkspace` and the new `CreateWorkspaceFiles` run `dcx down` when the test ends, and 67 copied cleanup blocks are gone.
+  - `TestHelpGolden` pins every command's `--help`.
+- **T10:**
+  - The secrets e2e matrix is four tests (image, non-root user, Dockerfile with build and runtime secrets, compose), down from 13.
+  - The bad-config errors are unit tests that check the messages; only the missing Dockerfile, which docker reports, stays in e2e.
+  - The caching tests compare container and image IDs instead of log text.
+- **D1:** a `v*` tag runs the full CI workflow (`workflow_call`) before the release job publishes.
+- **D3:** `make test-e2e` uses `-timeout 30m`.
+- **D4:**
+  - golangci-lint runs the gofmt and goimports formatters (`make fmt` applies them), `noctx` for HTTP requests and `bodyclose`, and lints e2e-tagged files.
+  - Import groups are fixed.
+  - `dcx upgrade` requests now take the command context, so Ctrl-C cancels them.
+- **D5:** a macOS job runs unit and conformance tests. It was checked here only by cross-compiling (`GOOS=darwin go vet`), not run.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

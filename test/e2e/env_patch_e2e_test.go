@@ -25,7 +25,7 @@ func TestEnvValuesAreNotExecutedE2E(t *testing.T) {
 	evil := `x' ; touch /tmp/pwned-probe ; echo '`
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"userEnvProbe": "loginShell",
 		"containerEnv": {"EVIL": %q},
@@ -53,10 +53,9 @@ func TestEtcEnvironmentFollowsConfigE2E(t *testing.T) {
 
 	name := helpers.UniqueTestName(t)
 	config := func(value string) string {
-		return fmt.Sprintf(`{"name": %q, "image": "alpine:latest", "workspaceFolder": "/workspace", "containerEnv": {"FROM_CONTAINER": "container-value"}, "remoteEnv": {"STAGE": %q}}`, name, value)
+		return fmt.Sprintf(`{"name": %q, "image": "alpine:3.24", "workspaceFolder": "/workspace", "containerEnv": {"FROM_CONTAINER": "container-value"}, "remoteEnv": {"STAGE": %q}}`, name, value)
 	}
 	ws := helpers.CreateTempWorkspace(t, config("one"))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	c := helpers.ContainerName(t, ws)
 

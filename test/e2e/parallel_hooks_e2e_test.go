@@ -96,10 +96,6 @@ func TestParallelOnCreateCommandE2E(t *testing.T) {
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -122,7 +118,7 @@ func TestParallelInitializeCommandE2E(t *testing.T) {
 	// Create workspace first so we can write marker files there
 	devcontainerJSON := `{
 		"name": "Parallel Initialize Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"initializeCommand": {
 			"init1": "touch .init1-marker",
@@ -130,10 +126,6 @@ func TestParallelInitializeCommandE2E(t *testing.T) {
 		}
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")

@@ -29,7 +29,7 @@ func TestFeaturesOnNonRootImageE2E(t *testing.T) {
 	write := func(path, content string, mode os.FileMode) {
 		require.NoError(t, os.WriteFile(path, []byte(content), mode))
 	}
-	write(filepath.Join(dir, "Dockerfile"), "FROM alpine:latest\nRUN adduser -D app\nUSER app\n", 0o644)
+	write(filepath.Join(dir, "Dockerfile"), "FROM alpine:3.24\nRUN adduser -D app\nUSER app\n", 0o644)
 	write(filepath.Join(featureDir, "devcontainer-feature.json"), `{"id": "needs-root", "version": "1.0.0", "name": "Needs Root"}`, 0o644)
 	write(filepath.Join(featureDir, "install.sh"), "#!/bin/sh\nset -e\nid -u > /usr/local/share/installed-as\n", 0o755)
 	write(filepath.Join(dir, "devcontainer.json"), fmt.Sprintf(`{

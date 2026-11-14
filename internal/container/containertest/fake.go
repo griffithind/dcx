@@ -4,13 +4,13 @@ package containertest
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/build"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/state"
 )

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/griffithind/dcx/internal/dcxhome"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 )
 
@@ -266,8 +267,8 @@ func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string 
 	// ~/.ssh/id_* (or an agent-loaded identity) can still connect via a
 	// plain `ssh <host>` invocation. If the file is absent, OpenSSH silently
 	// skips it, so this is safe to add unconditionally.
-	if home, err := os.UserHomeDir(); err == nil {
-		fmt.Fprintf(&b, "  IdentityFile %s\n", configPath(filepath.Join(home, ".dcx", "id_ed25519")))
+	if identity, err := dcxhome.Path("id_ed25519"); err == nil {
+		fmt.Fprintf(&b, "  IdentityFile %s\n", configPath(identity))
 	}
 	fmt.Fprintln(&b, "  ForwardAgent yes")
 	fmt.Fprintln(&b, "  IdentitiesOnly no")

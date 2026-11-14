@@ -60,13 +60,12 @@ func FeatureFixture(t *testing.T, name string) string {
 }
 
 // CreateTempWorkspace creates a temporary workspace with a devcontainer config.
-// Returns the workspace path.
+// Returns the workspace path. The environment is taken down (`dcx down`)
+// when the test ends.
 func CreateTempWorkspace(t *testing.T, devcontainerJSON string) string {
 	t.Helper()
 
-	// Create temp directory
-	tmpDir := t.TempDir()
-	registerWorkspace(tmpDir)
+	tmpDir := tempWorkspace(t)
 
 	// Create .devcontainer directory
 	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
@@ -113,12 +112,12 @@ func SimpleImageConfigWithHostReqs(t *testing.T, image, hostReqs string) string 
 }`, UniqueTestName(t), image, hostReqs)
 }
 
-// CreateTempComposeWorkspace creates a temp workspace with compose files.
+// CreateTempComposeWorkspace creates a temp workspace with compose files,
+// taken down when the test ends.
 func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAML string) string {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	registerWorkspace(tmpDir)
+	tmpDir := tempWorkspace(t)
 
 	// Create .devcontainer directory
 	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
@@ -136,4 +135,30 @@ func CreateTempComposeWorkspace(t *testing.T, devcontainerJSON, dockerComposeYAM
 	require.NoError(t, err)
 
 	return tmpDir
+}
+
+// tempWorkspace returns a new temporary workspace directory whose
+// environment `dcx down` removes when the test ends (before the directory
+// itself is removed; a workspace never brought up makes it a no-op).
+func tempWorkspace(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	registerWorkspace(dir)
+	t.Cleanup(func() { _, _, _ = RunDCXInDir(t, dir, "down") })
+	return dir
+}
+
+// CreateWorkspaceFiles creates a temporary workspace holding files (path
+// relative to the workspace -> content), taken down when the test ends.
+// Use it for workspaces with more than a devcontainer.json (Dockerfiles,
+// compose files, features).
+func CreateWorkspaceFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := tempWorkspace(t)
+	for rel, content := range files {
+		p := filepath.Join(dir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	return dir
 }

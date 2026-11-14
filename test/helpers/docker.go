@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/creack/pty"
 	"io"
 	"io/fs"
 	"os"
@@ -14,8 +13,12 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 // ansiRegex matches ANSI escape sequences.
@@ -169,21 +172,38 @@ func StripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
 }
 
+// ptyTimeout bounds an interactive dcx session: a session waiting for
+// input it never gets must fail the test, not hang the run.
+const ptyTimeout = 2 * time.Minute
+
 // RunDCXInPTY runs dcx in dir with a pseudo-terminal as its stdin/stdout,
 // as an interactive user would, typing input. It returns the terminal
-// output once dcx exits.
+// output once dcx exits, or kills the session after ptyTimeout.
 func RunDCXInPTY(t *testing.T, dir, input string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(GetDCXBinary(t), args...)
 	cmd.Dir = dir
-	ptmx, err := pty.Start(cmd)
+	ptmx, err := pty.Start(cmd) // a new session: dcx leads its process group
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = ptmx.Close() }()
 
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(ptyTimeout, func() {
+		timedOut.Store(true)
+		// The whole group: OpenSSH children hold the terminal open too.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = ptmx.Close()
+	})
+	defer timer.Stop()
+
 	go func() { _, _ = ptmx.Write([]byte(input)) }()
 	var out bytes.Buffer
 	_, _ = io.Copy(&out, ptmx) // ends with EIO once dcx exits
-	return out.String(), cmd.Wait()
+	err = cmd.Wait()
+	if timer.Stop(); timedOut.Load() {
+		return out.String(), fmt.Errorf("dcx %s: no exit after %s (output so far: %q)", strings.Join(args, " "), ptyTimeout, out.String())
+	}
+	return out.String(), err
 }

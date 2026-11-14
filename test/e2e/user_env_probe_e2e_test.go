@@ -29,10 +29,6 @@ func TestUserEnvProbeE2E(t *testing.T) {
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -93,10 +89,6 @@ func TestUserEnvProbeWithFeatureE2E(t *testing.T) {
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -113,15 +105,11 @@ func TestUserEnvProbeNoneE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "UserEnvProbe None Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"userEnvProbe": "none"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up should succeed without probing
 	helpers.RunDCXInDirSuccess(t, workspace, "up")

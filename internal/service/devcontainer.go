@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 	"io"
 	"log/slog"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/report"
 	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"

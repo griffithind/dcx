@@ -67,9 +67,10 @@ test: test-unit
 test-unit: build-agent
 	go test -v -race ./internal/...
 
-# Run end-to-end tests (requires Docker, builds first)
+# Run end-to-end tests (requires Docker, builds first). go test's default
+# 10-minute timeout is too short for a cold runner pulling images.
 test-e2e: build
-	go test -v -tags=e2e -parallel=$(NCPU) ./test/e2e/...
+	go test -v -tags=e2e -timeout 30m -parallel=$(NCPU) ./test/e2e/...
 
 # Run conformance tests (devcontainer spec compliance)
 test-conformance:
@@ -111,7 +112,7 @@ verify:
 
 # Format code
 fmt:
-	go fmt ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) fmt ./...
 
 # Run go vet
 vet: build-agent

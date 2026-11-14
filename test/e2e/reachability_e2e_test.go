@@ -32,13 +32,12 @@ func TestHostNetworkE2E(t *testing.T) {
 
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"runArgs": ["--network=host"],
 		"postCreateCommand": "echo hooks-ran > /tmp/hooks"
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	sshEcho(t, workspace, "host-network-ok")
@@ -63,17 +62,16 @@ func TestComposeSharedNetworkE2E(t *testing.T) {
 	}`, helpers.UniqueTestName(t))
 	dockerComposeYAML := `services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     network_mode: service:db
     volumes:
       - ..:/workspace:cached
   db:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
 `
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	sshEcho(t, workspace, "shared-network-ok")
@@ -99,7 +97,7 @@ func TestRecreateRemovesRenamedComposeServiceE2E(t *testing.T) {
 	compose := func(service string) string {
 		return fmt.Sprintf(`services:
   %s:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
@@ -137,9 +135,8 @@ func TestRootRemoteUserOnNonRootImageE2E(t *testing.T) {
 		"updateRemoteUserUID": false
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	dockerfile := "FROM alpine:latest\nRUN adduser -D app\nUSER app\n"
+	dockerfile := "FROM alpine:3.24\nRUN adduser -D app\nUSER app\n"
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "Dockerfile"), []byte(dockerfile), 0o644))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-un")
@@ -155,7 +152,7 @@ func TestHostsPersistAcrossRestartE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:latest"))
+	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
 	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
 
 	agentArgs := func(t *testing.T) string {

@@ -16,7 +16,7 @@ func TestSSHCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -121,17 +121,13 @@ func TestSSHCommandWithEnvE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Exec Env Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {
 			"MY_TEST_VAR": "exec-test-value"
 		}
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the container
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -147,7 +143,7 @@ func TestSSHCommandBinaryDataE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

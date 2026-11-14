@@ -46,7 +46,7 @@ chmod +x /usr/local/share/with-entrypoint-init.sh
 `, 0o755)
 	write(filepath.Join(workspace, ".devcontainer", "devcontainer.json"), fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {"./features/with-entrypoint": {}},
 		"postCreateCommand": {"local": "echo local >> /tmp/post-create.log"}

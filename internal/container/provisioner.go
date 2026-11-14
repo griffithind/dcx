@@ -6,16 +6,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/griffithind/dcx/internal/agentproto"
-	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/build"
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -734,11 +735,7 @@ func (r *Provisioner) composeProject(plan *devcontainer.ComposePlan) ComposeProj
 // it in the containers' config_files label), so later start/stop/down
 // commands see the same project definition as `up`.
 func ComposeOverridePath(workspaceID string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".dcx", "compose", workspaceID, "docker-compose.dcx.yml"), nil
+	return dcxhome.Path("compose", workspaceID, "docker-compose.dcx.yml")
 }
 
 // writeComposeOverride renders spec for the primary service and writes it

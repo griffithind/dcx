@@ -1,17 +1,17 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
 	"strings"
 
-	"github.com/minio/selfupdate"
-	"github.com/spf13/cobra"
-
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/griffithind/dcx/internal/version"
+	"github.com/minio/selfupdate"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -44,10 +44,12 @@ type githubRelease struct {
 }
 
 func runUpgrade(cmd *cobra.Command, args []string) error {
+	ctx, stop := commandContext() // Ctrl-C cancels a download
+	defer stop()
 	ui.Info("Current version: %s", ui.Code(version.Version))
 
 	// Get latest release info
-	release, err := getLatestRelease()
+	release, err := getLatestRelease(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
@@ -87,7 +89,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	// Start spinner for download
 	spinner := ui.StartSpinner(fmt.Sprintf("Downloading %s...", binaryName))
 
-	resp, err := http.Get(downloadURL)
+	resp, err := httpGet(ctx, downloadURL)
 	if err != nil {
 		spinner.Fail("Download failed")
 		return fmt.Errorf("failed to download: %w", err)
@@ -113,10 +115,19 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getLatestRelease() (*githubRelease, error) {
+// httpGet fetches url, cancelled with ctx.
+func httpGet(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func getLatestRelease(ctx context.Context) (*githubRelease, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
 
-	resp, err := http.Get(url)
+	resp, err := httpGet(ctx, url)
 	if err != nil {
 		return nil, err
 	}

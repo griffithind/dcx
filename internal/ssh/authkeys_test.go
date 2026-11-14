@@ -85,7 +85,7 @@ func TestCollectAuthorizedKeys_GeneratesFallbackWhenEmpty(t *testing.T) {
 // .pub, as two concurrent first runs could leave, is repaired.
 func TestFallbackClientKeyRepairsMismatchedPub(t *testing.T) {
 	home := t.TempDir()
-	first, err := ensureFallbackClientKey(home)
+	first, err := ensureFallbackClientKey(filepath.Join(home, ".dcx"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestFallbackClientKeyRepairsMismatchedPub(t *testing.T) {
 	if err := os.WriteFile(pubPath, []byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyOtherKeyOtherKeyOtherKeyOtherKeyOt\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	again, err := ensureFallbackClientKey(home)
+	again, err := ensureFallbackClientKey(filepath.Join(home, ".dcx"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestFallbackClientKeyRepairsMismatchedPub(t *testing.T) {
 	if err := os.Remove(pubPath); err != nil {
 		t.Fatal(err)
 	}
-	if missing, err := ensureFallbackClientKey(home); err != nil || string(missing) != string(first) {
+	if missing, err := ensureFallbackClientKey(filepath.Join(home, ".dcx")); err != nil || string(missing) != string(first) {
 		t.Errorf("a missing .pub must be re-derived, not the pair regenerated: %v", err)
 	}
 }

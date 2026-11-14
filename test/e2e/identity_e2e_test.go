@@ -36,15 +36,14 @@ func TestConfigEditsRecreateOnlyWhenNeededE2E(t *testing.T) {
 	write := func(ws, body string) {
 		require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "devcontainer.json"), []byte(body), 0o644))
 	}
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{"name": %q, "image": "alpine:latest", "containerEnv": {"A": "1"}}`, name))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
+	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{"name": %q, "image": "alpine:3.24", "containerEnv": {"A": "1"}}`, name))
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	first := containerID(t, ws)
 
 	write(ws, fmt.Sprintf(`{
 		// only a comment, formatting and editor settings changed
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"name": %q,
 		"containerEnv": {"A": "1"},
 		"customizations": {"vscode": {"extensions": ["golang.go"]}},
@@ -53,7 +52,7 @@ func TestConfigEditsRecreateOnlyWhenNeededE2E(t *testing.T) {
 	assert.Contains(t, out, "already running")
 	assert.Equal(t, first, containerID(t, ws), "cosmetic edits must not recreate the container")
 
-	write(ws, fmt.Sprintf(`{"name": %q, "image": "alpine:latest", "containerEnv": {"A": "2"}}`, name))
+	write(ws, fmt.Sprintf(`{"name": %q, "image": "alpine:3.24", "containerEnv": {"A": "2"}}`, name))
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	assert.NotEqual(t, first, containerID(t, ws), "a containerEnv change must recreate")
 	assert.Equal(t, "2", dcxExec(t, ws, "printenv", "A"))
@@ -77,7 +76,7 @@ func TestFeaturesUIDAndLocalFeatureEditsE2E(t *testing.T) {
 		"features": {"./marker": {}}
 	}`, helpers.UniqueTestName(t)))
 	dc := filepath.Join(ws, ".devcontainer")
-	require.NoError(t, os.WriteFile(filepath.Join(dc, "Dockerfile"), []byte("FROM alpine:latest\nRUN adduser -D -u 4321 dev\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dc, "Dockerfile"), []byte("FROM alpine:3.24\nRUN adduser -D -u 4321 dev\n"), 0o644))
 	feat := filepath.Join(dc, "marker")
 	require.NoError(t, os.MkdirAll(feat, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(feat, "devcontainer-feature.json"), []byte(`{"id": "marker", "version": "1.0.0"}`), 0o644))
@@ -85,7 +84,6 @@ func TestFeaturesUIDAndLocalFeatureEditsE2E(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(feat, "install.sh"), []byte("#!/bin/sh\necho "+v+" > /marker\n"), 0o755))
 	}
 	writeInstall("v1")
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 
 	want := strconv.Itoa(hostUID)
 	helpers.RunDCXInDirSuccess(t, ws, "up")
@@ -115,8 +113,7 @@ func TestCleanRemovesUnusedDcxImagesE2E(t *testing.T) {
 		"build": {"dockerfile": "Dockerfile"},
 		"workspaceFolder": "/workspace"
 	}`, helpers.UniqueTestName(t)))
-	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "Dockerfile"), []byte("FROM alpine:latest\nRUN echo clean-test > /x\n"), 0o644))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
+	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "Dockerfile"), []byte("FROM alpine:3.24\nRUN echo clean-test > /x\n"), 0o644))
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	id := containerID(t, ws)

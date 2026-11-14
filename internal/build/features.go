@@ -125,29 +125,41 @@ func stageFeatures(featureList []*features.Feature, destDir string, containerUse
 	return nil
 }
 
-// copyDir copies a directory recursively.
+// copyDir copies a directory recursively. Symbolic links are recreated as
+// links (BuildKit sends them into the build as such), so a link to a
+// directory or one the feature resolves at install time keeps working.
 func copyDir(src, dst string) error {
+	// The feature directory itself may be a link (a local feature path).
+	src, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
-		// Calculate destination path
 		relPath, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
 		}
 		dstPath := filepath.Join(dst, relPath)
 
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(target, dstPath)
+		case info.IsDir():
+			return os.MkdirAll(dstPath, info.Mode().Perm())
+		case !info.Mode().IsRegular():
+			return fmt.Errorf("%s: unsupported file type %s", path, info.Mode().Type())
 		}
-
-		// Copy file
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(dstPath, data, info.Mode())
+		return os.WriteFile(dstPath, data, info.Mode().Perm())
 	})
 }

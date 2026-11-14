@@ -4,8 +4,6 @@ package e2e
 
 import (
 	"context"
-	"github.com/griffithind/dcx/internal/agentproto"
-	"github.com/griffithind/dcx/internal/container"
 	"os/exec"
 	"strings"
 	"testing"
@@ -13,6 +11,8 @@ import (
 
 	dcxembed "github.com/griffithind/dcx"
 	"github.com/griffithind/dcx/internal/agentctl"
+	"github.com/griffithind/dcx/internal/agentproto"
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,12 +31,8 @@ func TestInstallAgentDeploysToContainerE2E(t *testing.T) {
 	}
 
 	// Create a simple workspace and start container
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up the environment
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -81,12 +77,8 @@ func TestInstallAgentIdempotentE2E(t *testing.T) {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -116,12 +108,8 @@ func TestInstallAgentDeployMakesAgentRunnableE2E(t *testing.T) {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -153,7 +141,7 @@ func TestInstallAgentArchitectureE2E(t *testing.T) {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {

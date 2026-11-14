@@ -17,12 +17,8 @@ func TestStateTransitionsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// absent -> running (via up)
 	t.Run("absent_to_running", func(t *testing.T) {
@@ -89,14 +85,10 @@ func TestStaleDetectionE2E(t *testing.T) {
 	// Create initial config
 	devcontainerJSON := `{
 		"name": "Stale Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -107,7 +99,7 @@ func TestStaleDetectionE2E(t *testing.T) {
 	// Modify devcontainer.json
 	modifiedConfig := `{
 		"name": "Stale Test Modified",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"containerEnv": {
 			"NEW_VAR": "value"
@@ -145,12 +137,8 @@ func TestUpFromAbsentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Ensure nothing exists
 	helpers.RunDCXInDir(t, workspace, "down")
@@ -167,12 +155,8 @@ func TestSSHOnStoppedFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Create and stop
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -188,7 +172,7 @@ func TestSSHOnAbsentFailsE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Ensure nothing exists
@@ -204,12 +188,8 @@ func TestStopIdempotentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Create and stop
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -225,7 +205,7 @@ func TestDownIdempotentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Ensure nothing exists
@@ -241,12 +221,8 @@ func TestStatusCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Status when absent
 	t.Run("status_absent", func(t *testing.T) {
@@ -284,12 +260,8 @@ func TestDoctorCommandE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Doctor should work even when no container exists
 	t.Run("doctor_absent", func(t *testing.T) {

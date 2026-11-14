@@ -1,494 +1,205 @@
-// Package conformance contains tests that verify Dev Container specification compliance.
-// See: https://containers.dev/implementors/spec/
+// Package conformance checks dcx against the Dev Container specification
+// (https://containers.dev/implementors/spec/, "Merge logic" and the
+// property reference). Every case runs ResolveWorkspace, the pipeline
+// `dcx up` uses, over a workspace on disk with the base image's
+// devcontainer.metadata supplied by a fake image source; the unit tests in
+// internal/devcontainer cover the individual parsers.
 package conformance
 
 import (
-	"encoding/json"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestSpecPropertyParsing verifies that all spec properties are correctly parsed.
-func TestSpecPropertyParsing(t *testing.T) {
-	t.Run("orchestration properties", func(t *testing.T) {
-		input := `{
-			"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-			"build": {
-				"dockerfile": "Dockerfile",
-				"context": ".",
-				"args": {"VERSION": "1.0"},
-				"target": "dev",
-				"cacheFrom": ["image:tag"],
-				"options": ["--build-arg", "FOO=bar"]
+// images serves devcontainer.metadata labels by image reference.
+type images map[string]string
+
+func (i images) ImageMetadata(_ context.Context, ref string) (string, error) { return i[ref], nil }
+
+// resolve writes files (path -> content, relative to a new workspace named
+// "project") and resolves the workspace with the given image metadata.
+func resolve(t *testing.T, files map[string]string, meta images) *devcontainer.ResolvedDevContainer {
+	t.Helper()
+	ws := filepath.Join(t.TempDir(), "project")
+	for rel, content := range files {
+		p := filepath.Join(ws, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	resolved, err := devcontainer.ResolveWorkspace(context.Background(), devcontainer.ResolveOptions{
+		WorkspacePath: ws,
+		Images:        meta,
+		Lockfile:      devcontainer.LockfileIgnore,
+	})
+	require.NoError(t, err)
+	return resolved
+}
+
+func config(json string) map[string]string {
+	return map[string]string{".devcontainer/devcontainer.json": json}
+}
+
+// commands flattens a phase's hooks into "source: argv-or-shell" strings.
+func commands(hooks []devcontainer.Hook) []string {
+	var out []string
+	for _, h := range hooks {
+		for _, s := range h.Command.Steps() {
+			cmd := s.Shell
+			if cmd == "" {
+				cmd = strings.Join(s.Argv, " ")
 			}
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "mcr.microsoft.com/devcontainers/base:ubuntu", cfg.Image)
-		require.NotNil(t, cfg.Build)
-		assert.Equal(t, "Dockerfile", cfg.Build.Dockerfile)
-		assert.Equal(t, ".", cfg.Build.Context)
-		assert.Equal(t, "1.0", cfg.Build.Args["VERSION"])
-		assert.Equal(t, "dev", cfg.Build.Target)
-		assert.Equal(t, []string{"image:tag"}, cfg.Build.CacheFrom)
-		assert.Equal(t, []string{"--build-arg", "FOO=bar"}, cfg.Build.Options)
-	})
-
-	t.Run("compose properties", func(t *testing.T) {
-		input := `{
-			"dockerComposeFile": ["docker-compose.yml", "docker-compose.override.yml"],
-			"service": "app",
-			"runServices": ["app", "db"]
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"docker-compose.yml", "docker-compose.override.yml"}, []string(cfg.DockerComposeFile))
-		assert.Equal(t, "app", cfg.Service)
-		assert.Equal(t, []string{"app", "db"}, cfg.RunServices)
-		assert.True(t, cfg.IsComposePlan())
-	})
-
-	t.Run("workspace properties", func(t *testing.T) {
-		input := `{
-			"workspaceFolder": "/workspace",
-			"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind"
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "/workspace", cfg.WorkspaceFolder)
-		assert.Contains(t, cfg.WorkspaceMount, "source=")
-	})
-
-	t.Run("user properties", func(t *testing.T) {
-		input := `{
-			"remoteUser": "vscode",
-			"containerUser": "root",
-			"updateRemoteUserUID": true
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "vscode", cfg.RemoteUser)
-		assert.Equal(t, "root", cfg.ContainerUser)
-		require.NotNil(t, cfg.UpdateRemoteUserUID)
-		assert.True(t, *cfg.UpdateRemoteUserUID)
-	})
-
-	t.Run("environment properties", func(t *testing.T) {
-		input := `{
-			"containerEnv": {"FOO": "bar", "BAZ": "qux"},
-			"remoteEnv": {"PATH": "/custom:${containerEnv:PATH}"}
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "bar", cfg.ContainerEnv["FOO"])
-		assert.Contains(t, *cfg.RemoteEnv["PATH"], "${containerEnv:PATH}")
-	})
-
-	t.Run("port properties", func(t *testing.T) {
-		input := `{
-			"forwardPorts": [3000, "8080:80"],
-			"appPort": [3000, 5000],
-			"portsAttributes": {
-				"3000": {
-					"label": "Web",
-					"protocol": "http",
-					"onAutoForward": "notify",
-					"requireLocalPort": true,
-					"elevateIfNeeded": true
-				}
-			},
-			"otherPortsAttributes": {"onAutoForward": "silent"}
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		specs := func(ports devcontainer.PortList) []string {
-			var out []string
-			for _, p := range ports {
-				pf, err := devcontainer.ParsePortSpec(p.Spec)
-				require.NoError(t, err)
-				out = append(out, pf.DockerSpec())
-			}
-			return out
+			out = append(out, string(h.Source)+": "+cmd)
 		}
-		assert.Equal(t, []string{"3000:3000", "8080:80"}, specs(cfg.ForwardPorts))
-		assert.Equal(t, []string{"3000:3000", "5000:5000"}, specs(cfg.AppPort))
+	}
+	return out
+}
 
-		attr, ok := cfg.PortsAttributes["3000"]
-		require.True(t, ok)
-		assert.Equal(t, "Web", attr.Label)
-		assert.Equal(t, "http", attr.Protocol)
-		assert.Equal(t, "notify", attr.OnAutoForward)
-		assert.True(t, attr.RequireLocalPort)
-		assert.True(t, attr.ElevateIfNeeded)
-		require.NotNil(t, cfg.OtherPortsAttributes)
-		assert.Equal(t, "silent", cfg.OtherPortsAttributes.OnAutoForward)
+// Merge logic: image metadata first, devcontainer.json last.
+func TestMergeLogic(t *testing.T) {
+	meta := images{"base:1": `[
+		{"remoteUser": "imageuser", "containerUser": "imagecontainer",
+		 "init": true, "privileged": false,
+		 "capAdd": ["SYS_PTRACE"], "securityOpt": ["seccomp=unconfined"],
+		 "containerEnv": {"A": "image", "B": "image"},
+		 "remoteEnv": {"R": "image"},
+		 "mounts": ["type=volume,source=image-vol,target=/data", "type=volume,source=cache,target=/cache"],
+		 "forwardPorts": [3000],
+		 "onCreateCommand": "echo image-create",
+		 "postStartCommand": "echo image-start",
+		 "hostRequirements": {"cpus": 4, "memory": "4gb"}},
+		{"capAdd": ["NET_ADMIN"], "entrypoint": "/usr/local/bin/image-entry"}
+	]`}
+	r := resolve(t, config(`{
+		"image": "base:1",
+		"remoteUser": "localuser",
+		"privileged": true,
+		"capAdd": ["SYS_PTRACE", "SYS_ADMIN"],
+		"containerEnv": {"B": "local", "C": "local"},
+		"mounts": ["type=volume,source=local-vol,target=/data"],
+		"forwardPorts": [3000, 8080],
+		"onCreateCommand": "echo local-create",
+		"hostRequirements": {"cpus": 2, "memory": "8gb"}
+	}`), meta)
+
+	t.Run("single values: last wins", func(t *testing.T) {
+		assert.Equal(t, "localuser", r.RemoteUser, "devcontainer.json overrides the image's remoteUser")
+		assert.Equal(t, "imagecontainer", r.ContainerUser, "the image's value applies when the config has none")
 	})
-
-	t.Run("mount properties - string format", func(t *testing.T) {
-		input := `{
-			"mounts": [
-				"type=bind,source=/host,target=/container",
-				"source=/data,target=/mnt,readonly"
-			]
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		require.Len(t, cfg.Mounts, 2)
-		assert.Equal(t, "/host", cfg.Mounts[0].Source)
-		assert.Equal(t, "/container", cfg.Mounts[0].Target)
-		assert.Equal(t, "bind", cfg.Mounts[0].Type)
-		assert.True(t, cfg.Mounts[1].ReadOnly)
+	t.Run("booleans: true if any is true", func(t *testing.T) {
+		assert.True(t, r.Init, "init from the image")
+		assert.True(t, r.Privileged, "privileged from the config")
 	})
-
-	t.Run("mount properties - object format", func(t *testing.T) {
-		input := `{
-			"mounts": [
-				{"source": "/host", "target": "/container", "type": "bind"},
-				{"source": "/data", "target": "/mnt", "readonly": true}
-			]
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		require.Len(t, cfg.Mounts, 2)
-		assert.Equal(t, "/host", cfg.Mounts[0].Source)
-		assert.Equal(t, "/container", cfg.Mounts[0].Target)
-		assert.Equal(t, "bind", cfg.Mounts[0].Type)
-		assert.True(t, cfg.Mounts[1].ReadOnly)
+	t.Run("capAdd and securityOpt: union without duplicates", func(t *testing.T) {
+		assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_ADMIN", "SYS_ADMIN"}, r.CapAdd)
+		assert.Equal(t, []string{"seccomp=unconfined"}, r.SecurityOpt)
 	})
-
-	t.Run("runtime properties", func(t *testing.T) {
-		input := `{
-			"runArgs": ["--cpus", "2", "--memory", "4g"],
-			"overrideCommand": true,
-			"shutdownAction": "stopContainer",
-			"init": true,
-			"privileged": true,
-			"capAdd": ["SYS_PTRACE", "NET_ADMIN"],
-			"securityOpt": ["seccomp=unconfined"]
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"--cpus", "2", "--memory", "4g"}, cfg.RunArgs)
-		require.NotNil(t, cfg.OverrideCommand)
-		assert.True(t, *cfg.OverrideCommand)
-		assert.Equal(t, "stopContainer", cfg.ShutdownAction)
-		require.NotNil(t, cfg.Init)
-		assert.True(t, *cfg.Init)
-		require.NotNil(t, cfg.Privileged)
-		assert.True(t, *cfg.Privileged)
-		assert.Equal(t, []string{"SYS_PTRACE", "NET_ADMIN"}, cfg.CapAdd)
-		assert.Equal(t, []string{"seccomp=unconfined"}, cfg.SecurityOpt)
+	t.Run("env: per variable, last wins", func(t *testing.T) {
+		assert.Equal(t, "image", r.ContainerEnv["A"])
+		assert.Equal(t, "local", r.ContainerEnv["B"])
+		assert.Equal(t, "local", r.ContainerEnv["C"])
+		assert.Equal(t, "image", r.RemoteEnv["R"])
 	})
-
-	t.Run("lifecycle properties", func(t *testing.T) {
-		input := `{
-			"initializeCommand": "echo init",
-			"onCreateCommand": {"task1": "echo create1", "task2": "echo create2"},
-			"updateContentCommand": ["echo", "update"],
-			"postCreateCommand": "echo postCreate",
-			"postStartCommand": "echo postStart",
-			"postAttachCommand": "echo postAttach",
-			"waitFor": "postCreateCommand"
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "echo init", cfg.InitializeCommand.Shell)
-		assert.True(t, cfg.OnCreateCommand.Parallel(), "the object form runs in parallel")
-		assert.Len(t, cfg.OnCreateCommand.Steps(), 2)
-		assert.Equal(t, []string{"echo", "update"}, cfg.UpdateContentCommand.Argv)
-		assert.Equal(t, "echo postCreate", cfg.PostCreateCommand.Shell)
-		assert.Equal(t, "echo postStart", cfg.PostStartCommand.Shell)
-		assert.Equal(t, "echo postAttach", cfg.PostAttachCommand.Shell)
-		assert.Equal(t, "postCreateCommand", cfg.WaitFor)
+	t.Run("mounts: collected, last source wins per target", func(t *testing.T) {
+		byTarget := map[string]string{}
+		for _, m := range r.Mounts {
+			byTarget[m.Target] = m.Source
+		}
+		assert.Equal(t, "local-vol", byTarget["/data"])
+		assert.Equal(t, "cache", byTarget["/cache"])
 	})
-
-	t.Run("host requirements", func(t *testing.T) {
-		input := `{
-			"hostRequirements": {
-				"cpus": 4,
-				"memory": "8gb",
-				"storage": "32gb",
-				"gpu": true
-			}
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		require.NotNil(t, cfg.HostRequirements)
-		assert.Equal(t, 4, cfg.HostRequirements.CPUs)
-		assert.Equal(t, "8gb", cfg.HostRequirements.Memory)
-		assert.Equal(t, "32gb", cfg.HostRequirements.Storage)
-		assert.Equal(t, devcontainer.GPURequired, cfg.HostRequirements.GPU.Mode)
+	t.Run("forwardPorts: union", func(t *testing.T) {
+		var ports []int
+		for _, p := range r.ForwardPorts {
+			ports = append(ports, p.ContainerPort)
+		}
+		assert.ElementsMatch(t, []int{3000, 8080}, ports)
 	})
-
-	t.Run("userEnvProbe property", func(t *testing.T) {
-		input := `{"userEnvProbe": "loginInteractiveShell"}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.Equal(t, "loginInteractiveShell", cfg.UserEnvProbe)
+	t.Run("lifecycle commands: collected, image first", func(t *testing.T) {
+		assert.Equal(t, []string{"image: echo image-create", "devcontainer.json: echo local-create"}, commands(r.Hooks.OnCreate))
+		assert.Equal(t, []string{"image: echo image-start"}, commands(r.Hooks.PostStart))
 	})
-
-	t.Run("features property", func(t *testing.T) {
-		input := `{
-			"features": {
-				"ghcr.io/devcontainers/features/git:1": {},
-				"ghcr.io/devcontainers/features/node:1": {"version": "18"}
-			},
-			"overrideFeatureInstallOrder": ["ghcr.io/devcontainers/features/git:1"]
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		require.Len(t, cfg.Features, 2)
-		assert.Contains(t, cfg.Features, "ghcr.io/devcontainers/features/git:1")
-		assert.Contains(t, cfg.Features, "ghcr.io/devcontainers/features/node:1")
-		assert.Equal(t, []string{"ghcr.io/devcontainers/features/git:1"}, cfg.OverrideFeatureInstallOrder)
+	t.Run("entrypoint: collected", func(t *testing.T) {
+		assert.Equal(t, []string{"/usr/local/bin/image-entry"}, r.Entrypoints)
 	})
-
-	t.Run("customizations property", func(t *testing.T) {
-		input := `{
-			"customizations": {
-				"vscode": {
-					"extensions": ["ms-python.python"],
-					"settings": {"python.linting.enabled": true}
-				}
-			}
-		}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		require.NotNil(t, cfg.Customizations)
-		assert.Contains(t, cfg.Customizations, "vscode")
+	t.Run("hostRequirements: maximum of each", func(t *testing.T) {
+		require.NotNil(t, r.HostRequirements)
+		assert.Equal(t, 4, r.HostRequirements.CPUs)
+		assert.Equal(t, "8gb", r.HostRequirements.Memory)
 	})
 }
 
-// TestVariableSubstitution verifies all variable substitution patterns.
+// Image and Dockerfile plans: workspaceFolder defaults to
+// /workspaces/<folder>.
+func TestWorkspaceDefaults(t *testing.T) {
+	r := resolve(t, config(`{"image": "base:1"}`), nil)
+	assert.Equal(t, "/workspaces/project", r.WorkspaceFolder)
+	assert.True(t, r.OverrideCommand, "overrideCommand defaults to true for image and Dockerfile plans")
+
+	r = resolve(t, config(`{"image": "base:1", "workspaceFolder": "/src", "overrideCommand": false}`), nil)
+	assert.Equal(t, "/src", r.WorkspaceFolder)
+	assert.False(t, r.OverrideCommand)
+}
+
+// Compose plans: overrideCommand defaults to false, and the service and
+// files come from the config.
+func TestComposeDefaults(t *testing.T) {
+	r := resolve(t, map[string]string{
+		".devcontainer/devcontainer.json":  `{"dockerComposeFile": ["docker-compose.yml"], "service": "app", "workspaceFolder": "/workspace"}`,
+		".devcontainer/docker-compose.yml": "services:\n  app:\n    image: base:1\n",
+	}, images{"base:1": `[{"remoteUser": "composeuser"}]`})
+	plan, ok := r.Plan.(*devcontainer.ComposePlan)
+	require.True(t, ok, "compose plan, got %T", r.Plan)
+	assert.Equal(t, "app", plan.Service)
+	assert.False(t, r.OverrideCommand)
+	assert.Equal(t, "composeuser", r.RemoteUser, "the service image's metadata applies")
+}
+
+// Variables: substituted in devcontainer.json and in image metadata alike;
+// ${containerEnv:…} is left for exec time.
 func TestVariableSubstitution(t *testing.T) {
-	ctx := &devcontainer.SubstitutionContext{
-		LocalWorkspaceFolder:     "/home/user/project",
-		ContainerWorkspaceFolder: "/workspace",
-		DevcontainerID:           "abc123",
-	}
+	t.Setenv("DCX_CONFORMANCE_VAR", "from-host")
+	r := resolve(t, config(`{
+		"image": "base:1",
+		"containerEnv": {
+			"BASENAME": "${localWorkspaceFolderBasename}",
+			"FOLDER": "${containerWorkspaceFolder}",
+			"HOST": "${localEnv:DCX_CONFORMANCE_VAR}",
+			"DEFAULTED": "${localEnv:DCX_CONFORMANCE_UNSET:fallback}",
+			"ID": "${devcontainerId}"
+		},
+		"remoteEnv": {"P": "${containerEnv:PATH}:/extra"}
+	}`), images{"base:1": `[{"mounts": ["type=volume,source=vol-${devcontainerId},target=/v"]}]`})
 
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "${localWorkspaceFolder}",
-			input:    "${localWorkspaceFolder}",
-			expected: "/home/user/project",
-		},
-		{
-			name:     "${localWorkspaceFolderBasename}",
-			input:    "${localWorkspaceFolderBasename}",
-			expected: "project", // basename of /home/user/project
-		},
-		{
-			name:     "${containerWorkspaceFolder}",
-			input:    "${containerWorkspaceFolder}",
-			expected: "/workspace",
-		},
-		{
-			name:     "${devcontainerId}",
-			input:    "${devcontainerId}",
-			expected: "abc123",
-		},
-		{
-			name:     "${localEnv:MISSING_VAR_12345:default}",
-			input:    "${localEnv:MISSING_VAR_12345:default}",
-			expected: "default",
-		},
-		{
-			// Resolved at exec time from the container's environment
-			// (ResolveContainerEnvRefs), so config substitution keeps it.
-			name:     "${containerEnv:PATH}",
-			input:    "${containerEnv:PATH}",
-			expected: "${containerEnv:PATH}",
-		},
-		{
-			name:     "mixed substitutions",
-			input:    "${localWorkspaceFolder}:${containerWorkspaceFolder}",
-			expected: "/home/user/project:/workspace",
-		},
-	}
+	assert.Equal(t, "project", r.ContainerEnv["BASENAME"])
+	assert.Equal(t, "/workspaces/project", r.ContainerEnv["FOLDER"])
+	assert.Equal(t, "from-host", r.ContainerEnv["HOST"])
+	assert.Equal(t, "fallback", r.ContainerEnv["DEFAULTED"])
+	id := r.ContainerEnv["ID"]
+	assert.Equal(t, r.WorkspaceID, id, "${devcontainerId} is the workspace ID")
+	assert.Equal(t, "${containerEnv:PATH}:/extra", r.RemoteEnv["P"])
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := devcontainer.Substitute(tt.input, ctx)
-			assert.Equal(t, tt.expected, result)
-		})
+	var sources []string
+	for _, m := range r.Mounts {
+		sources = append(sources, m.Source)
 	}
+	assert.Contains(t, sources, "vol-"+id, "image metadata is substituted too")
 }
 
-// TestParseProbeType verifies probe type parsing: unset means
-// loginInteractiveShell, the spec's default.
-func TestParseProbeType(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected env.ProbeType
-	}{
-		{"none", env.ProbeNone},
-		{"", env.ProbeLoginInteractiveShell},
-		{"loginShell", env.ProbeLoginShell},
-		{"loginInteractiveShell", env.ProbeLoginInteractiveShell},
-		{"interactiveShell", env.ProbeInteractiveShell},
-		{"invalid", env.ProbeLoginInteractiveShell},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := env.ParseProbeType(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestImageMetadataMerging verifies image metadata merging per spec.
-func TestImageMetadataMerging(t *testing.T) {
-	t.Run("parse valid metadata", func(t *testing.T) {
-		label := `[{"remoteUser": "vscode"}, {"capAdd": ["SYS_PTRACE"]}]`
-		configs, err := devcontainer.ParseImageMetadata(label)
-		require.NoError(t, err)
-		require.Len(t, configs, 2)
-		assert.Equal(t, "vscode", configs[0].RemoteUser)
-		assert.Equal(t, []string{"SYS_PTRACE"}, configs[1].CapAdd)
-	})
-
-	t.Run("boolean merging - true wins", func(t *testing.T) {
-		val := true
-		local := &devcontainer.DevContainerConfig{}
-		image := []devcontainer.DevContainerConfig{{Init: &val}}
-		merged := devcontainer.MergeMetadata(local, image)
-		require.NotNil(t, merged.Init)
-		assert.True(t, *merged.Init)
-	})
-
-	t.Run("array merging - union", func(t *testing.T) {
-		local := &devcontainer.DevContainerConfig{
-			CapAdd: []string{"SYS_PTRACE"},
-		}
-		image := []devcontainer.DevContainerConfig{{
-			CapAdd: []string{"NET_ADMIN"},
-		}}
-		merged := devcontainer.MergeMetadata(local, image)
-		assert.ElementsMatch(t, []string{"SYS_PTRACE", "NET_ADMIN"}, merged.CapAdd)
-	})
-
-	t.Run("single value - local wins", func(t *testing.T) {
-		local := &devcontainer.DevContainerConfig{RemoteUser: "local"}
-		image := []devcontainer.DevContainerConfig{{RemoteUser: "image"}}
-		merged := devcontainer.MergeMetadata(local, image)
-		assert.Equal(t, "local", merged.RemoteUser)
-	})
-
-	t.Run("image fills missing local values", func(t *testing.T) {
-		local := &devcontainer.DevContainerConfig{}
-		image := []devcontainer.DevContainerConfig{{RemoteUser: "image", WorkspaceFolder: "/workspace"}}
-		merged := devcontainer.MergeMetadata(local, image)
-		assert.Equal(t, "image", merged.RemoteUser)
-		assert.Equal(t, "/workspace", merged.WorkspaceFolder)
-	})
-}
-
-// TestMountFormats verifies both string and object mount formats.
-func TestMountFormats(t *testing.T) {
-	t.Run("string format parsing", func(t *testing.T) {
-		input := `"type=bind,source=/src,target=/dst,readonly"`
-		var m devcontainer.Mount
-		err := json.Unmarshal([]byte(input), &m)
-		require.NoError(t, err)
-
-		assert.Equal(t, "/src", m.Source)
-		assert.Equal(t, "/dst", m.Target)
-		assert.Equal(t, "bind", m.Type)
-		assert.True(t, m.ReadOnly)
-	})
-
-	t.Run("object format parsing", func(t *testing.T) {
-		input := `{"source": "/src", "target": "/dst", "type": "volume", "readonly": true}`
-		var m devcontainer.Mount
-		err := json.Unmarshal([]byte(input), &m)
-		require.NoError(t, err)
-
-		assert.Equal(t, "/src", m.Source)
-		assert.Equal(t, "/dst", m.Target)
-		assert.Equal(t, "volume", m.Type)
-		assert.True(t, m.ReadOnly)
-	})
-
-	t.Run("mount string output", func(t *testing.T) {
-		m := devcontainer.Mount{
-			Source: "/src",
-			Target: "/dst",
-			Type:   "bind",
-		}
-		assert.Equal(t, "type=bind,source=/src,target=/dst", m.String())
-
-		m.ReadOnly = true
-		assert.Equal(t, "type=bind,source=/src,target=/dst,readonly", m.String())
-	})
-}
-
-// TestComposeDetection verifies compose vs single container detection.
-func TestComposeDetection(t *testing.T) {
-	t.Run("compose plan detected", func(t *testing.T) {
-		input := `{"dockerComposeFile": "docker-compose.yml", "service": "app"}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.True(t, cfg.IsComposePlan())
-		assert.False(t, cfg.IsSinglePlan())
-	})
-
-	t.Run("image plan detected", func(t *testing.T) {
-		input := `{"image": "ubuntu:22.04"}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.False(t, cfg.IsComposePlan())
-		assert.True(t, cfg.IsSinglePlan())
-	})
-
-	t.Run("build plan detected", func(t *testing.T) {
-		input := `{"build": {"dockerfile": "Dockerfile"}}`
-		var cfg devcontainer.DevContainerConfig
-		err := json.Unmarshal([]byte(input), &cfg)
-		require.NoError(t, err)
-
-		assert.False(t, cfg.IsComposePlan())
-		assert.True(t, cfg.IsSinglePlan())
-	})
+// Dockerfile plans read the metadata of the image the target stage is
+// built FROM.
+func TestDockerfileBaseMetadata(t *testing.T) {
+	r := resolve(t, map[string]string{
+		".devcontainer/devcontainer.json": `{"build": {"dockerfile": "Dockerfile", "target": "dev"}}`,
+		".devcontainer/Dockerfile":        "FROM base:1 AS dev\nRUN true\nFROM other:2\n",
+	}, images{"base:1": `[{"remoteUser": "devuser"}]`, "other:2": `[{"remoteUser": "wrong"}]`})
+	_, ok := r.Plan.(*devcontainer.DockerfilePlan)
+	require.True(t, ok)
+	assert.Equal(t, "devuser", r.RemoteUser)
 }

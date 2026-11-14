@@ -1,0 +1,518 @@
+=== dcx
+dcx is a CLI that parses, validates, and runs devcontainers
+with full support for docker compose and Features.
+
+It drives the docker and docker compose CLIs directly, without the
+@devcontainers/cli, and tracks all state in container labels. Sessions go
+over SSH to a small agent inside the container: use 'dcx ssh' or plain
+'ssh <alias>'.
+
+Usage:
+  dcx [command]
+
+Lifecycle Commands:
+  down        Stop and remove containers
+  restart     Restart the devcontainer
+  stop        Stop running containers
+  up          Start the devcontainer environment
+
+Execution Commands:
+  run         Run a command shortcut in the container
+  ssh         Open a shell or run a command in the container
+
+Information Commands:
+  list        List all dcx-managed environments
+  logs        View container logs
+  status      Show devcontainer status
+
+Build & Maintenance:
+  build       Build the devcontainer images
+  clean       Clean up orphaned resources
+  lock        Generate or verify devcontainer-lock.json
+  upgrade     Upgrade dcx to the latest version
+
+Utilities:
+  completion  Generate shell completion scripts
+  config      Show devcontainer configuration
+  doctor      Check system requirements and configuration
+
+Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+Use "dcx [command] --help" for more information about a command.
+
+=== dcx build
+Build the devcontainer images without starting containers.
+
+This command parses the devcontainer.json configuration and builds
+any required images. For compose-based configurations, it runs
+'docker compose build'. For image-based configurations, it pulls
+the image. For Dockerfile-based configurations, it builds the image.
+
+This command may require network access for pulling base images.
+
+Usage:
+  dcx build [flags]
+
+Flags:
+      --no-cache   build without using cache
+      --pull       re-pull base images and re-fetch features (for moving tags like :latest)
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx clean
+Clean up orphaned dcx resources.
+
+This command removes:
+- Images built by dcx (dcx/*) that no container uses
+- Optionally, dangling (untagged) images
+
+By default, only derived images are cleaned. Use --all to include dangling images.
+
+This is an offline-safe command that does not require network access.
+
+Usage:
+  dcx clean [flags]
+
+Flags:
+      --all        also clean dangling images
+      --current    only clean images of the current workspace
+      --dangling   only clean dangling images
+      --dry-run    show what would be cleaned without removing
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx completion
+Generate shell completion scripts for dcx.
+
+To load completions:
+
+Bash:
+  $ source <(dcx completion bash)
+
+  # To load completions for each session, execute once:
+  # Linux:
+  $ dcx completion bash > /etc/bash_completion.d/dcx
+  # macOS:
+  $ dcx completion bash > $(brew --prefix)/etc/bash_completion.d/dcx
+
+Zsh:
+  # If shell completion is not already enabled in your environment,
+  # you will need to enable it. You can execute the following once:
+  $ echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+  # To load completions for each session, execute once:
+  $ dcx completion zsh > "${fpath[1]}/_dcx"
+
+  # You may need to start a new shell for this setup to take effect.
+
+Fish:
+  $ dcx completion fish | source
+
+  # To load completions for each session, execute once:
+  $ dcx completion fish > ~/.config/fish/completions/dcx.fish
+
+PowerShell:
+  PS> dcx completion powershell | Out-String | Invoke-Expression
+
+  # To load completions for every new session, run:
+  PS> dcx completion powershell > dcx.ps1
+  # and source this file from your PowerShell profile.
+
+Usage:
+  dcx completion [bash|zsh|fish|powershell]
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx config
+Show the resolved devcontainer.json configuration.
+
+By default, shows the configuration after variable substitution.
+Use --raw to show the original configuration without substitution.
+
+Examples:
+  dcx config                # Show resolved config
+  dcx config --raw          # Show original config
+  dcx config --validate     # Only validate config (no output)
+
+Usage:
+  dcx config [flags]
+
+Flags:
+      --raw        show original config without variable substitution
+      --validate   only validate configuration (no output)
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx doctor
+Check that dcx can run here.
+
+System checks: the Docker daemon (and whether you may use it), the docker
+compose plugin, and whether Docker labels containers for SELinux.
+
+Configuration checks (when a devcontainer.json is found, or with --config):
+the config resolves exactly as 'dcx up' resolves it, and the files it
+references exist.
+
+Usage:
+  dcx doctor [flags]
+
+Flags:
+      --config-only   only check configuration (skip system checks)
+      --system        only check system requirements (skip config checks)
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx down
+Stop and remove devcontainer containers.
+
+This is an offline-safe command that stops and removes containers
+managed by dcx. Optionally removes volumes and orphan containers.
+
+Usage:
+  dcx down [flags]
+
+Flags:
+      --remove-orphans   remove containers not defined in compose file
+      --volumes          remove named volumes
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx list
+List all devcontainer environments managed by dcx.
+
+By default, shows running environments grouped by workspace.
+Use --all to include stopped environments.
+
+Examples:
+  dcx list              # List running environments
+  dcx list --all        # List all environments (including stopped)
+
+Usage:
+  dcx list [flags]
+
+Aliases:
+  list, ls, ps
+
+Flags:
+      --all    show all environments (including stopped)
+      --json   print machine-readable JSON (stable keys) instead of a table
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx lock
+Generate or verify a lockfile that pins exact feature versions for reproducible builds.
+
+The lockfile records for each feature:
+- Exact semantic version resolved
+- OCI manifest digest for content-addressable references
+- SHA256 integrity hash for verification
+- Hard dependencies (dependsOn)
+
+Modes:
+  dcx lock           Generate/update lockfile (default)
+  dcx lock --verify  Verify existing lockfile matches resolved features
+  dcx lock --frozen  Fail if lockfile doesn't exist or doesn't match (CI mode)
+
+Per the devcontainer specification:
+- .devcontainer.json → .devcontainer-lock.json
+- devcontainer.json → devcontainer-lock.json
+- Local features (./path) are excluded from lockfile
+
+Usage:
+  dcx lock [flags]
+
+Flags:
+      --frozen   fail if lockfile doesn't exist or doesn't match (CI mode)
+      --verify   verify lockfile matches resolved features without updating
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx logs
+View logs from the devcontainer's primary container.
+
+By default, shows the last 100 lines of logs. Use --follow to stream
+new log output in real-time.
+
+Examples:
+  dcx logs                # Show last 100 lines
+  dcx logs --follow       # Stream logs in real-time
+  dcx logs --tail 50      # Show last 50 lines
+  dcx logs --timestamps   # Include timestamps
+
+Usage:
+  dcx logs [flags]
+
+Flags:
+  -f, --follow        follow log output
+      --tail string   number of lines to show from the end (use 'all' for all logs) (default "100")
+  -t, --timestamps    show timestamps
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx restart
+Stop the devcontainer and bring it up again.
+
+The start goes through 'dcx up', so the agent, runtime secrets and
+postStartCommand are set up again. If devcontainer.json changed since the
+container was created, it is recreated.
+
+If devcontainer.json sets shutdownAction to "none", the container is not
+restarted unless --force is given.
+
+--rebuild rebuilds the images and recreates the container (shutdownAction
+does not apply to it).
+
+Usage:
+  dcx restart [flags]
+
+Flags:
+  -f, --force     force restart even if shutdownAction is 'none'
+      --rebuild   perform full rebuild instead of restart
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx run
+Run a configured command shortcut in the devcontainer.
+
+Shortcuts are defined in devcontainer.json under "customizations.dcx.shortcuts".
+
+Example devcontainer.json:
+{
+  "name": "myproject",
+  "image": "ubuntu",
+  "customizations": {
+    "dcx": {
+      "shortcuts": {
+        "rw": "bin/jobs --skip-recurring",
+        "r": {"prefix": "rails", "passArgs": true},
+        "test": {"prefix": "rails test", "passArgs": true, "description": "Run tests"}
+      }
+    }
+  }
+}
+
+Usage:
+  dcx run rw                    # Runs: bin/jobs --skip-recurring
+  dcx run r server              # Runs: rails server
+  dcx run r console             # Runs: rails console
+  dcx run test test/models/     # Runs: rails test test/models/
+
+Use --list to see all available shortcuts.
+
+Usage:
+  dcx run [shortcut] [args...] [flags]
+
+Flags:
+  -l, --list   list available shortcuts
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx ssh
+Open an interactive shell in the workspace's devcontainer, or run a
+command in it.
+
+dcx finds the workspace from the current directory, checks that its
+container is running, then hands over to OpenSSH using the host alias
+'dcx up' configured. The session is exactly what 'ssh <alias>' gives
+editors and other tools: the remote user, remoteEnv, the probed user
+environment, SSH agent forwarding, and postAttachCommand for interactive
+shells.
+
+Arguments after '--' keep their quoting:
+
+  dcx ssh                          # interactive shell
+  dcx ssh -- npm install
+  dcx ssh -- bash -c "echo hello"
+  dcx ssh -- git clone git@github.com:user/repo.git
+
+'dcx ssh info' prints the alias and connection details.
+
+Usage:
+  dcx ssh [-- command [args...]] [flags]
+  dcx ssh [command]
+
+Available Commands:
+  info        Show SSH connection info for the current workspace
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+Use "dcx ssh [command] --help" for more information about a command.
+
+=== dcx ssh info
+Display the SSH endpoint, host-key fingerprint, and diagnostic info for
+the devcontainer in the current workspace.
+
+With --doctor, runs live probes (TCP reachable, listener responsive, host
+key pinned) and reports PASS/FAIL/WARN for each.
+
+Usage:
+  dcx ssh info [flags]
+
+Flags:
+      --doctor   Run live diagnostics
+      --json     Emit machine-readable JSON
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx status
+Show the current state of the devcontainer environment.
+
+This command queries Docker for containers managed by dcx and displays
+their current state (ABSENT, CREATED, RUNNING, STALE, or BROKEN).
+
+Use --detailed for container details, the resolved plan and features, why
+a container is stale, and its dcx labels; --json prints the same as stable
+JSON (--detailed --json replaces the old hidden 'debug' command).
+
+This is an offline-safe command that does not require network access.
+
+Usage:
+  dcx status [flags]
+
+Flags:
+  -d, --detailed   show detailed environment information
+      --json       print machine-readable JSON (stable keys) instead of text
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx stop
+Stop devcontainer containers without removing them.
+
+This is an offline-safe command that only stops running containers.
+The containers and their data are preserved and can be started again
+with 'dcx up'.
+
+If the devcontainer.json has shutdownAction set to "none", the container
+will not be stopped unless --force is used.
+
+Usage:
+  dcx stop [flags]
+
+Flags:
+  -f, --force   force stop even if shutdownAction is 'none'
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx up
+Start the devcontainer environment, building if necessary.
+
+This command is smart about what it needs to do:
+- If containers exist and are up to date, just starts them (offline-safe)
+- If containers are stale or missing, performs full build/create sequence
+- Use --rebuild to force image rebuild
+- Use --recreate to force container recreation
+
+Lifecycle hooks run as appropriate based on the action taken.
+
+Usage:
+  dcx up [flags]
+
+Flags:
+      --hosts string   widen SSH access beyond loopback when creating the container (e.g. --hosts=10.0.0.0/24, --hosts=any, --hosts=loopback); kept until changed with --recreate
+      --pull           re-pull the base image and re-fetch features (for moving tags like :latest); applies when the container is created, so add --recreate for an existing one
+      --rebuild        force rebuild images
+      --recreate       force recreate containers
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+
+=== dcx upgrade
+Check for and install the latest version of dcx from GitHub releases.
+
+The binary will be replaced in-place. If the current version is already
+the latest, no action is taken.
+
+Usage:
+  dcx upgrade [flags]
+
+Global Flags:
+  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color           disable colored output
+  -q, --quiet              minimal output (errors only)
+  -v, --verbose            verbose output
+  -w, --workspace string   workspace directory (default: current directory)
+

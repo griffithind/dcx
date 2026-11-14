@@ -28,7 +28,7 @@ func TestDockerfileBaseImageMetadataE2E(t *testing.T) {
 	baseTag := "dcx-e2e-meta:" + strings.ToLower(helpers.UniqueTestName(t))
 	baseDir := t.TempDir()
 	label := `[{"remoteUser": "app", "postCreateCommand": "echo from-base > /tmp/base-hook"}, {"id": "local/init", "entrypoint": "/usr/local/bin/base-init.sh"}]`
-	baseDockerfile := fmt.Sprintf(`FROM alpine:latest
+	baseDockerfile := fmt.Sprintf(`FROM alpine:3.24
 RUN adduser -D app && printf '#!/bin/sh\necho ran > /tmp/base-init\nexec "$@"\n' > /usr/local/bin/base-init.sh && chmod +x /usr/local/bin/base-init.sh
 LABEL devcontainer.metadata=%q
 `, label)

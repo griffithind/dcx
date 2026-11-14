@@ -2,11 +2,14 @@ package helpers
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/stretchr/testify/require"
 )
@@ -76,18 +79,44 @@ func RequireDockerAvailable(t *testing.T) {
 }
 
 // SSHDir is the directory the e2e run uses instead of ~/.ssh (see
-// UseIsolatedSSHDir); "" before it is set up.
+// Isolate); "" before it is set up.
 func SSHDir() string { return os.Getenv(hostconfig.SSHDirEnv) }
 
-// UseIsolatedSSHDir points dcx (and SSHCommand) at a temporary directory
-// instead of ~/.ssh, so the tests never modify the developer's SSH config.
-// Call it from TestMain.
-func UseIsolatedSSHDir() (string, error) {
-	dir, err := os.MkdirTemp("", "dcx-e2e-ssh-")
+// Isolate points dcx at temporary directories instead of ~/.ssh (SSH
+// config) and ~/.dcx (host keys, known_hosts, the fallback client key,
+// locks, compose overrides), so the tests never touch the developer's, and
+// replaces the SSH agent with one holding a generated key (see
+// AgentKeyFingerprint). The returned function undoes it; call Isolate from
+// TestMain.
+func Isolate() (cleanup func(), err error) {
+	sshDir, err := os.MkdirTemp("", "dcx-e2e-ssh-")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return dir, os.Setenv(hostconfig.SSHDirEnv, dir)
+	home, err := os.MkdirTemp("", "dcx-e2e-home-")
+	if err != nil {
+		_ = os.RemoveAll(sshDir)
+		return nil, err
+	}
+	cleanup = func() {
+		_ = os.RemoveAll(sshDir)
+		_ = os.RemoveAll(home)
+	}
+	if err := errors.Join(os.Setenv(hostconfig.SSHDirEnv, sshDir), os.Setenv(dcxhome.Env, home)); err != nil {
+		cleanup()
+		return nil, err
+	}
+	agentListener, err := startSSHAgent(home)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	removeDirs := cleanup
+	cleanup = func() {
+		_ = agentListener.Close()
+		removeDirs()
+	}
+	return cleanup, nil
 }
 
 // SSHCommand builds an OpenSSH command that uses the e2e run's SSH config.
@@ -104,4 +133,21 @@ func SFTPCommand(args ...string) *exec.Cmd {
 		args = append([]string{"-F", config}, args...)
 	}
 	return exec.Command("sftp", args...)
+}
+
+// ContainerID returns the ID of the workspace's primary container.
+func ContainerID(t *testing.T, dir string) string {
+	t.Helper()
+	s := GetStatus(t, dir)
+	require.NotNil(t, s.Container, "workspace %s has no container (state %s)", dir, s.State)
+	return s.Container.ID
+}
+
+// ContainerImageID returns the ID of the image the workspace's primary
+// container runs: unchanged when an up reused the cached image layers.
+func ContainerImageID(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("docker", "inspect", "--format", "{{.Image}}", ContainerID(t, dir)).Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out))
 }

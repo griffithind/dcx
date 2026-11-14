@@ -1,11 +1,38 @@
 version: "2"
 
+run:
+  # Lint the e2e tests too (they are behind the e2e build tag).
+  build-tags:
+    - e2e
+
+formatters:
+  # gofmt, and imports grouped standard library first (`make fmt` fixes
+  # both).
+  enable:
+    - gofmt
+    - goimports
+
 linters:
   # The standard set (errcheck, govet, ineffassign, staticcheck, unused)
-  # plus depguard, which enforces the package rules in CLAUDE.md.
+  # plus depguard, which enforces the package rules in CLAUDE.md, and
+  # noctx/bodyclose for the HTTP code (feature registries, upgrade).
   enable:
     - depguard
+    - noctx
+    - bodyclose
+  exclusions:
+    rules:
+      # noctx is here for HTTP requests; local sockets and processes are
+      # short-lived or bounded by their callers.
+      - linters: [noctx]
+        text: "^(net|os/exec)\\."
   settings:
+    errcheck:
+      exclude-functions:
+        # e2e tests run dcx for its effect (cleanups, setup) and check the
+        # result where it matters.
+        - github.com/griffithind/dcx/test/helpers.RunDCXInDir
+        - github.com/griffithind/dcx/test/helpers.RunDCX
     depguard:
       rules:
         # Only internal/cli and internal/ui print; everything else reports

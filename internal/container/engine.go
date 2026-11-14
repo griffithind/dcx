@@ -2,10 +2,10 @@ package container
 
 import (
 	"context"
-	"github.com/griffithind/dcx/internal/build"
 	"io"
 	"time"
 
+	"github.com/griffithind/dcx/internal/build"
 	"github.com/griffithind/dcx/internal/state"
 )
 

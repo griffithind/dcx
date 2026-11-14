@@ -20,15 +20,11 @@ func TestOverrideCommandE2E(t *testing.T) {
 	// Create config with overrideCommand: true
 	devcontainerJSON := `{
 		"name": "Override Command Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": true
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up - should not exit immediately even though alpine has no default command
 	t.Run("container_stays_running_with_override", func(t *testing.T) {
@@ -62,7 +58,7 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Shutdown None Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": true,
 		"shutdownAction": "none"
@@ -106,16 +102,12 @@ func TestShutdownActionStopContainerE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Shutdown Stop Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": true,
 		"shutdownAction": "stopContainer"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -139,12 +131,8 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 	// CPU and memory minimums the host can't meet warn and start anyway:
 	// many repositories set Codespaces-sized ones.
 	t.Run("warns_for_unmet_cpu_and_memory", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 10000, "memory": "10000gb"`)
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"cpus": 10000, "memory": "10000gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
 
 		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		require.NoError(t, err, "unmet cpu/memory must not block up: stdout=%s stderr=%s", stdout, stderr)
@@ -154,12 +142,8 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 
 	// Test with achievable requirements (should succeed)
 	t.Run("succeeds_with_achievable_requirements", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"cpus": 1, "memory": "512mb"`)
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"cpus": 1, "memory": "512mb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
 
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 		assert.Contains(t, stdout, "Devcontainer started successfully")
@@ -167,12 +151,8 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 
 	// A storage requirement can't be checked and is not reported.
 	t.Run("ignores_storage_requirement", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:latest", `"storage": "10gb"`)
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"storage": "10gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
 
 		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		require.NoError(t, err, "should succeed with storage requirement")
@@ -196,10 +176,6 @@ func TestRemoteUserE2E(t *testing.T) {
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	// Test that exec runs as remoteUser
@@ -217,17 +193,13 @@ func TestForwardPortsE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Ports Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"overrideCommand": true,
 		"forwardPorts": [8080, "9000:9000"],
 		"appPort": [7071]
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 

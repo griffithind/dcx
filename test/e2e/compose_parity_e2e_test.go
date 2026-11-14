@@ -46,7 +46,7 @@ func TestComposeRuntimeParityE2E(t *testing.T) {
 	}`, name, volume)
 	composeYAML := `services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
@@ -91,21 +91,18 @@ func TestComposeNonDefaultFileStopDownE2E(t *testing.T) {
 	}`, helpers.UniqueTestName(t))
 	decoy := `services:
   decoy:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
 `
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, decoy)
 	stack := `services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "stack.dev.yml"), []byte(stack), 0o644))
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
@@ -127,10 +124,7 @@ func TestKeepAliveStopsPromptlyE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:latest"))
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
+	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
 	name := helpers.ContainerName(t, workspace)

@@ -10,7 +10,8 @@ make build-agent    # Build only the dcx-agent Linux binaries (amd64/arm64)
 make test           # Run unit tests (alias for test-unit)
 make test-e2e       # Run end-to-end tests (requires Docker)
 make test-all       # Run unit + conformance + e2e tests
-make lint           # Run golangci-lint
+make lint           # Run golangci-lint (includes gofmt/goimports and e2e-tagged files)
+make fmt            # Apply the gofmt/goimports formatters
 make deadcode       # Fail if unused code is found (pinned deadcode)
 ```
 
@@ -20,7 +21,7 @@ go test -v -run TestShouldUpdateRemoteUserUID ./internal/build/...
 make build && go test -v -tags=e2e -run TestSingleImageBasedE2E ./test/e2e/...
 ```
 
-E2E tests run commands with `dcx ssh -- …` (OpenSSH + the generated config); use `helpers.RunDCXInPTY` for interactive sessions. `make lint` includes `depguard` rules (`.golangci.yml`) for the package rules below.
+E2E tests run commands with `dcx ssh -- …` (OpenSSH + the generated config); use `helpers.RunDCXInPTY` for interactive sessions (killed after two minutes). The e2e `TestMain` calls `helpers.Isolate`: `DCX_HOME` and `DCX_SSH_DIR` point at temporary directories and `SSH_AUTH_SOCK` at an in-process agent holding a generated key (`helpers.AgentKeyFingerprint`), so a run never touches the developer's `~/.dcx`, `~/.ssh` or agent. `helpers.CreateTempWorkspace`, `CreateTempComposeWorkspace` and `CreateWorkspaceFiles` run `dcx down` when the test ends. Use pinned image tags (`alpine:3.24`). `make lint` includes `depguard` rules (`.golangci.yml`) for the package rules below.
 
 ## Architecture Overview
 
@@ -184,6 +185,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
 - `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
+- `internal/dcxhome/` - dcx's state directory: `$DCX_HOME`, default `~/.dcx` (host keys, known_hosts, fallback client key, locks, compose overrides); never build `~/.dcx` paths by hand
 
 ## Key Types
 
@@ -261,7 +263,7 @@ CLI: dcx up [--recreate] [--rebuild] [--pull] [--hosts]
     ↓ NewCLIContext() → Service.Up(UpOptions)
 Service.Up (internal/service/up.go)
     ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
-    ├─ lockWorkspace (~/.dcx/locks/<id>.lock; Up, Down, Stop and Restart take it)
+    ├─ lockWorkspace ($DCX_HOME/locks/<id>.lock; Up, Down, Stop and Restart take it)
     ├─ StateWithHash + setupComplete + agentctl.Listening
     ├─ decideUp → none | resume | start | create | recreate
     ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
@@ -309,7 +311,7 @@ defer cliCtx.Close()
 Single `Up()` method dispatches to plan-specific implementation internally.
 
 ### ContainerSpec (one source for runtime settings)
-`Provisioner.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `~/.dcx/compose/<workspace-id>/docker-compose.dcx.yml`; existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
+`Provisioner.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `$DCX_HOME/compose/<workspace-id>/docker-compose.dcx.yml` (`~/.dcx` by default); existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
 
 ### Sealed Interface (ExecutionPlan)
 ```go
@@ -404,7 +406,7 @@ make build && make lint && make deadcode && make test-all
 |------|----------|-------------|
 | Unit | `internal/*/` | `make test` |
 | E2E | `test/e2e/` | `make test-e2e` (requires Docker) |
-| Conformance | `test/conformance/` | Part of `make test-all` |
+| Conformance | `test/conformance/` (spec merge and default rules through `ResolveWorkspace`) | Part of `make test-all` |
 | Lint | - | `make lint` (golangci-lint) |
 | Deadcode | - | `make deadcode` (find unused code) |
 
@@ -440,3 +442,4 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Parse mounts with `mount.Parse` (`devcontainer.ParseMountString`) and ports with `ParsePortSpec`; lifecycle commands are `*lifecyclecmd.Command`; don't add new parsers or `interface{}` config fields.
 - Typed config fields must marshal back to the JSON they were read from: the config hash (`TestConfigHashEncodingIsStable`) is the staleness key.
 - Resolution changes are covered by golden files in `internal/devcontainer/testdata/resolve`; review the diff of `go test ./internal/devcontainer -run TestResolveGolden -args -update`.
+- Every command's `--help` is pinned in `internal/cli/testdata/help.golden`; after changing commands or flags review the diff of `go test ./internal/cli -run TestHelpGolden -args -update`.

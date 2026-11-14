@@ -8,15 +8,13 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/griffithind/dcx/internal/dcxhome"
 )
 
 // workspaceLockDir holds one lock file per workspace (~/.dcx/locks).
 func workspaceLockDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".dcx", "locks"), nil
+	return dcxhome.Path("locks")
 }
 
 // lockWorkspace takes the workspace's exclusive lock, so two `dcx up` runs

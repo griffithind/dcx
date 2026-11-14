@@ -6,8 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/griffithind/dcx"
-
+	dcxembed "github.com/griffithind/dcx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,7 +115,7 @@ func TestEmbeddedBinaryExecutable(t *testing.T) {
 
 	cmd := exec.Command("docker", "run", "--rm", "--platform=linux/amd64",
 		"-v", tmpPath+":/dcx-agent:ro",
-		"alpine:latest", "/dcx-agent", "--help")
+		"alpine:3.24", "/dcx-agent", "--help")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "binary --help in Docker failed: %s", string(output))
 

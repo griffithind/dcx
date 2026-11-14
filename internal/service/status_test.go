@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -44,4 +46,79 @@ func TestListGroupsByWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, running, 1, "without --all, stopped environments are left out")
 	assert.Equal(t, "wsB", running[0].WorkspaceID)
+}
+
+// statusContainer is the workspace's primary container recorded with the
+// given hashes (at the current hash algorithm).
+func statusContainer(t *testing.T, svc *DevContainerService, configHash, inputsHash string) state.ContainerSummary {
+	t.Helper()
+	l := state.NewContainerLabels()
+	l.WorkspaceID, l.IsPrimary = svc.Identity().WorkspaceID, true
+	l.BuildMethod = state.BuildMethodImage
+	l.HashConfig, l.HashInputs, l.HashVersion = configHash, inputsHash, state.CurrentHashVersion
+	return state.ContainerSummary{ID: "c1", Name: "svc-test-c1", State: "running", Running: true, Labels: l.ToMap()}
+}
+
+func TestStatusAbsent(t *testing.T) {
+	svc, _ := newTestService(t, &containertest.Fake{})
+	r, err := svc.Status(context.Background(), false)
+	require.NoError(t, err)
+	assert.Equal(t, state.StateAbsent, r.State)
+	assert.Nil(t, r.Container)
+	assert.NotEmpty(t, r.ConfigHash)
+	assert.Empty(t, r.ConfigError)
+	assert.Equal(t, "alpine:latest", r.BaseImage)
+	assert.Empty(t, r.SSHAlias, "no SSH alias before the environment exists")
+}
+
+func TestStatusOverContainerStates(t *testing.T) {
+	fake := &containertest.Fake{StartedAt: map[string]string{"c1": "2026-01-01T00:00:00Z"}}
+	svc, _ := newTestService(t, fake)
+	resolved, err := svc.Load(context.Background())
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name               string
+		configHash, inputs string
+		want               state.ContainerState
+		drift              bool
+	}{
+		{"current", resolved.ConfigHash, resolved.InputsHash, state.StateRunning, false},
+		{"drift: same files, other inputs", resolved.ConfigHash, "older-inputs", state.StateRunning, true},
+		{"stale: files changed", "older-config", "older-inputs", state.StateStale, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.Containers = []state.ContainerSummary{statusContainer(t, svc, tc.configHash, tc.inputs)}
+			r, err := svc.Status(context.Background(), true)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, r.State)
+			assert.Equal(t, tc.drift, r.Drift)
+			require.NotNil(t, r.Container)
+			assert.Equal(t, "c1", r.Container.ID)
+			assert.Equal(t, "2026-01-01T00:00:00Z", r.StartedAt, "detailed output inspects the container")
+		})
+	}
+}
+
+func TestStatusFallsBackToTheRawConfig(t *testing.T) {
+	fake := &containertest.Fake{}
+	svc, _ := newTestService(t, fake)
+	fake.Containers = []state.ContainerSummary{statusContainer(t, svc, "some-hash", "")}
+	// A config that parses but does not resolve (two plans), with shortcuts.
+	writeConfig(t, svc, `{"image": "alpine:3", "dockerComposeFile": "c.yml", "service": "app",
+		"customizations": {"dcx": {"shortcuts": {"a": "echo a", "b": "echo b"}}}}`)
+
+	r, err := svc.Status(context.Background(), false)
+	require.NoError(t, err)
+	assert.Contains(t, r.ConfigError, "set only one of image, build or dockerComposeFile")
+	assert.Empty(t, r.ConfigHash, "staleness is not judged without a resolved config")
+	assert.Equal(t, state.StateRunning, r.State, "the container state is still reported")
+	require.NotNil(t, r.Config)
+	assert.Equal(t, 2, r.Shortcuts, "shortcuts come from the raw file")
+}
+
+// writeConfig replaces the test service's devcontainer.json.
+func writeConfig(t *testing.T, svc *DevContainerService, config string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(svc.workspacePath, ".devcontainer", "devcontainer.json"), []byte(config), 0o644))
 }

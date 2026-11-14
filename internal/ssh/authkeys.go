@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/griffithind/dcx/internal/dcxhome"
 	gossh "golang.org/x/crypto/ssh"
 	sshagent "golang.org/x/crypto/ssh/agent"
 )
@@ -76,7 +77,11 @@ func AuthorizedKeys() ([]byte, error) {
 
 	// Always include the dcx fallback. Generated on first call, then re-read
 	// from disk on subsequent invocations.
-	if fallback, err := ensureFallbackClientKey(home); err == nil {
+	dir, err := dcxhome.Dir()
+	if err != nil {
+		return nil, err
+	}
+	if fallback, err := ensureFallbackClientKey(dir); err == nil {
 		appendBlock(fallback)
 	} else if len(keys) == 0 {
 		return nil, fmt.Errorf("no SSH public keys found and fallback generation failed: %w", err)
@@ -93,8 +98,7 @@ func AuthorizedKeys() ([]byte, error) {
 // derived from it. A missing or mismatched id_ed25519.pub is rewritten;
 // it used to be trusted as is, so two concurrent first runs could leave a
 // pair that never authenticated.
-func ensureFallbackClientKey(home string) ([]byte, error) {
-	dir := filepath.Join(home, ".dcx")
+func ensureFallbackClientKey(dir string) ([]byte, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create ~/.dcx: %w", err)
 	}

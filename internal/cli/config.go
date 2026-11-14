@@ -2,9 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
 )

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/griffithind/dcx/internal/agentproto"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/report"

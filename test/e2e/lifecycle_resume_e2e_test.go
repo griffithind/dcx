@@ -23,7 +23,7 @@ func TestFailedCreateHookResumesE2E(t *testing.T) {
 
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"onCreateCommand": "echo ran >> /tmp/oncreate.log",
 		"postCreateCommand": "test -f /workspace/ready-to-finish",
@@ -55,12 +55,11 @@ func TestInitializeCommandRunsBeforeCreateE2E(t *testing.T) {
 
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"initializeCommand": "mkdir -p generated && echo init >> generated/runs",
 		"mounts": ["source=${localWorkspaceFolder}/generated,target=/generated,type=bind"]
 	}`, helpers.UniqueTestName(t)))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	assert.Equal(t, "init", dcxExec(t, ws, "cat", "/generated/runs"))
@@ -79,11 +78,10 @@ func TestPostAttachRunsOnShellE2E(t *testing.T) {
 
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"postAttachCommand": "echo attached >> /tmp/attach.log"
 	}`, helpers.UniqueTestName(t)))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	_, _, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-f", "/tmp/attach.log")

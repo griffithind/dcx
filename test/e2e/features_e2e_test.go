@@ -162,7 +162,7 @@ echo "feature installed" > /tmp/feature-marker
 	// Create devcontainer.json
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": "%s",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/simple-marker": {}
@@ -208,7 +208,7 @@ func createWorkspaceWithOptionsFeature(t *testing.T) string {
 	// Create devcontainer.json with options
 	devcontainerJSON := `{
 		"name": "Feature Options Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-options": {
@@ -277,7 +277,7 @@ echo "simple-marker installed" > /tmp/simple-marker
 	// Create devcontainer.json
 	devcontainerJSON := `{
 		"name": "Dependencies Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-dependencies": {},
@@ -342,7 +342,7 @@ echo "simple-marker installed" > /tmp/simple-marker
 	// Create devcontainer.json
 	devcontainerJSON := `{
 		"name": "Multiple Features Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/simple-marker": {},
@@ -366,20 +366,13 @@ func TestFeatureCachingE2E(t *testing.T) {
 		helpers.RunDCXInDir(t, workspace, "down")
 	})
 
-	// First up - features should be installed
-	t.Run("first_up_installs_features", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		// Should see feature building output
-		assert.Contains(t, stdout, "Building derived image")
-	})
+	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	containerID := helpers.ContainerID(t, workspace)
+	imageID := helpers.ContainerImageID(t, workspace)
 
-	// Second up - features should be cached (no "Building derived image" message expected
-	// since the container is already running and config hasn't changed)
-	t.Run("second_up_uses_cache", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		// Should see that environment is already running
-		assert.Contains(t, stdout, "already running")
+	t.Run("second_up_keeps_the_container", func(t *testing.T) {
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Equal(t, containerID, helpers.ContainerID(t, workspace))
 	})
 
 	// Now change the feature options and verify rebuild happens
@@ -391,7 +384,7 @@ func TestFeatureCachingE2E(t *testing.T) {
 		devcontainerDir := filepath.Join(workspace, ".devcontainer")
 		devcontainerJSON := `{
 		"name": "Feature Caching Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-options": {
@@ -404,11 +397,9 @@ func TestFeatureCachingE2E(t *testing.T) {
 		err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 		require.NoError(t, err)
 
-		// Now up should rebuild since config changed
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		// Should see building output since config changed
-		assert.Contains(t, stdout, "Building derived image")
+		// The changed options rebuild the features image.
+		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.NotEqual(t, imageID, helpers.ContainerImageID(t, workspace))
 
 		// Verify new options are in effect
 		execStdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
@@ -484,7 +475,7 @@ func createWorkspaceWithMountsFeature(t *testing.T) string {
 	// Create devcontainer.json
 	devcontainerJSON := `{
 		"name": "Mounts Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-mounts": {}
@@ -530,7 +521,7 @@ func createWorkspaceForCachingTest(t *testing.T) string {
 	// Create devcontainer.json with unique name for caching test
 	devcontainerJSON := `{
 		"name": "Feature Caching Test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/with-options": {
@@ -681,7 +672,7 @@ echo "feature installed" > /tmp/feature-marker
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
@@ -777,7 +768,7 @@ echo "security feature installed" > /tmp/security-feature-marker
 	// Create devcontainer.json
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/security-feature": {}
@@ -970,7 +961,7 @@ echo "feature-b installed" > /tmp/feature-b-marker
 	// Create devcontainer.json referencing feature-a
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"features": {
 			"./features/feature-a": {}

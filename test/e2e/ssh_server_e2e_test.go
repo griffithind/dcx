@@ -23,12 +23,8 @@ func TestSSHServerE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Get the workspace ID for this workspace (used in SSH hostname)
 	var workspaceID string
@@ -117,10 +113,6 @@ func TestSSHServerE2E(t *testing.T) {
 
 	// Test SSH agent forwarding via SSH connection
 	t.Run("ssh_agent_forwarding", func(t *testing.T) {
-		if os.Getenv("SSH_AUTH_SOCK") == "" {
-			t.Skip("SSH_AUTH_SOCK not set, skipping agent forwarding test")
-		}
-
 		// Check if SSH_AUTH_SOCK is set inside the container via SSH -A
 		stdout, _, err := runSSHWithAgent(t, hostname, "env")
 		require.NoError(t, err)
@@ -150,8 +142,8 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// Create two separate workspaces with unique container names
-	devcontainerJSON1 := helpers.SimpleImageConfigWithName("alpine:latest", helpers.UniqueTestName(t)+"_1")
-	devcontainerJSON2 := helpers.SimpleImageConfigWithName("alpine:latest", helpers.UniqueTestName(t)+"_2")
+	devcontainerJSON1 := helpers.SimpleImageConfigWithName("alpine:3.24", helpers.UniqueTestName(t)+"_1")
+	devcontainerJSON2 := helpers.SimpleImageConfigWithName("alpine:3.24", helpers.UniqueTestName(t)+"_2")
 	workspace1 := helpers.CreateTempWorkspace(t, devcontainerJSON1)
 	workspace2 := helpers.CreateTempWorkspace(t, devcontainerJSON2)
 
@@ -195,12 +187,8 @@ func TestSSHPortStableAcrossDownUpE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	stdout1 := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	port1 := extractSSHPort(t, stdout1)
@@ -228,12 +216,8 @@ func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// SSH is always configured
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
@@ -250,15 +234,11 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "ssh-dir-test",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/test-workspace",
 		"remoteUser": "root"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	hostname := extractSSHHostname(t, stdout)
@@ -313,7 +293,7 @@ func TestSSHServerCleanupE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	t.Cleanup(func() {
@@ -370,12 +350,8 @@ func TestSSHCommandHandlingE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:latest")
+	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Start with SSH enabled
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")

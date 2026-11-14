@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/report"
 )
 
 // httpClient is the HTTP client with timeout for registry requests.
@@ -367,6 +367,10 @@ func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name
 // and moves the result into place only when fetch succeeded, so failures
 // and concurrent dcx runs never leave a partial cache entry.
 func (r *Resolver) fetchInto(cachePath string, fetch func(dir string) error) error {
+	// The cache directory does not exist on a fresh machine.
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		return fmt.Errorf("create feature cache: %w", err)
+	}
 	tmp, err := os.MkdirTemp(filepath.Dir(cachePath), ".fetch-"+filepath.Base(cachePath)+"-")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)

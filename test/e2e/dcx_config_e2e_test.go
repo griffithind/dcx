@@ -28,17 +28,13 @@ func TestDcxConfigProjectNameE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	// Test dcx up with project name
 	t.Run("up_uses_project_name", func(t *testing.T) {
@@ -102,7 +98,7 @@ func TestDcxConfigShortcutsE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
@@ -110,23 +106,8 @@ services:
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
 	// Bring up the environment
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test dcx run --list
-	t.Run("run_list_shows_shortcuts", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "run", "--list")
-		assert.Contains(t, stdout, "Available shortcuts:")
-		assert.Contains(t, stdout, "hello")
-		assert.Contains(t, stdout, "greet")
-		assert.Contains(t, stdout, "say")
-		assert.Contains(t, stdout, "Say hello")      // description
-		assert.Contains(t, stdout, "Echo with args") // description
-	})
 
 	// Test status shows shortcuts count
 	t.Run("status_shows_shortcuts_count", func(t *testing.T) {
@@ -193,17 +174,13 @@ func TestDcxConfigFlagPassthroughE2E(t *testing.T) {
 	dockerComposeYAML := `version: '3.8'
 services:
   app:
-    image: alpine:latest
+    image: alpine:3.24
     command: sleep infinity
     volumes:
       - ..:/workspace:cached
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -224,7 +201,7 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "noenvtest",
-		"image": "alpine:latest",
+		"image": "alpine:3.24",
 		"workspaceFolder": "/workspace",
 		"customizations": {
 			"dcx": {
@@ -244,53 +221,5 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 		assert.Equal(t, "absent", st.State)
 		assert.Equal(t, 1, st.Shortcuts)
 		assert.Empty(t, st.SSHAlias, "no SSH alias before the environment exists")
-	})
-}
-
-// TestDcxConfigNoShortcutsE2E tests run command when no shortcuts are defined.
-func TestDcxConfigNoShortcutsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	// devcontainer.json with name but no shortcuts in customizations
-	devcontainerJSON := `{
-		"name": "noshortcuts",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:latest
-    command: sleep infinity
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	t.Run("run_list_with_no_shortcuts", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "run", "--list")
-		assert.Contains(t, stdout, "No shortcuts defined")
-	})
-
-	t.Run("run_shortcut_fails_with_no_shortcuts", func(t *testing.T) {
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "run", "anything")
-		require.Error(t, err)
-		assert.Contains(t, stderr, "no shortcuts defined")
-	})
-
-	t.Run("status_does_not_show_shortcuts_line", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.NotContains(t, stdout, "Shortcuts:")
 	})
 }

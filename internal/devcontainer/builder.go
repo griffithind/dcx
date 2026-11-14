@@ -3,7 +3,6 @@ package devcontainer
 import (
 	"context"
 	"fmt"
-	"github.com/griffithind/dcx/internal/report"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/report"
 	"gopkg.in/yaml.v3"
 )
 

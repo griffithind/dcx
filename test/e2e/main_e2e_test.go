@@ -11,14 +11,17 @@ import (
 )
 
 // TestMain isolates the run from the developer's environment: dcx writes
-// SSH config into a temporary directory instead of ~/.ssh, and the images
-// the tests built (dcx/<test workspace id>:*) are removed at the end.
+// its SSH config and state (~/.ssh, ~/.dcx) into temporary directories, and
+// the images the tests built (dcx/<test workspace id>:*) are removed at the
+// end.
 func TestMain(m *testing.M) {
-	if _, err := helpers.UseIsolatedSSHDir(); err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: cannot create isolated SSH dir:", err)
+	cleanup, err := helpers.Isolate()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "e2e: cannot isolate the run:", err)
 		os.Exit(1)
 	}
 	code := m.Run()
 	helpers.RemoveTestImages()
+	cleanup()
 	os.Exit(code)
 }
