@@ -37,7 +37,8 @@ type Status struct {
 // GetStatus runs `dcx status --json` in dir.
 func GetStatus(t *testing.T, dir string) Status {
 	t.Helper()
-	stdout := RunDCXInDirSuccess(t, dir, "status", "--json")
+	stdout, stderr, err := RunDCXInDir(t, dir, "status", "--json")
+	require.NoError(t, err, "dcx status --json: %s", stderr)
 	var s Status
 	require.NoError(t, json.Unmarshal([]byte(stdout), &s), "status --json output: %s", stdout)
 	return s

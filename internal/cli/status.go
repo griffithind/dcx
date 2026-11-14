@@ -27,8 +27,8 @@ var statusCmd = &cobra.Command{
 This command queries Docker for containers managed by dcx and displays
 their current state (ABSENT, CREATED, RUNNING, STALE, or BROKEN).
 
-Use --detailed for container details, the resolved plan and features, why
-a container is stale, and its dcx labels; --json prints the same as stable
+Use --detailed for container details, the SSH endpoint and host key, the
+resolved plan and features, why a container is stale, and its dcx labels; --json prints the same as stable
 JSON (--detailed --json replaces the old hidden 'debug' command).
 
 This is an offline-safe command that does not require network access.`,
@@ -73,6 +73,8 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 	label("", "Workspace ID", r.Identity.WorkspaceID)
 	label("", "State", ui.StateColor(string(r.State)))
 	switch {
+	case r.SSHAlias != "" && r.SSH != nil && r.SSH.Port > 0:
+		label("", "SSH", fmt.Sprintf("%s  %s", ui.Code("ssh "+r.SSHAlias), ui.Dim(fmt.Sprintf("(%s:%d)", r.SSH.BindAddress, r.SSH.Port))))
 	case r.SSHAlias != "":
 		label("", "SSH", ui.Code("ssh "+r.SSHAlias))
 	case r.State != state.StateAbsent:
@@ -109,6 +111,21 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 			}
 			label("  ", "Running", fmt.Sprintf("%t", c.Running))
 		}
+	}
+
+	if ssh := r.SSH; detailed && ssh != nil {
+		ui.Println("")
+		ui.Println(ui.Bold("SSH"))
+		label("  ", "Allowed", strings.Join(ssh.AllowedIPs, ", "))
+		if ssh.HostKeyFingerprint != "" {
+			label("  ", "Fingerprint", ssh.HostKeyFingerprint)
+			label("  ", "Host Key", ssh.HostKeyFile)
+		}
+		pinned := "yes"
+		if !ssh.KnownHostsPinned {
+			pinned = "no (run 'dcx up' to pin it)"
+		}
+		label("  ", "Pinned", pinned)
 	}
 
 	if cfg := r.Config; detailed && cfg != nil {
@@ -186,6 +203,7 @@ type statusJSON struct {
 	ConfigError   string         `json:"configError,omitempty"`
 	Drift         bool           `json:"drift,omitempty"`
 	Container     *containerJSON `json:"container"`
+	SSH           *sshJSON       `json:"ssh,omitempty"`
 	// Detail is set with --detailed (what the old hidden `debug` showed).
 	Detail *statusDetailJSON `json:"detail,omitempty"`
 }
@@ -198,6 +216,16 @@ type statusDetailJSON struct {
 	Features    []string          `json:"features,omitempty"`
 	StaleReason string            `json:"staleReason,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
+}
+
+// sshJSON is the workspace's SSH endpoint (status --json).
+type sshJSON struct {
+	BindAddress        string   `json:"bindAddress,omitempty"`
+	Port               int      `json:"port,omitempty"`
+	AllowedIPs         []string `json:"allowedIPs"`
+	HostKeyFingerprint string   `json:"hostKeyFingerprint,omitempty"`
+	HostKeyFile        string   `json:"hostKeyFile,omitempty"`
+	KnownHostsPinned   bool     `json:"knownHostsPinned"`
 }
 
 type containerJSON struct {
@@ -234,6 +262,13 @@ func statusToJSON(r *service.StatusReport, detailed bool) statusJSON {
 		}
 		if r.Container != nil && r.Container.Labels != nil {
 			out.Detail.Labels = r.Container.Labels.ToMap()
+		}
+	}
+	if ssh := r.SSH; ssh != nil {
+		out.SSH = &sshJSON{
+			BindAddress: ssh.BindAddress, Port: ssh.Port, AllowedIPs: ssh.AllowedIPs,
+			HostKeyFingerprint: ssh.HostKeyFingerprint, HostKeyFile: ssh.HostKeyFile,
+			KnownHostsPinned: ssh.KnownHostsPinned,
 		}
 	}
 	if c := r.Container; c != nil {

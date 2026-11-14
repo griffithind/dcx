@@ -98,7 +98,7 @@ type environmentJSON struct {
 	Name          string                `json:"name"`
 	WorkspacePath string                `json:"workspacePath"`
 	State         string                `json:"state"`
-	BuildMethod   string                `json:"buildMethod"`
+	PlanType      string                `json:"planType"` // image, dockerfile or compose (as in status --json)
 	CreatedAt     time.Time             `json:"createdAt"`
 	Containers    []environmentItemJSON `json:"containers"`
 }
@@ -116,7 +116,7 @@ func listToJSON(envs []service.Environment) []environmentJSON {
 	for _, e := range envs {
 		j := environmentJSON{
 			WorkspaceID: e.WorkspaceID, Name: e.Name, WorkspacePath: e.WorkspacePath,
-			State: string(e.State), BuildMethod: e.BuildMethod, CreatedAt: e.CreatedAt,
+			State: string(e.State), PlanType: e.BuildMethod, CreatedAt: e.CreatedAt,
 			Containers: []environmentItemJSON{},
 		}
 		for _, c := range e.Containers {

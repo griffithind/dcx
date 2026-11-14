@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +28,8 @@ func withFakeEngine(t *testing.T, fake *containertest.Fake, config string) {
 	workspacePath, configPath = ws, ""
 	t.Cleanup(func() {
 		newEngine, newDaemonEngine, workspacePath, configPath = oldEngine, oldDaemon, oldWS, oldCfg
-		doctorConfig, doctorSystem = false, false
+		doctorConfig, doctorSystem, doctorJSON = false, false, false
+		lockJSON = false
 		cleanAll, cleanDangling, cleanCurrent, dryRun = false, false, false, false
 	})
 }
@@ -61,4 +64,36 @@ func TestCleanGoesThroughTheService(t *testing.T) {
 	require.Len(t, calls, 1)
 	assert.NotEmpty(t, calls[0].Args[0], "--current scopes the cleanup to this workspace")
 	assert.Empty(t, fake.CallsTo("CleanupDanglingImages"))
+}
+
+func TestDoctorProbesTheRunningWorkspaceAgent(t *testing.T) {
+	fake := &containertest.Fake{}
+	withFakeEngine(t, fake, `{"image": "alpine:3"}`)
+
+	// The "agent": a local listener on the port recorded on the container.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	labels := state.NewContainerLabels()
+	labels.WorkspaceID = newService(fake, nil).Identity().WorkspaceID
+	labels.IsPrimary, labels.BuildMethod = true, state.BuildMethodImage
+	labels.SSHPort = ln.Addr().(*net.TCPAddr).Port
+	fake.Containers = []state.ContainerSummary{{ID: "c1", Name: "c1", State: "running", Running: true, Labels: labels.ToMap()}}
+
+	doctorConfig = true
+	var runErr error
+	out := captureUI(t, func() { runErr = runDoctor(doctorCmd, nil) })
+	assert.Contains(t, out, "Listener: published on 127.0.0.1:")
+	assert.Contains(t, out, "Reachable: the agent accepts connections")
+	assert.Contains(t, out, "known_hosts does not pin", "never brought up by dcx: nothing pinned")
+	require.Error(t, runErr, "an unpinned host key fails doctor")
 }

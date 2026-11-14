@@ -240,6 +240,38 @@
   - `dcx upgrade` requests now take the command context, so Ctrl-C cancels them.
 - **D5:** a macOS job runs unit and conformance tests. It was checked here only by cross-compiling (`GOOS=darwin go vet`), not run.
 
+**Step 6 (UX and docs): done.**
+- **D2:**
+  - `dcx upgrade` downloads `checksums.txt` and refuses a binary that doesn't match it (selfupdate checks the sum again).
+  - Requests have a 5-minute timeout and cancel on Ctrl-C.
+  - Versions compare as semver: a development build, or one newer than the latest release, is replaced only with `--force`, which also reinstalls.
+  - `install.sh` verifies the checksum (`sha256sum` or `shasum`) before installing.
+- **U4:** a failed docker command reports docker's stderr, without "exit status 1:". Doctor recognises a permission-denied socket (`container.IsDaemonPermissionDenied`) and explains it (docker group, `sg docker`) instead of suggesting to start Docker.
+- **U5:**
+  - With `--json`, errors print as `{"error": …}` on stdout.
+  - `list --json` says `planType` (was `buildMethod`).
+  - `doctor --json` and `lock --json` exist.
+  - `ssh info` and its key names are gone (see below).
+- **U6:**
+  - `--no-color` is applied before cobra parses, so flag and unknown-command errors honour it.
+  - Progress, success messages, warnings and spinners go to stderr; stdout carries only data. The e2e helpers' `RunDCXInDirSuccess` returns both streams, and `GetStatus` reads stdout alone.
+- **U7:**
+  - `run --help` shows its examples once, under Examples.
+  - `run <TAB>` completes shortcut names, with descriptions.
+  - The `--quiet` help says what it does.
+  - `config`'s help says it always prints JSON, and that image metadata is not merged in.
+- **`ssh info` removed** (user decision, beyond the audit): it duplicated `status` and `doctor`.
+  - `status` shows the endpoint next to the alias; `--detailed` and `--json` add the allowed source addresses, the host-key fingerprint and file, and whether known_hosts pins it.
+  - `doctor` gains an SSH section for a running workspace: port recorded, accepts connections, host key pinned.
+- **S4:** `internal/registryauth` finds registry credentials as docker does: the docker config's `auths`, `credHelpers` and `credsStore`, and `GITHUB_TOKEN` for ghcr.io. The resolver sends them to the token endpoint, or directly for a Basic challenge. Credential helpers are exempt from the os/exec depguard rule.
+- **Doc2–Doc5:**
+  - README sections on trust (host-side commands), features (sources, private registries, the cache and the 24-hour tag re-check, ordering, entrypoints), ports and networking, the files dcx writes, and the lockfile workflow (`up` and `build` use it; CI runs `lock --frozen`).
+  - The nonexistent `config --json` is no longer documented.
+- **Q8:** CLAUDE.md corrections:
+  - `build.Engine`, not `ImageBuilder`; feature `containerEnv` becomes `ENV`.
+  - State lookup is by `workspace.id`; `installsAfter` only orders features; `StateUnknown` is listed.
+  - The plan fields and substitution variables are complete, and the missing files are in the tables.
+
 ## 6. Plan
 
 Each step ships on its own and is a few hundred lines.

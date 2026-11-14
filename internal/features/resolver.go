@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/registryauth"
 	"github.com/griffithind/dcx/internal/report"
 )
 
@@ -447,7 +449,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	// Accept OCI manifest types
 	req.Header.Set("Accept", "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json")
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", authorization(token))
 	}
 
 	// Make request
@@ -520,7 +522,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 		return nil, err
 	}
 	if token != "" {
-		blobReq.Header.Set("Authorization", "Bearer "+token)
+		blobReq.Header.Set("Authorization", authorization(token))
 	}
 
 	blobResp, err := httpClient.Do(blobReq)
@@ -793,11 +795,25 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 		return "", nil
 	}
 
+	// Credentials from the docker config / credential helpers /
+	// GITHUB_TOKEN (private registries); anonymous without them.
+	creds, haveCreds, err := lookupCredentials(ctx, ref.Registry)
+	if err != nil {
+		return "", err
+	}
+
 	// Parse WWW-Authenticate header
 	// Format: Bearer realm="https://...",service="...",scope="..."
 	authHeader := resp.Header.Get("WWW-Authenticate")
 	if authHeader == "" {
 		return "", fmt.Errorf("no WWW-Authenticate header in response")
+	}
+	if strings.HasPrefix(strings.ToLower(authHeader), "basic") {
+		// The registry takes the credentials on every request.
+		if !haveCreds {
+			return "", fmt.Errorf("registry %s requires credentials (docker login %s)", ref.Registry, ref.Registry)
+		}
+		return basicAuthPrefix + base64.StdEncoding.EncodeToString([]byte(creds.Username+":"+creds.Password)), nil
 	}
 
 	// Parse the auth header
@@ -821,6 +837,9 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	tokenReq, err := http.NewRequestWithContext(ctx, "GET", tokenURL.String(), nil)
 	if err != nil {
 		return "", err
+	}
+	if haveCreds {
+		tokenReq.SetBasicAuth(creds.Username, creds.Password)
 	}
 
 	tokenResp, err := httpClient.Do(tokenReq)
@@ -850,6 +869,22 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	}
 
 	return token, nil
+}
+
+// lookupCredentials finds a registry's credentials (tests replace it).
+var lookupCredentials = registryauth.Lookup
+
+// basicAuthPrefix marks a getRegistryToken result that is Basic
+// credentials rather than a Bearer token.
+const basicAuthPrefix = "Basic "
+
+// authorization renders getRegistryToken's result as an Authorization
+// header value.
+func authorization(token string) string {
+	if strings.HasPrefix(token, basicAuthPrefix) {
+		return token
+	}
+	return "Bearer " + token
 }
 
 // parseAuthHeader parses a WWW-Authenticate header to extract realm and service.

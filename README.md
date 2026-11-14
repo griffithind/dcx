@@ -71,6 +71,15 @@ Works the same as VSCode with Remote SSH.
 
 Any editor or tool that supports SSH will work. The SSH host is `<project-name>.dcx`.
 
+## Trust
+
+`dcx up` runs commands from the repository **on your host**, not in the
+container: `initializeCommand`, and the `customizations.dcx.secrets` and
+`buildSecrets` commands (which typically read from your password manager).
+Opening a repository with dcx is like running its build script: only run
+`dcx up` in repositories you trust, and read those fields in an unfamiliar
+`devcontainer.json` first (`dcx config --raw` prints it).
+
 ## Installation
 
 ### Quick Install (Recommended)
@@ -79,7 +88,8 @@ Any editor or tool that supports SSH will work. The SSH host is `<project-name>.
 curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | sh
 ```
 
-Installs to `~/.local/bin/dcx`.
+Installs to `~/.local/bin/dcx`, after checking the download against the
+release's `checksums.txt`.
 
 `go install github.com/griffithind/dcx/cmd/dcx@latest` is not a supported
 install method: dcx embeds the agent binaries it deploys into containers,
@@ -132,23 +142,27 @@ make install   # copies it to $(go env GOPATH)/bin
 | `dcx status` | Show devcontainer status (`--detailed`, `--json`) |
 | `dcx list` | List all managed devcontainers (`--all`, `--json`) |
 | `dcx logs` | View container logs |
-| `dcx config` | Show resolved configuration |
+| `dcx config` | Print devcontainer.json after variable substitution, as JSON (`--raw`: as written; `--validate`) |
 
 ### Utilities
 
 | Command | Description |
 |---------|-------------|
 | `dcx build` | Build images without starting |
-| `dcx lock` | Generate or verify lockfile for reproducible builds |
+| `dcx lock` | Generate or verify the lockfile for reproducible builds (`--verify`, `--frozen`, `--json`) |
 | `dcx clean` | Remove unused dcx images (`--current`, `--all`, `--dangling`, `--dry-run`) |
-| `dcx doctor` | Check system requirements |
-| `dcx upgrade` | Update dcx to latest version |
-| `dcx ssh info` | SSH alias, host key and connection details (`--json`, `--doctor`) |
+| `dcx doctor` | Check Docker, the configuration and, when it is running, the workspace's SSH agent (`--json`) |
+| `dcx upgrade` | Update dcx to the latest release, verified against its checksums (`--force` to downgrade or replace a development build) |
 
-`dcx status --detailed --json` shows what the old hidden `dcx debug` did:
-the resolved plan and features, why a container is stale, and its labels.
-JSON output (`status`, `list`, `config`, `ssh info`) uses stable camelCase
-keys.
+`dcx status` shows the SSH alias and endpoint; `--detailed` adds the host
+key fingerprint, the allowed source addresses, the resolved plan and
+features, why a container is stale, and its labels.
+
+Output you asked for (status, lists, JSON) goes to stdout; progress and
+warnings go to stderr, so `dcx config > config.json` and `dcx list --json |
+jq` see only data. JSON output (`status`, `list`, `config`, `doctor`,
+`lock`) uses stable camelCase keys, and with `--json` a failure is printed
+as `{"error": "..."}` on stdout too.
 
 ### Global Flags
 
@@ -156,7 +170,7 @@ keys.
 -w, --workspace   Workspace directory (default: current directory)
 -c, --config      Path to devcontainer.json
 -v, --verbose     Enable verbose output
--q, --quiet       No progress output (data you asked for, errors and warnings still print)
+-q, --quiet       Only data and errors: no progress, no warnings
     --no-color    Disable colored output (also off with NO_COLOR or when not on a terminal)
 ```
 
@@ -188,7 +202,7 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   It is what `dcx status` and `dcx list` show.
 - **SSH alias:** `<sanitized name>.dcx` (`My App` → `my_app.dcx`); with no
   `name` it is `<workspace id>.dcx`. When another workspace already uses
-  the alias, this one is reached as `<container>.dcx` (`dcx ssh info`
+  the alias, this one is reached as `<container>.dcx` (`dcx status`
   shows it).
 - **Container / compose project:** `<sanitized name>-<first 8 characters
   of the workspace id>`, so two checkouts with the same `name` never
@@ -307,15 +321,21 @@ Build secrets are never baked into image layers - they're only available during 
 Lock feature versions for reproducible builds:
 
 ```bash
-dcx lock              # Generate devcontainer-lock.json
-dcx lock --verify     # Verify lockfile matches current resolution
-dcx lock --frozen     # CI mode: fail if lockfile missing or mismatched
+dcx lock              # Generate or update devcontainer-lock.json
+dcx lock --verify     # Check that the lockfile matches what dcx resolves
+dcx lock --frozen     # Same, and fail when there is no lockfile (CI)
 ```
 
-The lockfile pins:
-- Exact semantic versions
-- OCI manifest digests
-- SHA256 integrity hashes
+`devcontainer-lock.json` sits next to `devcontainer.json`. For each OCI or
+HTTP feature (local features are never locked) it pins the version, the
+OCI manifest digest and the SHA-256 of the feature tarball.
+
+- `dcx up` and `dcx build` use the lockfile automatically when it exists:
+  a feature is fetched by its locked digest (a tag that moved to a new
+  release is ignored) and must match its integrity hash, or `up` fails.
+  They never write the lockfile; run `dcx lock` after changing features.
+- Commit the lockfile, and run `dcx lock --frozen` in CI so a missing or
+  stale lockfile fails the build.
 
 ## Build Options
 
@@ -363,6 +383,34 @@ Use Docker Compose for multi-container setups:
 
 The `service` field specifies which container to use as the primary devcontainer. Other services in the compose file start automatically.
 
+### Features
+
+[Features](https://containers.dev/implementors/features/) are installed
+into a derived image (see the pipeline below). A feature can come from:
+
+- an OCI registry: `"ghcr.io/devcontainers/features/node:1": {}` (a tag,
+  or `@sha256:…`);
+- a local directory next to the config: `"./features/my-feature": {}`;
+- an HTTP(S) tarball: `"https://example.com/feature.tgz": {}`.
+
+Private registries use the credentials `docker login` stored: the docker
+config (`$DOCKER_CONFIG/config.json`, default `~/.docker/config.json`),
+including `credHelpers` and `credsStore`, and `$GITHUB_TOKEN` for ghcr.io.
+
+Fetched features are cached in `~/.cache/dcx/features` (`$XDG_CACHE_HOME`).
+A tag (`:1`, `:latest`) is checked against the registry again after 24
+hours, and the cached copy is used when the registry cannot be reached;
+`dcx up --pull --recreate` re-fetches now. Digests and lockfile pins are
+never re-fetched.
+
+Features install in dependency order: `dependsOn` (installed first,
+fetched if not listed), then `installsAfter`, then
+`overrideFeatureInstallOrder`. They install as root whatever the image's
+`USER`. Feature `entrypoint`s run when the container starts, before its
+command (after those recorded in the base image's metadata). A feature's
+`containerEnv` is set in the image; its mounts, capabilities, `privileged`
+and `init` apply to the container.
+
 ### Build Pipeline
 
 When features are configured, DCX builds a derived image:
@@ -404,6 +452,17 @@ then devcontainer.json's.
 | `postStartCommand` | After container starts | Every start |
 | `postAttachCommand` | When client connects | Every attach |
 
+### Ports and Networking
+
+- `forwardPorts` and `appPort` entries without a host address are
+  published on `127.0.0.1` only; write `"0.0.0.0:3000:3000"` in `appPort`
+  to expose a port on the network.
+- With compose `network_mode: service:<x>` the ports (and the SSH agent's
+  port) are published on `<x>`. With host networking nothing is published:
+  the ports, and the agent, are already on the host.
+- The SSH agent listens on a loopback port chosen when the container is
+  created (`dcx status` shows it); `--hosts` widens who may connect.
+
 ### Environment Variables
 
 ```json
@@ -431,27 +490,46 @@ then devcontainer.json's.
 
 When `updateRemoteUserUID` is true, DCX updates the container user's UID/GID to match your host user, ensuring file permissions work correctly with mounted volumes.
 
+## Files dcx Writes
+
+| Path | Contents |
+|------|----------|
+| `~/.dcx/` (`$DCX_HOME`) | Per-workspace SSH host keys, `known_hosts`, a fallback client key, workspace locks, compose override files |
+| `~/.ssh/dcx/config` | The SSH host blocks for each workspace, included by a line at the top of `~/.ssh/config` (`$DCX_SSH_DIR` replaces `~/.ssh` for both) |
+| `~/.cache/dcx/features` | Fetched features |
+| `devcontainer-lock.json` | Written only by `dcx lock` |
+
+`dcx down` removes the workspace's host key and SSH block. Docker state
+(containers, images tagged `dcx/<workspace>`, volumes) is labelled
+`com.griffithind.dcx.*`; `dcx clean` removes unused dcx images.
+
 ## Upgrading
 
 Changes since 0.7 that affect existing setups:
 
 - `dcx shell` and `dcx exec` are gone. Use `dcx ssh` and `dcx ssh -- <cmd>`
   (or plain `ssh <alias>`). `dcx ssh` needs the OpenSSH client.
-- `dcx ssh` connects instead of printing the command; `dcx ssh info` shows
-  the alias and connection details.
+- `dcx ssh` connects instead of printing the command.
+- `dcx ssh info` is gone: `dcx status` shows the alias and endpoint
+  (`--detailed` adds the host key), and `dcx doctor` probes the agent.
 - dcx's SSH host blocks moved to `~/.ssh/dcx/config`, included from the top
   of `~/.ssh/config`. Existing blocks move there on the next `dcx up`.
 - Shortcuts run through `sh -c`, so shell syntax in `command`/`prefix`
   works; extra arguments are passed unchanged as `"$@"`.
 - `dcx plan` is gone; `dcx status` shows the state and whether the config
   changed. The hidden `dcx debug` is gone too: use `dcx status --detailed --json`.
-- `--quiet` silences progress only; status, lists and other output you
-  asked for still print. Colour is off when output is not a terminal.
+- Progress and warnings go to stderr; stdout carries only the output you
+  asked for. `--quiet` silences progress and warnings. Colour is off when
+  output is not a terminal.
 - The agent runs as root and switches to the session user per session.
 - `userEnvProbe` defaults to `loginInteractiveShell` (the spec default) and
   uses the user's login shell, so nvm/asdf PATH entries reach hooks and
   sessions. Set `"userEnvProbe": "none"` to turn it off.
-- JSON keys of `config --json` and `ssh info --json` are camelCase.
+- JSON keys are camelCase (`dcx config` always prints JSON). `dcx list
+  --json` calls the plan `planType` (it was `buildMethod`), as `status
+  --json` does.
+- `dcx upgrade` verifies the release's checksums and no longer replaces a
+  development or newer build unless given `--force`.
 - A config that sets more than one of `image`, `build` and
   `dockerComposeFile` is rejected instead of silently picking one.
 - `forwardPorts` and `appPort` entries without a host address are

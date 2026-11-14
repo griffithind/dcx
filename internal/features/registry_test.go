@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/griffithind/dcx/internal/lockfile"
+	"github.com/griffithind/dcx/internal/registryauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +33,9 @@ type fakeRegistry struct {
 	manifests map[string][]byte // digest -> manifest
 	blobs     map[string][]byte // digest -> blob
 	scopes    []string          // scopes token requests asked for
+	// login, when set, is the "user:password" the token endpoint requires
+	// (a private registry).
+	login string
 }
 
 const fakeToken = "secret-token"
@@ -47,6 +51,12 @@ func newFakeRegistry(t *testing.T) *fakeRegistry {
 	old := httpClient
 	httpClient = r.srv.Client()
 	t.Cleanup(func() { httpClient = old })
+	// Never the developer's docker credentials.
+	oldLookup := lookupCredentials
+	lookupCredentials = func(context.Context, string) (registryauth.Credentials, bool, error) {
+		return registryauth.Credentials{}, false, nil
+	}
+	t.Cleanup(func() { lookupCredentials = oldLookup })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	return r
 }
@@ -93,6 +103,13 @@ func (r *fakeRegistry) serve(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token",service="fake"`, r.srv.URL))
 		w.WriteHeader(http.StatusUnauthorized)
 	case req.URL.Path == "/token":
+		if r.login != "" {
+			user, pass, ok := req.BasicAuth()
+			if !ok || user+":"+pass != r.login {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
 		r.scopes = append(r.scopes, req.URL.Query().Get("scope"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"token": fakeToken})
 	case req.Header.Get("Authorization") != "Bearer "+fakeToken:
@@ -271,4 +288,25 @@ func TestVerifyLockfileReportsMissingAndExtra(t *testing.T) {
 	assert.Equal(t, "ghcr.io/devcontainers/features/go:1", byType[MismatchExtra])
 
 	assert.Empty(t, GenerateLockfile(features).Features, "no integrity, local: nothing to lock")
+}
+
+func TestRegistryPrivateFeatureUsesCredentials(t *testing.T) {
+	reg := newFakeRegistry(t)
+	reg.login = "alice:s3cret"
+	reg.publish("1", featureTar(t, "1.0.0", nil), "")
+
+	// Anonymous: the token request is refused, and the error says so.
+	_, err := resolveFeature(t, reg.featureID("1"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401")
+
+	var asked string
+	lookupCredentials = func(_ context.Context, registry string) (registryauth.Credentials, bool, error) {
+		asked = registry
+		return registryauth.Credentials{Username: "alice", Password: "s3cret"}, true, nil
+	}
+	f, err := resolveFeature(t, reg.featureID("1"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", f.Metadata.Version)
+	assert.Equal(t, reg.host(), asked, "credentials are looked up for the feature's registry")
 }

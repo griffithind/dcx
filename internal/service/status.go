@@ -6,7 +6,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	dcxssh "github.com/griffithind/dcx/internal/ssh"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 )
@@ -42,9 +44,29 @@ type StatusReport struct {
 	BaseImage string
 	Features  []string // resolved, in install order
 
+	// SSH is how the agent is reached, nil while there is no container.
+	SSH *SSHStatus
+
 	// Filled in only when detailed output was requested.
 	Image     string
 	StartedAt string
+}
+
+// SSHStatus is the workspace's SSH endpoint as recorded at create time.
+type SSHStatus struct {
+	// Port is the host port the agent listens on (0 when unknown).
+	Port int
+	// BindAddress is the host address the port is published on.
+	BindAddress string
+	// AllowedIPs are the source ranges the agent accepts (loopback, plus
+	// --hosts).
+	AllowedIPs []string
+	// HostKeyFingerprint and HostKeyFile describe the workspace's host
+	// key ("" before the first up).
+	HostKeyFingerprint string
+	HostKeyFile        string
+	// KnownHostsPinned reports whether known_hosts pins the host key.
+	KnownHostsPinned bool
 }
 
 // Status reports the workspace's state. It resolves the config the same
@@ -89,6 +111,7 @@ func (s *DevContainerService) Status(ctx context.Context, detailed bool) (*Statu
 		if aliases := hostconfig.Aliases(r.Container.Name); len(aliases) > 0 {
 			r.SSHAlias = aliases[0]
 		}
+		r.SSH = s.sshStatus(ctx, ids.WorkspaceID, r.Container)
 		if detailed {
 			if details, ierr := s.engine.InspectContainer(ctx, r.Container.ID); ierr == nil && details != nil {
 				r.Image, r.StartedAt = details.Image, details.StartedAt
@@ -162,4 +185,20 @@ func (s *DevContainerService) List(ctx context.Context, all bool) ([]Environment
 	}
 	sort.Slice(envs, func(i, j int) bool { return envs[i].WorkspacePath < envs[j].WorkspacePath })
 	return envs, nil
+}
+
+// sshStatus collects the SSH endpoint of a workspace's container, best
+// effort: what cannot be read is left empty.
+func (s *DevContainerService) sshStatus(ctx context.Context, workspaceID string, ci *state.ContainerInfo) *SSHStatus {
+	st := &SSHStatus{AllowedIPs: []string{"127.0.0.0/8", "::1/128"}}
+	if port, err := container.SSHHostPort(ctx, s.engine, ci); err == nil {
+		access := container.RecordedSSHAccess(ci)
+		st.Port, st.BindAddress = port, access.BindHost()
+		st.AllowedIPs = append(st.AllowedIPs, access.AllowedCIDRs...)
+	}
+	if path, signer, err := dcxssh.LoadHostKey(workspaceID); err == nil {
+		st.HostKeyFile, st.HostKeyFingerprint = path, dcxssh.Fingerprint(signer)
+	}
+	st.KnownHostsPinned, _ = dcxssh.HasHost(workspaceID)
+	return st
 }

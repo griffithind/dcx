@@ -154,9 +154,9 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"storage": "10gb"`)
 		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 		require.NoError(t, err, "should succeed with storage requirement")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
+		assert.Contains(t, stderr, "Devcontainer started successfully", "progress goes to stderr")
 		assert.NotContains(t, stderr, "torage")
 	})
 }

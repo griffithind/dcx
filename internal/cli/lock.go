@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/service"
 	"github.com/griffithind/dcx/internal/ui"
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ var (
 	lockUpdate bool
 	lockVerify bool
 	lockFrozen bool
+	lockJSON   bool
 )
 
 var lockCmd = &cobra.Command{
@@ -43,6 +45,7 @@ func init() {
 	// The flags select one mode; together they used to cancel out
 	// (doctor then checked nothing and reported success).
 	lockCmd.MarkFlagsMutuallyExclusive("verify", "frozen", "update")
+	lockCmd.Flags().BoolVar(&lockJSON, "json", false, "print the result as machine-readable JSON")
 	lockCmd.GroupID = "maintenance"
 	rootCmd.AddCommand(lockCmd)
 }
@@ -51,7 +54,11 @@ func runLock(cmd *cobra.Command, args []string) error {
 	// Locking resolves features from registries; it needs no Docker daemon.
 	ctx, stop := commandContext()
 	defer stop()
-	svc := newService(newEngine(), ui.Reporter())
+	rep := ui.Reporter()
+	if lockJSON {
+		rep = report.Discard
+	}
+	svc := newService(newEngine(), rep)
 
 	// Determine lock mode
 	mode := service.LockModeGenerate
@@ -68,7 +75,10 @@ func runLock(cmd *cobra.Command, args []string) error {
 	} else if lockFrozen {
 		spinnerMsg = "Checking lockfile..."
 	}
-	spinner := ui.StartSpinner(spinnerMsg)
+	spinner := &ui.Spinner{}
+	if !lockJSON {
+		spinner = ui.StartSpinner(spinnerMsg)
+	}
 
 	// Execute lock operation
 	result, err := svc.Lock(ctx, service.LockOptions{
@@ -79,6 +89,17 @@ func runLock(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		spinner.Stop()
 		return err
+	}
+
+	if lockJSON {
+		changes := result.Changes
+		if changes == nil {
+			changes = []string{}
+		}
+		return printJSON(lockResultJSON{
+			Action: lockActionName(result.Action), LockfilePath: result.LockfilePath,
+			FeatureCount: result.FeatureCount, Changes: changes,
+		})
 	}
 
 	switch result.Action {
@@ -113,4 +134,28 @@ func runLock(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// lockResultJSON is the lock --json output.
+type lockResultJSON struct {
+	Action       string   `json:"action"` // created, updated, verified, unchanged or no-features
+	LockfilePath string   `json:"lockfilePath"`
+	FeatureCount int      `json:"featureCount"`
+	Changes      []string `json:"changes"`
+}
+
+func lockActionName(a service.LockAction) string {
+	switch a {
+	case service.LockActionCreated:
+		return "created"
+	case service.LockActionUpdated:
+		return "updated"
+	case service.LockActionVerified:
+		return "verified"
+	case service.LockActionNoChange:
+		return "unchanged"
+	case service.LockActionNoFeatures:
+		return "no-features"
+	}
+	return "unknown"
 }

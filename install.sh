@@ -55,11 +55,22 @@ detect_arch() {
 
 # Check for required commands
 check_deps() {
-    for cmd in curl grep; do
+    for cmd in curl grep awk mktemp; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             error "Required command not found: $cmd"
         fi
     done
+}
+
+# sha256 prints the SHA-256 of a file (sha256sum on Linux, shasum on macOS)
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        error "Neither sha256sum nor shasum found; cannot verify the download"
+    fi
 }
 
 # Get latest release version
@@ -86,16 +97,29 @@ main() {
     info "Latest version: ${LATEST}"
     info "Downloading ${BINARY}..."
 
-    # Create install directory
-    mkdir -p "${INSTALL_DIR}"
-
-    # Download binary
-    if ! curl -fsSL "${DOWNLOAD_URL}" -o "${INSTALL_DIR}/dcx"; then
+    # Download into a temporary directory and verify against the release's
+    # checksums.txt before installing anything.
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "${TMP_DIR}"' EXIT
+    if ! curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_DIR}/${BINARY}"; then
         error "Failed to download ${BINARY}"
     fi
+    if ! curl -fsSL "https://github.com/${REPO}/releases/download/${LATEST}/checksums.txt" -o "${TMP_DIR}/checksums.txt"; then
+        error "Failed to download checksums.txt"
+    fi
+    EXPECTED=$(awk -v f="${BINARY}" '$2 == f || $2 == "*" f { print $1 }' "${TMP_DIR}/checksums.txt")
+    if [ -z "${EXPECTED}" ]; then
+        error "checksums.txt has no entry for ${BINARY}"
+    fi
+    ACTUAL=$(sha256 "${TMP_DIR}/${BINARY}")
+    if [ "${EXPECTED}" != "${ACTUAL}" ]; then
+        error "Checksum mismatch for ${BINARY} (expected ${EXPECTED}, got ${ACTUAL})"
+    fi
+    info "Checksum verified"
 
-    # Make executable
-    chmod +x "${INSTALL_DIR}/dcx"
+    mkdir -p "${INSTALL_DIR}"
+    chmod +x "${TMP_DIR}/${BINARY}"
+    mv "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/dcx"
 
     info "Installed dcx to ${INSTALL_DIR}/dcx"
 

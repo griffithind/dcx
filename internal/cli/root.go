@@ -84,11 +84,42 @@ func resolveWorkspacePath(path string) (string, error) {
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
-	err := rootCmd.Execute()
+	// Errors cobra reports before PersistentPreRunE (a bad flag, an unknown
+	// command) must honour --no-color and the terminal check too.
+	preconfigureUI(os.Args[1:])
+	cmd, err := rootCmd.ExecuteC()
 	if err != nil {
-		ui.PrintError(err)
+		if jsonRequested(cmd) {
+			// A consumer of --json output gets the failure as JSON too.
+			_ = printJSON(map[string]string{"error": err.Error()})
+		} else {
+			ui.PrintError(err)
+		}
 	}
 	return err
+}
+
+// jsonRequested reports whether cmd was run with --json.
+func jsonRequested(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	f := cmd.Flags().Lookup("json")
+	return f != nil && f.Value.String() == "true"
+}
+
+// preconfigureUI applies --no-color from the raw arguments (up to "--"),
+// before cobra has parsed them.
+func preconfigureUI(args []string) {
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == "--no-color" || arg == "--no-color=true" {
+			noColor = true
+		}
+	}
+	initUI()
 }
 
 // initUI configures the UI system based on parsed flags.
@@ -115,7 +146,7 @@ func init() {
 
 	// Output flags
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
-	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "minimal output (errors only)")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "print only data and errors (no progress or warnings)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	// Configure Cobra to use UI-aware writers

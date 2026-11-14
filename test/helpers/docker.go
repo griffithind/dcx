@@ -74,24 +74,28 @@ func RunDCXInDir(t *testing.T, dir string, args ...string) (string, string, erro
 	return stdout.String(), stderr.String(), err
 }
 
-// RunDCXSuccess runs dcx and expects success.
+// RunDCXSuccess runs dcx and expects success. It returns everything dcx
+// printed: stdout (data) followed by stderr (progress, warnings). Use
+// RunDCX to look at one stream.
 func RunDCXSuccess(t *testing.T, args ...string) string {
 	t.Helper()
 	stdout, stderr, err := RunDCX(t, args...)
 	if err != nil {
 		t.Fatalf("dcx %v failed: %v\nstdout: %s\nstderr: %s", args, err, stdout, stderr)
 	}
-	return stdout
+	return stdout + stderr
 }
 
-// RunDCXInDirSuccess runs dcx in a directory and expects success.
+// RunDCXInDirSuccess runs dcx in a directory and expects success. It
+// returns everything dcx printed: stdout (data) followed by stderr
+// (progress, warnings). Use RunDCXInDir to look at one stream.
 func RunDCXInDirSuccess(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	stdout, stderr, err := RunDCXInDir(t, dir, args...)
 	if err != nil {
 		t.Fatalf("dcx %v in %s failed: %v\nstdout: %s\nstderr: %s", args, dir, err, stdout, stderr)
 	}
-	return stdout
+	return stdout + stderr
 }
 
 // GetDCXBinary returns bin/dcx, built by `make build`. It fails rather

@@ -77,9 +77,9 @@ func colorWanted(w io.Writer) bool {
 	return isTerminal(w)
 }
 
-// interactive reports whether stdout is a terminal.
+// interactive reports whether progress (stderr) goes to a terminal.
 func interactive() bool {
-	return isTerminal(Writer())
+	return isTerminal(ErrWriter())
 }
 
 func isTerminal(w io.Writer) bool {
@@ -124,12 +124,12 @@ func ErrWriter() io.Writer {
 	return config.ErrWriter
 }
 
-// Success prints a success message if not in quiet mode.
+// Success prints a success message to stderr if not in quiet mode.
 func Success(format string, args ...interface{}) {
 	if IsQuiet() {
 		return
 	}
-	pterm.Success.WithWriter(Writer()).Printf(format+"\n", args...)
+	pterm.Success.WithWriter(ErrWriter()).Printf(format+"\n", args...)
 }
 
 // Error prints an error message (always shown, even in quiet mode).
@@ -145,13 +145,15 @@ func Warning(format string, args ...interface{}) {
 	pterm.Warning.WithWriter(ErrWriter()).Printf(format+"\n", args...)
 }
 
-// Info prints a progress line ("Creating container...") unless in quiet
-// mode. Library progress (report.Reporter) goes through it.
+// Info prints a progress line ("Creating container...") to stderr unless
+// in quiet mode. Library progress (report.Reporter) goes through it.
+// Progress and warnings go to stderr so stdout carries only the data a
+// command was asked for (`dcx config > out.json`, `dcx list | ...`).
 func Info(format string, args ...interface{}) {
 	if IsQuiet() {
 		return
 	}
-	pterm.Printf(format+"\n", args...)
+	_, _ = fmt.Fprint(ErrWriter(), pterm.Sprintf(format+"\n", args...))
 }
 
 // Println prints a line of output the user asked for (status, lists,
@@ -182,9 +184,9 @@ type Spinner struct {
 	printer *pterm.SpinnerPrinter
 }
 
-// StartSpinner starts a spinner with the given message. In quiet mode it
-// does nothing; when stdout is not a terminal it prints the message once
-// instead of animating (no \r junk in logs and pipes).
+// StartSpinner starts a spinner on stderr with the given message. In quiet
+// mode it does nothing; when stderr is not a terminal it prints the
+// message once instead of animating (no \r junk in logs and pipes).
 func StartSpinner(message string) *Spinner {
 	if IsQuiet() {
 		return &Spinner{}
@@ -193,7 +195,7 @@ func StartSpinner(message string) *Spinner {
 		Info("%s", message)
 		return &Spinner{}
 	}
-	s, _ := pterm.DefaultSpinner.Start(message)
+	s, _ := pterm.DefaultSpinner.WithWriter(ErrWriter()).Start(message)
 	return &Spinner{printer: s}
 }
 

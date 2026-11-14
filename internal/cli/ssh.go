@@ -32,7 +32,8 @@ Arguments after '--' keep their quoting:
   dcx ssh -- bash -c "echo hello"
   dcx ssh -- git clone git@github.com:user/repo.git
 
-'dcx ssh info' prints the alias and connection details.`,
+'dcx status' shows the alias and endpoint ('--detailed' adds the host key);
+'dcx doctor' probes the agent.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runSSH,
 }

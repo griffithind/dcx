@@ -2,7 +2,7 @@ Workspace: /home/dev/myapp
 Project: myapp-abcd1234
 Workspace ID: abcd1234efgh
 State: stale
-SSH: ssh myapp.dcx
+SSH: ssh myapp.dcx  (127.0.0.1:41022)
 Shortcuts: 2 defined (use 'dcx run --list' to view)
 Stale: config changed (container 0123456789ab, now fedcba987654); 'dcx up' recreates it
 

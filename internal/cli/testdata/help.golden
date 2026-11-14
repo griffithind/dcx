@@ -39,7 +39,7 @@ Utilities:
 Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -65,7 +65,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -92,7 +92,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -139,23 +139,25 @@ Usage:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
 === dcx config
-Show the resolved devcontainer.json configuration.
+Show the resolved devcontainer.json configuration as JSON (always; there
+is no --json flag).
 
-By default, shows the configuration after variable substitution.
-Use --raw to show the original configuration without substitution.
-
-Examples:
-  dcx config                # Show resolved config
-  dcx config --raw          # Show original config
-  dcx config --validate     # Only validate config (no output)
+By default, shows devcontainer.json after variable substitution (the base
+image's metadata is not merged in; 'dcx status' shows the resolved plan).
+Use --raw to show it as written.
 
 Usage:
   dcx config [flags]
+
+Examples:
+  dcx config                # Show the resolved config
+  dcx config --raw          # Show the config as written
+  dcx config --validate     # Only validate the config (no output)
 
 Flags:
       --raw        show original config without variable substitution
@@ -164,7 +166,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -176,19 +178,22 @@ compose plugin, and whether Docker labels containers for SELinux.
 
 Configuration checks (when a devcontainer.json is found, or with --config):
 the config resolves exactly as 'dcx up' resolves it, and the files it
-references exist.
+references exist. When the workspace's container is running, the SSH
+checks probe its agent: the port is recorded, accepts connections, and
+known_hosts pins the host key.
 
 Usage:
   dcx doctor [flags]
 
 Flags:
       --config-only   only check configuration (skip system checks)
+      --json          print machine-readable JSON instead of text
       --system        only check system requirements (skip config checks)
 
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -208,7 +213,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -235,7 +240,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -263,12 +268,13 @@ Usage:
 
 Flags:
       --frozen   fail if lockfile doesn't exist or doesn't match (CI mode)
+      --json     print the result as machine-readable JSON
       --verify   verify lockfile matches resolved features without updating
 
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -295,7 +301,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -322,7 +328,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -346,16 +352,16 @@ Example devcontainer.json:
   }
 }
 
-Usage:
-  dcx run rw                    # Runs: bin/jobs --skip-recurring
-  dcx run r server              # Runs: rails server
-  dcx run r console             # Runs: rails console
-  dcx run test test/models/     # Runs: rails test test/models/
-
 Use --list to see all available shortcuts.
 
 Usage:
   dcx run [shortcut] [args...] [flags]
+
+Examples:
+  dcx run rw                    # Runs: bin/jobs --skip-recurring
+  dcx run r server              # Runs: rails server
+  dcx run r console             # Runs: rails console
+  dcx run test test/models/     # Runs: rails test test/models/
 
 Flags:
   -l, --list   list available shortcuts
@@ -363,7 +369,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -385,42 +391,16 @@ Arguments after '--' keep their quoting:
   dcx ssh -- bash -c "echo hello"
   dcx ssh -- git clone git@github.com:user/repo.git
 
-'dcx ssh info' prints the alias and connection details.
+'dcx status' shows the alias and endpoint ('--detailed' adds the host key);
+'dcx doctor' probes the agent.
 
 Usage:
   dcx ssh [-- command [args...]] [flags]
-  dcx ssh [command]
-
-Available Commands:
-  info        Show SSH connection info for the current workspace
 
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
-  -v, --verbose            verbose output
-  -w, --workspace string   workspace directory (default: current directory)
-
-Use "dcx ssh [command] --help" for more information about a command.
-
-=== dcx ssh info
-Display the SSH endpoint, host-key fingerprint, and diagnostic info for
-the devcontainer in the current workspace.
-
-With --doctor, runs live probes (TCP reachable, listener responsive, host
-key pinned) and reports PASS/FAIL/WARN for each.
-
-Usage:
-  dcx ssh info [flags]
-
-Flags:
-      --doctor   Run live diagnostics
-      --json     Emit machine-readable JSON
-
-Global Flags:
-  -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
-      --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -430,8 +410,8 @@ Show the current state of the devcontainer environment.
 This command queries Docker for containers managed by dcx and displays
 their current state (ABSENT, CREATED, RUNNING, STALE, or BROKEN).
 
-Use --detailed for container details, the resolved plan and features, why
-a container is stale, and its dcx labels; --json prints the same as stable
+Use --detailed for container details, the SSH endpoint and host key, the
+resolved plan and features, why a container is stale, and its dcx labels; --json prints the same as stable
 JSON (--detailed --json replaces the old hidden 'debug' command).
 
 This is an offline-safe command that does not require network access.
@@ -446,7 +426,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -469,7 +449,7 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
@@ -496,23 +476,28 @@ Flags:
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 
 === dcx upgrade
-Check for and install the latest version of dcx from GitHub releases.
+Check for and install the latest release of dcx from GitHub.
 
-The binary will be replaced in-place. If the current version is already
-the latest, no action is taken.
+The binary is verified against the release's checksums.txt and replaced in
+place. Nothing happens when this dcx is the latest release or newer; a
+development build or a newer build is replaced only with --force, which
+also reinstalls the current release.
 
 Usage:
   dcx upgrade [flags]
 
+Flags:
+      --force   install the latest release even over a development, newer or identical build
+
 Global Flags:
   -c, --config string      path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color           disable colored output
-  -q, --quiet              minimal output (errors only)
+  -q, --quiet              print only data and errors (no progress or warnings)
   -v, --verbose            verbose output
   -w, --workspace string   workspace directory (default: current directory)
 

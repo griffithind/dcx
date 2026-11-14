@@ -71,20 +71,6 @@ func (s *DevContainerService) Identity() *devcontainer.Identity {
 	return s.identity
 }
 
-// SSHAlias returns the alias `ssh` reaches this workspace by: the first
-// Host of its SSH config block (normally "<name>.dcx", or the unique
-// "<container>.dcx" when another workspace already uses that name), or the
-// default alias when no block exists yet.
-func (s *DevContainerService) SSHAlias(ctx context.Context) string {
-	ids := s.Identity()
-	if _, info, err := s.stateManager.State(ctx, ids.WorkspaceID); err == nil && info != nil {
-		if aliases := hostconfig.Aliases(info.Name); len(aliases) > 0 {
-			return aliases[0]
-		}
-	}
-	return ids.SSHHost
-}
-
 // StateManager returns the state manager for direct access when needed.
 func (s *DevContainerService) StateManager() *state.StateManager {
 	return s.stateManager

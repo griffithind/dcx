@@ -6,6 +6,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/ui"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,4 +75,14 @@ func TestCompletionScripts(t *testing.T) {
 			assert.Contains(t, buf.String(), want)
 		})
 	}
+}
+
+func TestRunCompletesShortcutNames(t *testing.T) {
+	withFakeEngine(t, &containertest.Fake{}, shortcutsConfig)
+	names, directive := completeShortcuts(runCmd, nil, "")
+	assert.ElementsMatch(t, []string{"greet\tSay hello", "hello", "say\tEcho with args"}, names)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	_, directive = completeShortcuts(runCmd, []string{"say"}, "")
+	assert.Equal(t, cobra.ShellCompDirectiveDefault, directive, "arguments after the shortcut complete as files")
 }

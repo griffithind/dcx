@@ -69,8 +69,8 @@ linters:
         # container.Engine (or build.Engine), so they can be tested against
         # containertest.Fake. Packages that legitimately run other host
         # programs are excluded: lifecycle (initializeCommand), secrets
-        # (secret commands), the cli (OpenSSH hand-off) and the
-        # agent.
+        # (secret commands), registryauth (docker credential helpers), the
+        # cli (OpenSSH hand-off) and the agent.
         engine-runs-docker:
           files:
             - "$all"
@@ -78,6 +78,7 @@ linters:
             - "!**/internal/cli/**"
             - "!**/internal/lifecycle/**"
             - "!**/internal/secrets/**"
+            - "!**/internal/registryauth/**"
             - "!**/internal/agent/**"
             - "!**/cmd/**"
             - "!$test"

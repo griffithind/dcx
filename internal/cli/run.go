@@ -33,15 +33,39 @@ Example devcontainer.json:
   }
 }
 
-Usage:
-  dcx run rw                    # Runs: bin/jobs --skip-recurring
+Use --list to see all available shortcuts.`,
+	Example: `  dcx run rw                    # Runs: bin/jobs --skip-recurring
   dcx run r server              # Runs: rails server
   dcx run r console             # Runs: rails console
-  dcx run test test/models/     # Runs: rails test test/models/
+  dcx run test test/models/     # Runs: rails test test/models/`,
+	RunE:              runRunCommand,
+	Args:              cobra.ArbitraryArgs,
+	ValidArgsFunction: completeShortcuts,
+}
 
-Use --list to see all available shortcuts.`,
-	RunE: runRunCommand,
-	Args: cobra.ArbitraryArgs,
+// completeShortcuts completes the shortcut name (the first argument) from
+// devcontainer.json; later arguments complete as files.
+func completeShortcuts(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	cfg, _, err := devcontainer.Load(workspacePath, configPath)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	custom := cfg.DcxCustomizations()
+	if custom == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var names []string
+	for _, info := range shortcuts.ListShortcuts(custom.Shortcuts) {
+		entry := info.Name
+		if info.Description != "" {
+			entry += "\t" + info.Description
+		}
+		names = append(names, entry)
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
 func init() {

@@ -65,7 +65,10 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
-| `status.go`, `logs.go`, `list.go` | Information commands |
+| `status.go`, `logs.go`, `list.go` | Information commands (`status` also shows the SSH endpoint and host key) |
+| `doctor.go` | System, config and (for a running workspace) SSH agent checks |
+| `upgrade.go` | Self-update from GitHub releases, verified against `checksums.txt`; semver comparison, `--force` |
+| `output.go` | `printJSON`; with `--json`, `Execute` prints errors as `{"error": …}` |
 
 Commands get their context, engine and service from `context.go` (`NewCLIContext`, or `commandContext` + `newEngine()` + `newService` for commands that must work without a Docker daemon); they never construct a service or Docker client themselves, so command-level tests run against `containertest.Fake` (`internal/cli/commands_engine_test.go`).
 
@@ -80,7 +83,12 @@ return cliCtx.Service.Up(...)   // Delegate to service
 ### Service Layer (`internal/service/`)
 | File | Purpose |
 |------|---------|
-| `devcontainer.go` | `DevContainerService` - main orchestrator |
+| `devcontainer.go` | `DevContainerService` - main orchestrator (Load, Down, Build, Lock) |
+| `up.go` | `Up`: `decideUp`, `announceUp`, the idempotent steps |
+| `status.go` | `Status` (state, drift, SSH endpoint) and `List` |
+| `stop.go` | `Stop` / `Restart` |
+| `lock_workspace.go` | `lockWorkspace` (`$DCX_HOME/locks/<id>.lock`) |
+| `clean.go` | Image cleanup for `dcx clean` |
 
 **Key Methods:**
 - `Load()` / `LoadWithOptions()` - Resolve through `devcontainer.ResolveWorkspace` (the service only supplies image metadata via the engine)
@@ -115,6 +123,9 @@ Load config → decideUp(state, setup complete, --recreate/--rebuild) → none |
 | `compose.go` | `ComposeProject` - the only docker compose executor (always explicit `-f` files) |
 | `compose_override.go` | `composeOverride` - renders a `ContainerSpec` as compose override YAML (yaml.v3) |
 | `secrets.go` | Secret mounting after container start |
+| `entrypoint.go` | Entrypoint chaining (image metadata, then features) and the keep-alive command |
+| `ssh_endpoint.go` | `planSSH` (agent port, listen address, network mode) and the recorded-endpoint readers |
+| `runtime.go` | `UpOptions`, `SSHAccess` (`--hosts`), `DownOptions` |
 
 **Provisioner plan dispatch:**
 ```go
@@ -138,7 +149,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
 | `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
-| `substitute.go` | Variable substitution (`${localEnv:VAR}`, `${containerWorkspaceFolder}`) |
+| `substitute.go` | Variable substitution (see "Variable Substitution") |
 | `resolve.go` | `ResolveWorkspace()` - the one resolution pipeline (load, image metadata via `ImageMetadataSource`, lockfile, build) |
 | `builder.go` | `Builder.Build()` - the build step of `ResolveWorkspace` |
 | `id.go` | `NewIdentity` / `LoadIdentity` - the only place the workspace identity is computed |
@@ -150,28 +161,31 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | File | Purpose |
 |------|---------|
 | `manager.go` | `StateManager` - detects state via Docker labels |
-| `state.go` | `ContainerState` enum (Absent, Created, Running, Stale, Broken) and `ContainerInfo` |
+| `state.go` | `ContainerState` enum (Unknown, Absent, Created, Running, Stale, Broken) and `ContainerInfo` |
 | `labels.go` | `ContainerLabels` struct, label schema (prefix: `com.griffithind.dcx`) |
 
 #### Features (`internal/features/`)
 | File | Purpose |
 |------|---------|
 | `manager.go` | `Manager.ResolveAll()` - entry point |
-| `resolver.go` | Resolve features from local, OCI registry, or HTTP |
+| `resolver.go` | Resolve features from local, OCI registry (credentials via `registryauth`), or HTTP; cache in `~/.cache/dcx/features` |
 | `ordering.go` | Topological sort with dependency resolution |
-| `dockerfile.go` | Generate Dockerfile for feature installation |
+| `dockerfile.go` | Generate Dockerfile for feature installation (feature `containerEnv` becomes `ENV`) |
+| `lock.go` | `GenerateLockfile` / `VerifyLockfile` |
 
 ### Build Layer (`internal/build/`)
 | File | Purpose |
 |------|---------|
-| `builder.go` | `ImageBuilder` interface |
-| `dockerfile.go` | CLI-based builder using `docker buildx build` |
-| `features.go` | Build derived images with features |
+| `builder.go` | `Builder` and `build.Engine`, the narrow engine interface it builds through (it never runs docker itself) |
+| `dockerfile.go` | `BuildFromDockerfile` (secrets, build contexts) |
+| `features.go` | Build derived images with features (`stageFeatures`) |
+| `metadata.go` | The `devcontainer.metadata` label of built images |
 | `uid.go` | UID update layer for host/container user matching |
 
 ### Supporting Packages
 - `internal/lifecycle/` - Hook execution from `devcontainer.Hooks`; `Markers` records completed once-per-container phases
 - `internal/lifecyclecmd/` - `Command`, the typed lifecycle command (string / array / named) used by devcontainer.json, image and feature metadata, and its only parser
+- `internal/registryauth/` - Registry credentials as docker finds them (`~/.docker/config.json` auths, `credHelpers`, `credsStore`; `GITHUB_TOKEN` for ghcr.io); runs credential helpers, so it is exempt from the os/exec rule
 - `internal/mount/` - `Mount` and `Parse`, the only mount string parser (devcontainer.json, image and feature metadata)
 - `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
 - `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
@@ -179,7 +193,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/env/` - `/etc/environment` and `/etc/profile` patching; `userEnvProbe` (the user's login shell, NUL-separated output)
 - `internal/secrets/` - Fetching runtime and build secrets (commands run on the host)
 - `internal/lockfile/` - `devcontainer-lock.json` read/write
-- `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data (shown with `--quiet`), `Info` is progress; colour off with `NO_COLOR`, `--no-color` or a non-terminal
+- `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data on stdout (shown with `--quiet`); `Info`, `Success`, `Warning` and spinners are progress on stderr (silenced by `--quiet`); colour off with `NO_COLOR`, `--no-color` or a non-terminal
 - `internal/version/` - Build version
 - `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
@@ -209,12 +223,13 @@ type ResolvedDevContainer struct {
 
 ### ExecutionPlan (`devcontainer/plan.go`)
 Sealed interface with three implementations:
-- `ImagePlan{Image string}` - Pre-built image
-- `DockerfilePlan{Dockerfile, Context, Args, Target string}` - Custom build
-- `ComposePlan{Files []string, Service, ProjectName string}` - Docker Compose
+- `ImagePlan{Image}` - Pre-built image
+- `DockerfilePlan{Dockerfile, Context, Args, Target, CacheFrom, Options}` - Custom build
+- `ComposePlan{Files, Service, RunServices, ProjectName}` - Docker Compose
 
 ### ContainerState (`state/state.go`)
 ```go
+StateUnknown  // "" - not determined
 StateAbsent   // No managed containers
 StateCreated  // Exists but not running (created or stopped)
 StateRunning  // Primary container running
@@ -251,7 +266,7 @@ DevContainerConfig (substituted)               — Local
     ├─ Create ExecutionPlan
     ├─ features.Manager.ResolveAll() → topological sort
     ├─ Compute hashes
-    └─ Merge feature config (mounts, caps, env)
+    └─ Merge feature config (mounts, caps, privileged, init; feature containerEnv goes into the image as ENV)
     ↓
 ResolvedDevContainer
 ```
@@ -288,7 +303,7 @@ Service.Up (internal/service/up.go)
 ```
 StateManager.State()
     ↓ Docker.ListContainers(labels)
-Find containers with workspace.id or workspace.name
+Find containers with the workspace.id label
     ↓ Find primary container
 Compare stored hash vs current hash
     ↓
@@ -350,17 +365,18 @@ Base Image → Features Layer → UID Update Layer → Final Image
 Supported patterns in `devcontainer.json`:
 - `${localEnv:VAR}` / `${localEnv:VAR:default}` - Host environment
 - `${containerEnv:VAR}` - Container environment
-- `${localWorkspaceFolder}` - Host workspace path
-- `${containerWorkspaceFolder}` - Container workspace path
+- `${localWorkspaceFolder}` / `${localWorkspaceFolderBasename}` - Host workspace path / its last element
+- `${containerWorkspaceFolder}` / `${containerWorkspaceFolderBasename}` - Container workspace path / its last element
 - `${devcontainerId}` - Workspace ID hash
 - `${userHome}` - User's home directory
+- `${pathSeparator}` - The host's path separator
 
 ## Feature Resolution
 
 Features resolved in order:
 1. Parse feature map from devcontainer.json
 2. Resolve each feature (local path, OCI registry, HTTP tarball)
-3. Recursively resolve dependencies (`dependsOn`, `installsAfter`)
+3. Recursively resolve `dependsOn` (fetched when not listed; `installsAfter` only orders features that are listed)
 4. Topological sort with soft dependency scoring
 5. Generate Dockerfile with staged feature installation
 

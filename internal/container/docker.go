@@ -993,15 +993,36 @@ func (d *Docker) ComposeVersion(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// runOutput runs cmd and returns its stdout. On failure the error includes
-// what docker printed on stderr ("exit status 1" alone explains nothing).
+// runOutput runs cmd and returns its stdout. On failure the error is what
+// docker printed on stderr ("exit status 1" alone explains nothing).
 func runOutput(cmd *exec.Cmd) ([]byte, error) {
 	out, err := cmd.Output()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
-			return out, fmt.Errorf("%w: %s", err, msg)
+			return out, &dockerError{msg: msg, err: err}
 		}
 	}
 	return out, err
+}
+
+// dockerError is a failed docker command: the message is docker's
+// stderr; it unwraps to the *exec.ExitError.
+type dockerError struct {
+	msg string
+	err error
+}
+
+func (e *dockerError) Error() string { return e.msg }
+
+func (e *dockerError) Unwrap() error { return e.err }
+
+// DaemonPermissionHint explains a permission-denied error from the Docker
+// socket: the daemon runs, but the user may not use it.
+const DaemonPermissionHint = "the Docker daemon is running but your user may not use it: add it to the docker group (then log in again), or run dcx under 'sg docker'"
+
+// IsDaemonPermissionDenied reports whether msg is docker's error for a
+// socket the user may not open.
+func IsDaemonPermissionDenied(msg string) bool {
+	return strings.Contains(msg, "permission denied") && strings.Contains(msg, "docker")
 }

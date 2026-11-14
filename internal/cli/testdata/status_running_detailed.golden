@@ -2,7 +2,7 @@ Workspace: /home/dev/myapp
 Project: myapp-abcd1234
 Workspace ID: abcd1234efgh
 State: running
-SSH: ssh myapp.dcx
+SSH: ssh myapp.dcx  (127.0.0.1:41022)
 Shortcuts: 2 defined (use 'dcx run --list' to view)
 
 Primary Container
@@ -15,6 +15,12 @@ Container Details
   Image: dcx/abcd1234efgh:uid-0123
   Started: 2026-11-13T10:00:00Z
   Running: true
+
+SSH
+  Allowed: 127.0.0.0/8, ::1/128
+  Fingerprint: SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG
+  Host Key: /home/dev/.dcx/hostkeys/abcd1234efgh
+  Pinned: yes
 
 Configuration
   Image: mcr.microsoft.com/devcontainers/go:1

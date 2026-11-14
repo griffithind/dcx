@@ -16,6 +16,17 @@
     "image": "dcx/abcd1234efgh:uid-0123",
     "startedAt": "2026-11-13T10:00:00Z"
   },
+  "ssh": {
+    "bindAddress": "127.0.0.1",
+    "port": 41022,
+    "allowedIPs": [
+      "127.0.0.0/8",
+      "::1/128"
+    ],
+    "hostKeyFingerprint": "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    "hostKeyFile": "/home/dev/.dcx/hostkeys/abcd1234efgh",
+    "knownHostsPinned": true
+  },
   "detail": {
     "dcxVersion": "VERSION",
     "platform": "OS/ARCH",

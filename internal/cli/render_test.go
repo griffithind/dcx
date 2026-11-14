@@ -55,6 +55,12 @@ func runningReport() *service.StatusReport {
 			ConfigHash: "0123456789abcdef0123", Labels: labels,
 		},
 		SSHAlias: "myapp.dcx",
+		SSH: &service.SSHStatus{
+			Port: 41022, BindAddress: "127.0.0.1", AllowedIPs: []string{"127.0.0.0/8", "::1/128"},
+			HostKeyFingerprint: "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+			HostKeyFile:        "/home/dev/.dcx/hostkeys/abcd1234efgh",
+			KnownHostsPinned:   true,
+		},
 		Config: &devcontainer.DevContainerConfig{
 			Name: "myapp", Image: "mcr.microsoft.com/devcontainers/go:1", RemoteUser: "vscode",
 			WorkspaceFolder: "/workspaces/myapp",

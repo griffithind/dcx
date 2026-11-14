@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -16,6 +19,7 @@ import (
 var (
 	doctorConfig bool
 	doctorSystem bool
+	doctorJSON   bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -28,7 +32,9 @@ compose plugin, and whether Docker labels containers for SELinux.
 
 Configuration checks (when a devcontainer.json is found, or with --config):
 the config resolves exactly as 'dcx up' resolves it, and the files it
-references exist.`,
+references exist. When the workspace's container is running, the SSH
+checks probe its agent: the port is recorded, accepts connections, and
+known_hosts pins the host key.`,
 	RunE: runDoctor,
 }
 
@@ -39,14 +45,22 @@ func init() {
 	// The flags select one mode; together they used to cancel out
 	// (doctor then checked nothing and reported success).
 	doctorCmd.MarkFlagsMutuallyExclusive("config-only", "system")
+	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "print machine-readable JSON instead of text")
 }
 
 // CheckResult represents a single check result.
 type CheckResult struct {
-	Name    string
-	OK      bool
-	Message string
-	Hint    string
+	Section string `json:"section"` // "system" or "config"
+	Name    string `json:"name"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// doctorReport is the doctor --json output.
+type doctorReport struct {
+	OK     bool          `json:"ok"`
+	Checks []CheckResult `json:"checks"`
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -65,36 +79,58 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	engine := newEngine()
-	allOK := true
+	var system, config []CheckResult
 	if !doctorConfig {
-		allOK = printChecks("System Requirements", systemChecks(ctx, engine)) && allOK
+		system = inSection("system", systemChecks(ctx, engine))
 	}
+	var sshChecks []CheckResult
 	if !doctorSystem && hasConfig {
-		allOK = printChecks("Configuration", configChecks(ctx, engine)) && allOK
+		config = inSection("config", configChecks(ctx, engine))
+		sshChecks = inSection("ssh", workspaceSSHChecks(ctx, engine))
+	}
+	report := doctorReport{OK: true, Checks: append(append(append([]CheckResult{}, system...), config...), sshChecks...)}
+	for _, c := range report.Checks {
+		report.OK = report.OK && c.OK
 	}
 
-	if allOK {
-		ui.Success("All checks passed!")
-		return nil
+	if doctorJSON {
+		if err := printJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printChecks("System Requirements", system)
+		printChecks("Configuration", config)
+		printChecks("SSH", sshChecks)
+		if report.OK {
+			ui.Success("All checks passed!")
+		}
 	}
-	return fmt.Errorf("some checks failed")
+	if !report.OK {
+		return fmt.Errorf("some checks failed")
+	}
+	return nil
 }
 
-// printChecks prints a titled list of results and reports whether all of
-// them passed.
-func printChecks(title string, results []CheckResult) bool {
+// inSection labels results with their section.
+func inSection(section string, results []CheckResult) []CheckResult {
+	for i := range results {
+		results[i].Section = section
+	}
+	return results
+}
+
+// printChecks prints a titled list of results.
+func printChecks(title string, results []CheckResult) {
 	if len(results) == 0 {
-		return true
+		return
 	}
 	ui.Println(ui.Bold(title))
 	ui.Println(ui.Dim(strings.Repeat("=", len(title))))
 	ui.Println("")
-	allOK := true
 	for _, r := range results {
 		check := ui.CheckResultPass
 		if !r.OK {
 			check = ui.CheckResultFail
-			allOK = false
 		}
 		ui.Println(ui.FormatCheck(check, fmt.Sprintf("%s: %s", r.Name, r.Message)))
 		if !r.OK && r.Hint != "" {
@@ -102,7 +138,6 @@ func printChecks(title string, results []CheckResult) bool {
 		}
 	}
 	ui.Println("")
-	return allOK
 }
 
 // systemChecks checks the Docker daemon, the compose plugin and SELinux.
@@ -110,8 +145,8 @@ func systemChecks(ctx context.Context, engine container.Engine) []CheckResult {
 	info, err := engine.Info(ctx)
 	if err != nil {
 		hint := "Start Docker Desktop or the Docker daemon"
-		if strings.Contains(err.Error(), "permission denied") {
-			hint = "The daemon is running but your user may not use it: add it to the docker group (then log in again), or run dcx under 'sg docker'"
+		if container.IsDaemonPermissionDenied(err.Error()) {
+			hint = "The daemon is running; " + container.DaemonPermissionHint
 		}
 		return []CheckResult{{Name: "Docker", OK: false, Message: err.Error(), Hint: hint}}
 	}
@@ -165,4 +200,37 @@ func configChecks(ctx context.Context, engine container.Engine) []CheckResult {
 		}
 	}
 	return results
+}
+
+// workspaceSSHChecks probes the agent of the workspace's running container
+// (none when it isn't running).
+func workspaceSSHChecks(ctx context.Context, engine container.Engine) []CheckResult {
+	st, err := newService(engine, report.Discard).Status(ctx, false)
+	if err != nil || st.Container == nil || !st.Container.Running || st.SSH == nil {
+		return nil
+	}
+	ssh := st.SSH
+	if ssh.Port == 0 {
+		return []CheckResult{{Name: "Listener", OK: false, Message: "no SSH port recorded for the container", Hint: "Run 'dcx up --recreate'"}}
+	}
+	endpoint := fmt.Sprintf("%s:%d", ssh.BindAddress, ssh.Port)
+	results := []CheckResult{{Name: "Listener", OK: true, Message: "published on " + endpoint}}
+	if err := tcpReachable(ctx, "127.0.0.1", ssh.Port); err != nil {
+		return append(results, CheckResult{Name: "Reachable", OK: false, Message: err.Error(), Hint: "Run 'dcx up' to restart the agent"})
+	}
+	results = append(results, CheckResult{Name: "Reachable", OK: true, Message: "the agent accepts connections"})
+	if !ssh.KnownHostsPinned {
+		return append(results, CheckResult{Name: "Host key", OK: false, Message: "known_hosts does not pin the workspace's host key", Hint: "Run 'dcx up' to pin it"})
+	}
+	return append(results, CheckResult{Name: "Host key", OK: true, Message: "pinned (" + ssh.HostKeyFingerprint + ")"})
+}
+
+// tcpReachable reports whether host:port accepts a TCP connection.
+func tcpReachable(ctx context.Context, host string, port int) error {
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }

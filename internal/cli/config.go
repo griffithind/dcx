@@ -17,15 +17,15 @@ var (
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show devcontainer configuration",
-	Long: `Show the resolved devcontainer.json configuration.
+	Long: `Show the resolved devcontainer.json configuration as JSON (always; there
+is no --json flag).
 
-By default, shows the configuration after variable substitution.
-Use --raw to show the original configuration without substitution.
-
-Examples:
-  dcx config                # Show resolved config
-  dcx config --raw          # Show original config
-  dcx config --validate     # Only validate config (no output)`,
+By default, shows devcontainer.json after variable substitution (the base
+image's metadata is not merged in; 'dcx status' shows the resolved plan).
+Use --raw to show it as written.`,
+	Example: `  dcx config                # Show the resolved config
+  dcx config --raw          # Show the config as written
+  dcx config --validate     # Only validate the config (no output)`,
 	RunE: runConfig,
 }
 
