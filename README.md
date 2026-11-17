@@ -502,7 +502,8 @@ mount). Compose configs mount the workspace in the compose file.
 - `forwardPorts` entries without a host address, and `appPort` numbers,
   are published on `127.0.0.1` only. `appPort` strings are passed to
   Docker as written (`"8080:80"` is reachable from the network,
-  `"0.0.0.0:3000:3000"` too).
+  `"0.0.0.0:3000:3000"` too). Ranges work as with `docker -p`:
+  `"3000-3005"`, `"8000-8005:3000-3005"`, `"127.0.0.1::3000-3005"`.
 - A port listed more than once (in `appPort` and `forwardPorts`, or as
   `3000` and `"localhost:3000"`) is published once, and a port your compose
   file already publishes is not published again. When a host port is in
@@ -645,6 +646,8 @@ Changes since 0.7 that affect existing setups:
     stopped environment starts with `up -d --no-recreate`, a primary
     service in a profile is found, and the project's `.env` applies when
     dcx looks for the base image's metadata.
+  - Port ranges in `appPort` (`"8000-8005:3000-3005"`) are published
+    (they were rejected).
   - The `devcontainer.metadata` label on images and containers keeps the
     base image's entries as they were, string mounts as written, and
     devcontainer.json unsubstituted (no host paths baked in).

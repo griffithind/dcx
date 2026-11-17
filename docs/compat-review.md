@@ -48,7 +48,7 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **R8:** a volume the user's compose files declare is not re-declared in the override. Volumes only in `mounts` are still declared with their bare name, as `docker run --mount` uses them (an intentional difference: upstream prefixes them with the project).
 - **M10:** the container's `devcontainer.metadata` label is the merged metadata (image, features, local config).
 - **R5:** `runArgs` `--name` names the container.
-- **Not done:** C17 port ranges are still rejected.
+- **C17** (done later, after step 5): see below.
 
 **Step 3 (features): done.**
 - **F1:** the lockfile is devcontainers/cli's: keys as written, integrity is the OCI manifest digest (features are fetched by it), `dependsOn` in declaration order, keys ordered as `localeCompare` and the same JSON form. A lockfile an older dcx wrote fails with a hint to run `dcx lock`.
@@ -80,7 +80,7 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **R10:** `compose build` builds only `runServices` and the primary (all services without `runServices`).
 - **R11:** `docker compose config` is read with `--profile '*'`; dcx's own reading of compose files (for the metadata image) uses the project's `.env`. `extends` and `include` are still not followed there, and services in profiles are not started without `runServices` (upstream neither).
 - **M9:** the `devcontainer.metadata` labels dcx writes keep the base entries verbatim, string mounts as written and devcontainer.json unsubstituted (`resolved.Raw`); feature ids were already the user's references (F16).
-- Not done from the earlier steps: C17 (port ranges).
+- **C17:** port ranges in docker `-p` syntax (`"3000-3005"`, `"8000-8005:3000-3005"`, `"IP::3000-3005"`, with a protocol) publish one binding per port (`ParsePortSpecs`), so collisions and dedupe work per port. A host range for a single container port (Docker picks one host port) is rejected, and a range is capped at 1024 ports.
 
 Decisions made on 2026-11-14 (see "Decisions" below):
 - `forwardPorts` stay published and are deduplicated;

@@ -147,7 +147,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `types.go` | `StringOrSlice` |
 | `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json); all run before `up` returns (`waitFor` has no effect) |
 | `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
-| `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec`, `PortForward.Collides` |
+| `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` (`ParsePortSpecs` expands ranges), `PortForward.Collides` |
 | `workspace.go` | The workspace layout: the git root containing the workspace is mounted at `/workspaces/<folder>`; default `workspaceFolder`; `resolveWorkspaceMount` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
 | `tree.go` | The JSONC tree a config is read into (BOM, case-sensitive keys), `Substitute` (one pass over every string), decoding |
@@ -465,7 +465,7 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 - Variable substitution happens once, in `devcontainer.LoadConfig`, over every string of the JSON tree before it is decoded (image metadata likewise, in `parseImageMetadata`). Don't substitute again downstream. `${containerEnv:…}` is resolved at exec time with `ResolveContainerEnvRefs`.
 - Compatibility with devcontainers/cli is tracked in `docs/compat-review.md`; read it before changing resolution, features or the runtime.
 - Container runtime settings live in `container.ContainerSpec`, rendered by both engines; run `docker compose` only through `container.ComposeProject`.
-- Parse mounts with `mount.Parse` (`devcontainer.ParseMountString`) and ports with `ParsePortSpec`; lifecycle commands are `*lifecyclecmd.Command`; don't add new parsers or `interface{}` config fields.
+- Parse mounts with `mount.Parse` (`devcontainer.ParseMountString`) and ports with `ParsePortSpec`/`ParsePortSpecs`; lifecycle commands are `*lifecyclecmd.Command`; don't add new parsers or `interface{}` config fields.
 - Typed config fields must marshal back to the JSON they were read from: the config hash (`TestConfigHashEncodingIsStable`) is the staleness key.
 - Resolution changes are covered by golden files in `internal/devcontainer/testdata/resolve`; review the diff of `go test ./internal/devcontainer -run TestResolveGolden -args -update`.
 - Every command's `--help` is pinned in `internal/cli/testdata/help.golden`; after changing commands or flags review the diff of `go test ./internal/cli -run TestHelpGolden -args -update`.

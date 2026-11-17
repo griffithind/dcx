@@ -25,7 +25,8 @@ var errRemoteHostPort = errors.New("refers to another host")
 //	"127.0.0.1::90"         bound to 127.0.0.1, Docker picks the host port
 //	any of the above + "/udp" or "/tcp"
 //
-// "db:5432" (a non-numeric, non-IP host) returns errRemoteHostPort.
+// "db:5432" (a non-numeric, non-IP host) returns errRemoteHostPort. Ranges
+// are ParsePortSpecs'.
 func ParsePortSpec(spec string) (PortForward, error) {
 	var pf PortForward
 	s := strings.TrimSpace(spec)
@@ -98,6 +99,88 @@ func ParsePortSpec(spec string) (PortForward, error) {
 	return pf, nil
 }
 
+// maxPortRange bounds how many ports one range entry may publish.
+const maxPortRange = 1024
+
+// ParsePortSpecs parses a port specification that may name a range, in
+// docker -p syntax ("3000-3005", "8000-8005:3000-3005",
+// "127.0.0.1:8000-8005:3000-3005", "127.0.0.1::3000-3005"), into one
+// binding per port; any other spec is ParsePortSpec's single binding. A
+// host range must be as long as the container range (a host range for one
+// container port, where Docker picks any free host port in it, is not
+// supported).
+func ParsePortSpecs(spec string) ([]PortForward, error) {
+	s := strings.TrimSpace(spec)
+	if !strings.Contains(s, "-") {
+		pf, err := ParsePortSpec(s)
+		if err != nil {
+			return nil, err
+		}
+		return []PortForward{pf}, nil
+	}
+	base, proto, hasProto := strings.Cut(s, "/")
+	parts := strings.Split(base, ":")
+	if len(parts) > 3 {
+		return nil, fmt.Errorf("invalid port %q", spec)
+	}
+	// The container ports are last. A host port range precedes them, except
+	// in "localhost:N-M" and "IP::N-M" (Docker picks the host ports).
+	last := len(parts) - 1
+	hostIdx := -1
+	if (len(parts) == 2 && parts[0] != "localhost") || (len(parts) == 3 && parts[1] != "") {
+		hostIdx = last - 1
+	}
+	cFrom, cTo, err := portRange(parts[last], spec)
+	if err != nil {
+		return nil, err
+	}
+	hFrom := cFrom
+	if hostIdx >= 0 {
+		var hTo int
+		if hFrom, hTo, err = portRange(parts[hostIdx], spec); err != nil {
+			return nil, err
+		}
+		if hTo-hFrom != cTo-cFrom {
+			return nil, fmt.Errorf("invalid port %q: the host and container ranges differ in length", spec)
+		}
+	}
+	if cTo-cFrom+1 > maxPortRange {
+		return nil, fmt.Errorf("invalid port %q: more than %d ports", spec, maxPortRange)
+	}
+	out := make([]PortForward, 0, cTo-cFrom+1)
+	for i := 0; i <= cTo-cFrom; i++ {
+		single := append([]string(nil), parts...)
+		single[last] = strconv.Itoa(cFrom + i)
+		if hostIdx >= 0 {
+			single[hostIdx] = strconv.Itoa(hFrom + i)
+		}
+		one := strings.Join(single, ":")
+		if hasProto {
+			one += "/" + proto
+		}
+		pf, err := ParsePortSpec(one)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pf)
+	}
+	return out, nil
+}
+
+// portRange parses "N" or "N-M" (N <= M).
+func portRange(s, spec string) (int, int, error) {
+	from, to, isRange := strings.Cut(s, "-")
+	if !isRange {
+		to = from
+	}
+	a, err1 := strconv.Atoi(from)
+	b, err2 := strconv.Atoi(to)
+	if err1 != nil || err2 != nil || a < 1 || b > 65535 || a > b {
+		return 0, 0, fmt.Errorf("invalid port %q", spec)
+	}
+	return a, b, nil
+}
+
 // DockerSpec renders the binding in docker -p / compose "ports" syntax.
 func (p PortForward) DockerSpec() string {
 	var s string
@@ -131,9 +214,9 @@ func (b *Builder) parsePorts(field string, ports PortList, loopbackNumbers bool)
 	var out []PortForward
 	for _, p := range ports {
 		spec := p.Spec
-		pf, err := ParsePortSpec(spec)
+		pfs, err := ParsePortSpecs(spec)
 		if err == nil && loopbackNumbers && p.number {
-			pf.Host = "127.0.0.1"
+			pfs[0].Host = "127.0.0.1"
 		}
 		if err != nil {
 			if errors.Is(err, errRemoteHostPort) {
@@ -143,7 +226,7 @@ func (b *Builder) parsePorts(field string, ports PortList, loopbackNumbers bool)
 			}
 			continue
 		}
-		out = append(out, pf)
+		out = append(out, pfs...)
 	}
 	return out
 }

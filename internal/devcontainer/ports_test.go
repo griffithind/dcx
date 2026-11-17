@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -39,4 +40,48 @@ func TestParsePortSpecInvalid(t *testing.T) {
 		_, err := ParsePortSpec(in)
 		assert.Error(t, err, in)
 	}
+}
+
+// Port ranges in docker -p syntax publish one binding per port (C17), as
+// appPort strings do when the official CLI passes them to docker.
+func TestParsePortSpecsRanges(t *testing.T) {
+	specs := func(spec string) []string {
+		t.Helper()
+		pfs, err := ParsePortSpecs(spec)
+		require.NoError(t, err, spec)
+		out := make([]string, len(pfs))
+		for i, pf := range pfs {
+			out[i] = pf.DockerSpec()
+		}
+		return out
+	}
+	assert.Equal(t, []string{"3000:3000", "3001:3001", "3002:3002"}, specs("3000-3002"))
+	assert.Equal(t, []string{"8000:3000", "8001:3001"}, specs("8000-8001:3000-3001"))
+	assert.Equal(t, []string{"127.0.0.1:8000:3000", "127.0.0.1:8001:3001"}, specs("127.0.0.1:8000-8001:3000-3001"))
+	assert.Equal(t, []string{"127.0.0.1::3000", "127.0.0.1::3001"}, specs("127.0.0.1::3000-3001"))
+	assert.Equal(t, []string{"3000:3000/udp", "3001:3001/udp"}, specs("3000-3001/udp"))
+	assert.Equal(t, []string{"3000:3000", "3001:3001"}, specs("localhost:3000-3001"))
+	assert.Equal(t, []string{"8080:80"}, specs("8080:80"), "a single port is ParsePortSpec's")
+
+	for spec, want := range map[string]string{
+		"8000-8005:80":        "differ in length",
+		"3002-3000":           "invalid port",
+		"1-2000":              "more than 1024 ports",
+		"3000-x":              "invalid port",
+		"8000-8001:3000-3005": "differ in length",
+	} {
+		_, err := ParsePortSpecs(spec)
+		require.Error(t, err, spec)
+		assert.Contains(t, err.Error(), want, spec)
+	}
+}
+
+func TestAppPortRangeExpands(t *testing.T) {
+	var ports PortList
+	require.NoError(t, json.Unmarshal([]byte(`["7000-7002:9000-9002", 3000]`), &ports))
+	got := NewBuilder(nil).parsePorts("appPort", ports, true)
+	require.Len(t, got, 4)
+	assert.Equal(t, "7000:9000", got[0].DockerSpec(), "a string is passed as written: every interface")
+	assert.Equal(t, "7002:9002", got[2].DockerSpec())
+	assert.Equal(t, "127.0.0.1:3000:3000", got[3].DockerSpec())
 }

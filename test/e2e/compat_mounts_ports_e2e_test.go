@@ -5,6 +5,7 @@ package e2e
 import (
 	"fmt"
 	"net"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,4 +71,23 @@ func TestComposePublishedForwardPortE2E(t *testing.T) {
 
 	helpers.RunDCXInDirSuccess(t, ws, "up")
 	assert.Equal(t, "running", helpers.GetContainerState(t, ws))
+}
+
+// TestAppPortRangeE2E: an appPort range publishes every port in it (C17).
+func TestAppPortRangeE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:3.24",
+		"appPort": ["127.0.0.1::8000-8002"]
+	}`, helpers.UniqueTestName(t)))
+	helpers.RunDCXInDirSuccess(t, ws, "up")
+
+	out, err := exec.Command("docker", "port", helpers.ContainerName(t, ws)).CombinedOutput()
+	require.NoError(t, err, string(out))
+	for _, port := range []string{"8000/tcp", "8001/tcp", "8002/tcp"} {
+		assert.Contains(t, string(out), port)
+	}
 }
