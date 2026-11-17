@@ -256,13 +256,17 @@ func TestShouldUpdateUID(t *testing.T) {
 		{"turned off", &off, "vscode", 1000, "linux", false},
 		{"root remote user", nil, "root", 1000, "linux", false},
 		{"numeric root", nil, "0", 1000, "linux", false},
-		{"no user", nil, "", 1000, "linux", false},
+		{"numeric user (C11)", nil, "1000", 1000, "linux", false},
+		{"no user: decided from the image's user (M2)", nil, "", 1000, "linux", true},
 		{"root host user", nil, "vscode", 0, "linux", false},
 		{"macOS", nil, "vscode", 501, "darwin", false},
 		{"windows", &on, "vscode", 1000, "windows", false},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, ShouldUpdateUID(tt.configured, tt.user, tt.hostUID, tt.goos), tt.name)
+	}
+	for user, want := range map[string]bool{"vscode": true, "node": true, "root": false, "1000": false, "": false} {
+		assert.Equal(t, want, UpdatableUser(user), user)
 	}
 }
 

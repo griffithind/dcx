@@ -193,7 +193,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
 - `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
 - `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only)
-- `internal/env/` - `/etc/environment` and `/etc/profile` patching; `userEnvProbe` (the user's login shell, NUL-separated output)
+- `internal/env/` - `/etc/environment` (the container's `Config.Env`, never `remoteEnv`) and `/etc/profile` patching; `userEnvProbe` (`$SHELL`, else the user's login shell; NUL-separated output)
 - `internal/secrets/` - Fetching runtime and build secrets (commands run on the host)
 - `internal/lockfile/` - `devcontainer-lock.json` read/write
 - `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data on stdout (shown with `--quiet`); `Info`, `Success`, `Warning` and spinners are progress on stderr (silenced by `--quiet`); colour off with `NO_COLOR`, `--no-color` or a non-terminal
@@ -283,7 +283,7 @@ Service.Up (internal/service/up.go)
     ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
     ├─ lockWorkspace ($DCX_HOME/locks/<id>.lock; Up, Down, Stop and Restart take it)
     ├─ StateWithHash + setupComplete + agentctl.Listening
-    ├─ decideUp → none | resume | start | create | recreate
+    ├─ decideUp → none (initializeCommand only) | resume | start | create | recreate
     ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
     └─ steps, each idempotent:
         initialize   host initializeCommand (lifecycle.HookRunner)
@@ -299,6 +299,7 @@ Service.Up (internal/service/up.go)
         ssh config   ~/.ssh/dcx/config block, known_hosts pin (before the hooks, so a
                      failing hook still leaves a way in)
         hooks        onCreate/updateContent/postCreate once (markers), postStart per start
+                     (a PTY when dcx's stdout is a terminal; parallel commands all finish)
                      (also after a restart outside dcx: StartedAt vs the poststart marker)
 ```
 
@@ -355,6 +356,7 @@ Base Image → Features Layer → UID Update Layer → Final Image
 - Ports (`Provisioner.buildPortBindings`): `forwardPorts` without a host address and `appPort` numbers publish on `127.0.0.1`, `appPort` strings as written; a host port already taken (an earlier entry, or the compose file's own `ports`) is skipped; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
 - Workspace mount (`resolved.WorkspaceMount`): the git root at `/workspaces/<folder>`, independent of `workspaceFolder`; a non-trivial layout is part of `hash.inputs`.
 - The container's `devcontainer.metadata` label is the merged metadata (image, features, local config), as upstream records it.
+- UID layer (`Provisioner.uidUser`): `remoteUser`/`containerUser`, else the runArgs or compose user, else the image's `USER`; skipped for root and numeric users (`devcontainer.UpdatableUser`).
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 
 ### Naming and staleness
@@ -406,7 +408,7 @@ Stored in `customizations.dcx` within devcontainer.json:
 
 ## Agent Binary
 
-The `dcx-agent` binary is embedded (gzip-compressed) and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned; never `/tmp`). It runs as root (sessions switch to the session user; without a remoteUser/containerUser that is the container's default uid); dcx first runs `dcx-agent setup` to create `/var/lib/dcx` and `/run/dcx`, the shell integration and the log. How it is reached depends on the network mode (published on the container, on the compose `service:` owner, or listening on the host port with `host` networking); `--hosts` is recorded on the container and kept until a recreate changes it. Every SSH session (dcx, OpenSSH, editors) gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. SSH host blocks live in `~/.ssh/dcx/config`, included from the top of `~/.ssh/config`.
+The `dcx-agent` binary is embedded (gzip-compressed) and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned; never `/tmp`). It runs as root (sessions switch to the session user; without a remoteUser/containerUser that is the container's default user by name; the shell is `$SHELL`, else the login shell, else `/bin/sh`); dcx first runs `dcx-agent setup` to create `/var/lib/dcx` and `/run/dcx`, the shell integration and the log. How it is reached depends on the network mode (published on the container, on the compose `service:` owner, or listening on the host port with `host` networking); `--hosts` is recorded on the container and kept until a recreate changes it. Every SSH session (dcx, OpenSSH, editors) gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. SSH host blocks live in `~/.ssh/dcx/config`, included from the top of `~/.ssh/config`.
 
 Subcommands:
 - `listen` - TCP SSH server (sessions, SFTP, agent forwarding, loopback port forwarding)

@@ -109,8 +109,10 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	if err != nil {
 		return nil, err
 	}
-	if !s.announceUp(ctx, action, setupDone, existing, resolved, opts) {
-		return nil, nil
+	s.announceUp(ctx, action, setupDone, existing, resolved, opts)
+	if action == actionNone {
+		// Only initializeCommand runs (see up).
+		return &upRun{opts: opts, resolved: resolved, ids: ids, action: action, state: currentState, existing: existing}, nil
 	}
 	if err := s.checkHostRequirements(ctx, resolved); err != nil {
 		return nil, err
@@ -132,6 +134,11 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	run, err := s.planUp(ctx, opts)
 	if err != nil || run == nil {
 		return err
+	}
+	if run.action == actionNone {
+		// initializeCommand runs on every up, as in devcontainers/cli,
+		// even when the container is already up and set up.
+		return s.stepInitialize(ctx, run)
 	}
 	steps := []upStep{
 		{"initialize", s.stepInitialize},
@@ -191,16 +198,14 @@ func inputsDrifted(existing *state.ContainerInfo, resolved *devcontainer.Resolve
 }
 
 // announceUp tells the user what up is about to do and why (drift, a
-// reconnect, a resumed setup, an older container). It returns false when
-// there is nothing to do.
-func (s *DevContainerService) announceUp(ctx context.Context, action upAction, setupDone bool, existing *state.ContainerInfo, resolved *devcontainer.ResolvedDevContainer, opts UpOptions) bool {
+// reconnect, a resumed setup, an older container, nothing to do).
+func (s *DevContainerService) announceUp(ctx context.Context, action upAction, setupDone bool, existing *state.ContainerInfo, resolved *devcontainer.ResolvedDevContainer, opts UpOptions) {
 	if (action == actionNone || action == actionStart || action == actionResume) && inputsDrifted(existing, resolved) {
 		s.report.Infof("Some inputs changed since this devcontainer was created (a substituted value such as ${localEnv:...}, or a feature tag that now points to a new release); it was kept. Run 'dcx up --recreate' to apply them.")
 	}
 	switch {
 	case action == actionNone:
 		s.report.Infof("Devcontainer is already running")
-		return false
 	case action == actionResume && setupDone:
 		s.report.Infof("The dcx agent is not running (was the container restarted outside dcx?); reconnecting...")
 	case action == actionResume:
@@ -211,7 +216,6 @@ func (s *DevContainerService) announceUp(ctx context.Context, action upAction, s
 	if existing.IsLegacyHash() && !opts.Recreate && !opts.Rebuild {
 		s.report.Infof("This devcontainer was created by an older dcx, so config changes can't be detected; run 'dcx up --recreate' to apply them.")
 	}
-	return true
 }
 
 // upAction is what Up does with the workspace's container.

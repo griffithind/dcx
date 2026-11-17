@@ -103,10 +103,11 @@ func TestUpCreatesAndCompletesSetup(t *testing.T) {
 	id := h.containers()[0].ID
 	assert.Contains(t, h.engine.Files, id+":"+markerPath(phaseReady), "setup completion is recorded")
 
-	// Up again: nothing to do.
+	// Up again: nothing to do but initializeCommand, which runs on every
+	// up (M6).
 	require.NoError(t, h.up(UpOptions{}))
 	assert.Len(t, h.engine.CallsTo("CreateContainer"), 1)
-	assert.Equal(t, fakeHooks{initialize: 1, create: 1, start: 1}, *h.hooks, "a ready environment runs no hooks")
+	assert.Equal(t, fakeHooks{initialize: 2, create: 1, start: 1}, *h.hooks, "a ready environment runs only initializeCommand")
 }
 
 func TestUpResumesAfterAFailedHook(t *testing.T) {

@@ -181,13 +181,17 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 		s.report.Infof("Creating single-container devcontainer...")
 	}
 
-	return explainPortConflict(prov.Up(ctx, container.UpOptions{
+	err = prov.Up(ctx, container.UpOptions{
 		Build:        opts.Rebuild,
 		Rebuild:      opts.Rebuild,
 		Pull:         opts.Pull,
 		BuildSecrets: buildSecrets,
 		SSHAccess:    access,
-	}), 0)
+	})
+	// The agent port was free when chosen; another process (or a
+	// devcontainer created at the same moment) can take it before Docker
+	// binds it.
+	return explainPortConflict(err, prov.PlannedSSHPort())
 }
 
 // recordedSSHPort is the agent port recorded on an existing container.
@@ -238,17 +242,19 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 	patcher := env.NewPatcher(s.engine)
 	prober := env.NewProber(s.engine)
 
-	// Collect environment variables to patch into /etc/environment
+	// /etc/environment gets the container's environment (image ENV,
+	// features' containerEnv, containerEnv), as devcontainers/cli writes
+	// it. remoteEnv is not written there: the file is world-readable and
+	// remoteEnv often holds tokens; sessions get it from the agent.
 	envToPatch := make(map[string]string)
 	for k, v := range resolved.ContainerEnv {
 		envToPatch[k] = v
 	}
 	remoteEnv = resolved.RemoteEnv
 	if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
-		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, devcontainer.EnvListToMap(details.Env))
-	}
-	for k, v := range remoteEnv {
-		envToPatch[k] = v
+		containerEnv := devcontainer.EnvListToMap(details.Env)
+		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, containerEnv)
+		envToPatch = containerEnv
 	}
 
 	// Always reconcile dcx's block, so removed variables disappear too.
@@ -360,9 +366,9 @@ var portConflict = regexp.MustCompile(`:(\d+)(?: failed)?: (?:bind: )?(?:port is
 
 // explainPortConflict adds the way out to a create or start that failed
 // because a host port the devcontainer publishes is in use. sshPort is the
-// agent's recorded port when starting an existing container (0 on create,
-// where dcx has just picked a free one): only that port changes with a
-// recreate; the user's ports are fixed by the config.
+// agent's port (recorded on an existing container, or just chosen on
+// create): only that port changes with a recreate; the user's ports are
+// fixed by the config.
 func explainPortConflict(err error, sshPort int) error {
 	if err == nil {
 		return nil

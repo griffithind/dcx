@@ -469,13 +469,16 @@ Hooks run in the foreground and `dcx up` waits for all of them (`waitFor`,
 which tells editors when they may connect, has no effect on a
 command-line `up`), so start long-running processes in the background (as
 above) or with your compose file. A hook can be a string (run with `sh -c`), an array (run directly)
-or an object of named commands (run in parallel). Hooks from the base
-image's metadata run first, then those of features (in install order),
-then devcontainer.json's.
+or an object of named commands (run in parallel; when one fails the others
+still finish, then the hook fails). Hooks from the base image's metadata
+run first, then those of features (in install order), then
+devcontainer.json's. When dcx runs in a terminal, container hooks get a
+pseudo-terminal (colours and `docker run -it` work); without one (CI, a
+pipe) they run without, so logs stay plain.
 
 | Hook | When | Runs |
 |------|------|------|
-| `initializeCommand` | Before container creation (on host) | Once |
+| `initializeCommand` | On the host, at the start of every `dcx up` | Every up |
 | `onCreateCommand` | After container created | Once |
 | `updateContentCommand` | When content is updated | Once |
 | `postCreateCommand` | After onCreate | Once |
@@ -524,7 +527,12 @@ mount). Compose configs mount the workspace in the compose file.
 ```
 
 - `containerEnv` - Set at container creation
-- `remoteEnv` - Set in shell sessions
+- `remoteEnv` - Set in shell sessions and hooks
+
+`/etc/environment` gets the container's environment (the image's `ENV`,
+features' `containerEnv` and `containerEnv`), as the official CLI writes it.
+`remoteEnv` is never written there: the file is world-readable and
+`remoteEnv` often holds tokens.
 
 ### User Configuration
 
@@ -535,7 +543,9 @@ mount). Compose configs mount the workspace in the compose file.
 }
 ```
 
-When `updateRemoteUserUID` is true, DCX updates the container user's UID/GID to match your host user, ensuring file permissions work correctly with mounted volumes.
+When `updateRemoteUserUID` is true (the default, on Linux hosts), DCX updates the container user's UID/GID to match your host user, ensuring file permissions work correctly with mounted volumes. The user is `remoteUser` (or `containerUser`), else the `runArgs` `--user` or the compose service's `user`, else the image's `USER`; root and numeric users are left alone.
+
+Sessions run as `remoteUser`, else `containerUser`, else the container's default user by name (with its `$HOME`). Their shell is the container's `SHELL`, else the user's login shell, else `/bin/sh`.
 
 ## Files dcx Writes
 
@@ -617,6 +627,22 @@ Changes since 0.7 that affect existing setups:
 - Features install as root, whatever the base image's `USER`; the image's
   user is restored afterwards. A feature given as a string
   (`"…/node:1": "18"`) sets its `version` option.
+- Users, environment and hooks follow the official CLI:
+  - `/etc/environment` holds the container's environment instead of
+    `remoteEnv` (sessions still get `remoteEnv`).
+  - Without `remoteUser`, the UID update applies to the image's (or the
+    compose service's, or `runArgs`') user, so bind-mounted files get the
+    right owner; numeric users are no longer remapped, and a user whose
+    home is `/` (such as `nobody`) is remapped without touching `/`.
+    Containers get the layer when they are next created.
+  - Sessions without a configured user run as the image's user by name
+    (they ran as a uid, with `HOME=/home/<uid>`), and use the container's
+    `SHELL` or the user's login shell instead of the first of bash, zsh
+    and sh.
+  - `initializeCommand` runs on every `dcx up`, also when the container is
+    already running.
+  - A failing command of a parallel hook no longer stops the others.
+  - Hooks run on a pseudo-terminal when dcx runs in a terminal.
 - Features follow the official CLI:
   - `devcontainer-lock.json` is written and read in its format (keys as
     written, integrity is the manifest digest). A lockfile an older dcx

@@ -173,3 +173,12 @@ func RecordedSSHAccess(info *state.ContainerInfo) SSHAccess {
 	}
 	return SSHAccess{AllowedCIDRs: info.Labels.SSHAllowedCIDRs}
 }
+
+// PlannedSSHPort is the host port chosen for the agent by the last Up (0
+// before one, or with host networking where nothing is published).
+func (r *Provisioner) PlannedSSHPort() int {
+	if r.ssh == nil || !r.ssh.publish {
+		return 0
+	}
+	return r.ssh.hostPort
+}

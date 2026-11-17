@@ -32,6 +32,16 @@ type RunOptions struct {
 	Command     []string
 	Stdout      io.Writer
 	Stderr      io.Writer
+	// TTY runs the command on a pseudo-terminal of the given size, as
+	// devcontainers/cli runs lifecycle commands: colours, progress bars
+	// and `docker run -it` work. Output then all arrives on Stdout.
+	TTY *TerminalSize
+}
+
+// TerminalSize is a TTY's size and $TERM.
+type TerminalSize struct {
+	Term       string
+	Rows, Cols int
 }
 
 // Run runs a command in the container and returns its exit code. Stdin is
@@ -59,6 +69,13 @@ func Run(ctx context.Context, opts RunOptions) (int, error) {
 	// Agent forwarding is optional (hooks cloning private repos use it).
 	if os.Getenv("SSH_AUTH_SOCK") != "" {
 		_ = agent.RequestAgentForwarding(session)
+	}
+
+	if t := opts.TTY; t != nil {
+		modes := ssh.TerminalModes{ssh.ECHO: 0}
+		if err := session.RequestPty(t.Term, t.Rows, t.Cols, modes); err != nil {
+			return -1, fmt.Errorf("request pty: %w", err)
+		}
 	}
 
 	session.Stdin = strings.NewReader("")

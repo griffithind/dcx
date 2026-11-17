@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,27 +165,26 @@ func TestRunInitializeUsesHost(t *testing.T) {
 
 // When one parallel (object-form) command fails, the others' context is
 // cancelled.
-func TestParallelFailureCancelsOthers(t *testing.T) {
+// A failing parallel command lets the others finish (M7), as in
+// devcontainers/cli; the phase fails afterwards, naming the failure.
+func TestParallelFailureLetsOthersFinish(t *testing.T) {
 	hooks := devcontainer.Hooks{OnCreate: []devcontainer.Hook{local(t, `{"fail": "fail", "slow": "slow"}`)}}
 	r := NewHookRunner(0, report.Discard, "/ws", hooks, "ws")
-	cancelled := make(chan struct{})
+	var finished atomic.Bool
 	r.execContainer = func(ctx context.Context, c lifecyclecmd.Step) error {
 		if c.Name == "fail" {
 			return errors.New("boom")
 		}
 		select {
 		case <-ctx.Done():
-			close(cancelled)
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(100 * time.Millisecond):
+			finished.Store(true)
 			return nil
 		}
 	}
 	err := r.RunCreateHooks(context.Background(), nil)
 	require.Error(t, err)
-	select {
-	case <-cancelled:
-	default:
-		t.Fatal("slow command was not cancelled")
-	}
+	assert.Contains(t, err.Error(), "[fail] boom")
+	assert.True(t, finished.Load(), "the slow command ran to completion")
 }

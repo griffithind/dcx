@@ -62,6 +62,15 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **F15:** manifests are hashed and checked against the pinned digest instead of trusting `Docker-Content-Digest`; `DEVCONTAINERS_OCI_AUTH` and identity tokens (OAuth2 refresh) are supported.
 - The features image tag has a version, so images built with the old Dockerfile are rebuilt on the next create.
 
+**Step 4 (users, environment and lifecycle): done.**
+- **M3:** `/etc/environment` gets the container's `Config.Env` (dcx's block, rewritten each up); `remoteEnv` is never written there.
+- **M2/C11:** the UID update user is `remoteUser`/`containerUser`, else the `runArgs` `--user` or compose `user:`, else the image's `USER` (decided in `layerImages` once the image is known); root and numeric users are skipped. A compose config without features may now get a UID layer. The UID script (upstream's) chowned the user's home even when it is `/` (`nobody`); dcx now chowns only a home directory other than `/` and matches the passwd entry from the line start.
+- **M4/M14:** the session shell, and the env probe's, is the container's `SHELL`, else the passwd shell, else `/bin/sh`. A `nologin` or `false` shell (system users such as `nobody`) is skipped; upstream would use it and fail every command.
+- **M13:** without a configured user the agent runs sessions as `id -un` (the uid only when it has no name).
+- **M6:** `initializeCommand` runs on every `up`, also when nothing else does.
+- **M7:** parallel commands all finish before the phase fails.
+- **M5:** container hooks run on a PTY when dcx's stdout is a terminal. Unlike upstream, not in CI (no terminal), so logs keep plain line endings and stderr stays separate.
+
 Decisions made on 2026-11-14 (see "Decisions" below):
 - `forwardPorts` stay published and are deduplicated;
 - dcx keeps its own identity;

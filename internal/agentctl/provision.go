@@ -46,8 +46,10 @@ func (o Options) listenAddr() string {
 // readyTimeout bounds how long Provision waits for a launched agent.
 var readyTimeout = 15 * time.Second
 
-// defaultUIDQuery prints the container default user's uid.
-var defaultUIDQuery = []string{"id", "-u"}
+// defaultUserQuery prints the container default user's name (as
+// devcontainers/cli does, so sessions get its USER and HOME), or its uid
+// when the passwd database has no name for it.
+var defaultUserQuery = []string{"sh", "-c", "id -un 2>/dev/null || id -u"}
 
 // Provision makes the container's agent current and listening. It is
 // idempotent: an up-to-date, listening agent is left alone apart from its
@@ -112,11 +114,11 @@ func launch(ctx context.Context, engine container.Engine, opts Options) error {
 	// Without one, sessions run as the container's default user.
 	user := opts.User
 	if user == "" {
-		uid, err := engine.ExecOutput(ctx, opts.ContainerName, defaultUIDQuery)
+		name, err := engine.ExecOutput(ctx, opts.ContainerName, defaultUserQuery)
 		if err != nil {
 			return fmt.Errorf("determine the container's default user: %w", err)
 		}
-		user = strings.TrimSpace(string(uid))
+		user = strings.TrimSpace(string(name))
 	}
 	workDir := opts.WorkDir
 	if workDir == "" {

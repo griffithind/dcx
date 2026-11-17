@@ -26,15 +26,21 @@ const (
 	ProbeInteractiveShell ProbeType = "interactiveShell"
 )
 
-// probeScript runs the user's login shell (from the passwd database,
-// /bin/sh when there is none) with the probe's flags ("$@") and prints its
+// probeScript runs the user's shell as sessions do (the container's SHELL,
+// else the user's login shell from the passwd database, else /bin/sh; a
+// nologin or false shell counts as none) with
+// the probe's flags ("$@") and prints its
 // environment: a marker, then /proc/self/environ. The environment is
 // NUL-separated, so multi-line values (exported bash functions) survive,
 // and the marker separates it from anything the shell's startup files
 // print. Nothing is interpolated into the script.
-const probeScript = `user=$(id -un)
-shell=$(getent passwd "$user" 2>/dev/null | cut -d: -f7)
-[ -n "$shell" ] || shell=$(awk -F: -v u="$user" '$1 == u { print $7 }' /etc/passwd 2>/dev/null)
+const probeScript = `shell=$SHELL
+if [ -z "$shell" ] || [ ! -x "$shell" ]; then
+	user=$(id -un)
+	shell=$(getent passwd "$user" 2>/dev/null | cut -d: -f7)
+	[ -n "$shell" ] || shell=$(awk -F: -v u="$user" '$1 == u { print $7 }' /etc/passwd 2>/dev/null)
+fi
+case "$shell" in */nologin|*/false) shell= ;; esac
 [ -n "$shell" ] && [ -x "$shell" ] || shell=/bin/sh
 exec "$shell" "$@" -c 'printf "\n` + probeMarker + `\0"; cat /proc/self/environ'`
 

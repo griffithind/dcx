@@ -113,3 +113,11 @@ func TestBuildWithFeaturesUsersAndOptions(t *testing.T) {
 		assert.Equal(t, "FLAVOR=plain\nVERSION=18\n", options)
 	}
 }
+
+// The UID update never chowns "/" or a missing home: system users such as
+// nobody (a compose service's user) have one of those, and chown -R / ran
+// over the whole filesystem.
+func TestUpdateUIDScriptGuardsTheHome(t *testing.T) {
+	assert.Contains(t, updateUIDDockerfile, `if [ -d "$HOME_FOLDER" ] && [ "$HOME_FOLDER" != "/" ]; then`)
+	assert.Contains(t, updateUIDDockerfile, `s/^${REMOTE_USER}:`, "the passwd entry is matched from the line start")
+}

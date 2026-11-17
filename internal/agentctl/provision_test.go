@@ -145,8 +145,10 @@ func notListeningUntilLaunched(fake *containertest.Fake) func(string, []string) 
 	}
 }
 
+// Without a session user, sessions run as the container's default user by
+// name (M13), so they get its USER and HOME.
 func TestLaunchWithoutSessionUserUsesContainerDefaultUser(t *testing.T) {
-	fake := &containertest.Fake{Outputs: map[string]string{strings.Join(defaultUIDQuery, " "): "1000\n"}}
+	fake := &containertest.Fake{Outputs: map[string]string{strings.Join(defaultUserQuery, " "): "node\n"}}
 	fake.ExecFunc = notListeningUntilLaunched(fake)
 	t.Setenv("HOME", t.TempDir())
 
@@ -154,7 +156,7 @@ func TestLaunchWithoutSessionUserUsesContainerDefaultUser(t *testing.T) {
 	opts.User = ""
 	require.NoError(t, launch(context.Background(), fake, opts))
 	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
-	assert.Contains(t, argv, "--user 1000")
+	assert.Contains(t, argv, "--user node")
 }
 
 func TestLaunchHonoursListenAddr(t *testing.T) {

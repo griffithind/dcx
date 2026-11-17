@@ -433,15 +433,29 @@ func (b *Builder) populateBuildDecisions(resolved *ResolvedDevContainer, cfg *De
 //     Desktop's file sharing maps ownership itself, and remapping to
 //     macOS's GID 20 collides with dialout on Debian images);
 //   - updateRemoteUserUID: false turns it off (it defaults to true);
-//   - never for root (as the remote user, or as the host user).
+//   - never for root (as the remote user, or as the host user) or a
+//     numeric user (UpdatableUser).
+//
+// At resolution the user is remoteUser or containerUser; "" means it comes
+// from the runArgs or compose user or the image's USER, which the
+// provisioner checks with UpdatableUser once the image is known.
 func ShouldUpdateUID(configured *bool, effectiveUser string, hostUID int, goos string) bool {
 	if goos != "linux" || (configured != nil && !*configured) {
 		return false
 	}
-	if effectiveUser == "" || effectiveUser == "root" || effectiveUser == "0" {
+	if effectiveUser != "" && !UpdatableUser(effectiveUser) {
 		return false
 	}
 	return hostUID != 0
+}
+
+// UpdatableUser reports whether the UID update applies to user: a named
+// user other than root (devcontainers/cli skips root and numeric users).
+func UpdatableUser(user string) bool {
+	if user == "" || user == "root" {
+		return false
+	}
+	return strings.Trim(user, "0123456789") != ""
 }
 
 // parseMounts validates config mounts (parsed when the config was read and

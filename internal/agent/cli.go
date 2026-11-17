@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -63,7 +64,7 @@ func runListenCmd(args []string) error {
 	addr := fs.String("addr", agentproto.ListenAddr("0.0.0.0"), "TCP address to bind (host:port)")
 	userFlag := fs.String("user", "", "Default user for sessions (falls back to SSH client user)")
 	workDir := fs.String("workdir", "/workspace", "Working directory")
-	shell := fs.String("shell", "", "Shell to use (auto-detected if empty)")
+	shell := fs.String("shell", "", "Shell to use (default: $SHELL, else the user's login shell, else /bin/sh)")
 	hostKey := fs.String("host-key", agentproto.HostKeyPath, "Path to persistent host key")
 	authKeys := fs.String("authorized-keys", agentproto.AuthorizedKeysPath, "Primary authorized_keys file")
 	allowCIDRs := fs.String("allow-cidrs", "", "Comma-separated CIDR list to accept in addition to loopback")
@@ -74,7 +75,7 @@ func runListenCmd(args []string) error {
 
 	shellPath := *shell
 	if shellPath == "" {
-		shellPath = detectShell()
+		shellPath = sessionShell(os.Getenv("SHELL"), *userFlag, passwdFile)
 	}
 
 	gate, err := buildGate(*allowCIDRs)
@@ -266,12 +267,38 @@ func (stdioConn) Close() error {
 	return os.Stdout.Close()
 }
 
-func detectShell() string {
-	shells := []string{"/bin/bash", "/bin/zsh", "/bin/sh"}
-	for _, shell := range shells {
-		if _, err := os.Stat(shell); err == nil {
+// passwdFile is the passwd database sessionShell reads.
+const passwdFile = "/etc/passwd"
+
+// sessionShell picks the sessions' shell as devcontainers/cli does: the
+// container's SHELL (the agent runs with the container's environment),
+// else the user's login shell from the passwd database, else /bin/sh. A
+// shell that is not executable, or one that refuses logins (nologin,
+// false: system users such as nobody), is skipped.
+func sessionShell(envShell, user, passwd string) string {
+	for _, shell := range []string{envShell, loginShell(user, passwd)} {
+		if base := filepath.Base(shell); base == "nologin" || base == "false" {
+			continue
+		}
+		if info, err := os.Stat(shell); shell != "" && err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 			return shell
 		}
 	}
 	return "/bin/sh"
+}
+
+// loginShell returns user's (a name or uid) shell from the passwd file, or
+// "".
+func loginShell(user, passwd string) string {
+	data, err := os.ReadFile(passwd)
+	if err != nil || user == "" {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) >= 7 && (fields[0] == user || fields[2] == user) {
+			return fields[6]
+		}
+	}
+	return ""
 }

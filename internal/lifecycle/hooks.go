@@ -13,6 +13,7 @@ import (
 	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/report"
 	sshclient "github.com/griffithind/dcx/internal/ssh/client"
+	"golang.org/x/term"
 )
 
 // HookRunner executes lifecycle hooks.
@@ -137,8 +138,9 @@ func (r *HookRunner) runPhase(ctx context.Context, phase string, hooks []devcont
 }
 
 // runCommand runs a lifecycle command with exec. Named (object-form)
-// commands run in parallel per the spec; when one fails the shared context
-// is cancelled so the others stop too.
+// commands run in parallel per the spec; as in devcontainers/cli, every
+// one runs to completion and the command fails afterwards if any failed
+// (only cancelling ctx, Ctrl-C, stops them).
 func (r *HookRunner) runCommand(ctx context.Context, cmd *lifecyclecmd.Command, exec func(context.Context, lifecyclecmd.Step) error) error {
 	cmds := cmd.Steps()
 	if !cmd.Parallel() {
@@ -151,9 +153,6 @@ func (r *HookRunner) runCommand(ctx context.Context, cmd *lifecyclecmd.Command, 
 	}
 
 	r.report.Infof("  Running %d parallel commands...", len(cmds))
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	var wg sync.WaitGroup
 	errs := make([]error, len(cmds))
 	for i, c := range cmds {
@@ -162,7 +161,6 @@ func (r *HookRunner) runCommand(ctx context.Context, cmd *lifecyclecmd.Command, 
 			defer wg.Done()
 			if err := exec(ctx, c); err != nil {
 				errs[i] = fmt.Errorf("[%s] %w", c.Name, err)
-				cancel()
 			}
 		}(i, c)
 	}
@@ -207,6 +205,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecycle
 		Command:     execCmd,
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
+		TTY:         hookTerminal(),
 	})
 	if err != nil {
 		return err
@@ -215,6 +214,26 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecycle
 		return fmt.Errorf("command exited with code %d", exitCode)
 	}
 	return nil
+}
+
+// hookTerminal is the PTY container hooks run on: one the size of dcx's
+// terminal when its output is a terminal, as devcontainers/cli runs them
+// on a PTY. Without a terminal (CI, a pipe) hooks get none, so logs keep
+// plain line endings and stdout and stderr stay apart.
+func hookTerminal() *sshclient.TerminalSize {
+	fd := int(os.Stdout.Fd())
+	if !term.IsTerminal(fd) {
+		return nil
+	}
+	cols, rows, err := term.GetSize(fd)
+	if err != nil || cols <= 0 || rows <= 0 {
+		cols, rows = 80, 24
+	}
+	name := os.Getenv("TERM")
+	if name == "" {
+		name = "xterm-256color"
+	}
+	return &sshclient.TerminalSize{Term: name, Rows: rows, Cols: cols}
 }
 
 // stepArgv is the argv that runs step: sh -c for the shell form.

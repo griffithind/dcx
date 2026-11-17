@@ -197,7 +197,8 @@ func (r *Provisioner) BuildImages(ctx context.Context, opts UpOptions) error {
 // runs; BuildKit's cache makes that cheap and picks up context changes),
 // then dcx's feature and UID layers are added (see layerImages). For a
 // compose plan without features or a UID update there is nothing to layer:
-// compose builds and runs the service image itself, and "" is returned.
+// compose builds and runs the service image itself, and "" is returned
+// (also when the UID update turns out not to apply to the image's user).
 //
 // Up and Build both use this, so `dcx build` produces exactly the image
 // `dcx up` would run.
@@ -224,9 +225,12 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 		if err != nil {
 			return "", err
 		}
-		if finalImage != baseImage {
-			r.derivedImage = finalImage
+		if finalImage == baseImage {
+			// No layer was needed after all (a root image user): compose
+			// runs the service image itself, as without features.
+			return "", nil
 		}
+		r.derivedImage = finalImage
 		return finalImage, nil
 	}
 
@@ -348,6 +352,17 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 	rebuild := opts.Rebuild
 	image := baseImage
 
+	// The compose service's user: features install for it, and the UID
+	// update applies to it, when the config names no user.
+	serviceUser := ""
+	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
+		info, err := r.composeService(ctx, plan)
+		if err != nil {
+			return "", err
+		}
+		serviceUser = info.User
+	}
+
 	if len(r.resolved.Features) > 0 {
 		baseID, err := r.engine.ImageID(ctx, image)
 		if err != nil {
@@ -355,14 +370,6 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		}
 		// Without a containerUser, features install for the compose
 		// service's user (or the image's USER, which baseID covers).
-		serviceUser := ""
-		if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
-			info, err := r.composeService(ctx, plan)
-			if err != nil {
-				return "", err
-			}
-			serviceUser = info.User
-		}
 		tag := r.layerTag("features", featuresLayerVersion, baseID, devcontainer.FeaturesKey(r.resolved.Features),
 			r.resolved.RemoteUser, r.resolved.ContainerUser, serviceUser)
 
@@ -398,7 +405,6 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect image %s: %w", image, err)
 		}
-		effectiveUser := r.resolved.EffectiveUser
 		// The layer ends with the image's own USER, as the reference
 		// implementation does; it used to end with containerUser or the
 		// remote user, which made the keep-alive, feature entrypoints and
@@ -412,13 +418,17 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		if imageUser == "" {
 			imageUser = "root"
 		}
+		uidUser := r.uidUser(serviceUser, imageUser)
+		if !devcontainer.UpdatableUser(uidUser) {
+			return image, nil
+		}
 		hostUID, hostGID := r.resolved.HostUID, r.resolved.HostGID
-		tag := r.layerTag("uid", imageID, effectiveUser, imageUser, strconv.Itoa(hostUID), strconv.Itoa(hostGID))
+		tag := r.layerTag("uid", imageID, uidUser, imageUser, strconv.Itoa(hostUID), strconv.Itoa(hostGID))
 
 		image, err = r.builder.BuildUIDUpdate(ctx, build.UIDBuildOptions{
 			BaseImage:  image,
 			Tag:        tag,
-			RemoteUser: effectiveUser,
+			RemoteUser: uidUser,
 			ImageUser:  imageUser,
 			HostUID:    hostUID,
 			HostGID:    hostGID,
@@ -431,6 +441,25 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 	}
 
 	return image, nil
+}
+
+// uidUser is the user the UID update applies to, as devcontainers/cli
+// picks it: remoteUser (or containerUser), else the runArgs --user or the
+// compose service's user, else the image's USER. A "user:group" keeps the
+// user.
+func (r *Provisioner) uidUser(serviceUser, imageUser string) string {
+	user := r.resolved.EffectiveUser
+	if user == "" && r.resolved.RunArgs != nil {
+		user = r.resolved.RunArgs.User
+	}
+	if user == "" {
+		user = serviceUser
+	}
+	if user == "" {
+		user = imageUser
+	}
+	user, _, _ = strings.Cut(user, ":")
+	return user
 }
 
 // featuresLayerVersion changes when the generated features Dockerfile
