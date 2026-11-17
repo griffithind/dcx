@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/features"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,4 +42,18 @@ func TestUserMountsWinOverFeatureMounts(t *testing.T) {
 	}
 	assert.Equal(t, "user-data", sources["/data"])
 	assert.Equal(t, "feature-cache", sources["/cache"])
+}
+
+// The features image is keyed on the install order: the same features in
+// another order (overrideFeatureInstallOrder) make another image, so it is
+// not reused (review of ff9134a, P2). The staleness key ignores the order,
+// so upgrading reports no drift.
+func TestFeaturesLayerKeyFollowsInstallOrder(t *testing.T) {
+	a := &features.Feature{ID: "ghcr.io/x/features/a:1", ManifestDigest: "sha256:a"}
+	b := &features.Feature{ID: "ghcr.io/x/features/b:1", ManifestDigest: "sha256:b"}
+	ab, ba := []*features.Feature{a, b}, []*features.Feature{b, a}
+
+	assert.NotEqual(t, FeaturesLayerKey(ab), FeaturesLayerKey(ba))
+	assert.Equal(t, FeaturesLayerKey(ab), FeaturesLayerKey([]*features.Feature{a, b}))
+	assert.Equal(t, FeaturesKey(ab), FeaturesKey(ba), "hash.inputs does not change with the order")
 }

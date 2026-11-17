@@ -205,50 +205,68 @@ func localFeatureRoot(configDir string) string {
 	}
 }
 
+// The feature cache ($XDG_CACHE_HOME/dcx/features) has two parts:
+//
+//	sha256/<hex>/  feature contents, by OCI manifest digest or tarball
+//	               SHA-256; written once (atomically) and never replaced,
+//	               so a resolved feature's CachePath keeps its bytes until
+//	               the build has copied them, whatever another resolution
+//	               (another pin, a moved tag) fetches meanwhile;
+//	refs/<key>     the digest a tag or URL last resolved to (its mtime is
+//	               when), so a tag is re-checked after ociTagTTL.
+const (
+	storeDir = "sha256"
+	refsDir  = "refs"
+)
+
 // resolveOCIWithLockfile resolves an OCI feature. A lockfile entry pins it
 // to the manifest digest it records (its integrity, as devcontainers/cli
-// writes it).
+// writes it); so does a reference by digest.
 func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature, lf *lockfile.Lockfile) error {
 	ref := feature.Source
+	name := ref.CanonicalID()
 
 	var lockedManifestDigest string
 	if locked, ok := lf.Get(feature.ID); ok && strings.HasPrefix(locked.Integrity, "sha256:") {
 		lockedManifestDigest = locked.Integrity
 	}
-
-	// Compute cache key
-	cacheKey := computeCacheKey(ref.CanonicalID())
-	cachePath := filepath.Join(r.cacheDir, cacheKey)
-
-	// A tag (":1", ":latest") moves; a digest or a lockfile pin does not.
-	// Cached tags are re-checked after ociTagTTL, falling back to the
-	// cached copy when the registry cannot be reached.
-	var maxAge time.Duration
-	if lockedManifestDigest == "" && !ref.IsDigest() {
-		maxAge = ociTagTTL
-	}
-	want := DigestInfo{ManifestDigest: lockedManifestDigest}
-	if hit, err := r.useCache(feature, cachePath, want, ref.CanonicalID(), maxAge); hit || err != nil {
-		return err
+	pin := lockedManifestDigest
+	if pin == "" && ref.IsDigest() {
+		pin = ref.Version
 	}
 
-	// Fetch from OCI registry
+	// A digest never moves: a stored copy is it. A tag (":1", ":latest")
+	// moves: it is re-checked after ociTagTTL.
+	if !r.forcePull {
+		if pin != "" {
+			if hit, err := r.loadStored(feature, pin); hit || err != nil {
+				return err
+			}
+		} else if info, fetched, ok := r.readRef(name); ok && time.Since(fetched) < ociTagTTL {
+			if hit, err := r.loadStored(feature, info.ManifestDigest); hit || err != nil {
+				return err
+			}
+		} else if ok {
+			r.report.Infof("  Checking %s for updates...", name)
+		}
+	}
+
 	if lockedManifestDigest != "" {
-		r.report.Infof("  Fetching feature from registry: %s (locked to %s)", ref.CanonicalID(), lockedManifestDigest[:min(19, len(lockedManifestDigest))]+"...")
+		r.report.Infof("  Fetching feature from registry: %s (locked to %s)", name, lockedManifestDigest[:min(19, len(lockedManifestDigest))]+"...")
 	} else {
-		r.report.Infof("  Fetching feature from registry: %s", ref.CanonicalID())
+		r.report.Infof("  Fetching feature from registry: %s", name)
 	}
-	var digestInfo *DigestInfo
-	err := r.fetchInto(cachePath, func(dir string) error {
-		var err error
-		digestInfo, err = r.fetchOCIWithDigest(ctx, ref, dir, lockedManifestDigest)
-		return err
-	})
+	info, err := r.fetchToStore(func(dir string) (*DigestInfo, error) {
+		return r.fetchOCIWithDigest(ctx, ref, dir, pin)
+	}, func(info *DigestInfo) string { return info.ManifestDigest })
 	if err != nil {
-		if maxAge > 0 {
-			if hit, _ := r.useCache(feature, cachePath, DigestInfo{}, ref.CanonicalID(), 0); hit {
-				r.report.Warnf("Could not refresh %s (%v); using the cached copy", ref.CanonicalID(), err)
-				return nil
+		// A tag falls back to the copy it last resolved to.
+		if pin == "" {
+			if last, _, ok := r.readRef(name); ok {
+				if hit, _ := r.loadStored(feature, last.ManifestDigest); hit {
+					r.report.Warnf("Could not refresh %s (%v); using the cached copy", name, err)
+					return nil
+				}
 			}
 		}
 		if lockedManifestDigest != "" {
@@ -256,136 +274,162 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 		}
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
-
-	feature.CachePath = cachePath
-	feature.ManifestDigest = digestInfo.ManifestDigest
-	feature.Integrity = digestInfo.Integrity
-
-	// Load metadata
-	metadata, err := r.loadMetadata(cachePath)
-	if err != nil {
-		return fmt.Errorf("failed to load feature metadata: %w", err)
+	if pin == "" {
+		r.writeRef(name, info)
 	}
-	feature.Metadata = metadata
-
+	if hit, err := r.loadStored(feature, info.ManifestDigest); !hit || err != nil {
+		return fmt.Errorf("feature %s: stored copy missing after fetch: %v", name, err)
+	}
 	return nil
 }
 
 // resolveHTTPWithLockfile resolves an HTTP feature, optionally using lockfile for integrity verification.
 func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature, lockfile *lockfile.Lockfile) error {
-	ref := feature.Source
+	url := feature.Source.URL
 
-	// Check if we have a locked version
 	var expectedIntegrity string
 	if locked, ok := lockfile.Get(feature.ID); ok {
 		expectedIntegrity = locked.Integrity
 	}
 
-	// Compute cache key
-	cacheKey := computeCacheKey(ref.URL)
-	cachePath := filepath.Join(r.cacheDir, cacheKey)
-
-	if hit, err := r.useCache(feature, cachePath, DigestInfo{Integrity: expectedIntegrity}, ref.URL, 0); hit || err != nil {
-		return err
+	// A tarball URL is fetched once; the lockfile pins its SHA-256.
+	if !r.forcePull {
+		digest := expectedIntegrity
+		if digest == "" {
+			if info, _, ok := r.readRef(url); ok {
+				digest = info.Integrity
+			}
+		}
+		if digest != "" {
+			if hit, err := r.loadStored(feature, digest); hit || err != nil {
+				return err
+			}
+		}
 	}
 
-	// Fetch from HTTP
-	var integrity string
-	err := r.fetchInto(cachePath, func(dir string) error {
-		var err error
-		integrity, err = r.fetchHTTPWithDigest(ctx, ref.URL, dir, expectedIntegrity)
-		return err
-	})
+	info, err := r.fetchToStore(func(dir string) (*DigestInfo, error) {
+		integrity, err := r.fetchHTTPWithDigest(ctx, url, dir, expectedIntegrity)
+		if err != nil {
+			return nil, err
+		}
+		return &DigestInfo{Integrity: integrity}, nil
+	}, func(info *DigestInfo) string { return info.Integrity })
 	if err != nil {
 		return fmt.Errorf("failed to fetch HTTP feature: %w", err)
 	}
-
-	feature.CachePath = cachePath
-	feature.Integrity = integrity
-
-	// Load metadata
-	metadata, err := r.loadMetadata(cachePath)
-	if err != nil {
-		return fmt.Errorf("failed to load feature metadata: %w", err)
+	if expectedIntegrity == "" {
+		r.writeRef(url, info)
 	}
-	feature.Metadata = metadata
-
+	if hit, err := r.loadStored(feature, info.Integrity); !hit || err != nil {
+		return fmt.Errorf("feature %s: stored copy missing after fetch: %v", url, err)
+	}
 	return nil
 }
 
-// useCache fills feature from its cache entry when the entry is complete
-// and matches the non-empty fields of want (from the lockfile). It reports
-// whether the cache was used. Incomplete or mismatching entries are
-// removed so they are fetched again; with force-pull the cache is ignored.
-//
-// An entry is complete only once its digest file exists: fetchInto writes
-// it last and moves the entry into place atomically, so a crashed or
-// failed fetch never leaves an entry that looks usable.
-//
-// With maxAge > 0 an entry fetched longer ago is not used (but kept, as a
-// fallback when the refresh fails).
-func (r *Resolver) useCache(feature *Feature, cachePath string, want DigestInfo, name string, maxAge time.Duration) (bool, error) {
-	if r.forcePull {
-		return false, os.RemoveAll(cachePath)
+// storePath is the store directory of digest ("sha256:<hex>"), or "" for
+// anything else.
+func (r *Resolver) storePath(digest string) string {
+	hexPart, ok := strings.CutPrefix(digest, "sha256:")
+	if !ok || len(hexPart) != 64 || strings.Trim(hexPart, "0123456789abcdef") != "" {
+		return ""
 	}
-	if _, err := os.Stat(cachePath); err != nil {
+	return filepath.Join(r.cacheDir, storeDir, hexPart)
+}
+
+// loadStored fills feature from the stored copy of digest, reporting
+// whether there is one.
+func (r *Resolver) loadStored(feature *Feature, digest string) (bool, error) {
+	path := r.storePath(digest)
+	if path == "" {
 		return false, nil
 	}
-	digestInfo, err := loadDigestInfo(cachePath)
+	info, err := loadDigestInfo(path)
 	if err != nil {
-		r.report.Infof("  Cached copy of %s is incomplete, re-fetching...", name)
-		return false, os.RemoveAll(cachePath)
+		return false, nil
 	}
-	if maxAge > 0 {
-		if st, err := os.Stat(filepath.Join(cachePath, digestFileName)); err == nil && time.Since(st.ModTime()) > maxAge {
-			r.report.Infof("  Checking %s for updates...", name)
-			return false, nil
-		}
-	}
-	if (want.Integrity != "" && digestInfo.Integrity != want.Integrity) ||
-		(want.ManifestDigest != "" && digestInfo.ManifestDigest != want.ManifestDigest) {
-		r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", name)
-		return false, os.RemoveAll(cachePath)
-	}
-	metadata, err := r.loadMetadata(cachePath)
+	metadata, err := r.loadMetadata(path)
 	if err != nil {
 		return false, fmt.Errorf("failed to load cached feature metadata: %w", err)
 	}
-	feature.CachePath = cachePath
+	feature.CachePath = path
 	feature.Metadata = metadata
-	feature.ManifestDigest = digestInfo.ManifestDigest
-	feature.Integrity = digestInfo.Integrity
+	feature.ManifestDigest = info.ManifestDigest
+	feature.Integrity = info.Integrity
 	return true, nil
 }
 
-// fetchInto runs fetch into a fresh temporary directory next to cachePath
-// and moves the result into place only when fetch succeeded, so failures
-// and concurrent dcx runs never leave a partial cache entry.
-func (r *Resolver) fetchInto(cachePath string, fetch func(dir string) error) error {
-	// The cache directory does not exist on a fresh machine.
-	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
-		return fmt.Errorf("create feature cache: %w", err)
+// fetchToStore runs fetch into a fresh temporary directory and moves the
+// result into the store under key(info). A copy already stored (another
+// dcx run fetched it, or --pull fetched it again) is kept as it is: store
+// entries never change. Failures leave nothing behind.
+func (r *Resolver) fetchToStore(fetch func(dir string) (*DigestInfo, error), key func(*DigestInfo) string) (*DigestInfo, error) {
+	store := filepath.Join(r.cacheDir, storeDir)
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		return nil, fmt.Errorf("create feature cache: %w", err)
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(cachePath), ".fetch-"+filepath.Base(cachePath)+"-")
+	tmp, err := os.MkdirTemp(store, ".fetch-")
 	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
+		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	if err := fetch(tmp); err != nil {
-		return err
+	info, err := fetch(tmp)
+	if err != nil {
+		return nil, err
 	}
-	if err := os.RemoveAll(cachePath); err != nil {
-		return err
+	dest := r.storePath(key(info))
+	if dest == "" {
+		return nil, fmt.Errorf("feature digest %q is not sha256", key(info))
 	}
-	if err := os.Rename(tmp, cachePath); err != nil {
-		// Another dcx run may have finished the same fetch first.
-		if _, derr := loadDigestInfo(cachePath); derr == nil {
-			return nil
+	if _, err := loadDigestInfo(dest); err == nil {
+		return info, nil
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		// Another dcx run may have stored the same digest first.
+		if _, derr := loadDigestInfo(dest); derr == nil {
+			return info, nil
 		}
-		return fmt.Errorf("install feature cache: %w", err)
+		return nil, fmt.Errorf("install feature cache: %w", err)
 	}
-	return nil
+	return info, nil
+}
+
+// readRef returns the digest name (a tag reference or a URL) last resolved
+// to, and when.
+func (r *Resolver) readRef(name string) (DigestInfo, time.Time, bool) {
+	path := filepath.Join(r.cacheDir, refsDir, computeCacheKey(name))
+	st, err := os.Stat(path)
+	if err != nil {
+		return DigestInfo{}, time.Time{}, false
+	}
+	data, err := os.ReadFile(path)
+	var info DigestInfo
+	if err != nil || json.Unmarshal(data, &info) != nil {
+		return DigestInfo{}, time.Time{}, false
+	}
+	return info, st.ModTime(), true
+}
+
+// writeRef records what name resolved to (atomically; a failure only costs
+// a fetch next time).
+func (r *Resolver) writeRef(name string, info *DigestInfo) {
+	dir := filepath.Join(r.cacheDir, refsDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		return
+	}
+	f, err := os.CreateTemp(dir, ".ref-")
+	if err != nil {
+		return
+	}
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if werr != nil || cerr != nil || os.Rename(f.Name(), filepath.Join(dir, computeCacheKey(name))) != nil {
+		_ = os.Remove(f.Name())
+	}
 }
 
 // Limits on what a registry or URL may send. Features are small scripts;
@@ -559,9 +603,9 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 		ManifestDigest: manifestDigest,
 		Integrity:      integrity,
 	}
+	// The digest file marks a store entry complete (loadStored).
 	if err := saveDigestInfo(destPath, *digestInfo); err != nil {
-		// Log but don't fail - digest info is nice to have
-		r.report.Warnf("failed to save digest info: %v", err)
+		return nil, fmt.Errorf("save digest info: %w", err)
 	}
 
 	return digestInfo, nil
@@ -607,9 +651,9 @@ func (r *Resolver) fetchHTTPWithDigest(ctx context.Context, url, destPath string
 	digestInfo := DigestInfo{
 		Integrity: integrity,
 	}
+	// The digest file marks a store entry complete (loadStored).
 	if err := saveDigestInfo(destPath, digestInfo); err != nil {
-		// Log but don't fail
-		r.report.Warnf("failed to save digest info: %v", err)
+		return "", fmt.Errorf("save digest info: %w", err)
 	}
 
 	return integrity, nil

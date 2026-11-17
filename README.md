@@ -421,7 +421,9 @@ Fetched features are cached in `~/.cache/dcx/features` (`$XDG_CACHE_HOME`).
 A tag (`:1`, `:latest`) is checked against the registry again after 24
 hours, and the cached copy is used when the registry cannot be reached;
 `dcx up --pull --recreate` re-fetches now. Digests and lockfile pins are
-never re-fetched.
+never re-fetched. Fetched contents are stored by digest and never
+overwritten, so workspaces pinning different versions of one feature can
+build at the same time.
 
 Features install in the official CLI's order, in rounds: each round
 installs the features whose `dependsOn` (fetched if not listed) and
@@ -667,6 +669,10 @@ Changes since 0.7 that affect existing setups:
     already running.
   - A failing command of a parallel hook no longer stops the others.
   - Hooks run on a pseudo-terminal when dcx runs in a terminal.
+- The feature cache stores contents by digest. Entries in the old layout
+  (`~/.cache/dcx/features/<16 hex digits>`) are no longer used and can be
+  deleted. Changing the feature install order now builds a new features
+  image instead of reusing one built in the old order.
 - Features follow the official CLI:
   - `devcontainer-lock.json` is written and read in its format (keys as
     written, integrity is the manifest digest). A lockfile an older dcx

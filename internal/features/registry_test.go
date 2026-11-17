@@ -243,10 +243,49 @@ func TestRegistryRejectsPathTraversalInLayer(t *testing.T) {
 	require.Error(t, err)
 	cache := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "dcx", "features")
 	assert.NoFileExists(t, filepath.Join(cache, "escaped"))
-	entries, _ := os.ReadDir(cache)
-	for _, e := range entries {
-		assert.True(t, strings.HasPrefix(e.Name(), "."), "a failed fetch leaves no cache entry, found %s", e.Name())
+	assert.NoFileExists(t, filepath.Join(cache, storeDir, "escaped"))
+	for _, dir := range []string{storeDir, refsDir} {
+		entries, _ := os.ReadDir(filepath.Join(cache, dir))
+		assert.Empty(t, entries, "a failed fetch leaves no %s entry", dir)
 	}
+}
+
+// A resolved feature keeps its bytes until the build copies them: another
+// resolution of the same tag at another pin (a second workspace with
+// another lockfile) stores its copy elsewhere instead of replacing the
+// directory the first will stage (review of ff9134a, P1).
+func TestRegistryPinsDoNotShareADirectory(t *testing.T) {
+	reg := newFakeRegistry(t)
+	first := reg.publish("1", featureTar(t, "1.0.0", nil), "")
+	second := reg.publish("1", featureTar(t, "1.1.0", nil), "")
+	pinned := func(digest string) *lockfile.Lockfile {
+		lf := lockfile.New()
+		lf.Set(reg.featureID("1"), lockfile.LockedFeature{Integrity: digest})
+		return lf
+	}
+
+	a, err := resolveFeature(t, reg.featureID("1"), pinned(first))
+	require.NoError(t, err)
+	b, err := resolveFeature(t, reg.featureID("1"), pinned(second))
+	require.NoError(t, err)
+
+	assert.NotEqual(t, a.CachePath, b.CachePath)
+	for f, want := range map[*Feature]string{a: "1.0.0", b: "1.1.0"} {
+		md, err := (&Resolver{}).loadMetadata(f.CachePath)
+		require.NoError(t, err)
+		assert.Equal(t, want, md.Version, "the staged bytes are the ones resolved")
+	}
+
+	// --pull fetches again but never touches a stored copy.
+	r, err := NewResolver(t.TempDir(), nil)
+	require.NoError(t, err)
+	r.SetForcePull(true)
+	again, err := r.ResolveWithLockfile(context.Background(), reg.featureID("1"), nil, pinned(first))
+	require.NoError(t, err)
+	assert.Equal(t, a.CachePath, again.CachePath)
+	md, err := r.loadMetadata(a.CachePath)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", md.Version)
 }
 
 func TestRegistryLockfilePinSurvivesAMovedTag(t *testing.T) {

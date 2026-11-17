@@ -171,7 +171,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 |------|---------|
 | `manager.go` | `Manager.ResolveAll()` - entry point |
 | `types.go` | `ParseFeatureSource` (upstream's reference rules, `LegacyFeatureRef`), `Dependencies` (ordered `dependsOn`), `EnvFile` |
-| `resolver.go` | Resolve features from local (inside `.devcontainer`), OCI registry (credentials via `registryauth`; manifests verified against pinned digests), or HTTPS; cache in `~/.cache/dcx/features` |
+| `resolver.go` | Resolve features from local (inside `.devcontainer`), OCI registry (credentials via `registryauth`; manifests verified against pinned digests), or HTTPS; cache in `~/.cache/dcx/features`: immutable `sha256/<hex>` entries (`fetchToStore`, never replaced) plus `refs/` from tags/URLs to digests |
 | `ordering.go` | Upstream's round-based install order (`node`, `sameFeature`, `compareFeatures`, override priorities) |
 | `dockerfile.go` | Generate Dockerfile for feature installation (feature `containerEnv` becomes `ENV` before its install; `FeatureUsers`) |
 | `lock.go` | `GenerateLockfile` / `VerifyLockfile` (upstream's format: keys as written, integrity = manifest digest) |
@@ -359,7 +359,7 @@ Base Image → Features Layer → UID Update Layer → Final Image
 - Builds run `docker buildx build --load`, or `docker build` (BuildKit) without the buildx plugin; build contexts (features) need buildx.
 - Containers are created without `-t -i -w`; the keep-alive is a `sleep 1` loop (`sleepForever`).
 - UID layer (`Provisioner.uidUser`): `remoteUser`/`containerUser`, else the runArgs or compose user, else the image's `USER`; skipped for root and numeric users (`devcontainer.UpdatableUser`).
-- Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
+- Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists. The features layer uses `FeaturesLayerKey` (install order) and the label it writes; `FeaturesKey` (order-free) is only for `hash.inputs`.
 
 ### Naming and staleness
 - Container / default compose project name: `devcontainer.ResourceName(name, id)` (`<slug>-<id8>`). Never derive Docker names from `name` alone.

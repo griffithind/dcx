@@ -22,98 +22,80 @@ func writeFeature(t *testing.T, dir string, digest *DigestInfo) {
 	}
 }
 
+func digestOf(b byte) string { return "sha256:" + strings.Repeat(string("0123456789abcdef"[b%16]), 64) }
+
 // A failed fetch used to leave a partial directory that later runs trusted.
-func TestFetchIntoLeavesNothingOnFailure(t *testing.T) {
+func TestFetchToStoreLeavesNothingOnFailure(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := &Resolver{cacheDir: cacheDir, report: report.Discard}
-	cachePath := filepath.Join(cacheDir, "feat")
 
-	err := r.fetchInto(cachePath, func(dir string) error {
+	_, err := r.fetchToStore(func(dir string) (*DigestInfo, error) {
 		writeFeature(t, dir, nil) // metadata extracted, then the fetch fails
-		return errors.New("connection reset")
-	})
+		return nil, errors.New("connection reset")
+	}, func(info *DigestInfo) string { return info.Integrity })
 	require.Error(t, err)
-	entries, _ := os.ReadDir(cacheDir)
-	assert.Empty(t, entries, "no cache entry and no temp directory may remain")
+	entries, _ := os.ReadDir(filepath.Join(cacheDir, storeDir))
+	assert.Empty(t, entries, "no store entry and no temp directory may remain")
 }
 
-func TestFetchIntoInstallsCompleteEntry(t *testing.T) {
+// Store entries never change: fetching a digest that is already stored
+// keeps the stored copy (a build may be about to copy it).
+func TestFetchToStoreNeverReplacesAnEntry(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := &Resolver{cacheDir: cacheDir, report: report.Discard}
-	cachePath := filepath.Join(cacheDir, "feat")
-	writeFeature(t, cachePath, &DigestInfo{Integrity: "sha256:old"}) // stale entry is replaced
-
-	require.NoError(t, r.fetchInto(cachePath, func(dir string) error {
-		writeFeature(t, dir, &DigestInfo{Integrity: "sha256:new"})
-		return nil
-	}))
-	info, err := loadDigestInfo(cachePath)
+	digest := digestOf(1)
+	fetch := func(marker string) {
+		t.Helper()
+		_, err := r.fetchToStore(func(dir string) (*DigestInfo, error) {
+			writeFeature(t, dir, &DigestInfo{Integrity: digest})
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "marker"), []byte(marker), 0o644))
+			return &DigestInfo{Integrity: digest}, nil
+		}, func(info *DigestInfo) string { return info.Integrity })
+		require.NoError(t, err)
+	}
+	fetch("first")
+	fetch("second")
+	data, err := os.ReadFile(filepath.Join(r.storePath(digest), "marker"))
 	require.NoError(t, err)
-	assert.Equal(t, "sha256:new", info.Integrity)
-	entries, _ := os.ReadDir(cacheDir)
-	assert.Len(t, entries, 1)
+	assert.Equal(t, "first", string(data))
+	entries, _ := os.ReadDir(filepath.Join(cacheDir, storeDir))
+	assert.Len(t, entries, 1, "no temp directory remains")
 }
 
-func TestUseCache(t *testing.T) {
+func TestLoadStored(t *testing.T) {
 	cacheDir := t.TempDir()
 	r := &Resolver{cacheDir: cacheDir, report: report.Discard}
+	digest := digestOf(2)
 
-	t.Run("incomplete entry is removed", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "incomplete")
-		writeFeature(t, path, nil)
-		hit, err := r.useCache(&Feature{}, path, DigestInfo{}, "f", 0)
-		require.NoError(t, err)
-		assert.False(t, hit)
-		assert.NoDirExists(t, path)
-	})
-	t.Run("complete entry is used", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "complete")
-		writeFeature(t, path, &DigestInfo{ManifestDigest: "sha256:m", Integrity: "sha256:i"})
-		f := &Feature{}
-		hit, err := r.useCache(f, path, DigestInfo{Integrity: "sha256:i"}, "f", 0)
-		require.NoError(t, err)
-		assert.True(t, hit)
-		assert.Equal(t, path, f.CachePath)
-		assert.Equal(t, "sha256:m", f.ManifestDigest)
-		assert.Equal(t, "go", f.Metadata.ID)
-	})
-	t.Run("integrity mismatch is removed", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "mismatch")
-		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
-		hit, err := r.useCache(&Feature{}, path, DigestInfo{Integrity: "sha256:other"}, "f", 0)
-		require.NoError(t, err)
-		assert.False(t, hit)
-		assert.NoDirExists(t, path)
-	})
-	t.Run("a manifest pinned elsewhere is removed", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "pinned")
-		writeFeature(t, path, &DigestInfo{ManifestDigest: "sha256:m", Integrity: "sha256:i"})
-		hit, err := r.useCache(&Feature{}, path, DigestInfo{ManifestDigest: "sha256:locked"}, "f", 0)
-		require.NoError(t, err)
-		assert.False(t, hit)
-		assert.NoDirExists(t, path)
-	})
-	t.Run("an expired tag entry is re-checked but kept", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "expired")
-		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
-		old := time.Now().Add(-2 * ociTagTTL)
-		require.NoError(t, os.Chtimes(filepath.Join(path, digestFileName), old, old))
-		hit, err := r.useCache(&Feature{}, path, DigestInfo{}, "f", ociTagTTL)
-		require.NoError(t, err)
-		assert.False(t, hit, "a moving tag is checked again after the TTL")
-		assert.DirExists(t, path, "kept as the fallback when the registry is unreachable")
-		hit, err = r.useCache(&Feature{}, path, DigestInfo{}, "f", 0)
-		require.NoError(t, err)
-		assert.True(t, hit)
-	})
-	t.Run("force pull ignores the cache", func(t *testing.T) {
-		path := filepath.Join(cacheDir, "forced")
-		writeFeature(t, path, &DigestInfo{Integrity: "sha256:i"})
-		forced := &Resolver{cacheDir: cacheDir, report: report.Discard, forcePull: true}
-		hit, err := forced.useCache(&Feature{}, path, DigestInfo{}, "f", 0)
-		require.NoError(t, err)
-		assert.False(t, hit)
-	})
+	hit, err := r.loadStored(&Feature{}, digest)
+	require.NoError(t, err)
+	assert.False(t, hit, "nothing stored")
+
+	writeFeature(t, r.storePath(digest), &DigestInfo{ManifestDigest: digest, Integrity: digestOf(3)})
+	f := &Feature{}
+	hit, err = r.loadStored(f, digest)
+	require.NoError(t, err)
+	require.True(t, hit)
+	assert.Equal(t, r.storePath(digest), f.CachePath)
+	assert.Equal(t, digest, f.ManifestDigest)
+	assert.Equal(t, "go", f.Metadata.ID)
+
+	hit, _ = r.loadStored(&Feature{}, "sha256:../../etc")
+	assert.False(t, hit, "only real digests name store entries")
+	assert.Empty(t, r.storePath("sha256:../../etc"))
+}
+
+// A ref records what a tag last resolved to, and when (the TTL).
+func TestRefs(t *testing.T) {
+	r := &Resolver{cacheDir: t.TempDir(), report: report.Discard}
+	_, _, ok := r.readRef("ghcr.io/x/features/y:1")
+	assert.False(t, ok)
+
+	r.writeRef("ghcr.io/x/features/y:1", &DigestInfo{ManifestDigest: digestOf(4)})
+	info, at, ok := r.readRef("ghcr.io/x/features/y:1")
+	require.True(t, ok)
+	assert.Equal(t, digestOf(4), info.ManifestDigest)
+	assert.WithinDuration(t, time.Now(), at, time.Minute)
 }
 
 func TestReadLimited(t *testing.T) {

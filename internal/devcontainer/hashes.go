@@ -139,8 +139,27 @@ func normalizedConfigJSON(cfg *DevContainerConfig) ([]byte, error) {
 
 // FeaturesKey identifies a resolved feature set: feature IDs, versions,
 // options, registry digests and, for local features, a hash of their files,
-// so editing a local feature's install.sh changes the key.
+// so editing a local feature's install.sh changes the key. It is part of
+// hash.inputs and ignores the install order, so it must not change (that
+// would report drift for every existing container); the features image
+// is keyed with FeaturesLayerKey.
 func FeaturesKey(feats []*features.Feature) string {
+	entries := featureEntries(feats)
+	sort.Strings(entries)
+	sum := sha256.Sum256([]byte(strings.Join(entries, "\x1e")))
+	return hex.EncodeToString(sum[:])
+}
+
+// FeaturesLayerKey identifies the features image's inputs: what FeaturesKey
+// covers, in install order, since the same features installed in another
+// order make another image.
+func FeaturesLayerKey(feats []*features.Feature) string {
+	sum := sha256.Sum256([]byte(strings.Join(featureEntries(feats), "\x1e")))
+	return hex.EncodeToString(sum[:])
+}
+
+// featureEntries describes each feature, in install order.
+func featureEntries(feats []*features.Feature) []string {
 	entries := make([]string, 0, len(feats))
 	for _, f := range feats {
 		opts, _ := json.Marshal(f.Options)
@@ -154,9 +173,7 @@ func FeaturesKey(feats []*features.Feature) string {
 		}
 		entries = append(entries, strings.Join([]string{f.ID, version, string(opts), f.ManifestDigest, f.Integrity, content}, "\x1f"))
 	}
-	sort.Strings(entries)
-	sum := sha256.Sum256([]byte(strings.Join(entries, "\x1e")))
-	return hex.EncodeToString(sum[:])
+	return entries
 }
 
 // hashDir hashes the relative paths, modes and contents of all regular

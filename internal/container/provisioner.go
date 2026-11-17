@@ -368,11 +368,6 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect base image %s: %w", image, err)
 		}
-		// Without a containerUser, features install for the compose
-		// service's user (or the image's USER, which baseID covers).
-		tag := r.layerTag("features", featuresLayerVersion, baseID, devcontainer.FeaturesKey(r.resolved.Features),
-			r.resolved.RemoteUser, r.resolved.ContainerUser, serviceUser)
-
 		// The base metadata of the features image is the one resolution
 		// read: for a Dockerfile plan the built image's own label already
 		// holds the local config, which would then appear twice.
@@ -382,6 +377,17 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 				baseImageMetadata = labels[devcontainer.DevcontainerMetadataLabel]
 			}
 		}
+		// The tag covers what the image is built from: the features in
+		// install order (another order is another image), the label
+		// written into it, and the users they install for (without a
+		// containerUser, the compose service's user, or the image's USER,
+		// which baseID covers).
+		metadata, err := build.GenerateMetadataLabel(baseImageMetadata, r.resolved.Features, r.labelConfig())
+		if err != nil {
+			return "", fmt.Errorf("failed to generate metadata: %w", err)
+		}
+		tag := r.layerTag("features", featuresLayerVersion, baseID, devcontainer.FeaturesLayerKey(r.resolved.Features),
+			metadata, r.resolved.RemoteUser, r.resolved.ContainerUser, serviceUser)
 		image, err = r.builder.BuildWithFeatures(ctx, build.FeatureBuildOptions{
 			BaseImage:         image,
 			Tag:               tag,
