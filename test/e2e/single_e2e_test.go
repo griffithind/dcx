@@ -139,8 +139,7 @@ func TestSingleContainerWithMounts(t *testing.T) {
 
 	devcontainerJSON := `{
 		"name": "Mount Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace"
+		"image": "alpine:3.24"
 	}`
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
@@ -153,8 +152,8 @@ func TestSingleContainerWithMounts(t *testing.T) {
 	// Bring up
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// Test workspace mount
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/workspace/test-file.txt")
+	// The default workspace mount: /workspaces/<folder>
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/workspaces/"+filepath.Base(workspace)+"/test-file.txt")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "mounted content")
 }

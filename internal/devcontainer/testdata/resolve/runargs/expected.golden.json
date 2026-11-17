@@ -10,8 +10,14 @@
   "sshHost": "<id>.dcx",
   "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "runArgs": {
     "User": "",
+    "Name": "",
     "NetworkMode": "host",
     "IpcMode": "",
     "PidMode": "",

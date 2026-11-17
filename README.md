@@ -208,6 +208,14 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   of the workspace id>`, so two checkouts with the same `name` never
   collide. A top-level `name:` in your compose files replaces the name
   part (`<name>-<id>`), so two checkouts never share a compose project.
+  `runArgs` `--name` names the container instead (dcx finds its containers
+  by label, not by name).
+- **Separate from VS Code and the official CLI:** dcx uses its own
+  workspace id (`${devcontainerId}`), labels and compose project names, so
+  `dcx up` and VS Code's "Reopen in Container" on the same folder make two
+  environments, and volumes named with `${devcontainerId}` are not shared.
+  The files they share (devcontainer.json, features, `devcontainer-lock.json`)
+  are read the same way.
 
 ### Shortcuts
 
@@ -452,11 +460,28 @@ then devcontainer.json's.
 | `postStartCommand` | After container starts | Every start |
 | `postAttachCommand` | When client connects | Every attach |
 
+### Workspace Mount
+
+As in the official CLI, the git repository containing the workspace is
+mounted at `/workspaces/<repository folder>`, and the default
+`workspaceFolder` is the workspace's place inside it: a config in
+`monorepo/services/api` gets `/workspaces/monorepo/services/api`, with
+`.git` and the sibling folders available. A workspace that is the
+repository root, or is not in a repository, is mounted itself at
+`/workspaces/<folder>`. `workspaceFolder` changes only the working
+directory; set `workspaceMount` to mount somewhere else (`""` for no
+mount). Compose configs mount the workspace in the compose file.
+
 ### Ports and Networking
 
-- `forwardPorts` and `appPort` entries without a host address are
-  published on `127.0.0.1` only; write `"0.0.0.0:3000:3000"` in `appPort`
-  to expose a port on the network.
+- `forwardPorts` entries without a host address, and `appPort` numbers,
+  are published on `127.0.0.1` only. `appPort` strings are passed to
+  Docker as written (`"8080:80"` is reachable from the network,
+  `"0.0.0.0:3000:3000"` too).
+- A port listed more than once (in `appPort` and `forwardPorts`, or as
+  `3000` and `"localhost:3000"`) is published once, and a port your compose
+  file already publishes is not published again. When a host port is in
+  use, `dcx up` says which one.
 - With compose `network_mode: service:<x>` the ports (and the SSH agent's
   port) are published on `<x>`. With host networking nothing is published:
   the ports, and the agent, are already on the host.
@@ -551,12 +576,22 @@ Changes since 0.7 that affect existing setups:
   `runArgs` or `features` (the official CLI ignores them there), and one
   bad property in an image's `devcontainer.metadata` drops only that
   property, with a warning.
-- `forwardPorts` and `appPort` entries without a host address are
+- `forwardPorts` entries without a host address and `appPort` numbers are
   published on `127.0.0.1` only (`forwardPorts` used to bind every
-  interface, and `appPort` failed to create). Write `"0.0.0.0:3000:3000"`
-  in `appPort` to expose a port on the network. With compose
-  `network_mode: service:<x>` the ports are published on `<x>`; with host
-  networking they are not published (they are already on the host).
+  interface, and `appPort` failed to create); `appPort` strings are passed
+  to Docker as written. A port listed twice, or already published by the
+  compose file, is published once. With compose `network_mode:
+  service:<x>` the ports are published on `<x>`; with host networking they
+  are not published (they are already on the host).
+- The git repository containing the workspace is mounted, and
+  `workspaceFolder` no longer moves the mount (it stays at
+  `/workspaces/<folder>`; set `workspaceMount` to move it). Containers
+  created with the old layout report drift; `dcx up --recreate` applies it.
+- `runArgs` `--name` names the container (it was ignored).
+- Containers carry the merged `devcontainer.metadata` label, so editors
+  that attach to a running container see `remoteUser` and the rest.
+- A volume in `mounts` that your compose file also declares is the compose
+  file's volume (dcx used to re-declare it under its bare name).
 - Features install as root, whatever the base image's `USER`; the image's
   user is restored afterwards. A feature given as a string
   (`"…/node:1": "18"`) sets its `version` option.

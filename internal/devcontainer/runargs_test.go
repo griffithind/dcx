@@ -253,7 +253,10 @@ func TestParseRunArgsPassthroughAndIgnored(t *testing.T) {
 	if strings.Join(got.Passthrough, " ") != strings.Join(wantPass, " ") {
 		t.Errorf("Passthrough = %q, want %q", got.Passthrough, wantPass)
 	}
-	wantIgnored := []string{"--rm", "--name"}
+	if got.Name != "mine" {
+		t.Errorf("Name = %q, want mine", got.Name)
+	}
+	wantIgnored := []string{"--rm"}
 	if strings.Join(got.Ignored, " ") != strings.Join(wantIgnored, " ") {
 		t.Errorf("Ignored = %q, want %q", got.Ignored, wantIgnored)
 	}

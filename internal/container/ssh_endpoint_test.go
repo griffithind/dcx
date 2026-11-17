@@ -168,7 +168,7 @@ func TestUserPortsBindLoopback(t *testing.T) {
 			specs = append(specs, p.DockerSpec())
 		}
 	}
-	assert.Equal(t, []string{"127.0.0.1:3000:3000", "127.0.0.1:8080:80", "0.0.0.0:9000:9000"}, specs)
+	assert.Equal(t, []string{"0.0.0.0:9000:9000", "127.0.0.1:3000:3000", "127.0.0.1:8080:80"}, specs)
 }
 
 func TestHostNetworkPublishesNoUserPorts(t *testing.T) {

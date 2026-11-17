@@ -10,6 +10,11 @@
   "sshHost": "<id>.dcx",
   "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "forwardPorts": [
     {
       "HostPort": 3000,
@@ -37,7 +42,7 @@
     {
       "HostPort": 7000,
       "ContainerPort": 7000,
-      "Host": "",
+      "Host": "127.0.0.1",
       "Protocol": "",
       "EphemeralHostPort": false
     }

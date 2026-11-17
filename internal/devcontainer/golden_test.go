@@ -25,7 +25,7 @@ type goldenView struct {
 	SSHHost         string              `json:"sshHost"`
 	OverrideCommand bool                `json:"overrideCommand"`
 	WorkspaceFolder string              `json:"workspaceFolder"`
-	WorkspaceMount  string              `json:"workspaceMount,omitempty"`
+	WorkspaceMount  *Mount              `json:"workspaceMount,omitempty"`
 	RemoteUser      string              `json:"remoteUser,omitempty"`
 	ContainerUser   string              `json:"containerUser,omitempty"`
 	EffectiveUser   string              `json:"effectiveUser,omitempty"`
@@ -169,7 +169,7 @@ func TestResolveGolden(t *testing.T) {
 			view := goldenView{
 				Name: resolved.Name, Plan: planView(resolved.Plan), BaseImage: resolved.BaseImage, MetadataImage: resolved.MetadataImage,
 				ResourceName: resolved.ResourceName, SSHHost: resolved.SSHHost, OverrideCommand: resolved.OverrideCommand, WorkspaceFolder: resolved.WorkspaceFolder,
-				WorkspaceMount: derefString(resolved.WorkspaceMount), RemoteUser: resolved.RemoteUser,
+				WorkspaceMount: resolved.WorkspaceMount, RemoteUser: resolved.RemoteUser,
 				ContainerUser: resolved.ContainerUser, EffectiveUser: resolved.EffectiveUser,
 				ContainerEnv: resolved.ContainerEnv, RemoteEnv: resolved.RemoteEnv,
 				Mounts: resolved.Mounts, CapAdd: resolved.CapAdd, SecurityOpt: resolved.SecurityOpt,
@@ -209,11 +209,4 @@ func TestResolveGolden(t *testing.T) {
 			}
 		})
 	}
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

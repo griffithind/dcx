@@ -10,6 +10,11 @@
   "sshHost": "subst-demo.dcx",
   "overrideCommand": true,
   "workspaceFolder": "/src/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "containerEnv": {
     "HOST_HOME": "<home>",
     "ID": "<id>",
@@ -40,6 +45,7 @@
   ],
   "runArgs": {
     "User": "",
+    "Name": "",
     "NetworkMode": "",
     "IpcMode": "",
     "PidMode": "",

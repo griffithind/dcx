@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -179,13 +181,21 @@ func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer
 		s.report.Infof("Creating single-container devcontainer...")
 	}
 
-	return prov.Up(ctx, container.UpOptions{
+	return explainPortConflict(prov.Up(ctx, container.UpOptions{
 		Build:        opts.Rebuild,
 		Rebuild:      opts.Rebuild,
 		Pull:         opts.Pull,
 		BuildSecrets: buildSecrets,
 		SSHAccess:    access,
-	})
+	}), 0)
+}
+
+// recordedSSHPort is the agent port recorded on an existing container.
+func recordedSSHPort(info *state.ContainerInfo) int {
+	if info == nil || info.Labels == nil {
+		return 0
+	}
+	return info.Labels.SSHPort
 }
 
 // startExisting starts the stopped environment found by the state lookup.
@@ -200,7 +210,7 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 		return fmt.Errorf("no existing devcontainer to start")
 	}
 	if existing.IsSingleContainer() {
-		return explainPortConflict(s.engine.StartContainer(ctx, existing.ID))
+		return explainPortConflict(s.engine.StartContainer(ctx, existing.ID), recordedSSHPort(existing))
 	}
 
 	plan, ok := resolved.Plan.(*devcontainer.ComposePlan)
@@ -218,7 +228,7 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
-	return explainPortConflict(prov.Start(ctx))
+	return explainPortConflict(prov.Start(ctx), recordedSSHPort(existing))
 }
 
 // setupContainerEnvironment applies patches and probes the user environment.
@@ -343,18 +353,36 @@ func (s *DevContainerService) setupSSHAccess(ctx context.Context, resolved *devc
 	return nil
 }
 
-// explainPortConflict adds the way out to a start that failed because a
-// published port (usually the agent's) is now used by something else:
-// ports are fixed at create time, and a recreate picks a free one.
-func explainPortConflict(err error) error {
+// portConflict matches Docker's errors for a host port in use ("Bind for
+// 127.0.0.1:3000 failed: port is already allocated", "listen tcp4
+// 127.0.0.1:3000: bind: address already in use").
+var portConflict = regexp.MustCompile(`:(\d+)(?: failed)?: (?:bind: )?(?:port is already allocated|address already in use)`)
+
+// explainPortConflict adds the way out to a create or start that failed
+// because a host port the devcontainer publishes is in use. sshPort is the
+// agent's recorded port when starting an existing container (0 on create,
+// where dcx has just picked a free one): only that port changes with a
+// recreate; the user's ports are fixed by the config.
+func explainPortConflict(err error, sshPort int) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
-	if strings.Contains(msg, "port is already allocated") || strings.Contains(msg, "address already in use") {
-		return fmt.Errorf("%w\na port this devcontainer publishes is in use by another process; stop it, or run 'dcx up --recreate' to pick a free SSH port", err)
+	if !strings.Contains(msg, "port is already allocated") && !strings.Contains(msg, "address already in use") {
+		return err
 	}
-	return err
+	port := 0
+	if m := portConflict.FindStringSubmatch(msg); m != nil {
+		port, _ = strconv.Atoi(m[1])
+	}
+	switch {
+	case sshPort > 0 && port == sshPort:
+		return fmt.Errorf("%w\nthe SSH port %d is in use by another process; stop it, or run 'dcx up --recreate' to pick a free one", err, port)
+	case port > 0:
+		return fmt.Errorf("%w\nhost port %d (forwardPorts or appPort) is in use by another process or devcontainer; stop it, or change the port in devcontainer.json", err, port)
+	default:
+		return fmt.Errorf("%w\na port this devcontainer publishes is in use by another process or devcontainer; stop it, or change the port in devcontainer.json", err)
+	}
 }
 
 // DownOptions contains options for tearing down a devcontainer.

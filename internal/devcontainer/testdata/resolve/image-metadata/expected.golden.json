@@ -10,6 +10,11 @@
   "sshHost": "metadata_image.dcx",
   "overrideCommand": false,
   "workspaceFolder": "/workspaces/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "remoteUser": "dev",
   "effectiveUser": "dev",
   "containerEnv": {

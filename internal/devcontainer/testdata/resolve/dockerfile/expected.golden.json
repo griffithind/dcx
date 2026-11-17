@@ -17,6 +17,11 @@
   "sshHost": "df.dcx",
   "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "containerUser": "builder",
   "effectiveUser": "builder"
 }

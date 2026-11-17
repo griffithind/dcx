@@ -2,6 +2,8 @@ package devcontainer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,7 +95,7 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 		resolved.BaseImage = opts.Config.Image
 	}
 	resolved.WorkspaceFolder = DetermineContainerWorkspaceFolder(opts.Config, opts.WorkspaceRoot)
-	resolved.WorkspaceMount = opts.Config.WorkspaceMount
+	resolved.WorkspaceMount = resolveWorkspaceMount(opts.Config, opts.WorkspaceRoot)
 	resolveUsers(resolved, opts.Config)
 	b.resolveRuntime(resolved, opts.Config, opts.WorkspaceRoot)
 
@@ -249,8 +251,8 @@ func (b *Builder) resolveRuntime(resolved *ResolvedDevContainer, cfg *DevContain
 			b.report.Warnf("runArgs are not applied to Docker Compose configurations; set these options in the compose file")
 		}
 	}
-	resolved.ForwardPorts = b.parsePorts("forwardPorts", cfg.ForwardPorts)
-	resolved.AppPorts = b.parsePorts("appPort", cfg.AppPort)
+	resolved.ForwardPorts = b.parsePorts("forwardPorts", cfg.ForwardPorts, false)
+	resolved.AppPorts = b.parsePorts("appPort", cfg.AppPort, true)
 	resolved.Mounts = b.parseMounts(cfg.Mounts, workspaceRoot)
 }
 
@@ -389,8 +391,23 @@ func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContaine
 	if err != nil {
 		return err
 	}
-	resolved.ConfigHash, resolved.InputsHash = configHash, inputsHash
+	resolved.ConfigHash, resolved.InputsHash = configHash, workspaceInputsHash(inputsHash, resolved)
 	return nil
+}
+
+// workspaceInputsHash adds the default workspace mount to the inputs hash
+// when it is not the plain bind of the workspace at the workspace folder
+// (which the config and the workspace path already determine): when the
+// workspace is inside a git repository, or workspaceFolder is set. A
+// container created with another layout then reports drift.
+func workspaceInputsHash(inputsHash string, resolved *ResolvedDevContainer) string {
+	m := resolved.WorkspaceMount
+	if m == nil || resolved.Local == nil || resolved.Local.WorkspaceMount != nil ||
+		(m.Source == resolved.LocalRoot && m.Target == resolved.WorkspaceFolder) {
+		return inputsHash
+	}
+	sum := sha256.Sum256([]byte(inputsHash + "\x00workspace\x00" + m.Source + "\x00" + m.Target))
+	return hex.EncodeToString(sum[:])
 }
 
 // populateBuildDecisions populates build-time decisions.

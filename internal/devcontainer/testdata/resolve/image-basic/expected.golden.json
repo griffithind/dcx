@@ -10,6 +10,11 @@
   "sshHost": "basic_image.dcx",
   "overrideCommand": true,
   "workspaceFolder": "/workspaces/proj",
+  "workspaceMount": {
+    "source": "<workspace>",
+    "target": "/workspaces/proj",
+    "type": "bind"
+  },
   "remoteUser": "vscode",
   "effectiveUser": "vscode"
 }

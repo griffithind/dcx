@@ -24,6 +24,7 @@ func TestFailedCreateHookResumesE2E(t *testing.T) {
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
 		"image": "alpine:3.24",
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspace",
 		"workspaceFolder": "/workspace",
 		"onCreateCommand": "echo ran >> /tmp/oncreate.log",
 		"postCreateCommand": "test -f /workspace/ready-to-finish",

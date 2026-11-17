@@ -9,11 +9,11 @@ import (
 //
 // Flags dcx needs to reason about are extracted into structured fields:
 //
-//	--network/--net, --ipc, --pid, --shm-size, -u/--user,
+//	--network/--net, --ipc, --pid, --shm-size, -u/--user, --name,
 //	--cap-drop, --device, --add-host, --sysctl
 //
 // Flags that would break dcx's container management (--rm deletes the
-// container when it stops, --name and -d/--detach are owned by dcx) are
+// container when it stops, -d/--detach is owned by dcx) are
 // collected in Ignored. Every other flag is kept verbatim in Passthrough and
 // handed to `docker run`, so options like --memory, --cpus, -e, --label,
 // --hostname, --ulimit, --gpus, --cap-add or -v work as written.
@@ -82,8 +82,9 @@ func ParseRunArgs(args []string) *ParsedRunArgs {
 				}
 			}
 		case "--name":
-			_, _ = value()
-			result.Ignored = append(result.Ignored, arg)
+			if v, ok := value(); ok {
+				result.Name = v
+			}
 		case "--rm", "-d", "--detach":
 			result.Ignored = append(result.Ignored, arg)
 		default:

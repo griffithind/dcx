@@ -37,6 +37,8 @@ type Provisioner struct {
 	ssh *sshEndpoint
 	// composeInfo caches composeService.
 	composeInfo *composeServiceInfo
+	// ports caches buildPortBindings (it reports what it skips).
+	ports []devcontainer.PortForward
 	// command is what a chained feature entrypoint execs (prepareCommand).
 	command []string
 	// selinux is set when the daemon labels containers for SELinux.
@@ -485,25 +487,17 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 	return s
 }
 
-// workspaceMount returns the workspace mount of a single-container plan:
-// workspaceMount from the config (none when it is ""), or a bind of the
-// local workspace. Validate has rejected a workspaceMount that does not
-// parse.
+// workspaceMount returns the resolved workspace mount (nil for none),
+// relabelled for SELinux when Docker labels containers.
 func (r *Provisioner) workspaceMount() *devcontainer.Mount {
-	var m *devcontainer.Mount
-	if spec := r.resolved.WorkspaceMount; spec != nil {
-		if *spec == "" {
-			return nil
-		}
-		m, _ = devcontainer.ParseWorkspaceMount(*spec)
+	if r.resolved.WorkspaceMount == nil {
+		return nil
 	}
-	if m == nil && r.resolved.LocalRoot != "" && r.resolved.WorkspaceFolder != "" {
-		m = &devcontainer.Mount{Type: "bind", Source: r.resolved.LocalRoot, Target: r.resolved.WorkspaceFolder}
-	}
-	if m != nil && r.selinux && (m.Type == "" || m.Type == "bind") {
+	m := *r.resolved.WorkspaceMount
+	if r.selinux && (m.Type == "" || m.Type == "bind") {
 		m.Relabel = true
 	}
-	return m
+	return &m
 }
 
 // applyRunArgs applies the runArgs dcx models to s and keeps the rest for
@@ -527,6 +521,9 @@ func (r *Provisioner) applyRunArgs(s *ContainerSpec) {
 	}
 	if ra.User != "" {
 		s.User = ra.User
+	}
+	if ra.Name != "" {
+		s.Name = ra.Name
 	}
 	s.CapDrop = append(s.CapDrop, ra.CapDrop...)
 	s.Devices = append(s.Devices, ra.Devices...)
@@ -595,7 +592,16 @@ func (r *Provisioner) buildLabels() map[string]string {
 		l.FeaturesInstalled = featureIDs
 	}
 
-	return l.ToMap()
+	labels := l.ToMap()
+	// The container's devcontainer.metadata is the merged metadata (image,
+	// features, devcontainer.json), as the reference implementation records
+	// it, so tools that attach to a running container (they read the
+	// container's label) see remoteUser and the rest even when no dcx
+	// layer was built.
+	if metadata, err := build.GenerateMetadataLabel(r.resolved.MetadataLabel, r.resolved.Features, r.resolved.Local); err == nil && metadata != "" {
+		labels[devcontainer.DevcontainerMetadataLabel] = metadata
+	}
+	return labels
 }
 
 // tmpfsOptions translates a tmpfs mount's --mount options (tmpfs-size,
@@ -644,10 +650,17 @@ func (r *Provisioner) buildEnvironment() map[string]string {
 }
 
 // buildPortBindings returns the ports published for the environment: the
-// user's forwardPorts and appPort, then the dcx-agent's port. Ports without
-// an explicit host address bind 127.0.0.1: forwardPorts are forwarded to
-// the local machine in the spec, and a dev server or database should not
-// be reachable from the network unless asked for ("0.0.0.0:3000:3000").
+// user's appPort and forwardPorts, then the dcx-agent's port.
+//
+// forwardPorts without an explicit host address bind 127.0.0.1 (a dev
+// server or database should not be reachable from the network unless asked
+// for, "0.0.0.0:3000:3000"); appPort numbers bind 127.0.0.1 and appPort
+// strings are published as written (see Builder.parsePorts). An entry is
+// skipped when an earlier one already publishes its host port (3000 in both
+// appPort and forwardPorts, or "localhost:3000" next to 3000), or when the
+// compose file publishes that host port on the service that owns the
+// network ("3000:3000" in the compose file and forwardPorts 3000).
+//
 // With host networking nothing is published (the ports are on the host);
 // with a compose network owner they are published there (see
 // writeComposeOverride).
@@ -655,19 +668,63 @@ func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 	if r.ssh != nil && !r.ssh.publish {
 		return nil
 	}
-	var ports []devcontainer.PortForward
-	for _, group := range [][]devcontainer.PortForward{r.resolved.ForwardPorts, r.resolved.AppPorts} {
-		for _, p := range group {
-			if p.Host == "" {
-				p.Host = "127.0.0.1"
+	if r.ports != nil {
+		return r.ports
+	}
+	composePorts := r.composePublishedPorts()
+	ports := []devcontainer.PortForward{}
+	add := func(field string, p devcontainer.PortForward) {
+		for _, q := range composePorts {
+			if q.Collides(p) {
+				if q.SamePort(p) {
+					r.report.Infof("%s: %s is already published by the compose file", field, p.DockerSpec())
+				} else {
+					r.report.Warnf("%s: skipping %s: the compose file publishes the same host port (%s)", field, p.DockerSpec(), q.DockerSpec())
+				}
+				return
 			}
-			ports = append(ports, p)
 		}
+		for _, q := range ports {
+			if q.Collides(p) {
+				if !q.SamePort(p) {
+					r.report.Warnf("%s: skipping %s: its host port is already published (%s)", field, p.DockerSpec(), q.DockerSpec())
+				}
+				return
+			}
+		}
+		ports = append(ports, p)
+	}
+	for _, p := range r.resolved.AppPorts {
+		add("appPort", p)
+	}
+	for _, p := range r.resolved.ForwardPorts {
+		if p.Host == "" {
+			p.Host = "127.0.0.1"
+		}
+		add("forwardPorts", p)
 	}
 	if r.ssh != nil {
 		ports = append(ports, r.ssh.portForward())
 	}
+	r.ports = ports
 	return ports
+}
+
+// composePublishedPorts returns the ports the user's compose files publish
+// on the service that owns the primary container's network: the network
+// owner for network_mode service:<owner>, else the primary service. It is
+// nil for single containers and before composeService has run (planSSH
+// runs it).
+func (r *Provisioner) composePublishedPorts() []devcontainer.PortForward {
+	plan, ok := r.composePlan()
+	if !ok || r.composeInfo == nil {
+		return nil
+	}
+	service := plan.Service
+	if r.ssh != nil && r.ssh.owner != "" {
+		service = r.ssh.owner
+	}
+	return r.composeInfo.Ports[service]
 }
 
 // containerPorts is what the primary container publishes itself: nothing
@@ -755,6 +812,14 @@ func ComposeOverridePath(workspaceID string) (string, error) {
 // to the workspace's persistent override file.
 func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec ContainerSpec) error {
 	file := overrideFile(plan.Service, spec, nil)
+	// A volume the user's compose files declare is theirs (usually
+	// project-prefixed); re-declaring it with a name would switch it to
+	// another volume.
+	if r.composeInfo != nil {
+		for name := range r.composeInfo.Volumes {
+			delete(file.Volumes, esc(name))
+		}
+	}
 	// network_mode service:<owner>: every port (the user's and the
 	// agent's) is published on the owner, the only container Docker
 	// publishes ports on for that namespace.
@@ -864,6 +929,10 @@ type composeServiceInfo struct {
 	// Entrypoint and Command are the service's own (nil: not set).
 	Entrypoint []string
 	Command    []string
+	// Ports are the ports each service publishes.
+	Ports map[string][]devcontainer.PortForward
+	// Volumes are the top-level volumes the compose files declare.
+	Volumes map[string]bool
 }
 
 // composeService reads the primary service from the user's compose files
@@ -890,8 +959,10 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 			NetworkMode string          `json:"network_mode"`
 			Entrypoint  json.RawMessage `json:"entrypoint"`
 			Command     json.RawMessage `json:"command"`
+			Ports       []composePort   `json:"ports"`
 		} `json:"services"`
-		Name string `json:"name"`
+		Name    string                     `json:"name"`
+		Volumes map[string]json.RawMessage `json:"volumes"`
 	}
 	if err := json.Unmarshal(output, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse compose config: %w", err)
@@ -907,6 +978,36 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 		ProjectName: config.Name,
 		Entrypoint:  composeArgv(svc.Entrypoint),
 		Command:     composeArgv(svc.Command),
+		Ports:       map[string][]devcontainer.PortForward{},
+		Volumes:     map[string]bool{},
+	}
+	for name, s := range config.Services {
+		for _, p := range s.Ports {
+			if pf, ok := p.forward(); ok {
+				r.composeInfo.Ports[name] = append(r.composeInfo.Ports[name], pf)
+			}
+		}
+	}
+	for name := range config.Volumes {
+		r.composeInfo.Volumes[name] = true
 	}
 	return r.composeInfo, nil
+}
+
+// composePort is a published port in `docker compose config` output.
+type composePort struct {
+	Target    int    `json:"target"`
+	Published string `json:"published"`
+	HostIP    string `json:"host_ip"`
+	Protocol  string `json:"protocol"`
+}
+
+// forward converts a published port (false unless it is published on a
+// fixed host port: not for a Docker-assigned port or a range).
+func (p composePort) forward() (devcontainer.PortForward, bool) {
+	n, err := strconv.Atoi(p.Published)
+	if err != nil || p.Target <= 0 {
+		return devcontainer.PortForward{}, false
+	}
+	return devcontainer.PortForward{ContainerPort: p.Target, HostPort: n, Host: p.HostIP, Protocol: p.Protocol}, true
 }

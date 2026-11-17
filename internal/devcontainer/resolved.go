@@ -54,9 +54,10 @@ type ResolvedDevContainer struct {
 	// WorkspaceFolder is the path inside the container.
 	WorkspaceFolder string
 
-	// WorkspaceMount is the workspaceMount specification: nil for the
-	// default bind of the workspace, "" for no workspace mount.
-	WorkspaceMount *string
+	// WorkspaceMount is the workspace mount of an image or Dockerfile plan
+	// (nil for none, and for compose): workspaceMount, or the bind of the
+	// git repository containing the workspace (see workspace.go).
+	WorkspaceMount *Mount
 
 	// === User Configuration ===
 
@@ -197,6 +198,7 @@ type PortForward struct {
 // properly applied to container creation.
 type ParsedRunArgs struct {
 	User        string
+	Name        string // --name: the container name (dcx finds containers by label)
 	NetworkMode string
 	IpcMode     string
 	PidMode     string
@@ -209,7 +211,7 @@ type ParsedRunArgs struct {
 	// Passthrough holds every other flag, verbatim, for `docker run`.
 	Passthrough []string
 	// Ignored holds flags dcx refuses because they break container
-	// management (--rm, --name, -d/--detach).
+	// management (--rm, -d/--detach).
 	Ignored []string
 }
 

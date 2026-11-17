@@ -36,6 +36,7 @@ func TestUIDUpdateE2E(t *testing.T) {
 		"name": "` + helpers.UniqueTestName(t) + `",
 		"image": "node:20-alpine",
 		"remoteUser": "node",
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspace",
 		"workspaceFolder": "/workspace"
 	}`
 

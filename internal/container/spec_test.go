@@ -208,6 +208,7 @@ func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
 		Identity:        devcontainer.Identity{WorkspaceID: "1234abcd5678", Name: "ws", ResourceName: "ws-1234abcd"},
 		LocalRoot:       "/home/u/ws",
 		WorkspaceFolder: "/workspaces/ws",
+		WorkspaceMount:  &devcontainer.Mount{Type: "bind", Source: "/home/u/ws", Target: "/workspaces/ws"},
 		Plan:            plan,
 		ContainerUser:   "vscode",
 		CapAdd:          []string{"SYS_ADMIN", "NET_ADMIN"}, // the builder merges feature caps

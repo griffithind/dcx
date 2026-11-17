@@ -93,6 +93,8 @@ func SimpleImageConfigWithName(image, name string) string {
 		"name":            name,
 		"image":           image,
 		"workspaceFolder": "/workspace",
+		// The project at /workspace (the default is /workspaces/<folder>).
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspace",
 	}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	return string(data)

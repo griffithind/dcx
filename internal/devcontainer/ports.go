@@ -19,6 +19,7 @@ var errRemoteHostPort = errors.New("refers to another host")
 // dcx and accepts the forms used by forwardPorts, appPort and docker -p:
 //
 //	"3000"                  container port 3000 on host port 3000
+//	"localhost:3000"        the same (forwardPorts' form for a local port)
 //	"8080:80"               host port 8080 -> container port 80
 //	"127.0.0.1:9000:90"     bound to 127.0.0.1
 //	"127.0.0.1::90"         bound to 127.0.0.1, Docker picks the host port
@@ -56,6 +57,14 @@ func ParsePortSpec(spec string) (PortForward, error) {
 		}
 		pf.HostPort, pf.ContainerPort = n, n
 	case 2:
+		if parts[0] == "localhost" {
+			n, err := port(parts[1])
+			if err != nil {
+				return pf, err
+			}
+			pf.HostPort, pf.ContainerPort = n, n
+			break
+		}
 		if _, err := strconv.Atoi(parts[0]); err != nil && net.ParseIP(parts[0]) == nil {
 			return pf, fmt.Errorf("port %q %w", spec, errRemoteHostPort)
 		}
@@ -115,11 +124,17 @@ func (p PortForward) DockerSpec() string {
 }
 
 // parsePorts parses port entries, reporting entries it cannot publish.
-func (b *Builder) parsePorts(field string, ports PortList) []PortForward {
+// With loopbackNumbers, entries written as numbers bind 127.0.0.1 (appPort:
+// a number is published on loopback, a string is passed to docker as
+// written, as the reference implementation does).
+func (b *Builder) parsePorts(field string, ports PortList, loopbackNumbers bool) []PortForward {
 	var out []PortForward
 	for _, p := range ports {
 		spec := p.Spec
 		pf, err := ParsePortSpec(spec)
+		if err == nil && loopbackNumbers && p.number {
+			pf.Host = "127.0.0.1"
+		}
 		if err != nil {
 			if errors.Is(err, errRemoteHostPort) {
 				b.report.Infof("%s: skipping %q (it %v; editors forward it over the network)", field, spec, errRemoteHostPort)
@@ -203,13 +218,64 @@ func (p Port) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.Spec)
 }
 
-// union appends the entries of b not already in l (by spec).
+// key identifies the port an entry names: 3000 and "localhost:3000" are
+// the same.
+func (p Port) key() string {
+	if pf, err := ParsePortSpec(p.Spec); err == nil {
+		return pf.DockerSpec()
+	}
+	return p.Spec
+}
+
+// union appends the entries of b not already in l.
 func (l PortList) union(b PortList) PortList {
 	for _, p := range b {
-		if !slices.ContainsFunc(l, func(q Port) bool { return q.Spec == p.Spec }) {
+		if !slices.ContainsFunc(l, func(q Port) bool { return q.key() == p.key() }) {
 			p.bare = false
 			l = append(l, p)
 		}
 	}
 	return l
+}
+
+// bindAddress is the address a binding listens on ("" for every
+// interface; "localhost" is 127.0.0.1).
+func (p PortForward) bindAddress() string {
+	switch p.Host {
+	case "", "0.0.0.0", "::":
+		return ""
+	case "localhost":
+		return "127.0.0.1"
+	}
+	return p.Host
+}
+
+func (p PortForward) protocol() string {
+	if p.Protocol == "" {
+		return "tcp"
+	}
+	return p.Protocol
+}
+
+// SamePort reports whether p and q publish the same container port with
+// the same protocol.
+func (p PortForward) SamePort(q PortForward) bool {
+	return p.ContainerPort == q.ContainerPort && p.protocol() == q.protocol()
+}
+
+// Collides reports whether p and q claim the same host port: Docker cannot
+// publish both. Bindings with a Docker-assigned host port never collide.
+func (p PortForward) Collides(q PortForward) bool {
+	if p.EphemeralHostPort || q.EphemeralHostPort || p.protocol() != q.protocol() {
+		return false
+	}
+	hp, hq := p.HostPort, q.HostPort
+	if hp == 0 {
+		hp = p.ContainerPort
+	}
+	if hq == 0 {
+		hq = q.ContainerPort
+	}
+	a, b := p.bindAddress(), q.bindAddress()
+	return hp == hq && (a == b || a == "" || b == "")
 }

@@ -36,6 +36,20 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **C15/M8:** image metadata no longer supplies `workspaceFolder`, `workspaceMount`, `runArgs` or `features`.
 - **F13:** `devcontainer-feature.json` is read as JSONC.
 
+**Step 2 (mounts, ports and labels): done.**
+- **Workspace layout** (`workspace.go`).
+  - **C2/R4:** the nearest folder with a `.git` entry (directory, or a worktree's file) is mounted at `/workspaces/<folder>`, and the default `workspaceFolder` is the workspace's place in it. dcx looks for `.git` instead of running `git rev-parse --show-cdup`; the result is the same.
+  - **C3/R3:** `workspaceFolder` no longer moves the mount.
+  - A layout other than the plain bind of the workspace at the workspace folder is part of `hash.inputs`, so containers created with the old layout report drift instead of breaking.
+- **Ports.**
+  - **R1/M12:** `"localhost:N"` is port N; an entry whose host port is already published (earlier in `appPort`/`forwardPorts`, or by the compose file on the network owner) is skipped, silently when it is the same port and with a warning otherwise.
+  - **R12:** `appPort` numbers bind `127.0.0.1`, strings are passed as written.
+  - The port-conflict hint names the port and suggests `--recreate` only for the SSH port; it now also applies on create.
+- **R8:** a volume the user's compose files declare is not re-declared in the override. Volumes only in `mounts` are still declared with their bare name, as `docker run --mount` uses them (an intentional difference: upstream prefixes them with the project).
+- **M10:** the container's `devcontainer.metadata` label is the merged metadata (image, features, local config).
+- **R5:** `runArgs` `--name` names the container.
+- **Not done:** C17 port ranges are still rejected.
+
 Decisions made on 2026-11-14 (see "Decisions" below):
 - `forwardPorts` stay published and are deduplicated;
 - dcx keeps its own identity;

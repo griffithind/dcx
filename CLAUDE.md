@@ -147,7 +147,8 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `types.go` | `StringOrSlice` |
 | `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json); all run before `up` returns (`waitFor` has no effect) |
 | `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
-| `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` |
+| `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec`, `PortForward.Collides` |
+| `workspace.go` | The workspace layout: the git root containing the workspace is mounted at `/workspaces/<folder>`; default `workspaceFolder`; `resolveWorkspaceMount` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
 | `tree.go` | The JSONC tree a config is read into (BOM, case-sensitive keys), `Substitute` (one pass over every string), decoding |
 | `substitute.go` | `SubstitutionContext`, `ResolveContainerEnvRefs` (exec-time `${containerEnv:…}`) |
@@ -350,7 +351,9 @@ Base Image → Features Layer → UID Update Layer → Final Image
 - Entrypoints (`resolved.Entrypoints`): those recorded in the base image's metadata, then the features', run before the keep-alive or the original command.
 - Mounts: unmodelled `--mount` options (`Mount.Options`) pass through; relative and `~` bind sources resolve against the workspace; the workspace mount is relabelled (`:z`) when Docker labels containers for SELinux (`SystemInfo.SELinux`).
 - Labels: a built image carries the FROM image's metadata plus the local config; the features layer adds the features to the metadata resolution read (`resolved.MetadataLabel`).
-- Ports: `forwardPorts`/`appPort` without a host address publish on `127.0.0.1`; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
+- Ports (`Provisioner.buildPortBindings`): `forwardPorts` without a host address and `appPort` numbers publish on `127.0.0.1`, `appPort` strings as written; a host port already taken (an earlier entry, or the compose file's own `ports`) is skipped; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
+- Workspace mount (`resolved.WorkspaceMount`): the git root at `/workspaces/<folder>`, independent of `workspaceFolder`; a non-trivial layout is part of `hash.inputs`.
+- The container's `devcontainer.metadata` label is the merged metadata (image, features, local config), as upstream records it.
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 
 ### Naming and staleness
