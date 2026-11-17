@@ -1,8 +1,9 @@
-// Package registryauth finds credentials for an OCI registry the way the
-// docker CLI does, so features can come from private registries: the
-// docker config ($DOCKER_CONFIG/config.json, default ~/.docker/config.json)
-// with its inline "auths", per-registry "credHelpers" and default
-// "credsStore", and, for ghcr.io, $GITHUB_TOKEN.
+// Package registryauth finds credentials for an OCI registry the way
+// devcontainers/cli does, so features can come from private registries:
+// $DEVCONTAINERS_OCI_AUTH, the docker config ($DOCKER_CONFIG/config.json,
+// default ~/.docker/config.json) with its inline "auths" (including the
+// identity tokens `az acr login` stores), per-registry "credHelpers" and
+// default "credsStore", and, for ghcr.io, $GITHUB_TOKEN.
 package registryauth
 
 import (
@@ -23,6 +24,10 @@ import (
 type Credentials struct {
 	Username string
 	Password string
+	// IdentityToken is an OAuth2 refresh token (docker config
+	// "identitytoken", or a credential helper's "<token>" user), exchanged
+	// for an access token instead of sending a password.
+	IdentityToken string
 }
 
 // helperTimeout bounds a credential helper (some prompt or hang when their
@@ -32,9 +37,10 @@ const helperTimeout = 30 * time.Second
 // dockerConfig is the part of config.json that names credentials.
 type dockerConfig struct {
 	Auths map[string]struct {
-		Auth     string `json:"auth"`
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Auth          string `json:"auth"`
+		Username      string `json:"username"`
+		Password      string `json:"password"`
+		IdentityToken string `json:"identitytoken"`
 	} `json:"auths"`
 	CredHelpers map[string]string `json:"credHelpers"`
 	CredsStore  string            `json:"credsStore"`
@@ -44,6 +50,13 @@ type dockerConfig struct {
 // port, as in a feature ID), or ok false when none are configured. An
 // error means credentials are configured but could not be read.
 func Lookup(ctx context.Context, registry string) (Credentials, bool, error) {
+	// DEVCONTAINERS_OCI_AUTH=registry|user|token[,registry|user|token…]
+	for _, entry := range strings.Split(os.Getenv("DEVCONTAINERS_OCI_AUTH"), ",") {
+		parts := strings.Split(entry, "|")
+		if len(parts) == 3 && parts[0] == registry {
+			return Credentials{Username: parts[1], Password: parts[2]}, true, nil
+		}
+	}
 	cfg, err := loadDockerConfig()
 	if err != nil {
 		return Credentials{}, false, err
@@ -55,6 +68,9 @@ func Lookup(ctx context.Context, registry string) (Credentials, bool, error) {
 		for key, entry := range cfg.Auths {
 			if normalize(key) != registry {
 				continue
+			}
+			if entry.IdentityToken != "" {
+				return Credentials{IdentityToken: entry.IdentityToken}, true, nil
 			}
 			if entry.Auth != "" {
 				return decodeAuth(entry.Auth, registry)
@@ -151,6 +167,10 @@ func fromHelper(ctx context.Context, helper, registry string) (Credentials, bool
 	}
 	if resp.Secret == "" {
 		return Credentials{}, false, nil
+	}
+	// The credential helper protocol's marker for an identity token.
+	if resp.Username == "<token>" {
+		return Credentials{IdentityToken: resp.Secret}, true, nil
 	}
 	return Credentials{Username: resp.Username, Password: resp.Secret}, true, nil
 }

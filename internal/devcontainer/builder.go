@@ -301,6 +301,15 @@ func (b *Builder) resolveFeatures(ctx context.Context, resolved *ResolvedDevCont
 // passing it again at runtime would override user containerEnv and freeze
 // unexpanded references.
 func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feats []*features.Feature, subCtx *SubstitutionContext) {
+	// Mounts merge image metadata, then features, then devcontainer.json
+	// (devcontainers/cli's order): a feature's mount replaces an image's on
+	// the same target, but never the user's.
+	userTargets := map[string]bool{}
+	if resolved.Local != nil {
+		for _, m := range resolved.Local.Mounts {
+			userTargets[m.Target] = true
+		}
+	}
 	for _, feat := range feats {
 		if feat.Metadata == nil {
 			continue
@@ -312,7 +321,9 @@ func (b *Builder) mergeFeatureRuntimeConfig(resolved *ResolvedDevContainer, feat
 				b.report.Warnf("Ignoring mount from feature %s: %v", feat.ID, err)
 				continue
 			}
-			resolved.Mounts = mergeMountByTarget(resolved.Mounts, m)
+			if !userTargets[m.Target] {
+				resolved.Mounts = mergeMountByTarget(resolved.Mounts, m)
+			}
 		}
 
 		for _, c := range feat.Metadata.CapAdd {

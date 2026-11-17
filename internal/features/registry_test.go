@@ -36,6 +36,9 @@ type fakeRegistry struct {
 	// login, when set, is the "user:password" the token endpoint requires
 	// (a private registry).
 	login string
+	// refresh, when set, is the identity token the token endpoint takes in
+	// an OAuth2 POST instead (Azure Container Registry).
+	refresh string
 }
 
 const fakeToken = "secret-token"
@@ -102,6 +105,13 @@ func (r *fakeRegistry) serve(w http.ResponseWriter, req *http.Request) {
 	case req.URL.Path == "/v2/":
 		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token",service="fake"`, r.srv.URL))
 		w.WriteHeader(http.StatusUnauthorized)
+	case req.URL.Path == "/token" && r.refresh != "":
+		if req.Method != http.MethodPost || req.FormValue("grant_type") != "refresh_token" || req.FormValue("refresh_token") != r.refresh {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		r.scopes = append(r.scopes, req.FormValue("scope"))
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": fakeToken})
 	case req.URL.Path == "/token":
 		if r.login != "" {
 			user, pass, ok := req.BasicAuth()
@@ -197,19 +207,32 @@ func TestRegistryRejectsLayerDigestMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "layer digest mismatch")
 }
 
-func TestRegistryRejectsLockfileIntegrityMismatch(t *testing.T) {
+// The lockfile pins the manifest digest (as devcontainers/cli writes it):
+// the manifest is fetched by that digest and must hash to it (F15).
+func TestRegistryRejectsATamperedPinnedManifest(t *testing.T) {
 	reg := newFakeRegistry(t)
-	manifestDigest := reg.publish("1", featureTar(t, "1.0.0", nil), "")
+	pinned := reg.publish("1", featureTar(t, "1.0.0", nil), "")
+	other := reg.publish("2", featureTar(t, "6.6.6", nil), "")
+	reg.manifests[pinned] = reg.manifests[other] // a mirror serving other bytes
 
 	lf := lockfile.New()
-	lf.Set(reg.featureID("1"), lockfile.LockedFeature{
-		Version:   "1.0.0",
-		Resolved:  reg.host() + "/devcontainers/features/hello@" + manifestDigest,
-		Integrity: "sha256:" + strings.Repeat("0", 64),
-	})
+	lf.Set(reg.featureID("1"), lockfile.LockedFeature{Version: "1.0.0", Integrity: pinned})
 	_, err := resolveFeature(t, reg.featureID("1"), lf)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "integrity mismatch")
+	assert.Contains(t, err.Error(), "manifest digest mismatch")
+}
+
+// A digest the registry doesn't have (a lockfile older dcx versions wrote
+// recorded the layer digest) says how to fix it.
+func TestRegistryUnknownPinnedDigest(t *testing.T) {
+	reg := newFakeRegistry(t)
+	reg.publish("1", featureTar(t, "1.0.0", nil), "")
+
+	lf := lockfile.New()
+	lf.Set(reg.featureID("1"), lockfile.LockedFeature{Version: "1.0.0", Integrity: "sha256:" + strings.Repeat("0", 64)})
+	_, err := resolveFeature(t, reg.featureID("1"), lf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "run 'dcx lock'")
 }
 
 func TestRegistryRejectsPathTraversalInLayer(t *testing.T) {
@@ -266,7 +289,7 @@ func lockedFeatureFor(reg *fakeRegistry, f *Feature) lockfile.LockedFeature {
 	return lockfile.LockedFeature{
 		Version:   f.Metadata.Version,
 		Resolved:  reg.host() + "/devcontainers/features/hello@" + f.ManifestDigest,
-		Integrity: f.Integrity,
+		Integrity: f.ManifestDigest,
 		DependsOn: []string{"ghcr.io/devcontainers/features/common-utils:2"},
 	}
 }
@@ -275,7 +298,7 @@ func TestVerifyLockfileReportsMissingAndExtra(t *testing.T) {
 	lf := lockfile.New()
 	lf.Set("ghcr.io/devcontainers/features/go:1", lockfile.LockedFeature{Integrity: "sha256:a"})
 	features := []*Feature{
-		{ID: "ghcr.io/devcontainers/features/node:1", Source: FeatureSource{Type: SourceTypeOCI}},
+		{ID: "ghcr.io/devcontainers/features/node:1", Source: FeatureSource{Type: SourceTypeOCI}, ManifestDigest: "sha256:n"},
 		{ID: "./local", Source: FeatureSource{Type: SourceTypeLocalPath}},
 	}
 	mismatches := VerifyLockfile(features, lf)
@@ -287,7 +310,7 @@ func TestVerifyLockfileReportsMissingAndExtra(t *testing.T) {
 	assert.Equal(t, "ghcr.io/devcontainers/features/node:1", byType[MismatchMissing])
 	assert.Equal(t, "ghcr.io/devcontainers/features/go:1", byType[MismatchExtra])
 
-	assert.Empty(t, GenerateLockfile(features).Features, "no integrity, local: nothing to lock")
+	assert.Empty(t, GenerateLockfile(features[1:]).Features, "local: nothing to lock")
 }
 
 func TestRegistryPrivateFeatureUsesCredentials(t *testing.T) {
@@ -309,4 +332,19 @@ func TestRegistryPrivateFeatureUsesCredentials(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1.0.0", f.Metadata.Version)
 	assert.Equal(t, reg.host(), asked, "credentials are looked up for the feature's registry")
+}
+
+// An identity token is exchanged for an access token with an OAuth2 POST
+// (F15).
+func TestRegistryExchangesAnIdentityToken(t *testing.T) {
+	reg := newFakeRegistry(t)
+	reg.refresh = "refresh-token"
+	reg.publish("1", featureTar(t, "1.0.0", nil), "")
+	lookupCredentials = func(context.Context, string) (registryauth.Credentials, bool, error) {
+		return registryauth.Credentials{IdentityToken: "refresh-token"}, true, nil
+	}
+	f, err := resolveFeature(t, reg.featureID("1"), nil)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", f.Metadata.Version)
+	assert.Equal(t, []string{"repository:devcontainers/features/hello:pull"}, reg.scopes)
 }

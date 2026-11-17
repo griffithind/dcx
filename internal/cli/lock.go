@@ -19,10 +19,11 @@ var lockCmd = &cobra.Command{
 	Short: "Generate or verify devcontainer-lock.json",
 	Long: `Generate or verify a lockfile that pins exact feature versions for reproducible builds.
 
-The lockfile records for each feature:
+The lockfile has the official devcontainer CLI's format. For each feature,
+keyed by its reference as written, it records:
 - Exact semantic version resolved
-- OCI manifest digest for content-addressable references
-- SHA256 integrity hash for verification
+- The resolved reference, pinned to the OCI manifest digest
+- Integrity: the manifest digest (or a tarball's SHA256)
 - Hard dependencies (dependsOn)
 
 Modes:

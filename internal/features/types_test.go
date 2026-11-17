@@ -31,14 +31,47 @@ func TestParseFeatureSource_OCI(t *testing.T) {
 			},
 		},
 		{
-			name: "short form defaults to ghcr.io",
-			id:   "devcontainers/features/node:18",
+			name: "references are case-insensitive",
+			id:   "GHCR.io/DevContainers/Features/Node:18",
 			expected: FeatureSource{
 				Type:       SourceTypeOCI,
 				Registry:   "ghcr.io",
 				Repository: "devcontainers/features",
 				Resource:   "node",
 				Version:    "18",
+			},
+		},
+		{
+			name: "devcontainers-contrib is devcontainers-extra",
+			id:   "ghcr.io/devcontainers-contrib/features/black:2",
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
+				Registry:   "ghcr.io",
+				Repository: "devcontainers-extra/features",
+				Resource:   "black",
+				Version:    "2",
+			},
+		},
+		{
+			name: "a registry with a port",
+			id:   "localhost:5000/acme/features/tool:1",
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
+				Registry:   "localhost:5000",
+				Repository: "acme/features",
+				Resource:   "tool",
+				Version:    "1",
+			},
+		},
+		{
+			name: "legacy short id",
+			id:   "golang",
+			expected: FeatureSource{
+				Type:       SourceTypeOCI,
+				Registry:   "ghcr.io",
+				Repository: "devcontainers/features",
+				Resource:   "go",
+				Version:    "1",
 			},
 		},
 		{
@@ -83,11 +116,6 @@ func TestParseFeatureSource_Local(t *testing.T) {
 			id:   "../shared/features/tool",
 			path: "../shared/features/tool",
 		},
-		{
-			name: "absolute path",
-			id:   "/opt/features/custom",
-			path: "/opt/features/custom",
-		},
 	}
 
 	for _, tt := range tests {
@@ -108,13 +136,8 @@ func TestParseFeatureSource_HTTP(t *testing.T) {
 	}{
 		{
 			name: "https URL",
-			id:   "https://example.com/features/tool.tgz",
-			url:  "https://example.com/features/tool.tgz",
-		},
-		{
-			name: "http URL",
-			id:   "http://localhost:8080/feature.tar.gz",
-			url:  "http://localhost:8080/feature.tar.gz",
+			id:   "https://example.com/features/devcontainer-feature-tool.tgz",
+			url:  "https://example.com/features/devcontainer-feature-tool.tgz",
 		},
 	}
 
@@ -126,6 +149,52 @@ func TestParseFeatureSource_HTTP(t *testing.T) {
 			assert.Equal(t, tt.url, ref.URL)
 		})
 	}
+}
+
+// References devcontainers/cli rejects (F12).
+func TestParseFeatureSourceRejects(t *testing.T) {
+	for id, want := range map[string]string{
+		"devcontainers/features/node:18": "GitHub-release form",
+		"fish":                           "legacy feature",
+		"/opt/features/custom":           "absolute path",
+		"http://example.com/devcontainer-feature-x.tgz":  "https",
+		"https://example.com/feature.tgz":                "devcontainer-feature-<id>.tgz",
+		"ghcr.io/devcontainers/features/node@sha256:abc": "sha256:<64 hex digits>",
+		"ghcr.io/node:1": "<registry>/<namespace>/<feature>",
+		"ghcr.io/devcontainers/features/node:bad tag": "bad tag",
+	} {
+		_, err := ParseFeatureSource(id)
+		require.Error(t, err, id)
+		assert.Contains(t, err.Error(), want, id)
+	}
+}
+
+// A tag and a digest: the digest is the version, the tag is kept (it
+// orders features), and only localhost is reached over plain http.
+func TestParseFeatureSourceTagAndDigest(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	ref, err := ParseFeatureSource("ghcr.io/devcontainers/features/node:1@" + digest)
+	require.NoError(t, err)
+	assert.Equal(t, "node", ref.Resource)
+	assert.Equal(t, "1", ref.Tag)
+	assert.Equal(t, digest, ref.Version)
+	assert.Equal(t, "https", ref.scheme())
+
+	local, err := ParseFeatureSource("localhost:5000/acme/features/tool")
+	require.NoError(t, err)
+	assert.Equal(t, "http", local.scheme())
+	assert.Equal(t, "latest", local.Tag)
+}
+
+// envVars reads a feature's devcontainer-features.env into a map.
+func envVars(f *Feature) map[string]string {
+	env := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(f.EnvFile()), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			env[k] = strings.Trim(v, "'")
+		}
+	}
+	return env
 }
 
 func TestFeature_GetEnvVars(t *testing.T) {
@@ -153,7 +222,7 @@ func TestFeature_GetEnvVars(t *testing.T) {
 		},
 	}
 
-	env := feature.EnvVars()
+	env := envVars(feature)
 
 	// Should have user-specified values
 	assert.Equal(t, "1.19", env["VERSION"])
@@ -298,7 +367,7 @@ func TestFeatureOptionsHandling(t *testing.T) {
 		},
 	}
 
-	env := feature.EnvVars()
+	env := envVars(feature)
 
 	// User-specified values should be set
 	assert.Equal(t, "testuser", env["USERNAME"])
@@ -364,7 +433,7 @@ func TestFeatureOptionsWithBooleans(t *testing.T) {
 				},
 			}
 
-			env := feature.EnvVars()
+			env := envVars(feature)
 			for k, v := range tt.expected {
 				assert.Equal(t, v, env[k])
 			}
@@ -444,7 +513,7 @@ func TestNormalizeOptionName(t *testing.T) {
 	}
 }
 
-// TestGetEnvVarsWithNormalization tests that EnvVars uses normalized option names.
+// TestGetEnvVarsWithNormalization tests that EnvFile uses normalized option names.
 func TestGetEnvVarsWithNormalization(t *testing.T) {
 	feature := &Feature{
 		ID: "test-feature",
@@ -471,7 +540,7 @@ func TestGetEnvVarsWithNormalization(t *testing.T) {
 		},
 	}
 
-	env := feature.EnvVars()
+	env := envVars(feature)
 
 	// Options should be normalized
 	assert.Equal(t, "value1", env["MY_OPTION"])

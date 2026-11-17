@@ -55,7 +55,13 @@ func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOption
 		return "", fmt.Errorf("failed to create feature source directory: %w", err)
 	}
 
-	remoteUser, containerUser := features.FeatureUsers(opts.RemoteUser, opts.ContainerUser)
+	// Features install for containerUser, else the compose service's
+	// user, else the base image's USER (devcontainers/cli's rule).
+	imageCfg, err := b.engine.ImageConfig(ctx, opts.BaseImage)
+	if err != nil {
+		return "", fmt.Errorf("read the user of %s: %w", opts.BaseImage, err)
+	}
+	remoteUser, containerUser := features.FeatureUsers(opts.RemoteUser, opts.ContainerUser, opts.ServiceUser, imageCfg.User)
 
 	// Generate metadata for the derived image
 	metadataLabel, err := GenerateMetadataLabel(
@@ -70,10 +76,6 @@ func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOption
 	// Generate Dockerfile using the features package
 	generator := features.NewDockerfileGenerator(opts.BaseImage, opts.Features, buildContextDir, remoteUser, containerUser)
 	generator.SetMetadata(metadataLabel)
-	imageCfg, err := b.engine.ImageConfig(ctx, opts.BaseImage)
-	if err != nil {
-		return "", fmt.Errorf("read the user of %s: %w", opts.BaseImage, err)
-	}
 	generator.SetImageUser(imageCfg.User)
 	dockerfile := generator.Generate()
 
@@ -107,11 +109,15 @@ func (b *Builder) BuildWithFeatures(ctx context.Context, opts FeatureBuildOption
 
 // stageFeatures copies feature directories and generates builtin.env for the build context.
 func stageFeatures(featureList []*features.Feature, destDir string, containerUser, remoteUser string) error {
-	// Copy each feature directory
+	// Copy each feature directory, with the feature's options as the
+	// devcontainer-features.env its install step sources.
 	for i, feature := range featureList {
 		featureDir := filepath.Join(destDir, fmt.Sprintf("feature_%d", i))
 		if err := copyDir(feature.CachePath, featureDir); err != nil {
 			return fmt.Errorf("failed to copy feature %s: %w", feature.ID, err)
+		}
+		if err := os.WriteFile(filepath.Join(featureDir, "devcontainer-features.env"), []byte(feature.EnvFile()), 0o644); err != nil {
+			return fmt.Errorf("failed to write the options of feature %s: %w", feature.ID, err)
 		}
 	}
 

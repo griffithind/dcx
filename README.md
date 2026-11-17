@@ -334,14 +334,18 @@ dcx lock --verify     # Check that the lockfile matches what dcx resolves
 dcx lock --frozen     # Same, and fail when there is no lockfile (CI)
 ```
 
-`devcontainer-lock.json` sits next to `devcontainer.json`. For each OCI or
-HTTP feature (local features are never locked) it pins the version, the
-OCI manifest digest and the SHA-256 of the feature tarball.
+`devcontainer-lock.json` sits next to `devcontainer.json`, in the format the
+official devcontainer CLI writes, so both tools share it. Each OCI or HTTP
+feature (local features are never locked) is keyed by its reference as
+devcontainer.json writes it, with its version, the resolved reference, its
+integrity (the OCI manifest digest, or the tarball's SHA-256) and its
+`dependsOn`.
 
 - `dcx up` and `dcx build` use the lockfile automatically when it exists:
-  a feature is fetched by its locked digest (a tag that moved to a new
-  release is ignored) and must match its integrity hash, or `up` fails.
-  They never write the lockfile; run `dcx lock` after changing features.
+  a feature is fetched by its locked manifest digest (a tag that moved to a
+  new release is ignored), and the manifest must hash to it, or `up` fails.
+- They write the lockfile only when it is an empty file (the spec's marker
+  for "create it"); otherwise run `dcx lock` after changing features.
 - Commit the lockfile, and run `dcx lock --frozen` in CI so a missing or
   stale lockfile fails the build.
 
@@ -397,13 +401,21 @@ The `service` field specifies which container to use as the primary devcontainer
 into a derived image (see the pipeline below). A feature can come from:
 
 - an OCI registry: `"ghcr.io/devcontainers/features/node:1": {}` (a tag,
-  or `@sha256:…`);
-- a local directory next to the config: `"./features/my-feature": {}`;
-- an HTTP(S) tarball: `"https://example.com/feature.tgz": {}`.
+  `@sha256:…`, or both). References are case-insensitive, and
+  `devcontainers-contrib` is read as its new name, `devcontainers-extra`;
+- a local directory inside `.devcontainer`: `"./features/my-feature": {}`;
+- an HTTPS tarball named `devcontainer-feature-<id>.tgz`.
 
-Private registries use the credentials `docker login` stored: the docker
-config (`$DOCKER_CONFIG/config.json`, default `~/.docker/config.json`),
-including `credHelpers` and `credsStore`, and `$GITHUB_TOKEN` for ghcr.io.
+Legacy short ids (`"node"`, `"golang"`, `"maven"`) map to
+`ghcr.io/devcontainers/features`, with a warning, as the official CLI does.
+A feature's value is its options; a string is its `version` option, and
+`true` or `false` installs it with its defaults.
+
+Private registries use `$DEVCONTAINERS_OCI_AUTH`
+(`registry|user|token,…`) or the credentials `docker login` stored: the
+docker config (`$DOCKER_CONFIG/config.json`, default `~/.docker/config.json`),
+including identity tokens (`az acr login`), `credHelpers` and `credsStore`,
+and `$GITHUB_TOKEN` for ghcr.io.
 
 Fetched features are cached in `~/.cache/dcx/features` (`$XDG_CACHE_HOME`).
 A tag (`:1`, `:latest`) is checked against the registry again after 24
@@ -411,13 +423,23 @@ hours, and the cached copy is used when the registry cannot be reached;
 `dcx up --pull --recreate` re-fetches now. Digests and lockfile pins are
 never re-fetched.
 
-Features install in dependency order: `dependsOn` (installed first,
-fetched if not listed), then `installsAfter`, then
-`overrideFeatureInstallOrder`. They install as root whatever the image's
-`USER`. Feature `entrypoint`s run when the container starts, before its
-command (after those recorded in the base image's metadata). A feature's
-`containerEnv` is set in the image; its mounts, capabilities, `privileged`
-and `init` apply to the container.
+Features install in the official CLI's order, in rounds: each round
+installs the features whose `dependsOn` (fetched if not listed) and
+`installsAfter` (only among listed features) earlier rounds installed,
+sorted by reference. `overrideFeatureInstallOrder` puts its features first
+within the rounds the dependencies allow. A feature is its source and
+options: one that a dependency asks for with other options installs again
+with them.
+
+Features install as root whatever the image's `USER`. Their
+`_CONTAINER_USER` is `containerUser`, else the compose service's `user`,
+else the image's `USER`; `_REMOTE_USER` is `remoteUser`, else that user.
+A feature's options are environment variables for its own `install.sh`
+only, and its `containerEnv` is set in the image before it installs.
+Feature `entrypoint`s run when the container starts, before its command
+(after those recorded in the base image's metadata). Its capabilities,
+`privileged`, `init` and mounts apply to the container; a mount in
+devcontainer.json wins over a feature's on the same target.
 
 ### Build Pipeline
 
@@ -522,7 +544,7 @@ When `updateRemoteUserUID` is true, DCX updates the container user's UID/GID to 
 | `~/.dcx/` (`$DCX_HOME`) | Per-workspace SSH host keys, `known_hosts`, a fallback client key, workspace locks, compose override files |
 | `~/.ssh/dcx/config` | The SSH host blocks for each workspace, included by a line at the top of `~/.ssh/config` (`$DCX_SSH_DIR` replaces `~/.ssh` for both) |
 | `~/.cache/dcx/features` | Fetched features |
-| `devcontainer-lock.json` | Written only by `dcx lock` |
+| `devcontainer-lock.json` | Written by `dcx lock`, and by `up`/`build` when it is an empty file |
 
 `dcx down` removes the workspace's host key and SSH block. Docker state
 (containers, images tagged `dcx/<workspace>`, volumes) is labelled
@@ -595,6 +617,24 @@ Changes since 0.7 that affect existing setups:
 - Features install as root, whatever the base image's `USER`; the image's
   user is restored afterwards. A feature given as a string
   (`"…/node:1": "18"`) sets its `version` option.
+- Features follow the official CLI:
+  - `devcontainer-lock.json` is written and read in its format (keys as
+    written, integrity is the manifest digest). A lockfile an older dcx
+    wrote fails with a hint: run `dcx lock` to rewrite it.
+  - Install order comes in rounds; `installsAfter` is always honoured and
+    `overrideFeatureInstallOrder` no longer overrides `dependsOn`.
+  - Options reach only their own feature (they used to leak into later
+    ones), `containerEnv` is set before the feature installs, and
+    `_CONTAINER_USER` comes from the compose `user` or the image's `USER`
+    when `containerUser` is not set (it was root). Existing feature images
+    are rebuilt on the next create.
+  - A feature set to `false` installs with its defaults, and a string value
+    is ignored by a feature without a `version` option.
+  - Legacy short ids are mapped; references without a registry
+    (`owner/repo/feature`), absolute local paths, local features outside
+    `.devcontainer` and plain-http tarballs are rejected.
+  - A user mount wins over a feature mount on the same target.
+  - The image label records features by their reference.
 - A relative `--config` is relative to the current directory, not the
   workspace.
 - `dcx restart --rebuild` is no longer skipped by `shutdownAction: "none"`.

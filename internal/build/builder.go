@@ -100,6 +100,10 @@ type FeatureBuildOptions struct {
 	// ContainerUser is the container's user account.
 	ContainerUser string
 
+	// ServiceUser is the compose service's user, which features install
+	// for when there is no containerUser.
+	ServiceUser string
+
 	// Rebuild forces rebuilding even if cached.
 	Rebuild bool
 

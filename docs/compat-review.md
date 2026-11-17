@@ -50,6 +50,18 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **R5:** `runArgs` `--name` names the container.
 - **Not done:** C17 port ranges are still rejected.
 
+**Step 3 (features): done.**
+- **F1:** the lockfile is devcontainers/cli's: keys as written, integrity is the OCI manifest digest (features are fetched by it), `dependsOn` in declaration order, keys ordered as `localeCompare` and the same JSON form. A lockfile an older dcx wrote fails with a hint to run `dcx lock`.
+- **F14:** `up` and `build` write the lockfile when it is an empty file. Writing it on every `up` (upstream's default) and `--frozen-lockfile` on `up` are not done: `dcx lock` and `dcx lock --frozen` cover them.
+- **F2, F11, F12:** references follow `getRef`: lowercased, `devcontainers-contrib` → `devcontainers-extra`, `name:tag@sha256:…`, a registry must be a host (the GitHub-release form is rejected rather than fetched), http for `localhost`; legacy short ids are mapped (and `maven`/`gradle`/`jupyterlab` become options); tarballs must be https and named `devcontainer-feature-<id>.tgz`; local features must be inside `.devcontainer` (or the config's folder, for configs elsewhere), absolute paths are rejected.
+- **F3/M1:** without `containerUser`, features install for the compose service's `user`, else the image's `USER`.
+- **F4, F5:** `containerEnv` is set before the install step; options are a per-feature `devcontainer-features.env` (defaults plus every key the user set), no longer build ARGs.
+- **F6–F9:** the round algorithm, with features identified by source and options, `installsAfter` a hard constraint among present features (renames followed through the referenced feature's `legacyIds`), and `overrideFeatureInstallOrder` a priority. An override entry that matches no feature warns (upstream only fails for one it cannot fetch). An `installsAfter` entry that is no feature reference is ignored with a warning (upstream fails).
+- **F10:** a devcontainer.json mount wins over a feature's on the same target.
+- **F16:** `false` installs a feature with its defaults; the label's feature `id` is the user's reference. (A `true` or `false` value is not turned into a `version` option, which upstream does for features with one.)
+- **F15:** manifests are hashed and checked against the pinned digest instead of trusting `Docker-Content-Digest`; `DEVCONTAINERS_OCI_AUTH` and identity tokens (OAuth2 refresh) are supported.
+- The features image tag has a version, so images built with the old Dockerfile are rebuilt on the next create.
+
 Decisions made on 2026-11-14 (see "Decisions" below):
 - `forwardPorts` stay published and are deduplicated;
 - dcx keeps its own identity;

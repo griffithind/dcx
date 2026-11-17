@@ -522,6 +522,9 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 	if err != nil {
 		return err
 	}
+	if err := s.initLockfile(resolved); err != nil {
+		return err
+	}
 
 	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
@@ -532,6 +535,22 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		NoCache: opts.NoCache,
 		Pull:    opts.Pull,
 	})
+}
+
+// initLockfile writes devcontainer-lock.json when it is an empty file:
+// the spec's marker for "create the lockfile on the next build".
+func (s *DevContainerService) initLockfile(resolved *devcontainer.ResolvedDevContainer) error {
+	if len(resolved.Features) == 0 {
+		return nil
+	}
+	if _, initMarker, err := lockfile.Load(resolved.ConfigPath); err != nil || !initMarker {
+		return nil
+	}
+	if err := features.GenerateLockfile(resolved.Features).Save(resolved.ConfigPath); err != nil {
+		return fmt.Errorf("failed to write lockfile: %w", err)
+	}
+	s.report.Infof("Created %s", lockfile.Path(resolved.ConfigPath))
+	return nil
 }
 
 // Lock generates, verifies, or checks the devcontainer-lock.json file.

@@ -80,6 +80,9 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	if err != nil {
 		return nil, err
 	}
+	if err := s.initLockfile(resolved); err != nil {
+		return nil, err
+	}
 	ids := &resolved.Identity
 
 	currentState, existing, err := s.stateManager.StateWithHash(ctx, resolved.WorkspaceID, resolved.ConfigHash)

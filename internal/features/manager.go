@@ -3,17 +3,17 @@ package features
 import (
 	"context"
 	"fmt"
-	"path"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/report"
 )
 
-// maxDependencyPasses bounds dependency resolution. Real dependency chains
-// are a handful of levels deep; hitting this means the graph never converges.
-const maxDependencyPasses = 32
+// maxFeatureNodes bounds dependency resolution: real feature graphs have a
+// handful of nodes, so reaching this means dependsOn never converges.
+const maxFeatureNodes = 256
 
 // Manager handles feature resolution, ordering, and installation.
 type Manager struct {
@@ -56,202 +56,147 @@ func (m *Manager) SetLockfile(lf *lockfile.Lockfile) {
 	m.lockfile = lf
 }
 
-// ResolveAll resolves all features from a devcontainer.json features map.
-// It recursively resolves dependencies (dependsOn; installsAfter only orders).
-// If a lockfile is set via SetLockfile, pinned versions will be used.
+// request is a feature to resolve: a reference with the options
+// devcontainer.json or a feature's dependsOn gives it.
+type request struct {
+	id      string
+	value   interface{}
+	options map[string]interface{}
+	parent  *node // the feature whose dependsOn asked for it
+}
+
+// ResolveAll resolves the features of devcontainer.json and, recursively,
+// their dependsOn, and returns them in installation order. It follows
+// devcontainers/cli: a feature is identified by its source and options, so
+// the same feature asked for with other options is installed again, and
+// the order is computed in rounds (see orderFeatures).
 func (m *Manager) ResolveAll(ctx context.Context, featuresConfig map[string]interface{}, overrideOrder []string) ([]*Feature, error) {
 	if len(featuresConfig) == 0 {
 		return nil, nil
 	}
 
-	// Track resolved features by their metadata ID
-	resolved := make(map[string]*Feature)
-
-	// Resolve each feature from config
-	for id, optionsRaw := range featuresConfig {
-		// Parse options
-		var options map[string]interface{}
-		switch v := optionsRaw.(type) {
-		case map[string]interface{}:
-			options = v
-		case bool:
-			// Boolean true means use defaults
-			if !v {
-				continue // Skip disabled features
-			}
-			options = make(map[string]interface{})
-		case string:
-			// A string is the "version" option ("…/node:1": "18"), as in
-			// the reference implementation.
-			options = map[string]interface{}{"version": v}
-		default:
-			options = make(map[string]interface{})
+	var nodes []*node
+	work := m.userRequests(featuresConfig)
+	for len(work) > 0 {
+		cur := work[0]
+		work = work[1:]
+		if len(nodes) >= maxFeatureNodes {
+			return nil, fmt.Errorf("feature dependencies did not converge after %d features", maxFeatureNodes)
+		}
+		if mapped, ok := LegacyFeatureRef(cur.id); ok {
+			m.report.Warnf("Feature %q is deprecated; use %q", cur.id, strings.TrimSuffix(mapped, ":1"))
 		}
 
-		// Resolve the feature (with lockfile if set)
-		feature, err := m.resolveFeature(ctx, id, options)
+		feature, err := m.resolveFeature(ctx, cur.id, cur.options)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve feature %q: %w", id, err)
-		}
-
-		// Use metadata ID as key if available
-		key := id
-		if feature.Metadata != nil && feature.Metadata.ID != "" {
-			key = feature.Metadata.ID
-		}
-		resolved[key] = feature
-	}
-
-	// Recursively resolve dependencies
-	if err := m.resolveDependencies(ctx, resolved); err != nil {
-		return nil, err
-	}
-
-	// Convert map to slice
-	features := make([]*Feature, 0, len(resolved))
-	for _, f := range resolved {
-		features = append(features, f)
-		if f.Metadata != nil && f.Metadata.Deprecated {
-			report.OrDiscard(m.report).Warnf("Feature %s is deprecated; see its documentation for a replacement", f.ID)
-		}
-	}
-
-	// Order features (dependencies were resolved above)
-	ordered, err := OrderFeatures(features, overrideOrder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to order features: %w", err)
-	}
-
-	return ordered, nil
-}
-
-// resolveDependencies recursively resolves all dependencies for the given features.
-//
-// Each dependency reference is resolved at most once. Without that guard a
-// reference that never matches its resolved feature (e.g. a versioned
-// "ghcr.io/.../pipx-package:1" key) was re-resolved forever.
-func (m *Manager) resolveDependencies(ctx context.Context, resolved map[string]*Feature) error {
-	attempted := make(map[string]bool)
-
-	for pass := 0; ; pass++ {
-		unresolved := m.collectUnresolvedDependencies(resolved)
-		for depID := range unresolved {
-			if attempted[depID] {
-				delete(unresolved, depID)
+			if cur.parent != nil {
+				return nil, fmt.Errorf("failed to resolve dependency %q of %s: %w", cur.id, cur.parent.feature.ID, err)
 			}
+			return nil, fmt.Errorf("failed to resolve feature %q: %w", cur.id, err)
 		}
-		if len(unresolved) == 0 {
-			return nil
+		// A string value is the "version" option only for a feature that
+		// declares one.
+		if _, isString := cur.value.(string); isString && !declaresOption(feature, "version") {
+			feature.Options = map[string]interface{}{}
 		}
-		if pass >= maxDependencyPasses {
-			return fmt.Errorf("feature dependencies did not converge after %d passes (unresolved: %v)", maxDependencyPasses, mapKeys(unresolved))
+		if cur.parent != nil {
+			cur.parent.dependsOn = append(cur.parent.dependsOn, feature)
 		}
-
-		// Resolve each unresolved dependency (with lockfile if set)
-		for depID, depOptions := range unresolved {
-			attempted[depID] = true
-			feature, err := m.resolveFeature(ctx, depID, depOptions)
-			if err != nil {
-				return fmt.Errorf("failed to resolve dependency %q: %w", depID, err)
-			}
-
-			// Use metadata ID as key if available
-			key := depID
-			if feature.Metadata != nil && feature.Metadata.ID != "" {
-				key = feature.Metadata.ID
-			}
-			// Never let a dependency overwrite a feature (and its options)
-			// that is already resolved under the same ID.
-			if _, exists := resolved[key]; !exists {
-				resolved[key] = feature
-			}
-		}
-	}
-}
-
-func mapKeys(m map[string]map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-// normalizeFeatureRef reduces a feature reference to the bare feature name so
-// references can be compared regardless of registry, version tag or digest:
-//
-//	ghcr.io/devcontainers/features/node:1      -> node
-//	ghcr.io/devcontainers/features/node@sha256:… -> node
-//	./local-feature                             -> local-feature
-//	https://example.com/feature.tgz             -> feature
-func normalizeFeatureRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if i := strings.Index(ref, "@"); i >= 0 {
-		ref = ref[:i]
-	}
-	ref = strings.TrimRight(ref, "/")
-	name := path.Base(ref)
-	if i := strings.LastIndex(name, ":"); i >= 0 {
-		name = name[:i]
-	}
-	name = strings.TrimSuffix(name, ".tgz")
-	name = strings.TrimSuffix(name, ".tar.gz")
-	return name
-}
-
-// collectUnresolvedDependencies finds all dependencies that haven't been resolved yet.
-func (m *Manager) collectUnresolvedDependencies(resolved map[string]*Feature) map[string]map[string]interface{} {
-	unresolved := make(map[string]map[string]interface{})
-
-	// Helper to check if a dependency is already resolved
-	// Dependencies can be specified as full OCI paths or short IDs
-	isResolved := func(depID string) bool {
-		// Check exact match first
-		if _, exists := resolved[depID]; exists {
-			return true
-		}
-		// Dependencies can be full OCI refs (with tag or digest), local paths
-		// or tarball URLs, while resolved features are keyed by metadata ID.
-		want := normalizeFeatureRef(depID)
-		for key, f := range resolved {
-			if key == depID || normalizeFeatureRef(key) == want {
-				return true
-			}
-			if f.ID != "" && (f.ID == depID || normalizeFeatureRef(f.ID) == want) {
-				return true
-			}
-			if f.Metadata != nil && f.Metadata.ID == want {
-				return true
-			}
-			if f.Metadata != nil && slices.ContainsFunc(f.Metadata.LegacyIds, func(id string) bool { return normalizeFeatureRef(id) == want }) {
-				return true
-			}
-		}
-		return false
-	}
-
-	for _, feature := range resolved {
-		if feature.Metadata == nil {
+		if slices.ContainsFunc(nodes, func(n *node) bool { return sameFeature(n.feature, feature) }) {
 			continue
 		}
 
-		// Check hard dependencies (dependsOn)
-		for depID, depOptionsRaw := range feature.Metadata.DependsOn {
-			if !isResolved(depID) {
-				// Parse options from dependency config
-				var depOptions map[string]interface{}
-				if opts, ok := depOptionsRaw.(map[string]interface{}); ok {
-					depOptions = opts
-				} else {
-					depOptions = make(map[string]interface{})
-				}
-				unresolved[depID] = depOptions
-			}
+		n := &node{feature: feature}
+		nodes = append(nodes, n)
+		if feature.Metadata == nil {
+			continue
 		}
-
-		// installsAfter is only an ordering hint (spec): it never adds a
-		// feature the user did not ask for.
+		for _, dep := range feature.Metadata.DependsOn {
+			work = append(work, request{id: dep.ID, options: dep.Options, parent: n})
+		}
+		for _, ref := range feature.Metadata.InstallsAfter {
+			src, err := ParseFeatureSource(ref)
+			if err != nil {
+				// The feature's author wrote it; it can order nothing.
+				m.report.Warnf("Feature %s: ignoring installsAfter %q: %v", feature.ID, ref, err)
+				continue
+			}
+			n.installsAfter = append(n.installsAfter, softDependency{ref: ref, source: src})
+		}
 	}
 
-	return unresolved
+	for _, n := range nodes {
+		if n.feature.Metadata != nil && n.feature.Metadata.Deprecated {
+			m.report.Warnf("Feature %s is deprecated; see its documentation for a replacement", n.feature.ID)
+		}
+	}
+	ordered, err := m.orderFeatures(ctx, nodes, overrideOrder)
+	if err != nil {
+		return nil, fmt.Errorf("failed to order features: %w", err)
+	}
+	return ordered, nil
+}
+
+// deprecatedIntoOptions are legacy features that became options of another
+// feature (devcontainers/cli's updateDeprecatedFeaturesIntoOptions).
+var deprecatedIntoOptions = map[string]struct {
+	feature string
+	options map[string]interface{}
+}{
+	"gradle":     {"java", map[string]interface{}{"installGradle": true}},
+	"maven":      {"java", map[string]interface{}{"installMaven": true}},
+	"jupyterlab": {"python", map[string]interface{}{"installJupyterlab": true}},
+}
+
+// userRequests turns devcontainer.json's features into requests, in a
+// stable order. A legacy feature that became an option ("maven") sets that
+// option on the feature that absorbed it ("java"), which is added when
+// devcontainer.json does not list it.
+func (m *Manager) userRequests(featuresConfig map[string]interface{}) []request {
+	ids := make([]string, 0, len(featuresConfig))
+	for id := range featuresConfig {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	var reqs []request
+	var absorbed []string
+	for _, id := range ids {
+		if _, ok := deprecatedIntoOptions[id]; ok {
+			absorbed = append(absorbed, id)
+			continue
+		}
+		value := featuresConfig[id]
+		reqs = append(reqs, request{id: id, value: value, options: featureOptions(value)})
+	}
+	for _, id := range absorbed {
+		into := deprecatedIntoOptions[id]
+		qualified := "ghcr.io/devcontainers/features/" + into.feature
+		m.report.Warnf("Feature %q is deprecated: it is now part of the %q feature (see https://github.com/devcontainers/features/tree/main/src/%s#options)", id, into.feature, into.feature)
+		i := slices.IndexFunc(reqs, func(r request) bool {
+			return r.id == into.feature || r.id == qualified || strings.HasPrefix(r.id, qualified+":")
+		})
+		if i < 0 {
+			reqs = append(reqs, request{id: qualified + ":1", options: map[string]interface{}{}})
+			i = len(reqs) - 1
+		}
+		opts := make(map[string]interface{}, len(reqs[i].options)+len(into.options))
+		for k, v := range reqs[i].options {
+			opts[k] = v
+		}
+		for k, v := range into.options {
+			opts[k] = v
+		}
+		reqs[i].options, reqs[i].value = opts, opts
+	}
+	return reqs
+}
+
+// declaresOption reports whether the feature's metadata declares name.
+func declaresOption(f *Feature, name string) bool {
+	if f.Metadata == nil {
+		return false
+	}
+	_, ok := f.Metadata.Options[name]
+	return ok
 }

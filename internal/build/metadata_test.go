@@ -104,6 +104,27 @@ func TestMetadataBuilder_FeaturesOnly(t *testing.T) {
 	}
 }
 
+// The label records a feature by the reference devcontainer.json uses, as
+// devcontainers/cli does (F16).
+func TestMetadataBuilder_FeatureIDIsTheReference(t *testing.T) {
+	builder := NewMetadataBuilder()
+	builder.WithFeatures([]*features.Feature{{
+		ID:       "ghcr.io/devcontainers/features/node:1",
+		Metadata: &features.FeatureMetadata{ID: "node"},
+	}})
+	result, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configs []devcontainer.DevContainerConfig
+	if err := json.Unmarshal([]byte(result), &configs); err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 || configs[0].ID != "ghcr.io/devcontainers/features/node:1" {
+		t.Errorf("got %+v", configs)
+	}
+}
+
 func TestMetadataBuilder_FeaturesNilMetadata(t *testing.T) {
 	builder := NewMetadataBuilder()
 

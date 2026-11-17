@@ -18,6 +18,7 @@ func dockerConfigDir(t *testing.T, config string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.json"), []byte(config), 0o600))
 	t.Setenv("DOCKER_CONFIG", dir)
 	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("DEVCONTAINERS_OCI_AUTH", "")
 }
 
 // fakeHelper installs docker-credential-<name> on PATH, printing out for
@@ -86,4 +87,31 @@ func TestLookupWithoutDockerConfig(t *testing.T) {
 	_, ok, err := Lookup(context.Background(), "ghcr.io")
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+// DEVCONTAINERS_OCI_AUTH (registry|user|token, comma-separated) comes
+// first, as in devcontainers/cli.
+func TestLookupDevcontainersOCIAuth(t *testing.T) {
+	dockerConfigDir(t, `{"auths": {"registry.example.com": {"username": "bob", "password": "pw"}}}`)
+	t.Setenv("DEVCONTAINERS_OCI_AUTH", "other.example.com|x|y,registry.example.com|alice|tok")
+	creds, ok, err := Lookup(context.Background(), "registry.example.com")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, Credentials{Username: "alice", Password: "tok"}, creds)
+}
+
+// Identity tokens (az acr login) are refresh tokens, from the config or a
+// helper's "<token>" user.
+func TestLookupIdentityTokens(t *testing.T) {
+	dockerConfigDir(t, `{"auths": {"acr.azurecr.io": {"auth": "", "identitytoken": "refresh-1"}}, "credHelpers": {"helped.azurecr.io": "fake"}}`)
+	creds, ok, err := Lookup(context.Background(), "acr.azurecr.io")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, Credentials{IdentityToken: "refresh-1"}, creds)
+
+	fakeHelper(t, "fake", "helped.azurecr.io", `{"Username": "<token>", "Secret": "refresh-2"}`)
+	creds, ok, err = Lookup(context.Background(), "helped.azurecr.io")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, Credentials{IdentityToken: "refresh-2"}, creds)
 }

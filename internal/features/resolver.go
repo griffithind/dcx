@@ -90,28 +90,6 @@ func verifyIntegrity(data []byte, expected string) error {
 	return nil
 }
 
-// extractDigestFromResolved extracts the manifest digest from a lockfile resolved field.
-// The resolved field format is: registry/repository/resource@sha256:...
-// Returns empty string if no digest is present (e.g., for tarball URLs or tag references).
-func extractDigestFromResolved(resolved string) string {
-	if resolved == "" {
-		return ""
-	}
-	// Look for @sha256: or @sha384: or @sha512: pattern
-	atIndex := strings.LastIndex(resolved, "@")
-	if atIndex == -1 {
-		return ""
-	}
-	digest := resolved[atIndex+1:]
-	// Validate it looks like a digest (starts with sha256:, sha384:, or sha512:)
-	if strings.HasPrefix(digest, "sha256:") ||
-		strings.HasPrefix(digest, "sha384:") ||
-		strings.HasPrefix(digest, "sha512:") {
-		return digest
-	}
-	return ""
-}
-
 // NewResolver creates a new feature resolver reporting fetch progress to rep
 // (nil discards it).
 func NewResolver(configDir string, rep report.Reporter) (*Resolver, error) {
@@ -183,12 +161,13 @@ func (r *Resolver) ResolveWithLockfile(ctx context.Context, id string, options m
 	return feature, nil
 }
 
-// resolveLocal resolves a local feature.
+// resolveLocal resolves a local feature. Its folder must be inside the
+// config's .devcontainer folder (or the config file's folder), as
+// devcontainers/cli requires.
 func (r *Resolver) resolveLocal(ctx context.Context, feature *Feature) error {
-	// Resolve path relative to config directory
-	path := feature.Source.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(r.configDir, path)
+	path := filepath.Join(r.configDir, feature.Source.Path)
+	if root := localFeatureRoot(r.configDir); !isWithinDir(root, path) {
+		return fmt.Errorf("local feature %s must be inside %s", feature.Source.Path, root)
 	}
 
 	// Verify directory exists
@@ -212,19 +191,29 @@ func (r *Resolver) resolveLocal(ctx context.Context, feature *Feature) error {
 	return nil
 }
 
-// resolveOCIWithLockfile resolves an OCI feature, optionally using lockfile for pinned versions.
-func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature, lockfile *lockfile.Lockfile) error {
+// localFeatureRoot is the folder local features must be in: the nearest
+// .devcontainer folder containing the config file, else the config file's
+// own folder.
+func localFeatureRoot(configDir string) string {
+	for dir := filepath.Clean(configDir); ; dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == ".devcontainer" {
+			return dir
+		}
+		if filepath.Dir(dir) == dir {
+			return filepath.Clean(configDir)
+		}
+	}
+}
+
+// resolveOCIWithLockfile resolves an OCI feature. A lockfile entry pins it
+// to the manifest digest it records (its integrity, as devcontainers/cli
+// writes it).
+func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature, lf *lockfile.Lockfile) error {
 	ref := feature.Source
 
-	// Check if we have a locked version
-	var expectedIntegrity string
 	var lockedManifestDigest string
-	if lockfile != nil {
-		if locked, ok := lockfile.Get(feature.ID); ok {
-			expectedIntegrity = locked.Integrity
-			// Extract manifest digest from Resolved field (format: registry/path@sha256:...)
-			lockedManifestDigest = extractDigestFromResolved(locked.Resolved)
-		}
+	if locked, ok := lf.Get(feature.ID); ok && strings.HasPrefix(locked.Integrity, "sha256:") {
+		lockedManifestDigest = locked.Integrity
 	}
 
 	// Compute cache key
@@ -238,7 +227,8 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	if lockedManifestDigest == "" && !ref.IsDigest() {
 		maxAge = ociTagTTL
 	}
-	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID(), maxAge); hit || err != nil {
+	want := DigestInfo{ManifestDigest: lockedManifestDigest}
+	if hit, err := r.useCache(feature, cachePath, want, ref.CanonicalID(), maxAge); hit || err != nil {
 		return err
 	}
 
@@ -251,15 +241,18 @@ func (r *Resolver) resolveOCIWithLockfile(ctx context.Context, feature *Feature,
 	var digestInfo *DigestInfo
 	err := r.fetchInto(cachePath, func(dir string) error {
 		var err error
-		digestInfo, err = r.fetchOCIWithDigest(ctx, ref, dir, lockedManifestDigest, expectedIntegrity)
+		digestInfo, err = r.fetchOCIWithDigest(ctx, ref, dir, lockedManifestDigest)
 		return err
 	})
 	if err != nil {
 		if maxAge > 0 {
-			if hit, _ := r.useCache(feature, cachePath, expectedIntegrity, ref.CanonicalID(), 0); hit {
+			if hit, _ := r.useCache(feature, cachePath, DigestInfo{}, ref.CanonicalID(), 0); hit {
 				r.report.Warnf("Could not refresh %s (%v); using the cached copy", ref.CanonicalID(), err)
 				return nil
 			}
+		}
+		if lockedManifestDigest != "" {
+			return fmt.Errorf("failed to fetch OCI feature %s at the digest devcontainer-lock.json pins (a lockfile written by an older dcx records another digest: run 'dcx lock'): %w", feature.ID, err)
 		}
 		return fmt.Errorf("failed to fetch OCI feature: %w", err)
 	}
@@ -284,17 +277,15 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 
 	// Check if we have a locked version
 	var expectedIntegrity string
-	if lockfile != nil {
-		if locked, ok := lockfile.Get(feature.ID); ok {
-			expectedIntegrity = locked.Integrity
-		}
+	if locked, ok := lockfile.Get(feature.ID); ok {
+		expectedIntegrity = locked.Integrity
 	}
 
 	// Compute cache key
 	cacheKey := computeCacheKey(ref.URL)
 	cachePath := filepath.Join(r.cacheDir, cacheKey)
 
-	if hit, err := r.useCache(feature, cachePath, expectedIntegrity, ref.URL, 0); hit || err != nil {
+	if hit, err := r.useCache(feature, cachePath, DigestInfo{Integrity: expectedIntegrity}, ref.URL, 0); hit || err != nil {
 		return err
 	}
 
@@ -323,7 +314,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 }
 
 // useCache fills feature from its cache entry when the entry is complete
-// and matches expectedIntegrity (from the lockfile, if any). It reports
+// and matches the non-empty fields of want (from the lockfile). It reports
 // whether the cache was used. Incomplete or mismatching entries are
 // removed so they are fetched again; with force-pull the cache is ignored.
 //
@@ -333,7 +324,7 @@ func (r *Resolver) resolveHTTPWithLockfile(ctx context.Context, feature *Feature
 //
 // With maxAge > 0 an entry fetched longer ago is not used (but kept, as a
 // fallback when the refresh fails).
-func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name string, maxAge time.Duration) (bool, error) {
+func (r *Resolver) useCache(feature *Feature, cachePath string, want DigestInfo, name string, maxAge time.Duration) (bool, error) {
 	if r.forcePull {
 		return false, os.RemoveAll(cachePath)
 	}
@@ -351,7 +342,8 @@ func (r *Resolver) useCache(feature *Feature, cachePath, expectedIntegrity, name
 			return false, nil
 		}
 	}
-	if expectedIntegrity != "" && digestInfo.Integrity != expectedIntegrity {
+	if (want.Integrity != "" && digestInfo.Integrity != want.Integrity) ||
+		(want.ManifestDigest != "" && digestInfo.ManifestDigest != want.ManifestDigest) {
 		r.report.Infof("  Cache integrity mismatch for %s, re-fetching...", name)
 		return false, os.RemoveAll(cachePath)
 	}
@@ -421,17 +413,15 @@ func readLimited(r io.Reader, limit int64) ([]byte, error) {
 
 // fetchOCIWithDigest fetches a feature from an OCI registry and returns digest info.
 // If lockedManifestDigest is provided (from lockfile), it fetches the manifest by digest
-// instead of by tag, ensuring exact reproducibility.
-func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, destPath string, lockedManifestDigest string, expectedIntegrity string) (*DigestInfo, error) {
-	// Build the OCI manifest URL
-	// For ghcr.io, the format is: https://ghcr.io/v2/{repository}/{feature}/manifests/{tag_or_digest}
-	// When we have a locked manifest digest, use it instead of the tag for exact reproducibility
+// instead of by tag, ensuring exact reproducibility. A manifest fetched by
+// digest (pinned by the lockfile or the reference) must hash to it.
+func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, destPath string, lockedManifestDigest string) (*DigestInfo, error) {
 	manifestReference := ref.Version
 	if lockedManifestDigest != "" {
 		manifestReference = lockedManifestDigest
 	}
-	manifestURL := fmt.Sprintf("https://%s/v2/%s/%s/manifests/%s",
-		ref.Registry, ref.Repository, ref.Resource, manifestReference)
+	base := fmt.Sprintf("%s://%s/v2/%s/%s", ref.scheme(), ref.Registry, ref.Repository, ref.Resource)
+	manifestURL := base + "/manifests/" + manifestReference
 
 	// Get token for authentication (required for most OCI registries)
 	token, tokenErr := r.getRegistryToken(ctx, ref)
@@ -468,16 +458,17 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 		return nil, fmt.Errorf("registry returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Read manifest body for digest computation
 	manifestBody, err := readLimited(resp.Body, maxManifestSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	// Capture manifest digest from header or compute it
-	manifestDigest := resp.Header.Get("Docker-Content-Digest")
-	if manifestDigest == "" {
-		manifestDigest = computeIntegrity(manifestBody)
+	// The manifest digest is the hash of the bytes received, never a
+	// header the registry (or a proxy) sends.
+	manifestDigest := computeIntegrity(manifestBody)
+	if strings.HasPrefix(manifestReference, "sha256:") && manifestDigest != manifestReference {
+		return nil, fmt.Errorf("feature %s/%s/%s: manifest digest mismatch: asked for %s, got %s",
+			ref.Registry, ref.Repository, ref.Resource, manifestReference, manifestDigest)
 	}
 
 	// Parse manifest
@@ -515,8 +506,7 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	}
 
 	// Fetch the layer blob
-	blobURL := fmt.Sprintf("https://%s/v2/%s/%s/blobs/%s",
-		ref.Registry, ref.Repository, ref.Resource, featureLayer.Digest)
+	blobURL := base + "/blobs/" + featureLayer.Digest
 
 	blobReq, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
 	if err != nil {
@@ -550,11 +540,6 @@ func (r *Resolver) fetchOCIWithDigest(ctx context.Context, ref FeatureSource, de
 	if strings.HasPrefix(featureLayer.Digest, "sha256:") && integrity != featureLayer.Digest {
 		return nil, fmt.Errorf("feature %s/%s/%s: layer digest mismatch: manifest says %s, got %s",
 			ref.Registry, ref.Repository, ref.Resource, featureLayer.Digest, integrity)
-	}
-
-	// Verify integrity against expected if provided
-	if err := verifyIntegrity(bodyData, expectedIntegrity); err != nil {
-		return nil, fmt.Errorf("feature %s/%s/%s: %w", ref.Registry, ref.Repository, ref.Resource, err)
 	}
 
 	// Extract the tarball based on media type
@@ -781,7 +766,7 @@ func extractTarReader(tr *tar.Reader, destPath string) error {
 // It follows the Docker Registry v2 authentication spec.
 func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (string, error) {
 	// First, make an unauthenticated request to get the WWW-Authenticate header
-	pingURL := fmt.Sprintf("https://%s/v2/", ref.Registry)
+	pingURL := fmt.Sprintf("%s://%s/v2/", ref.scheme(), ref.Registry)
 	req, err := http.NewRequestWithContext(ctx, "GET", pingURL, nil)
 	if err != nil {
 		return "", err
@@ -813,7 +798,7 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	}
 	if strings.HasPrefix(strings.ToLower(authHeader), "basic") {
 		// The registry takes the credentials on every request.
-		if !haveCreds {
+		if !haveCreds || creds.IdentityToken != "" {
 			return "", fmt.Errorf("registry %s requires credentials (docker login %s)", ref.Registry, ref.Registry)
 		}
 		return basicAuthPrefix + base64.StdEncoding.EncodeToString([]byte(creds.Username+":"+creds.Password)), nil
@@ -837,12 +822,29 @@ func (r *Resolver) getRegistryToken(ctx context.Context, ref FeatureSource) (str
 	query.Set("service", service)
 	query.Set("scope", scope)
 	tokenURL.RawQuery = query.Encode()
-	tokenReq, err := http.NewRequestWithContext(ctx, "GET", tokenURL.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	if haveCreds {
-		tokenReq.SetBasicAuth(creds.Username, creds.Password)
+	var tokenReq *http.Request
+	if creds.IdentityToken != "" {
+		// An identity (refresh) token is exchanged with an OAuth2 POST.
+		form := url.Values{
+			"client_id":     {"dcx"},
+			"grant_type":    {"refresh_token"},
+			"service":       {service},
+			"scope":         {scope},
+			"refresh_token": {creds.IdentityToken},
+		}
+		tokenReq, err = http.NewRequestWithContext(ctx, "POST", realm, strings.NewReader(form.Encode()))
+		if err != nil {
+			return "", err
+		}
+		tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		tokenReq, err = http.NewRequestWithContext(ctx, "GET", tokenURL.String(), nil)
+		if err != nil {
+			return "", err
+		}
+		if haveCreds {
+			tokenReq.SetBasicAuth(creds.Username, creds.Password)
+		}
 	}
 
 	tokenResp, err := httpClient.Do(tokenReq)

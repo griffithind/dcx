@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "name": "Feature with Dependencies",
     "description": "Test feature that has dependencies",
-    "installsAfter": ["simple-marker"],
+    "installsAfter": ["./features/simple-marker"],
     "options": {
         "message": {
             "type": "string",

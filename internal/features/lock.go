@@ -2,86 +2,54 @@ package features
 
 import (
 	"fmt"
-	"sort"
-	"strings"
+	"slices"
 
 	"github.com/griffithind/dcx/internal/lockfile"
 )
 
-// GenerateLockfile creates a lockfile from resolved features.
-// Local features (./path) are excluded per the devcontainer specification.
+// GenerateLockfile creates a lockfile from resolved features, as
+// devcontainers/cli writes it: each OCI or tarball feature keyed by its
+// reference as written, with its version, the resolved reference, its
+// integrity (the OCI manifest digest, or the tarball's SHA256) and its
+// dependsOn references in declaration order. Local features are not
+// locked.
 func GenerateLockfile(features []*Feature) *lockfile.Lockfile {
 	lf := lockfile.New()
-
 	for _, f := range features {
-		// Skip local features per spec
-		if f.Source.Type == SourceTypeLocalPath {
-			continue
+		if entry, ok := lockedEntry(f); ok {
+			lf.Set(f.ID, entry)
 		}
-
-		// Skip features without integrity info (shouldn't happen but be safe)
-		if f.Integrity == "" {
-			continue
-		}
-
-		normalizedID := lockfile.NormalizeFeatureID(f.ID)
-
-		var resolved string
-		switch f.Source.Type {
-		case SourceTypeOCI:
-			// Format: registry/repository/resource@sha256:...
-			if f.ManifestDigest != "" {
-				resolved = fmt.Sprintf("%s/%s/%s@%s",
-					f.Source.Registry, f.Source.Repository,
-					f.Source.Resource, f.ManifestDigest)
-			} else {
-				// Fallback to version tag if no digest
-				resolved = fmt.Sprintf("%s/%s/%s:%s",
-					f.Source.Registry, f.Source.Repository,
-					f.Source.Resource, f.Source.Version)
-			}
-		case SourceTypeTarball:
-			// For HTTP tarballs, use the URL as resolved
-			resolved = f.Source.URL
-		}
-
-		// Extract version from metadata
-		version := ""
-		if f.Metadata != nil {
-			version = f.Metadata.Version
-		}
-
-		// Extract dependencies
-		var dependsOn []string
-		if f.Metadata != nil && len(f.Metadata.DependsOn) > 0 {
-			dependsOn = extractDependencies(f.Metadata.DependsOn)
-		}
-
-		lf.Set(normalizedID, lockfile.LockedFeature{
-			Version:   version,
-			Resolved:  resolved,
-			Integrity: f.Integrity,
-			DependsOn: dependsOn,
-		})
 	}
-
 	return lf
 }
 
-// extractDependencies extracts feature IDs from the dependsOn map.
-func extractDependencies(dependsOn map[string]interface{}) []string {
-	if len(dependsOn) == 0 {
-		return nil
+// lockedEntry is f's lockfile entry; ok is false for a feature that is not
+// locked (local, or without a digest).
+func lockedEntry(f *Feature) (lockfile.LockedFeature, bool) {
+	var entry lockfile.LockedFeature
+	switch f.Source.Type {
+	case SourceTypeOCI:
+		if f.ManifestDigest == "" {
+			return entry, false
+		}
+		entry.Integrity = f.ManifestDigest
+		entry.Resolved = fmt.Sprintf("%s/%s/%s@%s", f.Source.Registry, f.Source.Repository, f.Source.Resource, f.ManifestDigest)
+	case SourceTypeTarball:
+		if f.Integrity == "" {
+			return entry, false
+		}
+		entry.Integrity = f.Integrity
+		entry.Resolved = f.Source.URL
+	default:
+		return entry, false
 	}
-
-	deps := make([]string, 0, len(dependsOn))
-	for id := range dependsOn {
-		deps = append(deps, strings.ToLower(id))
+	if f.Metadata != nil {
+		entry.Version = f.Metadata.Version
+		for _, dep := range f.Metadata.DependsOn {
+			entry.DependsOn = append(entry.DependsOn, dep.ID)
+		}
 	}
-
-	// Sort for consistent output
-	sort.Strings(deps)
-	return deps
+	return entry, true
 }
 
 // VerifyLockfile compares resolved features against an existing lockfile.
@@ -95,14 +63,11 @@ func VerifyLockfile(features []*Feature, lf *lockfile.Lockfile) []LockfileMismat
 
 	// Check each feature against lockfile
 	for _, f := range features {
-		// Skip local features
-		if f.Source.Type == SourceTypeLocalPath {
+		entry, ok := lockedEntry(f)
+		if !ok {
 			continue
 		}
-
-		normalizedID := lockfile.NormalizeFeatureID(f.ID)
-		locked, ok := lf.Get(normalizedID)
-
+		locked, ok := lf.Get(f.ID)
 		if !ok {
 			mismatches = append(mismatches, LockfileMismatch{
 				FeatureID: f.ID,
@@ -111,43 +76,25 @@ func VerifyLockfile(features []*Feature, lf *lockfile.Lockfile) []LockfileMismat
 			})
 			continue
 		}
-
-		// Check version
-		version := ""
-		if f.Metadata != nil {
-			version = f.Metadata.Version
-		}
-		if version != "" && locked.Version != "" && version != locked.Version {
+		if entry.Version != "" && locked.Version != "" && entry.Version != locked.Version {
 			mismatches = append(mismatches, LockfileMismatch{
 				FeatureID: f.ID,
 				Type:      MismatchVersion,
-				Message:   fmt.Sprintf("version mismatch: lockfile has %s, resolved %s", locked.Version, version),
+				Message:   fmt.Sprintf("%s: version mismatch: lockfile has %s, resolved %s", f.ID, locked.Version, entry.Version),
 			})
 		}
-
-		// Check integrity
-		if f.Integrity != "" && locked.Integrity != "" && f.Integrity != locked.Integrity {
+		if locked.Integrity != entry.Integrity {
 			mismatches = append(mismatches, LockfileMismatch{
 				FeatureID: f.ID,
 				Type:      MismatchIntegrity,
-				Message:   fmt.Sprintf("integrity mismatch: lockfile has %s, resolved %s", locked.Integrity, f.Integrity),
+				Message:   fmt.Sprintf("%s: integrity mismatch: lockfile has %s, resolved %s", f.ID, locked.Integrity, entry.Integrity),
 			})
 		}
 	}
 
 	// Check for features in lockfile that aren't in resolved features
 	for id := range lf.Features {
-		found := false
-		for _, f := range features {
-			if f.Source.Type == SourceTypeLocalPath {
-				continue
-			}
-			if lockfile.NormalizeFeatureID(f.ID) == id {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(features, func(f *Feature) bool { return f.ID == id && f.Source.Type != SourceTypeLocalPath }) {
 			mismatches = append(mismatches, LockfileMismatch{
 				FeatureID: id,
 				Type:      MismatchExtra,

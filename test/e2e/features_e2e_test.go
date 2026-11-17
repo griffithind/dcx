@@ -876,7 +876,7 @@ func createWorkspaceWithOCIFeature(t *testing.T) string {
 }
 
 // TestCircularDependencyErrorE2E tests that circular feature dependencies are detected.
-// Note: Circular dependency detection is tested at the unit level in ordering_test.go.
+// Note: Circular dependency detection is tested at the unit level in manager_test.go.
 // This E2E test verifies behavior with local features that have mutual dependencies.
 func TestCircularDependencyErrorE2E(t *testing.T) {
 	t.Parallel()

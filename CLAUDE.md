@@ -170,10 +170,11 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | File | Purpose |
 |------|---------|
 | `manager.go` | `Manager.ResolveAll()` - entry point |
-| `resolver.go` | Resolve features from local, OCI registry (credentials via `registryauth`), or HTTP; cache in `~/.cache/dcx/features` |
-| `ordering.go` | Topological sort with dependency resolution |
-| `dockerfile.go` | Generate Dockerfile for feature installation (feature `containerEnv` becomes `ENV`) |
-| `lock.go` | `GenerateLockfile` / `VerifyLockfile` |
+| `types.go` | `ParseFeatureSource` (upstream's reference rules, `LegacyFeatureRef`), `Dependencies` (ordered `dependsOn`), `EnvFile` |
+| `resolver.go` | Resolve features from local (inside `.devcontainer`), OCI registry (credentials via `registryauth`; manifests verified against pinned digests), or HTTPS; cache in `~/.cache/dcx/features` |
+| `ordering.go` | Upstream's round-based install order (`node`, `sameFeature`, `compareFeatures`, override priorities) |
+| `dockerfile.go` | Generate Dockerfile for feature installation (feature `containerEnv` becomes `ENV` before its install; `FeatureUsers`) |
+| `lock.go` | `GenerateLockfile` / `VerifyLockfile` (upstream's format: keys as written, integrity = manifest digest) |
 
 ### Build Layer (`internal/build/`)
 | File | Purpose |
@@ -378,14 +379,14 @@ Supported patterns in `devcontainer.json`:
 ## Feature Resolution
 
 Features resolved in order:
-1. Parse feature map from devcontainer.json
-2. Resolve each feature (local path, OCI registry, HTTP tarball)
+1. Parse feature map from devcontainer.json (legacy short ids mapped, `maven`/`gradle`/`jupyterlab` folded into options)
+2. Resolve each feature (local path, OCI registry, HTTPS tarball); a feature is its source plus options (`sameFeature`), so a dependency with other options installs again
 3. Recursively resolve `dependsOn` (fetched when not listed; `installsAfter` only orders features that are listed)
-4. Topological sort with soft dependency scoring
-5. Generate Dockerfile with staged feature installation
+4. Order in rounds as devcontainers/cli does (`orderFeatures`): dependencies first, `overrideFeatureInstallOrder` as a priority within rounds, rounds sorted by `compareFeatures`
+5. Generate Dockerfile with staged feature installation; each feature's options are its own `devcontainer-features.env`
 
 OCI features fetched from registries like `ghcr.io/devcontainers/features/go:1`.
-Lockfile support for reproducible builds via digest pinning.
+Lockfile support for reproducible builds via digest pinning, in devcontainers/cli's format (`lockfile.CompareIDs` orders keys like `localeCompare`); `up`/`build` write it only when it is an empty file.
 
 ## DCX Customizations
 

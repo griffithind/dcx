@@ -6,23 +6,80 @@ import (
 	"testing"
 )
 
-func TestNormalizeFeatureID(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"ghcr.io/devcontainers/features/common-utils", "ghcr.io/devcontainers/features/common-utils"},
-		{"GHCR.IO/DevContainers/Features/Common-Utils", "ghcr.io/devcontainers/features/common-utils"},
-		{"Docker-in-Docker", "docker-in-docker"},
+// TestCompareIDs pins the localeCompare order devcontainers/cli writes
+// lockfile keys in, where it differs from byte order.
+func TestCompareIDs(t *testing.T) {
+	ordered := []string{
+		"a",
+		"a_1", // a prefix first; punctuation '_' < '-' < '/' before digits
+		"a-b",
+		"a/b",
+		"a1",
+		"ab",
+		"aB", // case only breaks ties, lowercase first
+		"B",  // letters ignore case: 'a' < 'B' < 'c'
+		"c",
+	}
+	for i := range ordered {
+		for j := range ordered {
+			got := CompareIDs(ordered[i], ordered[j])
+			switch {
+			case i < j && got >= 0, i > j && got <= 0, i == j && got != 0:
+				t.Errorf("CompareIDs(%q, %q) = %d", ordered[i], ordered[j], got)
+			}
+		}
+	}
+}
+
+// TestSaveWritesDevcontainersCLIForm: the same bytes JSON.stringify(lockfile,
+// null, 2) + "\n" gives, so the two tools never churn the file.
+func TestSaveWritesDevcontainersCLIForm(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "devcontainer.json")
+	lf := New()
+	lf.Set("ghcr.io/devcontainers/features/node:1", LockedFeature{
+		Version: "1.6.1", Resolved: "ghcr.io/devcontainers/features/node@sha256:aa", Integrity: "sha256:aa",
+	})
+	lf.Set("ghcr.io/devcontainers-extra/features/tool<x>:1", LockedFeature{
+		Version: "2.0.0", Resolved: "ghcr.io/devcontainers-extra/features/tool@sha256:bb", Integrity: "sha256:bb",
+		DependsOn: []string{"ghcr.io/devcontainers/features/node:1", "ghcr.io/devcontainers/features/common-utils"},
+	})
+	if err := lf.Save(configPath); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(Path(configPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "features": {
+    "ghcr.io/devcontainers-extra/features/tool<x>:1": {
+      "version": "2.0.0",
+      "resolved": "ghcr.io/devcontainers-extra/features/tool@sha256:bb",
+      "integrity": "sha256:bb",
+      "dependsOn": [
+        "ghcr.io/devcontainers/features/node:1",
+        "ghcr.io/devcontainers/features/common-utils"
+      ]
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "1.6.1",
+      "resolved": "ghcr.io/devcontainers/features/node@sha256:aa",
+      "integrity": "sha256:aa"
+    }
+  }
+}
+`
+	if string(data) != want {
+		t.Errorf("lockfile:\n%s\nwant:\n%s", data, want)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := NormalizeFeatureID(tt.input)
-			if result != tt.expected {
-				t.Errorf("NormalizeFeatureID(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
+	if err := New().Save(configPath); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(Path(configPath))
+	if string(data) != "{\n  \"features\": {}\n}\n" {
+		t.Errorf("empty lockfile: %q", data)
 	}
 }
 
@@ -84,13 +141,10 @@ func TestLockfileSetGet(t *testing.T) {
 		t.Errorf("Integrity = %q, want %q", got.Integrity, feature.Integrity)
 	}
 
-	// Get with different case (should work due to normalization)
-	got, ok = lf.Get("GHCR.IO/DevContainers/Features/GO")
-	if !ok {
-		t.Fatal("Get() should find feature with different case")
-	}
-	if got.Version != feature.Version {
-		t.Errorf("Version = %q, want %q", got.Version, feature.Version)
+	// Keys are the references as written (devcontainers/cli looks them
+	// up exactly).
+	if _, ok = lf.Get("GHCR.IO/DevContainers/Features/GO"); ok {
+		t.Error("Get() matched a differently cased reference")
 	}
 
 	// Get non-existent feature

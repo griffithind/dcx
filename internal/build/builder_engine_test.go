@@ -2,8 +2,11 @@ package build
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/griffithind/dcx/internal/features"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +18,8 @@ type fakeEngine struct {
 	images  map[string]bool
 	configs map[string]ImageConfig
 	Builds  []DockerfileBuildOptions
+	// onBuild, when set, sees each build while its context still exists.
+	onBuild func(DockerfileBuildOptions)
 }
 
 func (f *fakeEngine) ImageConfig(_ context.Context, ref string) (ImageConfig, error) {
@@ -23,6 +28,9 @@ func (f *fakeEngine) ImageConfig(_ context.Context, ref string) (ImageConfig, er
 
 func (f *fakeEngine) BuildImage(_ context.Context, opts DockerfileBuildOptions) error {
 	f.Builds = append(f.Builds, opts)
+	if f.onBuild != nil {
+		f.onBuild(opts)
+	}
 	return nil
 }
 
@@ -69,4 +77,39 @@ func TestBuildUIDUpdateBuildsWithArgs(t *testing.T) {
 	assert.Equal(t, "1001", args["NEW_UID"])
 	assert.Equal(t, "1002", args["NEW_GID"])
 	assert.Equal(t, "dev", args["IMAGE_USER"], "image user defaults to the remote user")
+}
+
+// Without a containerUser features install for the compose service's
+// user, else the image's USER (F3), and each feature gets its options as
+// devcontainer-features.env (F5).
+func TestBuildWithFeaturesUsersAndOptions(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(src, "install.sh"), []byte("#!/bin/sh\n"), 0o755))
+	feature := &features.Feature{ID: "./f", CachePath: src, Options: map[string]interface{}{"version": "18"},
+		Metadata: &features.FeatureMetadata{ID: "f", Options: map[string]features.OptionDefinition{"flavor": {Default: "plain"}}}}
+
+	for _, tc := range []struct{ serviceUser, imageUser, want string }{
+		{"", "", "root"},
+		{"", "node:node", "node"},
+		{"app", "node", "app"},
+	} {
+		var builtin, options string
+		fake := &fakeEngine{configs: map[string]ImageConfig{"base": {User: tc.imageUser}}}
+		fake.onBuild = func(opts DockerfileBuildOptions) {
+			dir := opts.BuildContexts["dev_containers_feature_content_source"]
+			data, err := os.ReadFile(filepath.Join(dir, "builtin.env"))
+			require.NoError(t, err)
+			builtin = string(data)
+			data, err = os.ReadFile(filepath.Join(dir, "feature_0", "devcontainer-features.env"))
+			require.NoError(t, err)
+			options = string(data)
+		}
+		_, err := NewBuilder(fake, nil).BuildWithFeatures(context.Background(), FeatureBuildOptions{
+			BaseImage: "base", Tag: "dcx/ws:features", Features: []*features.Feature{feature}, ServiceUser: tc.serviceUser,
+		})
+		require.NoError(t, err)
+		assert.Contains(t, builtin, "export _CONTAINER_USER="+tc.want+"\n", "%+v", tc)
+		assert.Contains(t, builtin, "export _REMOTE_USER="+tc.want+"\n", "%+v", tc)
+		assert.Equal(t, "FLAVOR=plain\nVERSION=18\n", options)
+	}
 }

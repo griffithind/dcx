@@ -353,8 +353,18 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect base image %s: %w", image, err)
 		}
-		tag := r.layerTag("features", baseID, devcontainer.FeaturesKey(r.resolved.Features),
-			r.resolved.RemoteUser, r.resolved.ContainerUser)
+		// Without a containerUser, features install for the compose
+		// service's user (or the image's USER, which baseID covers).
+		serviceUser := ""
+		if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
+			info, err := r.composeService(ctx, plan)
+			if err != nil {
+				return "", err
+			}
+			serviceUser = info.User
+		}
+		tag := r.layerTag("features", featuresLayerVersion, baseID, devcontainer.FeaturesKey(r.resolved.Features),
+			r.resolved.RemoteUser, r.resolved.ContainerUser, serviceUser)
 
 		// The base metadata of the features image is the one resolution
 		// read: for a Dockerfile plan the built image's own label already
@@ -371,6 +381,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 			Features:          r.resolved.Features,
 			RemoteUser:        r.resolved.RemoteUser,
 			ContainerUser:     r.resolved.ContainerUser,
+			ServiceUser:       serviceUser,
 			Rebuild:           rebuild,
 			NoCache:           opts.NoCache,
 			Progress:          os.Stdout,
@@ -421,6 +432,10 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 
 	return image, nil
 }
+
+// featuresLayerVersion changes when the generated features Dockerfile
+// changes how features install, so existing features images are not reused.
+const featuresLayerVersion = "2"
 
 // layerTag returns dcx/<workspaceID>:<kind>-<hash of parts>.
 func (r *Provisioner) layerTag(kind string, parts ...string) string {
@@ -925,6 +940,7 @@ type composeServiceInfo struct {
 	Image       string
 	Built       bool // the service has a build: section
 	NetworkMode string
+	User        string // the service's user: (features install for it)
 	ProjectName string // the compose files' top-level name
 	// Entrypoint and Command are the service's own (nil: not set).
 	Entrypoint []string
@@ -960,6 +976,7 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 			Entrypoint  json.RawMessage `json:"entrypoint"`
 			Command     json.RawMessage `json:"command"`
 			Ports       []composePort   `json:"ports"`
+			User        string          `json:"user"`
 		} `json:"services"`
 		Name    string                     `json:"name"`
 		Volumes map[string]json.RawMessage `json:"volumes"`
@@ -975,6 +992,7 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 		Image:       svc.Image,
 		Built:       len(svc.Build) > 0 && string(svc.Build) != "null",
 		NetworkMode: svc.NetworkMode,
+		User:        svc.User,
 		ProjectName: config.Name,
 		Entrypoint:  composeArgv(svc.Entrypoint),
 		Command:     composeArgv(svc.Command),

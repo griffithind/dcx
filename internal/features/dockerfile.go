@@ -21,17 +21,30 @@ type DockerfileGenerator struct {
 	imageUser         string
 }
 
-// FeatureUsers applies the spec's defaults to the users features install
-// for: the container user defaults to root, the remote user to the
-// container user.
-func FeatureUsers(remoteUser, containerUser string) (remote, container string) {
+// FeatureUsers applies devcontainers/cli's defaults to the users features
+// install for: the container user is containerUser, else the first
+// non-empty fallback (the compose service's user, then the image's USER),
+// else root; the remote user defaults to the container user. A "user:group"
+// keeps only the user.
+func FeatureUsers(remoteUser, containerUser string, fallbacks ...string) (remote, container string) {
+	for _, u := range append([]string{containerUser}, fallbacks...) {
+		if containerUser = userOnly(u); containerUser != "" {
+			break
+		}
+	}
 	if containerUser == "" {
 		containerUser = "root"
 	}
-	if remoteUser == "" {
+	if remoteUser = userOnly(remoteUser); remoteUser == "" {
 		remoteUser = containerUser
 	}
 	return remoteUser, containerUser
+}
+
+// userOnly drops the group of a "user:group" (a docker USER).
+func userOnly(u string) string {
+	u, _, _ = strings.Cut(strings.TrimSpace(u), ":")
+	return u
 }
 
 // NewDockerfileGenerator creates a new Dockerfile generator for the
@@ -115,11 +128,11 @@ func (g *DockerfileGenerator) Generate() string {
 	sb.WriteString("COPY --from=dev_containers_feature_content_source builtin.env /tmp/dcx-features/\n\n")
 
 	// Install each feature using RUN --mount. A feature's containerEnv is
-	// set right after it installs, so later features (which may depend on
-	// it, e.g. a PATH entry) see it, as the spec requires.
+	// set before its install step (as devcontainers/cli does), so the step
+	// and every later feature see it (e.g. a PATH entry).
 	for i, feature := range g.features {
-		g.generateFeatureInstall(&sb, feature, i)
 		g.generateFeatureEnv(&sb, feature)
+		g.generateFeatureInstall(&sb, feature, i)
 	}
 
 	// Back to the base image's user, so the derived image runs as before.
@@ -158,12 +171,6 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 
 	featureDir := fmt.Sprintf("feature_%d", index)
 
-	// Set option environment variables as build args (not persisted in image)
-	envVars := feature.EnvVars()
-	for _, key := range sortedKeys(envVars) {
-		fmt.Fprintf(sb, "ARG %s=%s\n", key, dockerfileQuote(envVars[key]))
-	}
-
 	// Quote banner lines for the shell. Newlines are flattened first: even a
 	// quoted newline would terminate the Dockerfile RUN instruction.
 	echoLine := func(text string) string {
@@ -176,8 +183,9 @@ func (g *DockerfileGenerator) generateFeatureInstall(sb *strings.Builder, featur
 	fmt.Fprintf(sb, "    cp -ar /tmp/build-features-src/%s /tmp/dcx-features/%s && \\\n", featureDir, featureDir)
 	fmt.Fprintf(sb, "    chmod -R 0755 /tmp/dcx-features/%s && \\\n", featureDir)
 	fmt.Fprintf(sb, "    cd /tmp/dcx-features/%s && \\\n", featureDir)
-	sb.WriteString("    set -a && . /tmp/dcx-features/builtin.env && set +a && \\\n")
-	sb.WriteString("    if [ -f ./devcontainer-features.env ]; then . ./devcontainer-features.env; fi && \\\n")
+	// The feature's options (devcontainer-features.env, written when the
+	// feature is staged) are exported to its install.sh only.
+	sb.WriteString("    set -a && . /tmp/dcx-features/builtin.env && . ./devcontainer-features.env && set +a && \\\n")
 	sb.WriteString("    echo '===========================================================================' && \\\n")
 	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Feature       : "+featureName))
 	fmt.Fprintf(sb, "    %s && \\\n", echoLine("Description   : "+featureDescription))
@@ -244,20 +252,6 @@ func ElevatedFeatures(feats []*Feature) []string {
 func dockerfileEnvQuote(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
-}
-
-// dockerfileQuote quotes a literal value (feature option) for a Dockerfile
-// ARG instruction, escaping \, ", $ and ` inside double quotes so nothing
-// is expanded.
-func dockerfileQuote(s string) string {
-	if !strings.ContainsAny(s, " \t\n\"'$`\\!") {
-		return s
-	}
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, `$`, `\$`)
-	s = strings.ReplaceAll(s, "`", "\\`")
 	return `"` + s + `"`
 }
 
