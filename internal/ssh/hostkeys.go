@@ -1,7 +1,9 @@
 // Package ssh provides host-side SSH key management for dcx.
 //
-// hostkeys.go manages per-workspace SSH host keys stored under
-// ~/.dcx/hostkeys/<workspaceID>.key. The same key is bind-mounted into the
+// hostkeys.go manages per-workspace SSH host keys stored in the
+// workspace's folder ($DCX_HOME/workspaces/<id>/host_key; older dcx kept
+// them in hostkeys/<id>.key and they move on first use). The same key is
+// bind-mounted into the
 // container as /run/secrets/dcx/ssh_host_ed25519_key so the agent presents
 // a stable fingerprint across container recreation.
 package ssh
@@ -19,19 +21,22 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-// HostKeyDir returns the directory where per-workspace host keys live.
-// Callers should not assume the directory exists; EnsureHostKey creates it.
-func HostKeyDir() (string, error) {
-	return dcxhome.Path("hostkeys")
-}
-
 // HostKeyPath returns the absolute path to a workspace's host key file.
+// A key an older dcx kept in hostkeys/<id>.key is moved there first, so
+// editors' pins of it stay valid.
 func HostKeyPath(workspaceID string) (string, error) {
-	dir, err := HostKeyDir()
+	path, err := dcxhome.WorkspacePath(workspaceID, dcxhome.HostKeyFile)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, workspaceID+".key"), nil
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if legacy, err := dcxhome.Path(dcxhome.LegacyDirs.HostKeys, workspaceID+".key"); err == nil {
+			if _, err := os.Stat(legacy); err == nil && os.MkdirAll(filepath.Dir(path), 0o700) == nil {
+				_ = os.Rename(legacy, path)
+			}
+		}
+	}
+	return path, nil
 }
 
 // ErrNoHostKey means the workspace has no host key yet (`dcx up` creates it).
@@ -109,7 +114,7 @@ func EnsureHostKey(workspaceID string) (path string, signer gossh.Signer, err er
 }
 
 // RemoveHostKey deletes the workspace's host key (on `dcx down`), so keys of
-// removed environments do not accumulate under ~/.dcx/hostkeys.
+// removed environments do not accumulate.
 func RemoveHostKey(workspaceID string) error {
 	if workspaceID == "" {
 		return nil

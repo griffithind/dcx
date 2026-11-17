@@ -554,14 +554,17 @@ Sessions run as `remoteUser`, else `containerUser`, else the container's default
 
 | Path | Contents |
 |------|----------|
-| `~/.dcx/` (`$DCX_HOME`) | Per-workspace SSH host keys, `known_hosts`, a fallback client key, workspace locks, compose override files |
+| `~/.dcx/` (`$DCX_HOME`) | `known_hosts`, a fallback client key, and `workspaces/<workspace ID>/` per workspace: its SSH host key, lock, compose override and `workspace.json` (the workspace's path, config and name) |
 | `~/.ssh/dcx/config` | The SSH host blocks for each workspace, included by a line at the top of `~/.ssh/config` (`$DCX_SSH_DIR` replaces `~/.ssh` for both) |
 | `~/.cache/dcx/features` | Fetched features |
 | `devcontainer-lock.json` | Written by `dcx lock`, and by `up`/`build` when it is an empty file |
 
-`dcx down` removes the workspace's host key and SSH block. Docker state
-(containers, images tagged `dcx/<workspace>`, volumes) is labelled
-`com.griffithind.dcx.*`; `dcx clean` removes unused dcx images.
+`dcx down` removes the workspace's host key, record and SSH block. Docker
+state (containers, images tagged `dcx/<workspace>`, volumes) is labelled
+`com.griffithind.dcx.*` and is the source of truth for the container;
+`~/.dcx` holds only what must exist without a container. `dcx clean`
+removes unused dcx images and the `~/.dcx` folders of workspaces that have
+no container (`--dry-run` counts them first).
 
 ## Upgrading
 
@@ -669,6 +672,11 @@ Changes since 0.7 that affect existing setups:
     already running.
   - A failing command of a parallel hook no longer stops the others.
   - Hooks run on a pseudo-terminal when dcx runs in a terminal.
+- Per-workspace files in `~/.dcx` moved into `workspaces/<workspace ID>/`.
+  A host key moves there the next time it is used (so editors' pins stay
+  valid). Existing compose environments keep using their override at the
+  old path until they are recreated. `dcx clean` removes what is left in
+  `hostkeys/`, `locks/` and `compose/` for workspaces without a container.
 - The feature cache stores contents by digest. Entries in the old layout
   (`~/.cache/dcx/features/<16 hex digits>`) are no longer used and can be
   deleted. Changing the feature install order now builds a new features

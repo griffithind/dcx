@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/features"
@@ -412,6 +412,11 @@ func (s *DevContainerService) Down(ctx context.Context, opts DownOptions) error 
 	if err := dcxssh.RemoveHostKey(ids.WorkspaceID); err != nil {
 		s.report.Warnf("Failed to remove SSH host key: %v", err)
 	}
+	// The folder keeps only the lock, which is held now; `dcx clean`
+	// removes it.
+	if path, err := dcxhome.WorkspacePath(ids.WorkspaceID, dcxhome.RecordFile); err == nil {
+		_ = os.Remove(path)
+	}
 	return nil
 }
 
@@ -457,8 +462,8 @@ func (s *DevContainerService) DownWithIDs(ctx context.Context, projectName, work
 		if err := project.Down(ctx, s.engine, opts); err != nil {
 			return fmt.Errorf("failed to remove environment: %w", err)
 		}
-		if path, err := container.ComposeOverridePath(containerInfo.WorkspaceID); err == nil && containerInfo.WorkspaceID != "" {
-			_ = os.RemoveAll(filepath.Dir(path))
+		if containerInfo.WorkspaceID != "" {
+			container.RemoveComposeOverride(containerInfo.WorkspaceID)
 		}
 	}
 

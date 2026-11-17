@@ -141,16 +141,41 @@ func TestLoadHostKeyNeverCreates(t *testing.T) {
 	}
 }
 
-func TestHostKeyDirLayout(t *testing.T) {
+// The host key lives in the workspace's folder; one an older dcx kept in
+// hostkeys/<id>.key moves there on first use, so pins of it stay valid.
+func TestHostKeyLayoutAndMigration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("DCX_HOME", "")
 
-	dir, err := HostKeyDir()
+	path, err := HostKeyPath("ws1")
 	if err != nil {
-		t.Fatalf("HostKeyDir: %v", err)
+		t.Fatal(err)
 	}
-	want := filepath.Join(home, ".dcx", "hostkeys")
-	if dir != want {
-		t.Errorf("HostKeyDir = %q, want %q", dir, want)
+	if want := filepath.Join(home, ".dcx", "workspaces", "ws1", "host_key"); path != want {
+		t.Errorf("HostKeyPath = %q, want %q", path, want)
+	}
+
+	legacy := filepath.Join(home, ".dcx", "hostkeys", "ws2.key")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, old, err := EnsureHostKey("ws2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, _ := HostKeyPath("ws2")
+	if err := os.Rename(moved, legacy); err != nil { // as an older dcx left it
+		t.Fatal(err)
+	}
+	_, signer, err := LoadHostKey("ws2")
+	if err != nil {
+		t.Fatalf("LoadHostKey after migration: %v", err)
+	}
+	if Fingerprint(signer) != Fingerprint(old) {
+		t.Error("the migrated key is the same key")
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Error("the legacy key was moved, not copied")
 	}
 }

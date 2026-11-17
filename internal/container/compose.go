@@ -103,9 +103,10 @@ func (p ComposeProject) ForRemoval(workspaceID string) ComposeProject {
 	if err != nil || workspaceID == "" {
 		return p
 	}
+	legacy, _ := legacyComposeOverridePath(workspaceID)
 	files := make([]string, 0, len(p.Files))
 	for _, f := range p.Files {
-		if filepath.Clean(f) != override {
+		if f := filepath.Clean(f); f != override && f != legacy {
 			files = append(files, f)
 		}
 	}

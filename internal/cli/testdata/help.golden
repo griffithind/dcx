@@ -74,9 +74,12 @@ Clean up orphaned dcx resources.
 
 This command removes:
 - Images built by dcx (dcx/*) that no container uses
+- What dcx keeps in ~/.dcx (host key, lock, compose override) for
+  workspaces that have no container
 - Optionally, dangling (untagged) images
 
-By default, only derived images are cleaned. Use --all to include dangling images.
+By default, derived images and workspace state are cleaned. Use --all to
+include dangling images.
 
 This is an offline-safe command that does not require network access.
 

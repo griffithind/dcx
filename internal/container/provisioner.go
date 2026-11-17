@@ -860,11 +860,28 @@ func (r *Provisioner) composeProject(plan *devcontainer.ComposePlan) ComposeProj
 }
 
 // ComposeOverridePath is where dcx keeps the compose override of a
-// workspace. It persists for the environment's lifetime (compose records
-// it in the containers' config_files label), so later start/stop/down
-// commands see the same project definition as `up`.
+// workspace, in its folder. It persists for the environment's lifetime
+// (compose records it in the containers' config_files label), so later
+// start/stop/down commands see the same project definition as `up`.
 func ComposeOverridePath(workspaceID string) (string, error) {
-	return dcxhome.Path("compose", workspaceID, "docker-compose.dcx.yml")
+	return dcxhome.WorkspacePath(workspaceID, dcxhome.ComposeOverrideFile)
+}
+
+// legacyComposeOverridePath is where older dcx versions kept it; existing
+// environments still name it in their config_files label.
+func legacyComposeOverridePath(workspaceID string) (string, error) {
+	return dcxhome.Path(dcxhome.LegacyDirs.Compose, workspaceID, dcxhome.ComposeOverrideFile)
+}
+
+// RemoveComposeOverride removes the workspace's compose override, wherever
+// dcx kept it (after `down`, or when a recreate writes a new one).
+func RemoveComposeOverride(workspaceID string) {
+	if path, err := ComposeOverridePath(workspaceID); err == nil {
+		_ = os.Remove(path)
+	}
+	if path, err := legacyComposeOverridePath(workspaceID); err == nil {
+		_ = os.RemoveAll(filepath.Dir(path))
+	}
 }
 
 // writeComposeOverride renders spec for the primary service and writes it
@@ -897,6 +914,9 @@ func (r *Provisioner) writeComposeOverride(plan *devcontainer.ComposePlan, spec 
 	if err != nil {
 		return err
 	}
+	// The environment is being created: an override an older dcx wrote
+	// elsewhere is no longer referenced.
+	RemoveComposeOverride(r.resolved.WorkspaceID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}

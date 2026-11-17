@@ -87,8 +87,8 @@ return cliCtx.Service.Up(...)   // Delegate to service
 | `up.go` | `Up`: `decideUp`, `announceUp`, the idempotent steps |
 | `status.go` | `Status` (state, drift, SSH endpoint) and `List` |
 | `stop.go` | `Stop` / `Restart` |
-| `lock_workspace.go` | `lockWorkspace` (`$DCX_HOME/locks/<id>.lock`) |
-| `clean.go` | Image cleanup for `dcx clean` |
+| `lock_workspace.go` | `lockWorkspace` (`$DCX_HOME/workspaces/<id>/lock`), `tryLockWorkspace` |
+| `clean.go` | `dcx clean`: unused images, and `PruneWorkspaces` (`~/.dcx` folders and older-layout files of workspaces without a container) |
 
 **Key Methods:**
 - `Load()` / `LoadWithOptions()` - Resolve through `devcontainer.ResolveWorkspace` (the service only supplies image metadata via the engine)
@@ -202,7 +202,7 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
 - `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
-- `internal/dcxhome/` - dcx's state directory: `$DCX_HOME`, default `~/.dcx` (host keys, known_hosts, fallback client key, locks, compose overrides); never build `~/.dcx` paths by hand
+- `internal/dcxhome/` - dcx's state directory: `$DCX_HOME`, default `~/.dcx`: known_hosts, the fallback client key, and `workspaces/<id>/` per workspace (`WorkspaceDir`: host key, lock, compose override, `workspace.json`); never build `~/.dcx` paths by hand. Docker labels stay the source of truth for container state
 
 ## Key Types
 
@@ -281,7 +281,8 @@ CLI: dcx up [--recreate] [--rebuild] [--pull] [--hosts]
     ↓ NewCLIContext() → Service.Up(UpOptions)
 Service.Up (internal/service/up.go)
     ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
-    ├─ lockWorkspace ($DCX_HOME/locks/<id>.lock; Up, Down, Stop and Restart take it)
+    ├─ lockWorkspace ($DCX_HOME/workspaces/<id>/lock; Up, Down, Stop and Restart take it)
+    ├─ dcxhome.WriteWorkspace (workspace.json: path, config, name)
     ├─ StateWithHash + setupComplete + agentctl.Listening
     ├─ decideUp → none (initializeCommand only) | resume | start | create | recreate
     ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
@@ -330,7 +331,7 @@ defer cliCtx.Close()
 Single `Up()` method dispatches to plan-specific implementation internally.
 
 ### ContainerSpec (one source for runtime settings)
-`Provisioner.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `$DCX_HOME/compose/<workspace-id>/docker-compose.dcx.yml` (`~/.dcx` by default); existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
+`Provisioner.spec` derives a `ContainerSpec` from the resolved config; `dockerRunArgs` (single container) and `composeOverride` (compose) render it. A new runtime setting goes into `ContainerSpec` and both renderers — `TestContainerSpecParity` fails otherwise. The compose override persists at `$DCX_HOME/workspaces/<workspace-id>/docker-compose.dcx.yml` (`~/.dcx` by default; older dcx wrote `compose/<id>/`, which existing environments still reference until recreated); existing compose environments are operated on with the `-f` files compose recorded on the container (`ExistingComposeProject`).
 
 ### Sealed Interface (ExecutionPlan)
 ```go

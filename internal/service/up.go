@@ -11,6 +11,7 @@ import (
 	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container"
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/secrets"
@@ -82,6 +83,12 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	}
 	if err := s.initLockfile(resolved); err != nil {
 		return nil, err
+	}
+	// The record says which workspace the folder in $DCX_HOME belongs to.
+	if err := dcxhome.WriteWorkspace(resolved.WorkspaceID, dcxhome.Workspace{
+		Path: s.workspacePath, Config: resolved.ConfigPath, Name: resolved.Name,
+	}); err != nil {
+		s.report.Warnf("Could not write the workspace record: %v", err)
 	}
 	ids := &resolved.Identity
 

@@ -12,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/agentctl"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/report"
@@ -58,6 +59,7 @@ type upHarness struct {
 func newUpHarness(t *testing.T, config string) *upHarness {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv(dcxhome.Env, t.TempDir())
 	t.Setenv(hostconfig.SSHDirEnv, t.TempDir())
 	h := &upHarness{t: t, workspace: t.TempDir(), hooks: &fakeHooks{}}
 	h.writeConfig(config)
@@ -102,6 +104,10 @@ func TestUpCreatesAndCompletesSetup(t *testing.T) {
 	assert.Equal(t, fakeHooks{initialize: 1, create: 1, start: 1}, *h.hooks)
 	id := h.containers()[0].ID
 	assert.Contains(t, h.engine.Files, id+":"+markerPath(phaseReady), "setup completion is recorded")
+	wsID := h.containers()[0].Labels[state.LabelWorkspaceID]
+	record, ok := dcxhome.ReadWorkspace(wsID)
+	require.True(t, ok, "up writes the workspace record")
+	assert.Equal(t, h.workspace, record.Path)
 
 	// Up again: nothing to do but initializeCommand, which runs on every
 	// up (M6).

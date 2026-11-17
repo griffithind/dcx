@@ -1,6 +1,8 @@
 // Package dcxhome locates the directory where dcx keeps its state on the
-// host: SSH host keys, known_hosts, the fallback client key, workspace
-// locks and compose overrides.
+// host: known_hosts and the fallback client key, and one folder per
+// workspace (WorkspaceDir) with its host key, lock, compose override and
+// record. Older dcx versions kept the per-workspace files in hostkeys/,
+// locks/ and compose/; they are moved or removed (see LegacyDirs).
 package dcxhome
 
 import (
@@ -31,3 +33,8 @@ func Path(elem ...string) (string, error) {
 	}
 	return filepath.Join(append([]string{dir}, elem...)...), nil
 }
+
+// LegacyDirs are where older dcx versions kept per-workspace files:
+// hostkeys/<id>.key, locks/<id>.lock and compose/<id>/. Host keys move to
+// the workspace's folder when next used; `dcx clean` removes the rest.
+var LegacyDirs = struct{ HostKeys, Locks, Compose string }{"hostkeys", "locks", "compose"}

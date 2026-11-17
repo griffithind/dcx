@@ -9,6 +9,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
+	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/report"
 	"github.com/griffithind/dcx/internal/secrets"
@@ -22,6 +23,7 @@ import (
 func newTestService(t *testing.T, fake *containertest.Fake) (*DevContainerService, *report.Recorder) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv(dcxhome.Env, t.TempDir())
 
 	ws := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(ws, ".devcontainer"), 0o755))

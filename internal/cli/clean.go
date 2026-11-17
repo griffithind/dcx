@@ -23,9 +23,12 @@ var cleanCmd = &cobra.Command{
 
 This command removes:
 - Images built by dcx (dcx/*) that no container uses
+- What dcx keeps in ~/.dcx (host key, lock, compose override) for
+  workspaces that have no container
 - Optionally, dangling (untagged) images
 
-By default, only derived images are cleaned. Use --all to include dangling images.
+By default, derived images and workspace state are cleaned. Use --all to
+include dangling images.
 
 This is an offline-safe command that does not require network access.`,
 	RunE: runClean,
@@ -96,6 +99,22 @@ func runClean(cmd *cobra.Command, args []string) error {
 		totalSpace += result.SpaceReclaimed
 	}
 
+	if !cleanDangling && !cleanCurrent {
+		ui.Info("Cleaning workspace state...")
+		pruned, err := svc.PruneWorkspaces(ctx, false)
+		if err != nil {
+			return fmt.Errorf("failed to clean workspace state: %w", err)
+		}
+		if pruned.Folders+pruned.Legacy > 0 {
+			ui.Info("  Removed the state of %d workspace(s) without a container (%d file(s) of an older layout)", pruned.Folders, pruned.Legacy)
+		} else {
+			ui.Info("  No workspace state to clean")
+		}
+		if pruned.Busy > 0 {
+			ui.Info("  Kept %d workspace(s) a dcx command is using", pruned.Busy)
+		}
+	}
+
 	ui.Info("")
 	if totalImages > 0 {
 		ui.Success("Total: %d image(s) removed, %s reclaimed", totalImages, formatBytes(totalSpace))
@@ -122,6 +141,11 @@ func showCleanStats(ctx context.Context, svc *service.DevContainerService) error
 		ui.Println("Derived images: none")
 	}
 
+	pruned, err := svc.PruneWorkspaces(ctx, true)
+	if err != nil {
+		return fmt.Errorf("failed to inspect workspace state: %w", err)
+	}
+	ui.Printf("Workspace state without a container: %d folder(s), %d file(s) of an older layout", pruned.Folders, pruned.Legacy)
 	return nil
 }
 
