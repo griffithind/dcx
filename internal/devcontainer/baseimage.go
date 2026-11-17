@@ -141,7 +141,9 @@ func expandArgs(s string, values map[string]string) string {
 
 // composeServiceBaseImage returns the primary service's image, or the base
 // image of its build, from the compose files (later files override earlier
-// ones). Compose's ${VAR} interpolation uses the environment.
+// ones). Compose's ${VAR} interpolation uses the environment, then the
+// project's .env file (next to the first compose file), as compose does.
+// extends and include are not followed.
 func composeServiceBaseImage(files []string, service string) string {
 	var image string
 	var build struct {
@@ -150,6 +152,13 @@ func composeServiceBaseImage(files []string, service string) string {
 		set                         bool
 	}
 	env := environMap()
+	if len(files) > 0 {
+		for k, v := range readDotEnv(filepath.Join(filepath.Dir(files[0]), ".env")) {
+			if _, set := env[k]; !set {
+				env[k] = v
+			}
+		}
+	}
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -251,6 +260,29 @@ func environMap() map[string]string {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			env[k] = v
 		}
+	}
+	return env
+}
+
+// readDotEnv reads a compose .env file: KEY=VALUE lines (an optional
+// "export ", quotes around the value), comments and blank lines skipped.
+func readDotEnv(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.HasPrefix(line, "#") {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		env[strings.TrimSpace(k)] = v
 	}
 	return env
 }

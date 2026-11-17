@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
@@ -73,7 +74,7 @@ func TestMetadataBuilder_BaseImageEmpty(t *testing.T) {
 func TestMetadataBuilder_FeaturesOnly(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "test-feature",
 			Metadata: &features.FeatureMetadata{
@@ -108,7 +109,7 @@ func TestMetadataBuilder_FeaturesOnly(t *testing.T) {
 // devcontainers/cli does (F16).
 func TestMetadataBuilder_FeatureIDIsTheReference(t *testing.T) {
 	builder := NewMetadataBuilder()
-	builder.WithFeatures([]*features.Feature{{
+	_ = builder.WithFeatures([]*features.Feature{{
 		ID:       "ghcr.io/devcontainers/features/node:1",
 		Metadata: &features.FeatureMetadata{ID: "node"},
 	}})
@@ -128,7 +129,7 @@ func TestMetadataBuilder_FeatureIDIsTheReference(t *testing.T) {
 func TestMetadataBuilder_FeaturesNilMetadata(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID:       "no-metadata",
 			Metadata: nil,
@@ -147,7 +148,7 @@ func TestMetadataBuilder_FeaturesNilMetadata(t *testing.T) {
 func TestMetadataBuilder_LocalConfigOnly(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		RemoteUser:    "developer",
 		ContainerUser: "root",
 		ContainerEnv: map[string]string{
@@ -178,7 +179,7 @@ func TestMetadataBuilder_LocalConfigOnly(t *testing.T) {
 
 func TestMetadataBuilder_LocalConfigNil(t *testing.T) {
 	builder := NewMetadataBuilder()
-	builder.WithLocalConfig(nil)
+	_ = builder.WithLocalConfig(nil)
 
 	result, err := builder.Build()
 	if err != nil {
@@ -199,7 +200,7 @@ func TestMetadataBuilder_FullStack(t *testing.T) {
 	}
 
 	// Feature metadata (middle precedence)
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "feature1",
 			Metadata: &features.FeatureMetadata{
@@ -217,7 +218,7 @@ func TestMetadataBuilder_FullStack(t *testing.T) {
 	})
 
 	// Local config (highest precedence)
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		RemoteUser: "vscode",
 	})
 
@@ -254,7 +255,7 @@ func TestMetadataBuilder_FullStack(t *testing.T) {
 func TestMetadataBuilder_PrivilegedFeature(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "privileged-feature",
 			Metadata: &features.FeatureMetadata{
@@ -285,7 +286,7 @@ func TestMetadataBuilder_PrivilegedFeature(t *testing.T) {
 func TestMetadataBuilder_InitFeature(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "init-feature",
 			Metadata: &features.FeatureMetadata{
@@ -316,7 +317,7 @@ func TestMetadataBuilder_InitFeature(t *testing.T) {
 func TestMetadataBuilder_FeatureMounts(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "mount-feature",
 			Metadata: &features.FeatureMetadata{
@@ -396,7 +397,7 @@ func TestGenerateMetadataLabel_AllNil(t *testing.T) {
 func TestMetadataBuilder_FeatureLifecycleCommands(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "lifecycle-feature",
 			Metadata: &features.FeatureMetadata{
@@ -431,7 +432,7 @@ func TestMetadataBuilder_FeatureLifecycleCommands(t *testing.T) {
 func TestMetadataBuilder_LocalConfigLifecycleCommands(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		OnCreateCommand:      &lifecyclecmd.Command{Shell: "npm install"},
 		UpdateContentCommand: &lifecyclecmd.Command{Shell: "npm run build"},
 		PostCreateCommand: &lifecyclecmd.Command{Named: map[string]lifecyclecmd.Command{
@@ -467,7 +468,7 @@ func TestMetadataBuilder_LocalConfigLifecycleCommands(t *testing.T) {
 func TestMetadataBuilder_LocalConfigPortForwarding(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		ForwardPorts: devcontainer.PortList{{Spec: "3000"}, {Spec: "8080:80"}},
 		PortsAttributes: map[string]devcontainer.PortAttribute{
 			"3000": {Label: "Frontend", OnAutoForward: "notify"},
@@ -503,7 +504,7 @@ func TestMetadataBuilder_LocalConfigPortForwarding(t *testing.T) {
 func TestMetadataBuilder_LocalConfigHostRequirements(t *testing.T) {
 	builder := NewMetadataBuilder()
 
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		HostRequirements: &devcontainer.HostRequirements{
 			CPUs:   4,
 			Memory: "8gb",
@@ -541,7 +542,7 @@ func TestMetadataBuilder_LocalConfigUserSettings(t *testing.T) {
 
 	updateUID := true
 	overrideCmd := false
-	builder.WithLocalConfig(&devcontainer.DevContainerConfig{
+	_ = builder.WithLocalConfig(&devcontainer.DevContainerConfig{
 		RemoteUser:          "developer",
 		ContainerUser:       "root",
 		UpdateRemoteUserUID: &updateUID,
@@ -586,7 +587,7 @@ func TestMetadataBuilder_FeatureContainerEnvNotInMetadata(t *testing.T) {
 	// because it's baked into the image via ENV instructions in the Dockerfile.
 	builder := NewMetadataBuilder()
 
-	builder.WithFeatures([]*features.Feature{
+	_ = builder.WithFeatures([]*features.Feature{
 		{
 			ID: "env-feature",
 			Metadata: &features.FeatureMetadata{
@@ -621,5 +622,38 @@ func TestMetadataBuilder_FeatureContainerEnvNotInMetadata(t *testing.T) {
 	// But capAdd SHOULD be there
 	if len(configs[0].CapAdd) != 1 || configs[0].CapAdd[0] != "NET_ADMIN" {
 		t.Errorf("expected capAdd=[NET_ADMIN], got %v", configs[0].CapAdd)
+	}
+}
+
+// The label keeps the base image's entries verbatim (properties dcx does not
+// model included), string mounts as written (options included), and records
+// devcontainer.json unsubstituted, as devcontainers/cli does (M9).
+func TestMetadataLabelFidelity(t *testing.T) {
+	base := `[{"id":"ghcr.io/x/features/y:1","futureProperty":{"a":1}}]`
+	mount, err := devcontainer.ParseMountString("type=volume,source=cache-${devcontainerId},target=/cache,volume-nocopy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mount.Raw = "type=volume,source=cache-${devcontainerId},target=/cache,volume-nocopy"
+	local := &devcontainer.DevContainerConfig{
+		RemoteUser:   "dev",
+		ContainerEnv: devcontainer.StringMap{"WS": "${localWorkspaceFolder}"},
+		Mounts:       []devcontainer.Mount{mount, {Type: "bind", Source: "/a", Target: "/b"}},
+	}
+	label, err := GenerateMetadataLabel(base, nil, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(label, `[{"id":"ghcr.io/x/features/y:1","futureProperty":{"a":1}},`) {
+		t.Errorf("base entries are kept verbatim: %s", label)
+	}
+	for _, want := range []string{
+		`"type=volume,source=cache-${devcontainerId},target=/cache,volume-nocopy"`,
+		`{"source":"/a","target":"/b","type":"bind"}`,
+		`"WS":"${localWorkspaceFolder}"`,
+	} {
+		if !strings.Contains(label, want) {
+			t.Errorf("label lacks %s: %s", want, label)
+		}
 	}
 }

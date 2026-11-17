@@ -120,7 +120,7 @@ Load config → decideUp(state, setup complete, --recreate/--rebuild) → none |
 | `docker.go` | `Docker` - the Docker CLI implementation of `Engine` (no singleton; injected) |
 | `containertest/` | `Fake` in-memory `Engine` for unit tests |
 | `spec.go` | `ContainerSpec` - every runtime setting of the primary container |
-| `compose.go` | `ComposeProject` - the only docker compose executor (always explicit `-f` files) |
+| `compose.go` | `ComposeProject` - the only docker compose executor (always explicit `-f` files); `Start` is `up -d --no-recreate` |
 | `compose_override.go` | `composeOverride` - renders a `ContainerSpec` as compose override YAML (yaml.v3) |
 | `secrets.go` | Secret mounting after container start |
 | `entrypoint.go` | Entrypoint chaining (image metadata, then features) and the keep-alive command |
@@ -355,7 +355,9 @@ Base Image → Features Layer → UID Update Layer → Final Image
 - Labels: a built image carries the FROM image's metadata plus the local config; the features layer adds the features to the metadata resolution read (`resolved.MetadataLabel`).
 - Ports (`Provisioner.buildPortBindings`): `forwardPorts` without a host address and `appPort` numbers publish on `127.0.0.1`, `appPort` strings as written; a host port already taken (an earlier entry, or the compose file's own `ports`) is skipped; with compose `network_mode: service:<x>` every port is published on `<x>`; with host networking none are.
 - Workspace mount (`resolved.WorkspaceMount`): the git root at `/workspaces/<folder>`, independent of `workspaceFolder`; a non-trivial layout is part of `hash.inputs`.
-- The container's `devcontainer.metadata` label is the merged metadata (image, features, local config), as upstream records it.
+- The container's `devcontainer.metadata` label is the merged metadata (image, features, local config), as upstream records it. Labels dcx writes keep the base entries verbatim, string mounts as written, and devcontainer.json unsubstituted (`resolved.Raw`).
+- Builds run `docker buildx build --load`, or `docker build` (BuildKit) without the buildx plugin; build contexts (features) need buildx.
+- Containers are created without `-t -i -w`; the keep-alive is a `sleep 1` loop (`sleepForever`).
 - UID layer (`Provisioner.uidUser`): `remoteUser`/`containerUser`, else the runArgs or compose user, else the image's `USER`; skipped for root and numeric users (`devcontainer.UpdatableUser`).
 - Each layer is tagged `dcx/<workspace>:<features|uid>-<hash>` where the hash covers the parent image ID plus the layer's inputs (see `Provisioner.layerImages`), and reused when the tag exists.
 

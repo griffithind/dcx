@@ -63,33 +63,25 @@ func TestParseMemoryString_Values(t *testing.T) {
 	}
 }
 
+// A GPU the host lacks never refuses to start (R6/C12): a required one
+// warns, an optional one is silent.
 func TestGPURequirementAgainstDockerRuntime(t *testing.T) {
 	required := &HostRequirements{GPU: &GPURequirement{Mode: GPURequired}}
 	optional := &HostRequirements{GPU: &GPURequirement{Mode: GPUOptional}}
 	none := &HostRequirements{GPU: &GPURequirement{Mode: GPUNone}}
 
-	if r := ValidateHostRequirementsWithDocker(required, &DockerResources{}); r.Satisfied {
-		t.Error("a required GPU without a GPU runtime must fail")
-	}
-	if r := ValidateHostRequirementsWithDocker(required, &DockerResources{GPU: true}); !r.Satisfied {
-		t.Errorf("a GPU runtime satisfies a required GPU: %v", r.Errors)
-	}
-	if r := ValidateHostRequirementsWithDocker(optional, &DockerResources{}); !r.Satisfied || len(r.Warnings) != 1 {
-		t.Errorf("an optional GPU only warns: %+v", r)
-	}
-	if r := ValidateHostRequirementsWithDocker(none, &DockerResources{}); !r.Satisfied || len(r.Warnings) != 0 {
-		t.Errorf("gpu: false asks for nothing: %+v", r)
-	}
+	assert.Len(t, HostRequirementWarnings(required, &DockerResources{}), 1)
+	assert.Empty(t, HostRequirementWarnings(required, &DockerResources{GPU: true}))
+	assert.Empty(t, HostRequirementWarnings(optional, &DockerResources{}))
+	assert.Empty(t, HostRequirementWarnings(none, &DockerResources{}))
 }
 
 // CPU and memory minimums warn instead of refusing to start (S3); storage
 // is not reported.
 func TestHostRequirementShortfallsWarn(t *testing.T) {
-	r := ValidateHostRequirementsWithDocker(&HostRequirements{CPUs: 8, Memory: "32gb", Storage: "64gb"},
+	w := HostRequirementWarnings(&HostRequirements{CPUs: 8, Memory: "32gb", Storage: "64gb"},
 		&DockerResources{CPUs: 4, Memory: 8 << 30})
-	assert.True(t, r.Satisfied)
-	assert.Len(t, r.Warnings, 2, "%v", r.Warnings)
-	assert.Empty(t, r.Errors)
+	assert.Len(t, w, 2, "%v", w)
 }
 
 // Image metadata's hostRequirements merge by taking the larger of each.

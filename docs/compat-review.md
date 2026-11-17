@@ -71,6 +71,17 @@ dcx's deliberate differences are listed at the end, not as findings: SSH session
 - **M7:** parallel commands all finish before the phase fails.
 - **M5:** container hooks run on a PTY when dcx's stdout is a terminal. Unlike upstream, not in CI (no terminal), so logs keep plain line endings and stderr stays separate.
 
+**Step 5 (runtime details): done.**
+- **R6/C12:** a GPU the host lacks never fails `up`: `--gpus` is dropped, a required GPU warns, an optional one is silent. `HostRequirementWarnings` only warns now.
+- **R13:** `docker create` without `-t -i -w` (the `WorkingDir` spec field is gone). A `workspaceFolder` outside the mount is no longer created empty by `-w`; sessions start in `$HOME` there, as upstream's do.
+- **R14:** without the buildx plugin, `docker build` with `DOCKER_BUILDKIT=1`; build contexts (the features layer) still need buildx and say so.
+- **R15:** the keep-alive is upstream's `while sleep 1 & wait $!; do :; done`.
+- **R16:** a stopped compose environment starts with `up -d --no-recreate [services]` instead of `start`. On create dcx has no existing container (a recreate removes it first), so the flag only applies to starts.
+- **R10:** `compose build` builds only `runServices` and the primary (all services without `runServices`).
+- **R11:** `docker compose config` is read with `--profile '*'`; dcx's own reading of compose files (for the metadata image) uses the project's `.env`. `extends` and `include` are still not followed there, and services in profiles are not started without `runServices` (upstream neither).
+- **M9:** the `devcontainer.metadata` labels dcx writes keep the base entries verbatim, string mounts as written and devcontainer.json unsubstituted (`resolved.Raw`); feature ids were already the user's references (F16).
+- Not done from the earlier steps: C17 (port ranges).
+
 Decisions made on 2026-11-14 (see "Decisions" below):
 - `forwardPorts` stay published and are deduplicated;
 - dcx keeps its own identity;

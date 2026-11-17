@@ -236,6 +236,7 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 		"name": "ssh-dir-test",
 		"image": "alpine:3.24",
 		"workspaceFolder": "/test-workspace",
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/test-workspace",
 		"remoteUser": "root"
 	}`
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)

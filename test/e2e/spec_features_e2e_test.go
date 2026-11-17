@@ -149,6 +149,20 @@ func TestHostRequirementsValidationE2E(t *testing.T) {
 		assert.Contains(t, stdout, "Devcontainer started successfully")
 	})
 
+	// A required GPU on a host without a GPU runtime warns and starts
+	// without GPUs, as the official CLI does (R6/C12).
+	t.Run("required_gpu_without_runtime_warns", func(t *testing.T) {
+		if out, err := exec.Command("docker", "info", "--format", "{{json .Runtimes}}").Output(); err == nil && strings.Contains(string(out), "nvidia") {
+			t.Skip("the Docker host has a GPU runtime")
+		}
+		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"gpu": true`)
+		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+		require.NoError(t, err, "a missing GPU must not block up: stderr=%s", stderr)
+		assert.Contains(t, stderr, "no GPU runtime")
+	})
+
 	// A storage requirement can't be checked and is not reported.
 	t.Run("ignores_storage_requirement", func(t *testing.T) {
 		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"storage": "10gb"`)

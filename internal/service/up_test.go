@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/internal/agentproto"
@@ -111,15 +113,20 @@ func TestDecideUp(t *testing.T) {
 	}
 }
 
-// "gpu": "optional" must not add --gpus on a host without a GPU runtime.
-func TestOptionalGPUDroppedWithoutRuntime(t *testing.T) {
-	svc, _ := newTestService(t, &containertest.Fake{}) // fake Info reports no GPU
-	resolved := &devcontainer.ResolvedDevContainer{
-		HostRequirements: &devcontainer.HostRequirements{GPU: &devcontainer.GPURequirement{Mode: devcontainer.GPUOptional}},
-		GPU:              &devcontainer.GPURequirement{Mode: devcontainer.GPUOptional},
+// A GPU request, optional or required, never adds --gpus on a host
+// without a GPU runtime (it would fail the start); a required one warns
+// (R6/C12).
+func TestGPUDroppedWithoutRuntime(t *testing.T) {
+	for _, mode := range []devcontainer.GPUMode{devcontainer.GPUOptional, devcontainer.GPURequired} {
+		svc, rec := newTestService(t, &containertest.Fake{}) // fake Info reports no GPU
+		resolved := &devcontainer.ResolvedDevContainer{
+			HostRequirements: &devcontainer.HostRequirements{GPU: &devcontainer.GPURequirement{Mode: mode}},
+			GPU:              &devcontainer.GPURequirement{Mode: mode},
+		}
+		svc.checkHostRequirements(context.Background(), resolved)
+		assert.Nil(t, resolved.GPU, "mode %d", mode)
+		assert.Equal(t, mode == devcontainer.GPURequired, strings.Contains(fmt.Sprint(rec.Messages()), "no GPU runtime"), "mode %d", mode)
 	}
-	require.NoError(t, svc.checkHostRequirements(context.Background(), resolved))
-	assert.Nil(t, resolved.GPU)
 }
 
 func TestSSHAccessIsKeptUnlessChangedWithACreate(t *testing.T) {

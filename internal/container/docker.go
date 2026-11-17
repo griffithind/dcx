@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/griffithind/dcx/internal/build"
@@ -30,6 +31,10 @@ type Docker struct {
 	// trace, when set, receives every docker command line before it runs
 	// (dcx -v).
 	trace func(cmdline string)
+
+	// buildx records whether the buildx plugin is installed (asked once).
+	buildxOnce sync.Once
+	buildx     bool
 }
 
 // WithTrace makes d report every docker command line to trace before
@@ -459,7 +464,9 @@ func lastLine(s string) string {
 
 // dockerRunArgs renders a ContainerSpec as `docker create` arguments.
 func dockerRunArgs(s ContainerSpec) []string {
-	args := []string{"create", "-t", "-i"}
+	// No -t, -i or -w, as devcontainers/cli creates it: an image command
+	// that needs a terminal (bash) exits as it does there.
+	args := []string{"create"}
 	add := func(flag string, values ...string) {
 		for _, v := range values {
 			args = append(args, flag, v)
@@ -471,9 +478,6 @@ func dockerRunArgs(s ContainerSpec) []string {
 	}
 	if s.User != "" {
 		add("-u", s.User)
-	}
-	if s.WorkingDir != "" {
-		add("-w", s.WorkingDir)
 	}
 	if s.Privileged {
 		args = append(args, "--privileged")
@@ -901,11 +905,22 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path s
 	return nil
 }
 
-// BuildImage runs `docker buildx build --load` for opts. Paths in opts are
-// absolute (build.Builder resolves them). Output streams to opts.Progress,
-// or to dcx's stdout/stderr.
+// BuildImage runs `docker buildx build --load` for opts, or, without the
+// buildx plugin, `docker build` with BuildKit (as devcontainers/cli falls
+// back). Build contexts, which the features layer uses, need buildx.
+// Paths in opts are absolute (build.Builder resolves them). Output streams
+// to opts.Progress, or to dcx's stdout/stderr.
 func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error {
-	cmd := d.command(ctx, buildArgs(opts)...)
+	d.buildxOnce.Do(func() {
+		d.buildx = d.command(ctx, "buildx", "version").Run() == nil
+	})
+	if !d.buildx && len(opts.BuildContexts) > 0 {
+		return fmt.Errorf("building features needs the docker buildx plugin (BuildKit build contexts); install docker-buildx")
+	}
+	cmd := d.command(ctx, buildArgs(opts, d.buildx)...)
+	if !d.buildx {
+		cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	}
 	if opts.Progress != nil {
 		cmd.Stdout = opts.Progress
 		cmd.Stderr = opts.Progress
@@ -916,10 +931,14 @@ func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptio
 	return cmd.Run()
 }
 
-// buildArgs renders build options as `docker buildx build` arguments, with
-// map-valued options sorted so the command line is deterministic.
-func buildArgs(opts build.DockerfileBuildOptions) []string {
-	args := []string{"buildx", "build"}
+// buildArgs renders build options as `docker buildx build` arguments (or
+// `docker build` ones without buildx), with map-valued options sorted so
+// the command line is deterministic.
+func buildArgs(opts build.DockerfileBuildOptions, buildx bool) []string {
+	args := []string{"build"}
+	if buildx {
+		args = []string{"buildx", "build"}
+	}
 	add := func(flag string, values ...string) {
 		for _, v := range values {
 			args = append(args, flag, v)
@@ -956,7 +975,10 @@ func buildArgs(opts build.DockerfileBuildOptions) []string {
 	}
 	// build.options from devcontainer.json, verbatim.
 	args = append(args, opts.Options...)
-	args = append(args, "--load", opts.Context)
+	if buildx {
+		args = append(args, "--load")
+	}
+	args = append(args, opts.Context)
 	return args
 }
 

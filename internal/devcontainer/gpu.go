@@ -11,7 +11,8 @@ type GPUMode int
 const (
 	// GPUNone asks for no GPUs (false, an empty object, or absent).
 	GPUNone GPUMode = iota
-	// GPURequired fails without a GPU runtime on the Docker host.
+	// GPURequired asks for GPUs; without a GPU runtime the container starts
+	// without them, with a warning.
 	GPURequired
 	// GPUOptional uses GPUs only when the Docker host has a GPU runtime.
 	GPUOptional

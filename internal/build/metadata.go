@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/features"
@@ -15,8 +16,13 @@ import (
 // 1. Base image metadata - from devcontainer.metadata label
 // 2. Feature metadata - from each feature's devcontainer-feature.json (in installation order)
 // 3. Local devcontainer.json - user's configuration (highest precedence)
+//
+// As devcontainers/cli writes it, the label holds the base image's entries
+// verbatim, then the features', then devcontainer.json as written (before
+// variable substitution, so nothing host-specific is baked in: whoever
+// reads the label substitutes it), with string mounts kept as strings.
 type MetadataBuilder struct {
-	configs []devcontainer.DevContainerConfig
+	entries []json.RawMessage
 }
 
 // NewMetadataBuilder creates a new metadata builder.
@@ -30,23 +36,64 @@ func (b *MetadataBuilder) WithBaseImage(labelValue string) error {
 	if labelValue == "" {
 		return nil
 	}
-	configs, err := devcontainer.ParseImageMetadata(labelValue)
+	var entries []json.RawMessage
+	if err := json.Unmarshal([]byte(labelValue), &entries); err != nil {
+		// A single object rather than an array.
+		var entry map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(labelValue), &entry); err != nil {
+			return fmt.Errorf("invalid devcontainer.metadata label: %w", err)
+		}
+		entries = []json.RawMessage{json.RawMessage(labelValue)}
+	}
+	b.entries = append(b.entries, entries...)
+	return nil
+}
+
+// add appends cfg as an entry, keeping string mounts as written (Mount
+// marshals as an object, which drops options dcx does not model).
+func (b *MetadataBuilder) add(cfg devcontainer.DevContainerConfig) error {
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	b.configs = append(b.configs, configs...)
+	if len(cfg.Mounts) > 0 {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		mounts := make([]any, len(cfg.Mounts))
+		for i, m := range cfg.Mounts {
+			if m.Raw != "" {
+				mounts[i] = m.Raw
+			} else {
+				mounts[i] = m
+			}
+		}
+		if fields["mounts"], err = json.Marshal(mounts); err != nil {
+			return err
+		}
+		if data, err = json.Marshal(fields); err != nil {
+			return err
+		}
+	}
+	if string(data) != "{}" {
+		b.entries = append(b.entries, data)
+	}
 	return nil
 }
 
 // WithFeatures adds metadata from installed features in installation order.
 // Feature metadata has higher precedence than base image metadata.
-func (b *MetadataBuilder) WithFeatures(feats []*features.Feature) {
+func (b *MetadataBuilder) WithFeatures(feats []*features.Feature) error {
 	for _, f := range feats {
 		if f.Metadata == nil {
 			continue
 		}
-		b.configs = append(b.configs, featureToConfig(f))
+		if err := b.add(featureToConfig(f)); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // WithLocalConfig adds the local devcontainer.json configuration.
@@ -61,9 +108,9 @@ func (b *MetadataBuilder) WithFeatures(feats []*features.Feature) {
 // - Ports: forwardPorts, portsAttributes, otherPortsAttributes
 // - Lifecycle: onCreateCommand, updateContentCommand, postCreateCommand, postStartCommand, postAttachCommand, waitFor
 // - Other: hostRequirements, customizations
-func (b *MetadataBuilder) WithLocalConfig(cfg *devcontainer.DevContainerConfig) {
+func (b *MetadataBuilder) WithLocalConfig(cfg *devcontainer.DevContainerConfig) error {
 	if cfg == nil {
-		return
+		return nil
 	}
 	// Create a copy with only metadata-relevant fields per pickConfigProperties
 	metaCfg := devcontainer.DevContainerConfig{
@@ -107,15 +154,15 @@ func (b *MetadataBuilder) WithLocalConfig(cfg *devcontainer.DevContainerConfig) 
 		// Customizations
 		Customizations: cfg.Customizations,
 	}
-	b.configs = append(b.configs, metaCfg)
+	return b.add(metaCfg)
 }
 
 // Build generates the JSON string for the devcontainer.metadata label.
 func (b *MetadataBuilder) Build() (string, error) {
-	if len(b.configs) == 0 {
+	if len(b.entries) == 0 {
 		return "[]", nil
 	}
-	data, err := json.Marshal(b.configs)
+	data, err := json.Marshal(b.entries)
 	if err != nil {
 		return "", err
 	}
@@ -177,7 +224,8 @@ func featureToConfig(f *features.Feature) devcontainer.DevContainerConfig {
 }
 
 // GenerateMetadataLabel is a convenience function that builds a metadata label
-// from base image metadata, features, and local configuration.
+// from base image metadata, features, and devcontainer.json as written
+// (resolved.Raw, unsubstituted).
 func GenerateMetadataLabel(
 	baseImageMetadata string,
 	feats []*features.Feature,
@@ -188,8 +236,11 @@ func GenerateMetadataLabel(
 	if err := builder.WithBaseImage(baseImageMetadata); err != nil {
 		return "", err
 	}
-	builder.WithFeatures(feats)
-	builder.WithLocalConfig(localConfig)
-
+	if err := builder.WithFeatures(feats); err != nil {
+		return "", err
+	}
+	if err := builder.WithLocalConfig(localConfig); err != nil {
+		return "", err
+	}
 	return builder.Build()
 }

@@ -24,7 +24,6 @@ func fullSpec() ContainerSpec {
 		Name:        "ws-1234abcd",
 		Image:       "img:1",
 		User:        "vscode",
-		WorkingDir:  "/workspaces/ws",
 		Labels:      map[string]string{"l": "v"},
 		Env:         map[string]string{"E": "v"},
 		Mounts:      []devcontainer.Mount{{Type: "bind", Source: "/a", Target: "/b"}},
@@ -62,7 +61,6 @@ func TestContainerSpecParity(t *testing.T) {
 		"Name":        {"--name", ""},
 		"Image":       {"img:1", "image"},
 		"User":        {"-u", "user"},
-		"WorkingDir":  {"-w", ""},
 		"Labels":      {"-l", "labels"},
 		"Env":         {"-e", "environment"},
 		"Mounts":      {"--mount", "volumes"},
@@ -200,7 +198,9 @@ func TestDockerRunArgsEntrypoint(t *testing.T) {
 
 	args = dockerRunArgs(ContainerSpec{Image: "img", Cmd: []string{"a", "b"}})
 	assert.Equal(t, []string{"img", "a", "b"}, args[len(args)-3:])
-	assert.Equal(t, []string{"create", "-t", "-i"}, args[:3])
+	assert.Equal(t, "create", args[0])
+	assert.NotContains(t, args, "-t", "no TTY, as devcontainers/cli creates it (R13)")
+	assert.NotContains(t, args, "-i")
 }
 
 func gpuRuntime(plan devcontainer.ExecutionPlan) *Provisioner {
@@ -252,17 +252,15 @@ func TestSpecComposeParity(t *testing.T) {
 		})
 	}
 
-	// Single-container only: name, workdir, workspace mount, runArgs and
+	// Single-container only: name, workspace mount, runArgs and
 	// the keep-alive (overrideCommand defaults to false for compose).
 	assert.Equal(t, "ws-1234abcd", single.Name)
-	assert.Equal(t, "/workspaces/ws", single.WorkingDir)
 	assert.Equal(t, devcontainer.Mount{Type: "bind", Source: "/home/u/ws", Target: "/workspaces/ws"}, single.Mounts[0])
 	assert.Equal(t, "host", single.IpcMode)
 	assert.Equal(t, []string{"--hostname=x"}, single.RunArgs)
 	assert.Equal(t, keepAliveEntrypoint, single.Entrypoint)
 
 	assert.Empty(t, compose.Name)
-	assert.Empty(t, compose.WorkingDir)
 	assert.Empty(t, compose.Mounts)
 	assert.Empty(t, compose.IpcMode)
 	assert.Empty(t, compose.RunArgs)
@@ -318,7 +316,11 @@ func TestBuildArgsAreDeterministic(t *testing.T) {
 		"--build-context", "features=/tmp/f",
 		"--secret", "id=tok,src=/tmp/tok",
 		"--network=host", "--load", "/w",
-	}, buildArgs(opts))
+	}, buildArgs(opts, true))
+
+	// Without buildx: plain `docker build` (BuildKit), no --load (R14).
+	plain := buildArgs(build.DockerfileBuildOptions{Tag: "t", Context: "/w"}, false)
+	assert.Equal(t, []string{"build", "-t", "t", "/w"}, plain)
 }
 
 // Mount rendering (F16, F20, Q4): CSV quoting, passed-through options,

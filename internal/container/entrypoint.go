@@ -22,7 +22,7 @@ func keepAlive(entrypoints []string) []string {
 	}
 	return append([]string{
 		"/bin/sh", "-c",
-		`trap "exit 0" TERM INT; ` + runFeatureEntrypoints + `; sleep infinity & wait`,
+		`trap "exit 0" TERM INT; ` + runFeatureEntrypoints + `; ` + sleepForever,
 		"dcx-keepalive", strconv.Itoa(len(entrypoints)),
 	}, entrypoints...)
 }

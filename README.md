@@ -393,7 +393,7 @@ Use Docker Compose for multi-container setups:
 }
 ```
 
-The `service` field specifies which container to use as the primary devcontainer. Other services in the compose file start automatically.
+The `service` field specifies which container to use as the primary devcontainer. Other services in the compose file start automatically; with `runServices`, only those and the primary service are built and started. A primary service in a compose profile is found. Restarting a stopped environment runs `docker compose up -d --no-recreate`, as the official CLI does.
 
 ### Features
 
@@ -627,6 +627,27 @@ Changes since 0.7 that affect existing setups:
 - Features install as root, whatever the base image's `USER`; the image's
   user is restored afterwards. A feature given as a string
   (`"…/node:1": "18"`) sets its `version` option.
+- Runtime details follow the official CLI:
+  - `hostRequirements.gpu` on a host without a GPU runtime no longer fails
+    `up`: the container starts without GPUs, with a warning (none for
+    `"optional"`).
+  - Containers are created without `-t -i -w`: an image command that
+    needs a terminal (`overrideCommand: false` with `CMD bash`) exits, as
+    it does with the official CLI. Sessions still start in the workspace
+    folder; a `workspaceFolder` outside the workspace mount is no longer
+    created empty by Docker, so sessions start in `$HOME` there (set
+    `workspaceMount` to mount the project at it).
+  - The keep-alive is a `sleep 1` loop instead of `sleep infinity`, which
+    not every image's `sleep` supports.
+  - Without the buildx plugin, images build with `docker build` (BuildKit);
+    features still need buildx.
+  - Compose: only `runServices` and the primary service are built, a
+    stopped environment starts with `up -d --no-recreate`, a primary
+    service in a profile is found, and the project's `.env` applies when
+    dcx looks for the base image's metadata.
+  - The `devcontainer.metadata` label on images and containers keeps the
+    base image's entries as they were, string mounts as written, and
+    devcontainer.json unsubstituted (no host paths baked in).
 - Users, environment and hooks follow the official CLI:
   - `/etc/environment` holds the container's environment instead of
     `remoteEnv` (sessions still get `remoteEnv`).

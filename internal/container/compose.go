@@ -65,8 +65,12 @@ func (p ComposeProject) args(extra ...string) []string {
 }
 
 // Start starts the project's existing, stopped services.
-func (p ComposeProject) Start(ctx context.Context, e Engine) error {
-	return e.Compose(ctx, p, "start")
+//
+// Like devcontainers/cli it runs `up -d --no-recreate` (for services, or
+// all of them): stopped containers start as they are, and a service whose
+// container is missing is created.
+func (p ComposeProject) Start(ctx context.Context, e Engine, services []string) error {
+	return e.Compose(ctx, p, append([]string{"up", "-d", "--no-recreate"}, services...)...)
 }
 
 // Stop stops the project's services without removing them.

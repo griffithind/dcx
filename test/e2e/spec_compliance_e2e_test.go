@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -132,31 +134,40 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	helpers.RequireDockerAvailable(t)
 
 	// With overrideCommand=false dcx must not replace the image's command
-	// with `sleep infinity`. alpine's default command (/bin/sh) keeps
-	// running because dcx allocates a TTY and stdin.
-	//
-	// (This test used to pass runArgs ["--entrypoint","sleep","-c","infinity"],
-	// which is not valid docker syntax — "-c" is --cpu-shares — and only
-	// "worked" because dcx silently dropped runArgs.)
+	// with its keep-alive: PID 1 is the image's own command.
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
+		"build": {"dockerfile": "Dockerfile"},
 		"overrideCommand": false
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "Dockerfile"),
+		[]byte("FROM alpine:3.24\nCMD [\"tail\", \"-f\", \"/dev/null\"]\n"), 0o644))
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
-	// PID 1 is the image's own command, not dcx's sleep.
 	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "/bin/sh")
-	assert.NotContains(t, stdout, "sleep")
+	assert.Contains(t, stdout, "tail -f /dev/null")
+	assert.NotContains(t, stdout, "dcx-keepalive")
+}
+
+// TestOverrideCommandFalseWithoutTTYE2E: the container gets no TTY or
+// open stdin (R13), as devcontainers/cli creates it, so an image command
+// that needs a terminal (alpine's /bin/sh) exits and up says so.
+func TestOverrideCommandFalseWithoutTTYE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	workspace := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:3.24",
+		"overrideCommand": false
+	}`, helpers.UniqueTestName(t)))
+
+	_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "not running")
 }
 
 // TestWaitForDefaultE2E tests the default waitFor behavior (updateContentCommand per spec).

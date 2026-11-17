@@ -47,7 +47,7 @@ func TestPortsArePublishedOnce(t *testing.T) {
 func TestComposeOverrideLeavesTheUsersPortsAndVolumes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"config --format json": `{
+		ComposeOutputs: map[string]string{"--profile * config --format json": `{
 			"services":{"app":{"image":"base:1","ports":[{"target":3000,"published":"3000","protocol":"tcp"}]}},
 			"volumes":{"pgdata":{"name":"proj_pgdata"}}}`},
 		Registry: map[string]map[string]string{"base:1": {}},

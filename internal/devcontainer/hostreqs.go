@@ -6,13 +6,6 @@ import (
 	"strings"
 )
 
-// HostRequirementsResult contains the result of host requirements validation.
-type HostRequirementsResult struct {
-	Satisfied bool
-	Warnings  []string
-	Errors    []string
-}
-
 // DockerResources represents the resources available to Docker.
 // This may be less than the host's actual resources (e.g., Docker Desktop VM limits).
 type DockerResources struct {
@@ -21,47 +14,40 @@ type DockerResources struct {
 	GPU    bool   // Docker has a GPU (NVIDIA) runtime, so --gpus works
 }
 
-// ValidateHostRequirementsWithDocker checks if Docker's configured resources meet the requirements.
-// This is the preferred method as it checks Docker's actual available resources,
-// which may be limited by Docker Desktop VM settings or cgroup limits.
-func ValidateHostRequirementsWithDocker(reqs *HostRequirements, dockerRes *DockerResources) *HostRequirementsResult {
-	result := &HostRequirementsResult{Satisfied: true}
-
+// HostRequirementWarnings checks hostRequirements against Docker's
+// resources (which Docker Desktop VM settings or cgroup limits may cap)
+// and returns what falls short. Nothing refuses to start, as in
+// devcontainers/cli: CPU and memory minimums are advice (many repositories
+// set Codespaces-sized ones), and without a GPU runtime the container
+// starts without GPUs (a required GPU warns, an optional one is silent).
+func HostRequirementWarnings(reqs *HostRequirements, dockerRes *DockerResources) []string {
+	var warnings []string
 	if reqs == nil {
-		return result
+		return nil
 	}
 
-	// CPU and memory minimums are advice: many repositories set
-	// Codespaces-sized ones, and refusing to start on a laptop helps no
-	// one. They warn; a missing GPU runtime fails (--gpus would).
 	if reqs.CPUs > 0 && dockerRes.CPUs < reqs.CPUs {
-		result.Warnings = append(result.Warnings,
+		warnings = append(warnings,
 			fmt.Sprintf("hostRequirements: %d CPUs recommended, Docker has %d", reqs.CPUs, dockerRes.CPUs))
 	}
 	if reqs.Memory != "" {
 		reqBytes, err := parseMemoryString(reqs.Memory)
 		if err != nil {
-			result.Warnings = append(result.Warnings,
+			warnings = append(warnings,
 				fmt.Sprintf("Could not parse memory requirement '%s': %v", reqs.Memory, err))
 		} else if dockerRes.Memory > 0 && dockerRes.Memory < reqBytes {
-			result.Warnings = append(result.Warnings,
+			warnings = append(warnings,
 				fmt.Sprintf("hostRequirements: %s of memory recommended, Docker has %s", reqs.Memory, formatBytes(dockerRes.Memory)))
 		}
 	}
 
-	// Check GPU against Docker's GPU runtime: without it --gpus fails.
-	if reqs.GPU.Wanted() && !dockerRes.GPU {
-		if reqs.GPU.Mode == GPUOptional {
-			result.Warnings = append(result.Warnings, "No GPU runtime on the Docker host; starting without GPUs (optional requirement)")
-		} else {
-			result.Satisfied = false
-			result.Errors = append(result.Errors, "GPU requirement not met: the Docker host has no GPU runtime")
-		}
+	if reqs.GPU.Wanted() && reqs.GPU.Mode != GPUOptional && !dockerRes.GPU {
+		warnings = append(warnings, `hostRequirements: a GPU is required but the Docker host has no GPU runtime; starting without GPUs (mark it "optional" to silence this)`)
 	}
 
 	// storage can't be checked meaningfully; it is not reported.
 
-	return result
+	return warnings
 }
 
 // parseMemoryString parses a memory string like "4gb", "4096mb", "4g" into bytes.

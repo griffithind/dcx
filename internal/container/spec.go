@@ -19,10 +19,9 @@ type ContainerSpec struct {
 	// Image to run. For compose, empty means "keep the service's image".
 	Image string
 	User  string
-	// WorkingDir is the container's working directory. Compose plans keep
-	// the service's own working_dir (the service command may depend on it),
-	// so the spec builder leaves this empty for them.
-	WorkingDir string
+	// The container gets no working directory, TTY or open stdin (as in
+	// devcontainers/cli): sessions start in the workspace folder through
+	// the agent.
 
 	Labels map[string]string
 	Env    map[string]string
@@ -69,9 +68,14 @@ type ContainerSpec struct {
 // shell running as PID 1 ignores SIGTERM without a handler.
 var keepAliveEntrypoint = []string{
 	"/bin/sh", "-c",
-	`trap "exit 0" TERM INT; sleep infinity & wait`,
+	`trap "exit 0" TERM INT; ` + sleepForever,
 	"dcx-keepalive",
 }
+
+// sleepForever is devcontainers/cli's portable keep-alive: `sleep infinity`
+// is not supported by every sleep, `sleep 1` is. Sleeping in the
+// background and waiting lets the trap run.
+const sleepForever = `while sleep 1 & wait $!; do :; done`
 
 // sortedKeys returns the keys of m in sorted order, so renderings are
 // deterministic.

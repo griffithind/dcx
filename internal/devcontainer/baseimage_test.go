@@ -56,4 +56,10 @@ func TestComposeServiceBaseImage(t *testing.T) {
 	t.Setenv("DCX_TEST_TAG", "17")
 	writeFile(t, base, "services:\n  db:\n    image: postgres:${DCX_TEST_TAG}\n")
 	assert.Equal(t, "postgres:17", composeServiceBaseImage([]string{base}, "db"), "compose interpolation")
+
+	// The project's .env fills in what the environment doesn't set (R11).
+	writeFile(t, filepath.Join(dir, ".env"), "# versions\nexport PG_TAG=\"15\"\nDCX_TEST_TAG=99\n")
+	writeFile(t, base, "services:\n  db:\n    image: postgres:${PG_TAG}\n  app:\n    image: node:${DCX_TEST_TAG}\n")
+	assert.Equal(t, "postgres:15", composeServiceBaseImage([]string{base}, "db"))
+	assert.Equal(t, "node:17", composeServiceBaseImage([]string{base}, "app"), "the environment wins over .env")
 }

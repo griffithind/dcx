@@ -114,9 +114,7 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 		// Only initializeCommand runs (see up).
 		return &upRun{opts: opts, resolved: resolved, ids: ids, action: action, state: currentState, existing: existing}, nil
 	}
-	if err := s.checkHostRequirements(ctx, resolved); err != nil {
-		return nil, err
-	}
+	s.checkHostRequirements(ctx, resolved)
 	keepComposeProject(resolved, existing)
 
 	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, access: access, state: currentState, existing: existing}
@@ -276,33 +274,25 @@ func sshAccessFor(action upAction, existing *state.ContainerInfo, requested *con
 	}
 }
 
-// checkHostRequirements validates hostRequirements against the Docker host.
-func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) error {
+// checkHostRequirements reports hostRequirements the Docker host falls
+// short of, and drops the GPU request when the host has no GPU runtime
+// (`--gpus` would fail the start), as devcontainers/cli does.
+func (s *DevContainerService) checkHostRequirements(ctx context.Context, resolved *devcontainer.ResolvedDevContainer) {
 	if resolved.HostRequirements == nil {
-		return nil
+		return
 	}
 	info, err := s.engine.Info(ctx)
 	if err != nil {
 		s.report.Warnf("Could not get Docker info for resource validation: %v", err)
-		return nil
+		return
 	}
-	// "gpu": "optional" asks for GPUs only when the host has them;
-	// `--gpus` on a host without the NVIDIA runtime fails container start.
-	if gpu := resolved.GPU; gpu != nil && gpu.Mode == devcontainer.GPUOptional && !info.GPU {
+	if !info.GPU {
 		resolved.GPU = nil
 	}
-	result := devcontainer.ValidateHostRequirementsWithDocker(resolved.HostRequirements,
-		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal, GPU: info.GPU})
-	for _, w := range result.Warnings {
+	for _, w := range devcontainer.HostRequirementWarnings(resolved.HostRequirements,
+		&devcontainer.DockerResources{CPUs: info.NCPU, Memory: info.MemTotal, GPU: info.GPU}) {
 		s.report.Warnf("%s", w)
 	}
-	if !result.Satisfied {
-		for _, e := range result.Errors {
-			s.report.Errorf("%s", e)
-		}
-		return fmt.Errorf("host requirements not satisfied")
-	}
-	return nil
 }
 
 // keepComposeProject keeps the compose project an existing environment was

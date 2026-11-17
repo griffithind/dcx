@@ -34,7 +34,7 @@ func composeUIDRuntime(t *testing.T, fake *containertest.Fake) *container.Provis
 
 func TestComposeImageOnlyBaseIsPulledBeforeLayering(t *testing.T) {
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"config --format json": `{"services":{"app":{"image":"mcr.example/base:1"}}}`},
+		ComposeOutputs: map[string]string{"--profile * config --format json": `{"services":{"app":{"image":"mcr.example/base:1"}}}`},
 		Registry:       map[string]map[string]string{"mcr.example/base:1": {}},
 	}
 	require.NoError(t, composeUIDRuntime(t, fake).Up(context.Background(), container.UpOptions{}))
@@ -44,7 +44,7 @@ func TestComposeImageOnlyBaseIsPulledBeforeLayering(t *testing.T) {
 
 func TestComposeRecreateDoesNotRebuildOverDcxLayers(t *testing.T) {
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"config --format json": `{"services":{"app":{"image":"mcr.example/base:1"}}}`},
+		ComposeOutputs: map[string]string{"--profile * config --format json": `{"services":{"app":{"image":"mcr.example/base:1"}}}`},
 		Registry:       map[string]map[string]string{"mcr.example/base:1": {}},
 	}
 	// A recreate passes Build: compose must still not rebuild the service
@@ -63,7 +63,7 @@ func TestComposeRecreateDoesNotRebuildOverDcxLayers(t *testing.T) {
 func TestBuildImagesBuildsComposeServicesWithoutLayers(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"config --format json": `{"services":{"app":{"build":{"context":"."}}}}`},
+		ComposeOutputs: map[string]string{"--profile * config --format json": `{"services":{"app":{"build":{"context":"."}}}}`},
 	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
 		Identity: devcontainer.Identity{WorkspaceID: "ws1234567890", ResourceName: "app-ws123456"},

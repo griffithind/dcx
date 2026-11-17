@@ -314,7 +314,7 @@ func (r *Provisioner) buildDockerfile(ctx context.Context, imageTag string, plan
 
 	// The built image's label: the FROM image's metadata plus the local
 	// config (a label set here replaces the one the build inherits).
-	metadata, _ := build.GenerateMetadataLabel(r.resolved.MetadataLabel, nil, r.resolved.Local)
+	metadata, _ := build.GenerateMetadataLabel(r.resolved.MetadataLabel, nil, r.labelConfig())
 
 	// With both image and build, the built image is also tagged as image
 	// (the reference implementation's behaviour).
@@ -393,7 +393,7 @@ func (r *Provisioner) layerImages(ctx context.Context, baseImage string, opts Up
 			NoCache:           opts.NoCache,
 			Progress:          os.Stdout,
 			BaseImageMetadata: baseImageMetadata,
-			LocalConfig:       r.resolved.Local,
+			LocalConfig:       r.labelConfig(),
 		})
 		if err != nil {
 			return "", fmt.Errorf("failed to build derived image with features: %w", err)
@@ -462,6 +462,16 @@ func (r *Provisioner) uidUser(serviceUser, imageUser string) string {
 	return user
 }
 
+// labelConfig is the devcontainer.json entry of the devcontainer.metadata
+// labels dcx writes: the config as written, before substitution (M9), as
+// devcontainers/cli records it.
+func (r *Provisioner) labelConfig() *devcontainer.DevContainerConfig {
+	if r.resolved.Raw != nil {
+		return r.resolved.Raw
+	}
+	return r.resolved.Local
+}
+
 // featuresLayerVersion changes when the generated features Dockerfile
 // changes how features install, so existing features images are not reused.
 const featuresLayerVersion = "2"
@@ -504,7 +514,6 @@ func (r *Provisioner) spec(image string) ContainerSpec {
 
 	if !isCompose {
 		s.Name = res.ResourceName
-		s.WorkingDir = res.WorkspaceFolder
 		if wm := r.workspaceMount(); wm != nil {
 			s.Mounts = append([]devcontainer.Mount{*wm}, s.Mounts...)
 		}
@@ -642,7 +651,7 @@ func (r *Provisioner) buildLabels() map[string]string {
 	// it, so tools that attach to a running container (they read the
 	// container's label) see remoteUser and the rest even when no dcx
 	// layer was built.
-	if metadata, err := build.GenerateMetadataLabel(r.resolved.MetadataLabel, r.resolved.Features, r.resolved.Local); err == nil && metadata != "" {
+	if metadata, err := build.GenerateMetadataLabel(r.resolved.MetadataLabel, r.resolved.Features, r.labelConfig()); err == nil && metadata != "" {
 		labels[devcontainer.DevcontainerMetadataLabel] = metadata
 	}
 	return labels
@@ -783,7 +792,7 @@ func (r *Provisioner) containerPorts() []devcontainer.PortForward {
 // Start starts the existing, stopped environment.
 func (r *Provisioner) Start(ctx context.Context) error {
 	if plan, ok := r.composePlan(); ok {
-		return r.composeProject(plan).Start(ctx, r.engine)
+		return r.composeProject(plan).Start(ctx, r.engine, composeServices(plan))
 	}
 	return r.engine.StartContainer(ctx, r.containerName)
 }
@@ -798,7 +807,7 @@ func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
 		if opts.Pull {
 			args = append(args, "--pull")
 		}
-		return r.engine.Compose(ctx, r.userCompose(plan), args...)
+		return r.engine.Compose(ctx, r.userCompose(plan), append(args, composeServices(plan)...)...)
 	}
 
 	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, NoCache: opts.NoCache, Pull: opts.Pull})
@@ -918,7 +927,9 @@ func (r *Provisioner) ensureServicesBuilt(ctx context.Context, plan *devcontaine
 		defer func() { _ = os.Remove(path) }()
 		project = project.with(path)
 	}
-	return r.engine.Compose(ctx, project, "build")
+	// Only the services `up` starts (runServices and the primary; all of
+	// them without runServices), as devcontainers/cli builds them.
+	return r.engine.Compose(ctx, project, append([]string{"build"}, composeServices(plan)...)...)
 }
 
 // getComposeBaseImage returns the primary service's image and whether
@@ -993,7 +1004,9 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 	if plan.Service == "" {
 		return nil, fmt.Errorf("no primary service specified")
 	}
-	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "config", "--format", "json")
+	// Every profile, so a primary service in a profile is found (as
+	// devcontainers/cli reads the config).
+	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "--profile", "*", "config", "--format", "json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get compose config: %w", err)
 	}

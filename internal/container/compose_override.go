@@ -14,9 +14,8 @@ import (
 // Every string comes from an already-substituted configuration, so `$` is
 // escaped: compose would otherwise interpolate it a second time.
 //
-// Name and WorkingDir are not rendered (compose names its containers, and
-// the service keeps its own working directory); RunArgs have no compose
-// equivalent.
+// Name is not rendered (compose names its containers); RunArgs have no
+// compose equivalent.
 func composeOverride(service string, s ContainerSpec, buildSecrets map[string]string) ([]byte, error) {
 	return marshalOverride(overrideFile(service, s, buildSecrets))
 }

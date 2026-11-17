@@ -111,6 +111,7 @@ func TestExplicitConfigAndContainerEnvRefsE2E(t *testing.T) {
 		"name": %q,
 		"image": "alpine:${localEnv:DCX_E2E_UNSET_TAG:latest}",
 		"workspaceFolder": "/src/${localWorkspaceFolderBasename}",
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/src/${localWorkspaceFolderBasename}",
 		"remoteEnv": {"PATH": "${containerEnv:PATH}:/custom/bin"}
 	}`, helpers.UniqueTestName(t))), 0o644))
 	cfg := ".devcontainer/variant/devcontainer.json"
