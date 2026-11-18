@@ -1,7 +1,6 @@
 package container_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -38,7 +37,7 @@ func TestPortsArePublishedOnce(t *testing.T) {
 			{ContainerPort: 5432, HostPort: 5432},
 		}
 	})
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 	assert.Equal(t, []string{"127.0.0.1:3000:3000", "127.0.0.1:5432:5432"}, userPorts(fake.Specs[0]))
 }
 
@@ -64,7 +63,7 @@ func TestComposeOverrideLeavesTheUsersPortsAndVolumes(t *testing.T) {
 	}
 	prov, err := container.NewProvisioner(fake, nil, resolved)
 	require.NoError(t, err)
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 
 	path, err := container.ComposeOverridePath("ws1234567890")
 	require.NoError(t, err)
@@ -93,7 +92,7 @@ func TestContainerMetadataLabelAndName(t *testing.T) {
 		r.Local = &devcontainer.DevContainerConfig{Image: "alpine:3", RemoteUser: "vscode"}
 		r.RunArgs = &devcontainer.ParsedRunArgs{Name: "myproj_devcontainer"}
 	})
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 	spec := fake.Specs[0]
 	assert.Equal(t, "myproj_devcontainer", spec.Name)
 	assert.Contains(t, spec.Labels[devcontainer.DevcontainerMetadataLabel], `"remoteUser":"vscode"`)

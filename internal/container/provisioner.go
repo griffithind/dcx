@@ -63,26 +63,69 @@ func NewProvisioner(engine Engine, rep report.Reporter, resolved *devcontainer.R
 	}, nil
 }
 
-// Up builds the images and creates and starts the environment.
-func (r *Provisioner) Up(ctx context.Context, opts UpOptions) error {
-	// Determine the approach based on plan type
+// Prepared is what Prepare built or pulled, and what Create runs.
+type Prepared struct {
+	// Image is the primary container's image: a dcx tag (a layer, or a
+	// Dockerfile's base), or the ID of the user's image (a tag that moves
+	// after Prepare cannot change what runs). "" for a compose plan without dcx layers: compose runs
+	// the services it just built.
+	Image string
+}
+
+// Prepare builds (or pulls) everything the environment runs, without
+// creating anything: the base image, dcx's layers, and compose's service
+// images. A recreate prepares while the old environment still runs, so a
+// failing build leaves it in place, and creates from the result, so
+// nothing is built twice. `dcx build` is Prepare alone.
+func (r *Provisioner) Prepare(ctx context.Context, opts UpOptions) (*Prepared, error) {
+	// An unreachable network mode fails here too, before a recreate
+	// removes the old environment.
+	if _, _, err := r.sshNetwork(ctx); err != nil {
+		return nil, err
+	}
+	image, err := r.buildImages(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
+		// Without dcx layers buildImages built nothing: compose runs the
+		// service images, built here so `compose up` uses fresh ones.
+		if image == "" {
+			if err := r.ensureServicesBuilt(ctx, plan, opts); err != nil {
+				return nil, fmt.Errorf("failed to build services: %w", err)
+			}
+		}
+		return &Prepared{Image: image}, nil
+	}
+	// The user's image (no dcx layer on it) is pinned by ID: its tag can
+	// move between now and the create. dcx's own tags (a Dockerfile's
+	// base, its layers) only change under the workspace lock, and stay
+	// names so `dcx clean` sees them in use.
+	if _, isImage := r.resolved.Plan.(*devcontainer.ImagePlan); isImage && r.derivedImage == "" {
+		id, err := r.engine.ImageID(ctx, image)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect image %s: %w", image, err)
+		}
+		image = id
+	}
+	return &Prepared{Image: image}, nil
+}
+
+// Create creates and starts the environment from what Prepare made.
+func (r *Provisioner) Create(ctx context.Context, prepared *Prepared, access SSHAccess) error {
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ComposePlan:
-		return r.upCompose(ctx, opts, plan)
+		return r.createCompose(ctx, prepared.Image, access, plan)
 	case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
-		return r.upSingle(ctx, opts)
+		return r.createSingle(ctx, prepared.Image, access)
 	default:
 		return fmt.Errorf("unsupported plan type: %T", plan)
 	}
 }
 
-// upCompose handles compose-based configurations.
-func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, plan *devcontainer.ComposePlan) error {
-	image, err := r.buildImages(ctx, opts)
-	if err != nil {
-		return err
-	}
-	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
+// createCompose creates a compose environment.
+func (r *Provisioner) createCompose(ctx context.Context, image string, access SSHAccess, plan *devcontainer.ComposePlan) error {
+	if err := r.planSSH(ctx, access); err != nil {
 		return err
 	}
 	if err := r.prepareCommand(ctx, image); err != nil {
@@ -92,31 +135,11 @@ func (r *Provisioner) upCompose(ctx context.Context, opts UpOptions, plan *devco
 	if err := r.writeComposeOverride(plan, r.spec(image)); err != nil {
 		return fmt.Errorf("failed to write compose override: %w", err)
 	}
-	project := r.composeProject(plan)
-
-	// Build secrets only matter when compose itself builds the service
-	// (no dcx layers). They live in a one-off override so the persistent
-	// one never references deleted secret files.
-	if len(opts.BuildSecrets) > 0 && r.derivedImage == "" {
-		path, err := writeTempOverride(plan.Service, ContainerSpec{}, opts.BuildSecrets)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = os.Remove(path) }()
-		project = project.with(path)
-	}
-
-	args := []string{"up", "-d"}
-	// Let compose rebuild only when it runs the service image itself. When
-	// dcx layered the image (features or the UID update), the override
-	// points the service at dcx's tag, and `--build` would rebuild the
-	// user's Dockerfile straight onto that tag, dropping dcx's layers.
-	// buildImages has already rebuilt the services in that case.
-	if opts.Build && r.derivedImage == "" {
-		args = append(args, "--build")
-	}
-	args = append(args, composeServices(plan)...)
-	return r.engine.Compose(ctx, project, args...)
+	// Prepare built the services (and dcx's layers): `up` builds nothing.
+	// With dcx layers the override points the service at dcx's tag, which
+	// `--build` would overwrite with the user's Dockerfile.
+	args := append([]string{"up", "-d"}, composeServices(plan)...)
+	return r.engine.Compose(ctx, r.composeProject(plan), args...)
 }
 
 // composeServices returns the services `up` starts: all of them when
@@ -135,13 +158,9 @@ func composeServices(plan *devcontainer.ComposePlan) []string {
 	return append(services, plan.Service)
 }
 
-// upSingle handles single-container configurations (image or Dockerfile).
-func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
-	finalImage, err := r.buildImages(ctx, opts)
-	if err != nil {
-		return err
-	}
-	if err := r.planSSH(ctx, opts.SSHAccess); err != nil {
+// createSingle creates a single container (image or Dockerfile plan).
+func (r *Provisioner) createSingle(ctx context.Context, finalImage string, access SSHAccess) error {
+	if err := r.planSSH(ctx, access); err != nil {
 		return err
 	}
 	if err := r.prepareCommand(ctx, finalImage); err != nil {
@@ -167,30 +186,6 @@ func (r *Provisioner) upSingle(ctx context.Context, opts UpOptions) error {
 	return nil
 }
 
-// BuildImages builds (or pulls) everything Up needs without creating
-// anything, so a recreate can prepare the new images while the old
-// environment still runs: a failing build then leaves it in place.
-func (r *Provisioner) BuildImages(ctx context.Context, opts UpOptions) error {
-	// An unreachable network mode fails here too, before a recreate
-	// removes the old environment.
-	if _, _, err := r.sshNetwork(ctx); err != nil {
-		return err
-	}
-	image, err := r.buildImages(ctx, opts)
-	if err != nil {
-		return err
-	}
-	// A compose plan without dcx layers builds nothing in buildImages
-	// (compose runs the service image itself); build its services here so
-	// the later `compose up` uses fresh images.
-	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && image == "" {
-		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
-			return fmt.Errorf("failed to build services: %w", err)
-		}
-	}
-	return nil
-}
-
 // buildImages builds the image the dev container runs and returns it.
 //
 // The base image is pulled or built (the Dockerfile / compose build always
@@ -207,7 +202,7 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 		if len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
 			return "", nil
 		}
-		if err := r.ensureServicesBuilt(ctx, plan, opts.BuildSecrets); err != nil {
+		if err := r.ensureServicesBuilt(ctx, plan, opts); err != nil {
 			return "", fmt.Errorf("failed to build services: %w", err)
 		}
 		baseImage, built, err := r.getComposeBaseImage(ctx, plan)
@@ -217,7 +212,7 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 		// `compose build` skips image-only services, so their image may not
 		// be local yet; dcx layers on top of it and needs it present.
 		if !built {
-			if err := r.ensureImage(ctx, baseImage, opts.Pull); err != nil {
+			if err := r.ensureImage(ctx, baseImage, opts); err != nil {
 				return "", err
 			}
 		}
@@ -248,13 +243,15 @@ func (r *Provisioner) buildImages(ctx context.Context, opts UpOptions) (string, 
 	return finalImage, nil
 }
 
-// ensureImage makes sure ref is present locally, pulling it when missing
-// (or always, with pull).
-func (r *Provisioner) ensureImage(ctx context.Context, ref string, pull bool) error {
+// ensureImage makes sure ref is present locally, pulling it when missing,
+// or with --pull unless resolution just pulled it (its metadata is then
+// the one resolved; pulling again could move to another image).
+func (r *Provisioner) ensureImage(ctx context.Context, ref string, opts UpOptions) error {
 	exists, err := r.engine.ImageExists(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("failed to check image: %w", err)
 	}
+	pull := opts.Pull && (!opts.MetadataPulled || ref != r.resolved.MetadataImage)
 	if !exists || pull {
 		r.report.Infof("Pulling image: %s", ref)
 		if err := r.engine.PullImageWithProgress(ctx, ref, os.Stdout); err != nil {
@@ -269,7 +266,7 @@ func (r *Provisioner) resolveBaseImage(ctx context.Context, opts UpOptions) (str
 	switch plan := r.resolved.Plan.(type) {
 	case *devcontainer.ImagePlan:
 		r.report.Infof("Using image: %s", plan.Image)
-		if err := r.ensureImage(ctx, plan.Image, opts.Pull); err != nil {
+		if err := r.ensureImage(ctx, plan.Image, opts); err != nil {
 			return "", err
 		}
 		return plan.Image, nil
@@ -803,25 +800,15 @@ func (r *Provisioner) Start(ctx context.Context) error {
 	return r.engine.StartContainer(ctx, r.containerName)
 }
 
-// Build builds the images without creating anything.
-func (r *Provisioner) Build(ctx context.Context, opts BuildOptions) error {
-	if plan, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok && len(r.resolved.Features) == 0 && !r.resolved.ShouldUpdateUID {
-		args := []string{"build"}
-		if opts.NoCache {
-			args = append(args, "--no-cache")
-		}
-		if opts.Pull {
-			args = append(args, "--pull")
-		}
-		return r.engine.Compose(ctx, r.userCompose(plan), append(args, composeServices(plan)...)...)
-	}
-
-	image, err := r.buildImages(ctx, UpOptions{Build: true, Rebuild: opts.NoCache, NoCache: opts.NoCache, Pull: opts.Pull})
+// Build builds the images without creating anything (`dcx build`): what
+// Prepare does for `dcx up`, with the same options.
+func (r *Provisioner) Build(ctx context.Context, opts UpOptions) error {
+	prepared, err := r.Prepare(ctx, opts)
 	if err != nil {
 		return err
 	}
-	if image != "" {
-		r.report.Infof("Built image: %s", image)
+	if prepared.Image != "" {
+		r.report.Infof("Built image: %s", prepared.Image)
 	}
 	return nil
 }
@@ -943,19 +930,26 @@ func writeTempOverride(service string, spec ContainerSpec, buildSecrets map[stri
 	return f.Name(), nil
 }
 
-func (r *Provisioner) ensureServicesBuilt(ctx context.Context, plan *devcontainer.ComposePlan, buildSecrets map[string]string) error {
+func (r *Provisioner) ensureServicesBuilt(ctx context.Context, plan *devcontainer.ComposePlan, opts UpOptions) error {
 	project := r.userCompose(plan)
-	if len(buildSecrets) > 0 {
-		path, err := writeTempOverride(plan.Service, ContainerSpec{}, buildSecrets)
+	if len(opts.BuildSecrets) > 0 {
+		path, err := writeTempOverride(plan.Service, ContainerSpec{}, opts.BuildSecrets)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = os.Remove(path) }()
 		project = project.with(path)
 	}
+	args := []string{"build"}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	if opts.Pull {
+		args = append(args, "--pull")
+	}
 	// Only the services `up` starts (runServices and the primary; all of
 	// them without runServices), as devcontainers/cli builds them.
-	return r.engine.Compose(ctx, project, append([]string{"build"}, composeServices(plan)...)...)
+	return r.engine.Compose(ctx, project, append(args, composeServices(plan)...)...)
 }
 
 // getComposeBaseImage returns the primary service's image and whether

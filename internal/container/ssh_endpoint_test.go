@@ -52,7 +52,7 @@ func sshPorts(spec container.ContainerSpec) []devcontainer.PortForward {
 
 func TestSSHPortIsPublishedAndRecorded(t *testing.T) {
 	fake := &containertest.Fake{}
-	require.NoError(t, singleRuntime(t, fake, "").Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, singleRuntime(t, fake, ""), container.UpOptions{}))
 	require.Len(t, fake.Specs, 1)
 	spec := fake.Specs[0]
 
@@ -74,7 +74,7 @@ func TestSSHPortSkipsPortsOfOtherWorkspaces(t *testing.T) {
 	other.SSHPort = preferred
 	fake := &containertest.Fake{Containers: []state.ContainerSummary{{ID: "c-other", Labels: other.ToMap()}}}
 
-	require.NoError(t, singleRuntime(t, fake, "").Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, singleRuntime(t, fake, ""), container.UpOptions{}))
 	labels := state.ContainerLabelsFromMap(fake.Specs[0].Labels)
 	assert.NotEqual(t, preferred, labels.SSHPort)
 	assert.Equal(t, labels.SSHPort, sshPorts(fake.Specs[0])[0].HostPort)
@@ -83,7 +83,7 @@ func TestSSHPortSkipsPortsOfOtherWorkspaces(t *testing.T) {
 func TestWidenedSSHAccessIsPublishedOnAllInterfacesAndRecorded(t *testing.T) {
 	fake := &containertest.Fake{}
 	access := container.SSHAccess{AllowedCIDRs: []string{"10.0.0.0/24"}}
-	require.NoError(t, singleRuntime(t, fake, "").Up(context.Background(), container.UpOptions{SSHAccess: access}))
+	require.NoError(t, up(t, singleRuntime(t, fake, ""), container.UpOptions{}, access))
 	spec := fake.Specs[0]
 	assert.Equal(t, "0.0.0.0", sshPorts(spec)[0].Host)
 	assert.Equal(t, []string{"10.0.0.0/24"}, state.ContainerLabelsFromMap(spec.Labels).SSHAllowedCIDRs)
@@ -91,7 +91,7 @@ func TestWidenedSSHAccessIsPublishedOnAllInterfacesAndRecorded(t *testing.T) {
 
 func TestHostNetworkAgentListensOnTheHostPort(t *testing.T) {
 	fake := &containertest.Fake{}
-	require.NoError(t, singleRuntime(t, fake, "host").Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, singleRuntime(t, fake, "host"), container.UpOptions{}))
 	spec := fake.Specs[0]
 	assert.Empty(t, sshPorts(spec), "Docker can't publish ports with host networking")
 	labels := state.ContainerLabelsFromMap(spec.Labels)
@@ -102,7 +102,7 @@ func TestHostNetworkAgentListensOnTheHostPort(t *testing.T) {
 func TestContainerNetworkModeIsRejected(t *testing.T) {
 	fake := &containertest.Fake{}
 	prov := singleRuntime(t, fake, "container:db")
-	err := prov.BuildImages(context.Background(), container.UpOptions{})
+	err := prov.Build(context.Background(), container.UpOptions{})
 	require.Error(t, err, "rejected before a recreate removes anything")
 	assert.Contains(t, err.Error(), "container:db")
 	assert.Empty(t, fake.Specs)
@@ -123,7 +123,7 @@ func TestComposeSharedNetworkPublishesOnTheOwner(t *testing.T) {
 		ForwardPorts: []devcontainer.PortForward{{ContainerPort: 5432, HostPort: 5432}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 
 	path, err := container.ComposeOverridePath(sshTestWorkspace)
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestUserPortsBindLoopback(t *testing.T) {
 		r.ForwardPorts = []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}, {ContainerPort: 80, HostPort: 8080}}
 		r.AppPorts = []devcontainer.PortForward{{ContainerPort: 9000, HostPort: 9000, Host: "0.0.0.0"}}
 	})
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 	var specs []string
 	for _, p := range fake.Specs[0].Ports {
 		if p.ContainerPort != agentproto.ListenPort {
@@ -176,6 +176,6 @@ func TestHostNetworkPublishesNoUserPorts(t *testing.T) {
 	prov := singleRuntime(t, fake, "host", func(r *devcontainer.ResolvedDevContainer) {
 		r.ForwardPorts = []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}}
 	})
-	require.NoError(t, prov.Up(context.Background(), container.UpOptions{}))
+	require.NoError(t, up(t, prov, container.UpOptions{}))
 	assert.Empty(t, fake.Specs[0].Ports, "Docker discards published ports with host networking")
 }

@@ -106,6 +106,9 @@ type LoadOptions struct {
 	// mounts, ...) is merged on the first run too. Without it the first
 	// `up` and later runs could resolve differently.
 	PullForMetadata bool
+	// RefreshMetadata pulls the base image even when it is local (--pull),
+	// so users, hooks and labels come from the image that will run.
+	RefreshMetadata bool
 }
 
 // Load resolves the devcontainer configuration.
@@ -122,7 +125,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 	return devcontainer.ResolveWorkspace(ctx, devcontainer.ResolveOptions{
 		WorkspacePath: s.workspacePath,
 		ConfigPath:    s.configPath,
-		Images:        engineImages{engine: s.engine, report: s.report, pull: opts.PullForMetadata},
+		Images:        engineImages{engine: s.engine, report: s.report, pull: opts.PullForMetadata, refresh: opts.RefreshMetadata},
 		Lockfile:      lock,
 		ForcePull:     opts.ForcePull,
 		Report:        s.report,
@@ -130,16 +133,26 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 }
 
 // engineImages reads image metadata through the container engine, pulling
-// the image first when pull is set and it is not available locally.
+// the image first when pull is set and it is not available locally, or
+// always with refresh.
 type engineImages struct {
-	engine container.Engine
-	report report.Reporter
-	pull   bool
+	engine  container.Engine
+	report  report.Reporter
+	pull    bool
+	refresh bool
 }
 
 func (e engineImages) ImageMetadata(ctx context.Context, imageRef string) (string, error) {
+	if e.refresh {
+		e.report.Infof("Pulling image: %s", imageRef)
+		if err := e.engine.PullImageWithProgress(ctx, imageRef, io.Discard); err != nil {
+			// A local-only image (built here, or from a registry that is
+			// down) keeps the metadata it has.
+			e.report.Warnf("Could not pull %s (%v); using the local image's metadata", imageRef, err)
+		}
+	}
 	labels, err := e.engine.ImageLabels(ctx, imageRef)
-	if err != nil && e.pull {
+	if err != nil && e.pull && !e.refresh {
 		e.report.Infof("Pulling image: %s", imageRef)
 		if perr := e.engine.PullImageWithProgress(ctx, imageRef, io.Discard); perr != nil {
 			e.report.Warnf("Could not pull %s to read its metadata: %v", imageRef, perr)
@@ -153,45 +166,50 @@ func (e engineImages) ImageMetadata(ctx context.Context, imageRef string) (strin
 	return labels[devcontainer.DevcontainerMetadataLabel], nil
 }
 
-// create creates a new environment.
-// prebuild builds the images a create will use, before anything is removed.
-func (s *DevContainerService) prebuild(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, buildSecrets map[string]string) error {
-	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
+// createEnvironment prepares everything the environment runs (images
+// built or pulled), then creates it from that result. On a recreate the
+// old environment is removed only after preparing succeeded, so a failing
+// build (Dockerfile error, registry outage, broken feature) leaves the
+// user with a working container, and nothing is built twice.
+func (s *DevContainerService) createEnvironment(ctx context.Context, r *upRun, buildSecrets map[string]string) error {
+	prov, err := container.NewProvisioner(s.engine, s.report, r.resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
-	s.report.Infof("Building images...")
-	return prov.BuildImages(ctx, container.UpOptions{
-		Build:        opts.Rebuild,
-		Rebuild:      opts.Rebuild,
-		Pull:         opts.Pull,
-		BuildSecrets: buildSecrets,
+	prepared, err := prov.Prepare(ctx, container.UpOptions{
+		Rebuild:        r.opts.Rebuild,
+		Pull:           r.opts.Pull,
+		MetadataPulled: r.opts.Pull,
+		BuildSecrets:   buildSecrets,
 	})
-}
-
-func (s *DevContainerService) create(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, opts UpOptions, access container.SSHAccess, buildSecrets map[string]string) error {
-	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
-		return fmt.Errorf("failed to create provisioner: %w", err)
+		if r.action == actionRecreate {
+			return fmt.Errorf("build failed; the existing devcontainer was left running: %w", err)
+		}
+		return err
 	}
 
-	if _, ok := resolved.Plan.(*devcontainer.ComposePlan); ok {
+	if r.action == actionRecreate {
+		s.report.Infof("Removing existing devcontainer...")
+		// Never remove named volumes when recreating: they hold user
+		// data that must survive a config change. Only an explicit
+		// `dcx down --volumes` removes them. Orphans go: compose runs
+		// down with the edited files, so a renamed or removed service
+		// (possibly the old primary) would otherwise keep running.
+		if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.WorkspaceID, DownOptions{RemoveOrphans: true}); err != nil {
+			return fmt.Errorf("failed to remove existing environment: %w", err)
+		}
+	}
+
+	if _, ok := r.resolved.Plan.(*devcontainer.ComposePlan); ok {
 		s.report.Infof("Creating compose-based devcontainer...")
 	} else {
 		s.report.Infof("Creating single-container devcontainer...")
 	}
-
-	err = prov.Up(ctx, container.UpOptions{
-		Build:        opts.Rebuild,
-		Rebuild:      opts.Rebuild,
-		Pull:         opts.Pull,
-		BuildSecrets: buildSecrets,
-		SSHAccess:    access,
-	})
 	// The agent port was free when chosen; another process (or a
 	// devcontainer created at the same moment) can take it before Docker
 	// binds it.
-	return explainPortConflict(err, prov.PlannedSSHPort())
+	return explainPortConflict(prov.Create(ctx, prepared, r.access), prov.PlannedSSHPort())
 }
 
 // recordedSSHPort is the agent port recorded on an existing container.
@@ -529,6 +547,7 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 		ForcePull:       opts.Pull,
 		UseLockfile:     true,
 		PullForMetadata: true,
+		RefreshMetadata: opts.Pull,
 	})
 	if err != nil {
 		return err
@@ -536,15 +555,23 @@ func (s *DevContainerService) Build(ctx context.Context, opts BuildOptions) erro
 	if err := s.initLockfile(resolved); err != nil {
 		return err
 	}
+	// The same build inputs as `dcx up`: build secrets included.
+	buildSecrets, cleanup, err := s.fetchBuildSecrets(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	prov, err := container.NewProvisioner(s.engine, s.report, resolved)
 	if err != nil {
 		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
-
-	return prov.Build(ctx, container.BuildOptions{
-		NoCache: opts.NoCache,
-		Pull:    opts.Pull,
+	return prov.Build(ctx, container.UpOptions{
+		Rebuild:        opts.NoCache,
+		NoCache:        opts.NoCache,
+		Pull:           opts.Pull,
+		MetadataPulled: opts.Pull,
+		BuildSecrets:   buildSecrets,
 	})
 }
 

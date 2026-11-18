@@ -93,7 +93,7 @@ return cliCtx.Service.Up(...)   // Delegate to service
 **Key Methods:**
 - `Load()` / `LoadWithOptions()` - Resolve through `devcontainer.ResolveWorkspace` (the service only supplies image metadata via the engine)
 - `Stop()` / `Restart()` - Stop (honouring `shutdownAction`), or stop and bring up again through `Up`
-- `Up()` - Full lifecycle: load → validate → build → create → hooks → SSH. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
+- `Up()` - Full lifecycle: load → validate → prepare (build/pull) → create → hooks → SSH. With `--pull`, resolution pulls the base image first (`LoadOptions.RefreshMetadata`), so its metadata is the one that runs; `Build()` is Prepare alone, with the same secrets and flags. Also the only start path: `dcx up` on a stopped container and `dcx restart` both go through it so the agent, runtime secrets and postStart hooks are re-established.
 - `Status()` / `List()` - Data for `dcx status` / `dcx list`; the CLI only renders it (golden tests in `internal/cli/testdata`)
 - `Down()` / `DownWithIDs()` - Remove containers
 - `Build()` - Build images without starting
@@ -289,11 +289,14 @@ Service.Up (internal/service/up.go)
     └─ steps, each idempotent:
         initialize   host initializeCommand (lifecycle.HookRunner)
         container    start: startExisting
-                     create/recreate: Provisioner.BuildImages (recreate builds first),
-                       DownWithIDs (recreate), Provisioner.Up:
-                       base image → features layer → UID layer (layerImages),
-                       planSSH (port, listen address, network mode), prepareCommand
-                       (feature entrypoints), CreateContainer / compose up with override
+                     create/recreate (createEnvironment): Provisioner.Prepare
+                       (base image → features layer → UID layer (layerImages),
+                       compose service builds; returns Prepared, a user image pinned
+                       by ID), then DownWithIDs (recreate only, after Prepare
+                       succeeded), then Provisioner.Create(Prepared): planSSH (port,
+                       listen address, network mode), prepareCommand (feature
+                       entrypoints), CreateContainer / compose up with override.
+                       Nothing is built after the old environment is removed.
         agent        agentctl.Provision: install, root-owned SSH secrets, setup, launch as root
         secrets      runtime secrets on the /run/secrets tmpfs
         environment  /etc/environment, userEnvProbe, /run/dcx/session.json

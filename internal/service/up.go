@@ -77,7 +77,7 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	// One resolution: the base image is pulled for its devcontainer.metadata
 	// only when it is not present (the first run), so its metadata applies
 	// then too. (It used to resolve twice, features included.)
-	resolved, err := s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true})
+	resolved, err := s.LoadWithOptions(ctx, LoadOptions{ForcePull: opts.Pull, UseLockfile: true, PullForMetadata: true, RefreshMetadata: opts.Pull})
 	if err != nil {
 		return nil, err
 	}
@@ -341,29 +341,7 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 		}
 		defer cleanup()
 
-		createOpts := r.opts
-		if r.action == actionRecreate {
-			// Build the new images while the old environment still runs, so
-			// a failing build (Dockerfile error, registry outage, broken
-			// feature) leaves the user with a working container. The create
-			// below then reuses the freshly built layers.
-			prebuildOpts := r.opts
-			prebuildOpts.Rebuild = true
-			if err := s.prebuild(ctx, r.resolved, prebuildOpts, buildSecrets); err != nil {
-				return fmt.Errorf("build failed; the existing devcontainer was left running: %w", err)
-			}
-			s.report.Infof("Removing existing devcontainer...")
-			// Never remove named volumes when recreating: they hold user
-			// data that must survive a config change. Only an explicit
-			// `dcx down --volumes` removes them. Orphans go: compose runs
-			// down with the edited files, so a renamed or removed service
-			// (possibly the old primary) would otherwise keep running.
-			if err := s.DownWithIDs(ctx, r.ids.ResourceName, r.resolved.WorkspaceID, DownOptions{RemoveOrphans: true}); err != nil {
-				return fmt.Errorf("failed to remove existing environment: %w", err)
-			}
-			createOpts.Rebuild = false
-		}
-		if err := s.create(ctx, r.resolved, createOpts, r.access, buildSecrets); err != nil {
+		if err := s.createEnvironment(ctx, r, buildSecrets); err != nil {
 			return err
 		}
 		r.started = true

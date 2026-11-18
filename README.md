@@ -672,6 +672,11 @@ Changes since 0.7 that affect existing setups:
     already running.
   - A failing command of a parallel hook no longer stops the others.
   - Hooks run on a pseudo-terminal when dcx runs in a terminal.
+- `dcx up --pull` pulls the base image before reading its metadata, so
+  `remoteUser`, hooks and labels come from the image that runs. A recreate
+  builds everything once, before removing the old container, and creates
+  from that result. `dcx build` uses build secrets, `--pull` and
+  `--no-cache` as `up` does, also for compose services.
 - Per-workspace files in `~/.dcx` moved into `workspaces/<workspace ID>/`.
   A host key moves there the next time it is used (so editors' pins stay
   valid). Existing compose environments keep using their override at the
