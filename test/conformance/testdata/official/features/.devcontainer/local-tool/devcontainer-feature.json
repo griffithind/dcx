@@ -1,0 +1,15 @@
+{
+  "id": "local-tool",
+  "version": "1.0.0",
+  "name": "Local tool",
+  "dependsOn": {
+    "ghcr.io/devcontainers/features/common-utils:2": {"username": "none"}
+  },
+  "installsAfter": ["ghcr.io/devcontainers/features/node"],
+  "containerEnv": {"FROM_FEATURE": "feature", "SHARED": "feature"},
+  "capAdd": ["SYS_PTRACE"],
+  "securityOpt": ["seccomp=unconfined"],
+  "mounts": [{"type": "volume", "source": "local-tool-cache", "target": "/cache"}],
+  "postCreateCommand": ["echo", "feature-post-create"],
+  "postStartCommand": "echo feature-post-start"
+}

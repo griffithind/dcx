@@ -1,0 +1,17 @@
+{
+  "name": "Features",
+  "image": "mcr.microsoft.com/devcontainers/base:alpine",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/node:1": {"version": "20"},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "./local-tool": {}
+  },
+  "overrideFeatureInstallOrder": ["ghcr.io/devcontainers/features/github-cli"],
+  "containerEnv": {"FROM_CONFIG": "config", "SHARED": "config"},
+  "remoteEnv": {"REMOTE": "config"},
+  "postCreateCommand": "echo config-post-create"
+}

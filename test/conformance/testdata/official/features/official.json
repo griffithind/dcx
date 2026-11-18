@@ -1,0 +1,116 @@
+{
+  "cli": "0.90.0",
+  "featureOrder": [
+    {
+      "id": "ghcr.io/devcontainers/features/common-utils:2",
+      "options": {},
+      "version": "2.7.1"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/common-utils:2",
+      "options": {
+        "username": "none"
+      },
+      "version": "2.7.1"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/docker-in-docker:2",
+      "options": {},
+      "version": "2.17.0"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/git:1",
+      "options": {},
+      "version": "1.3.8"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/node:1",
+      "options": {
+        "version": "20"
+      },
+      "version": "1.7.1"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/python:1",
+      "options": {},
+      "version": "1.8.1"
+    },
+    {
+      "id": "ghcr.io/devcontainers/features/github-cli:1",
+      "options": {},
+      "version": "1.1.3"
+    },
+    {
+      "id": "./local-tool",
+      "options": {},
+      "version": "1.0.0"
+    }
+  ],
+  "workspace": {
+    "workspaceFolder": "/workspaces/features",
+    "workspaceMount": "type=bind,source=<workspace>,target=/workspaces/features"
+  },
+  "mergedConfiguration": {
+    "name": "Features",
+    "image": "mcr.microsoft.com/devcontainers/base:alpine",
+    "features": {
+      "ghcr.io/devcontainers/features/python:1": {},
+      "ghcr.io/devcontainers/features/node:1": {
+        "version": "20"
+      },
+      "ghcr.io/devcontainers/features/github-cli:1": {},
+      "ghcr.io/devcontainers/features/git:1": {},
+      "ghcr.io/devcontainers/features/common-utils:2": {},
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+      "./local-tool": {}
+    },
+    "overrideFeatureInstallOrder": [
+      "ghcr.io/devcontainers/features/github-cli"
+    ],
+    "containerEnv": {
+      "FROM_CONFIG": "config",
+      "SHARED": "config"
+    },
+    "remoteEnv": {
+      "REMOTE": "config"
+    },
+    "init": false,
+    "privileged": true,
+    "capAdd": [
+      "SYS_PTRACE"
+    ],
+    "securityOpt": [
+      "seccomp=unconfined"
+    ],
+    "entrypoints": [
+      "/usr/local/share/docker-init.sh"
+    ],
+    "mounts": [
+      {
+        "source": "dind-var-lib-docker-${devcontainerId}",
+        "target": "/var/lib/docker",
+        "type": "volume"
+      },
+      {
+        "type": "volume",
+        "source": "local-tool-cache",
+        "target": "/cache"
+      }
+    ],
+    "onCreateCommands": [],
+    "updateContentCommands": [],
+    "postCreateCommands": [
+      [
+        "echo",
+        "feature-post-create"
+      ],
+      "echo config-post-create"
+    ],
+    "postStartCommands": [
+      "echo feature-post-start"
+    ],
+    "postAttachCommands": [],
+    "remoteUser": "vscode",
+    "portsAttributes": {}
+  }
+}

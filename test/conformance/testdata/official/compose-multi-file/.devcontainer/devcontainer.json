@@ -1,0 +1,8 @@
+{
+  "name": "Compose Multi File",
+  "dockerComposeFile": ["compose.yml", "extra/override.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {"FROM_CONFIG": "config"},
+  "postStartCommand": "echo config-post-start"
+}

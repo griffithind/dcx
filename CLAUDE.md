@@ -438,7 +438,7 @@ make build && make lint && make deadcode && make test-all
 |------|----------|-------------|
 | Unit | `internal/*/` | `make test` |
 | E2E | `test/e2e/` | `make test-e2e` (requires Docker) |
-| Conformance | `test/conformance/` (spec merge and default rules through `ResolveWorkspace`) | Part of `make test-all` |
+| Conformance | `test/conformance/` (spec merge and default rules through `ResolveWorkspace`; `testdata/official/` cases compared with the official CLI's recorded output, re-recorded by hand with `record-official.sh`) | Part of `make test-all` |
 | Lint | - | `make lint` (golangci-lint) |
 | Deadcode | - | `make deadcode` (find unused code) |
 

@@ -1,0 +1,31 @@
+{
+  "cli": "0.90.0",
+  "featureOrder": [],
+  "workspace": {
+    "workspaceFolder": "/workspace"
+  },
+  "mergedConfiguration": {
+    "name": "Compose Multi File",
+    "dockerComposeFile": [
+      "compose.yml",
+      "extra/override.yml"
+    ],
+    "service": "app",
+    "workspaceFolder": "/workspace",
+    "containerEnv": {
+      "FROM_CONFIG": "config"
+    },
+    "init": false,
+    "privileged": false,
+    "onCreateCommands": [],
+    "updateContentCommands": [],
+    "postCreateCommands": [],
+    "postStartCommands": [
+      "echo config-post-start"
+    ],
+    "postAttachCommands": [],
+    "remoteUser": "vscode",
+    "remoteEnv": {},
+    "portsAttributes": {}
+  }
+}

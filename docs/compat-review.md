@@ -13,6 +13,8 @@ dcx compared with the official devcontainers/cli v0.90.0 (commit `a190a3f`, 2026
 - **Verification.** The high-impact findings were checked by hand in both codebases. One claim was wrong and is dropped: upstream does not resolve `${containerEnv:…}` inside lifecycle commands either, because hooks run from a map built without container substitution.
 - **IDs.** IDs say where a finding came from: C (config), M (metadata and lifecycle), F (features), R (runtime). Duplicates found by two comparisons are merged under one ID. Upstream paths are relative to the upstream `src/`.
 
+- **Recorded fixtures.** `test/conformance/testdata/official/` holds workspaces together with what the official CLI (the same version) made of them: `read-configuration` (install order, merged configuration) and `upgrade` (the lockfile), plus the image metadata, compose model and registry features it read. `TestOfficialCLI` resolves each workspace offline from those inputs and compares. `test/conformance/record-official.sh` re-records them by hand (Docker and network access needed; the CLI runs in a container). It is never run by the tests. Add a case when a compatibility fix needs one.
+
 dcx's deliberate differences are listed at the end, not as findings: SSH sessions to an agent, `customizations.dcx` secrets, `waitFor` ignored, its recreate policy, and its own labels and image names.
 
 ## Status

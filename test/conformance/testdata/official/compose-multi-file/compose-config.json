@@ -1,0 +1,37 @@
+{
+  "name": "fixture",
+  "networks": {
+    "default": {
+      "name": "fixture_default",
+      "ipam": {}
+    }
+  },
+  "services": {
+    "app": {
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "entrypoint": null,
+      "image": "alpine:3.24",
+      "networks": {
+        "default": null
+      },
+      "build": {
+        "context": "<workspace>/.devcontainer",
+        "dockerfile": "Dockerfile.dev"
+      }
+    },
+    "db": {
+      "command": [
+        "sleep",
+        "infinity"
+      ],
+      "entrypoint": null,
+      "image": "alpine:3.24",
+      "networks": {
+        "default": null
+      }
+    }
+  }
+}
