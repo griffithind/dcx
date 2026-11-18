@@ -1,0 +1,7 @@
+# Relative paths in every compose file resolve against the project
+# directory (.devcontainer), not this file's folder.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev

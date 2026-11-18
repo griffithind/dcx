@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/griffithind/dcx/internal/features"
-	"gopkg.in/yaml.v3"
 )
 
 // ComputeConfigHash computes the staleness key of a devcontainer: when it
@@ -33,19 +32,27 @@ import (
 // What else determines the container (substituted values, the digests a
 // feature tag resolves to) is ComputeInputsHash: when only that changes,
 // dcx reports the drift instead of recreating.
-func ComputeConfigHash(raw *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
-	return computeHash(raw, dockerfilePath, composeFiles, localFeaturesKey(resolvedFeatures))
+func ComputeConfigHash(raw *DevContainerConfig, dockerfilePath string, compose composeInputs, resolvedFeatures []*features.Feature) (string, error) {
+	return computeHash(raw, dockerfilePath, compose, localFeaturesKey(resolvedFeatures))
+}
+
+// composeInputs are the files of a compose project that go into the
+// hashes: the compose files and the Dockerfiles their services build
+// (from the compose model, so paths resolve as compose resolves them).
+type composeInputs struct {
+	Files       []string
+	Dockerfiles []string
 }
 
 // ComputeInputsHash covers everything that determines the container: the
 // substituted local config (before image-metadata merging, so it does not
 // depend on whether the base image happens to be available) and the
 // resolved features with their versions and digests (FeaturesKey).
-func ComputeInputsHash(local *DevContainerConfig, dockerfilePath string, composeFiles []string, resolvedFeatures []*features.Feature) (string, error) {
-	return computeHash(local, dockerfilePath, composeFiles, FeaturesKey(resolvedFeatures))
+func ComputeInputsHash(local *DevContainerConfig, dockerfilePath string, compose composeInputs, resolvedFeatures []*features.Feature) (string, error) {
+	return computeHash(local, dockerfilePath, compose, FeaturesKey(resolvedFeatures))
 }
 
-func computeHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []string, featuresKey string) (string, error) {
+func computeHash(cfg *DevContainerConfig, dockerfilePath string, compose composeInputs, featuresKey string) (string, error) {
 	h := sha256.New()
 
 	norm, err := normalizedConfigJSON(cfg)
@@ -64,8 +71,8 @@ func computeHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []
 	}
 
 	// Compose files and their referenced Dockerfiles
-	if len(composeFiles) > 0 {
-		for _, f := range composeFiles {
+	if len(compose.Files) > 0 {
+		for _, f := range compose.Files {
 			content, err := os.ReadFile(f)
 			if err != nil {
 				return "", fmt.Errorf("read compose file %s: %w", f, err)
@@ -74,7 +81,7 @@ func computeHash(cfg *DevContainerConfig, dockerfilePath string, composeFiles []
 			h.Write(content)
 		}
 
-		dockerfilePaths := collectComposeDockerfiles(composeFiles)
+		dockerfilePaths := append([]string(nil), compose.Dockerfiles...)
 		sort.Strings(dockerfilePaths)
 		for _, df := range dockerfilePaths {
 			content, err := os.ReadFile(df)
@@ -198,103 +205,4 @@ func hashDir(dir string) string {
 		return nil
 	})
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// collectComposeDockerfiles parses compose files and returns absolute paths
-// to all Dockerfiles referenced by service build directives.
-func collectComposeDockerfiles(composeFiles []string) []string {
-	seen := make(map[string]bool)
-	var result []string
-
-	for _, f := range composeFiles {
-		content, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-
-		paths := parseComposeDockerfilePaths(content, filepath.Dir(f))
-		for _, p := range paths {
-			if !seen[p] {
-				seen[p] = true
-				result = append(result, p)
-			}
-		}
-	}
-
-	return result
-}
-
-// composeFile is a minimal representation of a docker-compose.yml for
-// extracting build Dockerfile references.
-type composeFile struct {
-	Services map[string]composeService `yaml:"services"`
-}
-
-// composeService represents a single service in a compose file.
-type composeService struct {
-	Build composeBuild `yaml:"build"`
-}
-
-// composeBuild handles both string and object forms of the build directive.
-// String form: build: ./path (context only, Dockerfile defaults to "Dockerfile")
-// Object form: build: { context: ./path, dockerfile: Dockerfile.dev }
-type composeBuild struct {
-	Context    string `yaml:"context"`
-	Dockerfile string `yaml:"dockerfile"`
-}
-
-// UnmarshalYAML handles both string and object forms of the build directive.
-func (b *composeBuild) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.ScalarNode {
-		// String form: build: ./path
-		b.Context = value.Value
-		return nil
-	}
-	// Object form - decode fields
-	type plain composeBuild
-	return value.Decode((*plain)(b))
-}
-
-// parseComposeDockerfilePaths extracts Dockerfile paths from compose YAML content.
-// baseDir is the directory of the compose file, used to resolve relative paths.
-func parseComposeDockerfilePaths(content []byte, baseDir string) []string {
-	var cf composeFile
-	if err := yaml.Unmarshal(content, &cf); err != nil {
-		return nil
-	}
-
-	var paths []string
-	for _, svc := range cf.Services {
-		if svc.Build.Context == "" && svc.Build.Dockerfile == "" {
-			// No build directive (image-only service)
-			continue
-		}
-
-		context := svc.Build.Context
-		if context == "" {
-			context = "."
-		}
-
-		// Resolve context relative to compose file directory
-		if !filepath.IsAbs(context) {
-			context = filepath.Join(baseDir, context)
-		}
-
-		dockerfile := svc.Build.Dockerfile
-		if dockerfile == "" {
-			dockerfile = "Dockerfile"
-		}
-
-		// Resolve dockerfile relative to context directory
-		var absPath string
-		if filepath.IsAbs(dockerfile) {
-			absPath = dockerfile
-		} else {
-			absPath = filepath.Join(context, dockerfile)
-		}
-
-		paths = append(paths, absPath)
-	}
-
-	return paths
 }

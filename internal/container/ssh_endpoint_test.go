@@ -111,14 +111,13 @@ func TestContainerNetworkModeIsRejected(t *testing.T) {
 func TestComposeSharedNetworkPublishesOnTheOwner(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"--profile * config --format json": `{"services":{
-			"app":{"image":"mcr.example/base:1","network_mode":"service:db"},
-			"db":{"image":"postgres:16"}}}`},
 		Registry: map[string]map[string]string{"mcr.example/base:1": {}},
 	}
 	prov, err := container.NewProvisioner(fake, nil, &devcontainer.ResolvedDevContainer{
-		Identity:     devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
-		Plan:         devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
+		Identity: devcontainer.Identity{WorkspaceID: sshTestWorkspace, ResourceName: "app-ws"},
+		Plan: composePlan(t, `{"services":{
+			"app":{"image":"mcr.example/base:1","network_mode":"service:db"},
+			"db":{"image":"postgres:16"}}}`),
 		Config:       &devcontainer.DevContainerConfig{},
 		ForwardPorts: []devcontainer.PortForward{{ContainerPort: 5432, HostPort: 5432}},
 	})

@@ -3,20 +3,16 @@ package devcontainer
 import (
 	"bufio"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // metadataImage returns the image whose devcontainer.metadata applies to the
 // config: the image of an image plan, the base (FROM) image of a Dockerfile
 // plan's target stage, and for compose the primary service's image or the
-// base image of its build. "" when it can't be determined (a FROM built from
-// an unknown variable, scratch). It reads files only; resolving it needs no
-// Docker.
-func metadataImage(cfg *DevContainerConfig, configPath string) string {
+// base image of its build, from the compose model. "" when it can't be
+// determined (a FROM built from an unknown variable, scratch).
+func metadataImage(cfg *DevContainerConfig, configPath string, compose *ComposeConfig) string {
 	switch cfg.PlanType() {
 	case PlanTypeImage:
 		return cfg.Image
@@ -24,7 +20,7 @@ func metadataImage(cfg *DevContainerConfig, configPath string) string {
 		plan := buildPlan(cfg, configPath, "").(*DockerfilePlan)
 		return dockerfileBaseImage(plan.Dockerfile, cfg.Build.Target, cfg.Build.Args)
 	case PlanTypeCompose:
-		return composeServiceBaseImage(composeFilePaths(cfg, configPath), cfg.Service)
+		return compose.baseImage(cfg.Service)
 	}
 	return ""
 }
@@ -137,152 +133,4 @@ func expandArgs(s string, values map[string]string) string {
 		}
 		return ref
 	})
-}
-
-// composeServiceBaseImage returns the primary service's image, or the base
-// image of its build, from the compose files (later files override earlier
-// ones). Compose's ${VAR} interpolation uses the environment, then the
-// project's .env file (next to the first compose file), as compose does.
-// extends and include are not followed.
-func composeServiceBaseImage(files []string, service string) string {
-	var image string
-	var build struct {
-		context, dockerfile, target string
-		args                        map[string]string
-		set                         bool
-	}
-	env := environMap()
-	if len(files) > 0 {
-		for k, v := range readDotEnv(filepath.Join(filepath.Dir(files[0]), ".env")) {
-			if _, set := env[k]; !set {
-				env[k] = v
-			}
-		}
-	}
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			continue
-		}
-		var doc struct {
-			Services map[string]struct {
-				Image string    `yaml:"image"`
-				Build yaml.Node `yaml:"build"`
-			} `yaml:"services"`
-		}
-		if yaml.Unmarshal(data, &doc) != nil {
-			continue
-		}
-		svc, ok := doc.Services[service]
-		if !ok {
-			continue
-		}
-		if svc.Image != "" {
-			image = expandArgs(svc.Image, env)
-		}
-		switch svc.Build.Kind {
-		case yaml.ScalarNode:
-			build.set, build.context, build.dockerfile = true, resolveFrom(file, expandArgs(svc.Build.Value, env)), ""
-		case yaml.MappingNode:
-			var b struct {
-				Context    string    `yaml:"context"`
-				Dockerfile string    `yaml:"dockerfile"`
-				Target     string    `yaml:"target"`
-				Args       yaml.Node `yaml:"args"`
-			}
-			if svc.Build.Decode(&b) != nil {
-				continue
-			}
-			build.set = true
-			if b.Context != "" || build.context == "" {
-				build.context = resolveFrom(file, expandArgs(b.Context, env))
-			}
-			if b.Dockerfile != "" {
-				build.dockerfile = expandArgs(b.Dockerfile, env)
-			}
-			if b.Target != "" {
-				build.target = b.Target
-			}
-			build.args = composeArgs(b.Args, env)
-		}
-	}
-	if !build.set {
-		return image
-	}
-	dockerfile := build.dockerfile
-	if dockerfile == "" {
-		dockerfile = "Dockerfile"
-	}
-	if !filepath.IsAbs(dockerfile) {
-		dockerfile = filepath.Join(build.context, dockerfile)
-	}
-	return dockerfileBaseImage(dockerfile, build.target, build.args)
-}
-
-// composeArgs reads build args given as a map or a KEY=VALUE list.
-func composeArgs(node yaml.Node, env map[string]string) map[string]string {
-	args := map[string]string{}
-	switch node.Kind {
-	case yaml.MappingNode:
-		var m map[string]string
-		if node.Decode(&m) == nil {
-			for k, v := range m {
-				args[k] = expandArgs(v, env)
-			}
-		}
-	case yaml.SequenceNode:
-		var list []string
-		if node.Decode(&list) == nil {
-			for _, kv := range list {
-				if k, v, ok := strings.Cut(kv, "="); ok {
-					args[k] = expandArgs(v, env)
-				}
-			}
-		}
-	}
-	return args
-}
-
-// resolveFrom resolves a compose path relative to the compose file.
-func resolveFrom(composeFile, p string) string {
-	if p == "" {
-		p = "."
-	}
-	if filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(filepath.Dir(composeFile), p)
-}
-
-func environMap() map[string]string {
-	env := map[string]string{}
-	for _, kv := range os.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			env[k] = v
-		}
-	}
-	return env
-}
-
-// readDotEnv reads a compose .env file: KEY=VALUE lines (an optional
-// "export ", quotes around the value), comments and blank lines skipped.
-func readDotEnv(path string) map[string]string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	env := map[string]string{}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.HasPrefix(line, "#") {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-		}
-		env[strings.TrimSpace(k)] = v
-	}
-	return env
 }

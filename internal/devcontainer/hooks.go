@@ -91,8 +91,15 @@ func resolveHooks(local *DevContainerConfig, imageConfigs []DevContainerConfig, 
 		h.add(HookFromFeature, name, lifecycleCommands{m.OnCreateCommand, m.UpdateContentCommand, m.PostCreateCommand, m.PostStartCommand, m.PostAttachCommand})
 	}
 	h.add(HookFromConfig, "", configCommands(local))
-	if cmd := local.InitializeCommand; cmd != nil && len(cmd.Steps()) > 0 {
-		h.Initialize = []Hook{{Source: HookFromConfig, Command: cmd}}
-	}
+	h.Initialize = InitializeHooks(local)
 	return h
+}
+
+// InitializeHooks returns the initializeCommand of devcontainer.json, the
+// only place it comes from (it runs on the host, before resolution).
+func InitializeHooks(local *DevContainerConfig) []Hook {
+	if cmd := local.InitializeCommand; cmd != nil && len(cmd.Steps()) > 0 {
+		return []Hook{{Source: HookFromConfig, Command: cmd}}
+	}
+	return nil
 }

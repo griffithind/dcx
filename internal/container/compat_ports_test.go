@@ -46,14 +46,13 @@ func TestPortsArePublishedOnce(t *testing.T) {
 func TestComposeOverrideLeavesTheUsersPortsAndVolumes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &containertest.Fake{
-		ComposeOutputs: map[string]string{"--profile * config --format json": `{
-			"services":{"app":{"image":"base:1","ports":[{"target":3000,"published":"3000","protocol":"tcp"}]}},
-			"volumes":{"pgdata":{"name":"proj_pgdata"}}}`},
 		Registry: map[string]map[string]string{"base:1": {}},
 	}
 	resolved := &devcontainer.ResolvedDevContainer{
-		Identity:     devcontainer.Identity{WorkspaceID: "ws1234567890", Name: "app", ResourceName: "app-ws123456"},
-		Plan:         devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"),
+		Identity: devcontainer.Identity{WorkspaceID: "ws1234567890", Name: "app", ResourceName: "app-ws123456"},
+		Plan: composePlan(t, `{
+			"services":{"app":{"image":"base:1","ports":[{"target":3000,"published":"3000","protocol":"tcp"}]}},
+			"volumes":{"pgdata":{"name":"proj_pgdata"}}}`),
 		Config:       &devcontainer.DevContainerConfig{},
 		ForwardPorts: []devcontainer.PortForward{{ContainerPort: 3000, HostPort: 3000}, {ContainerPort: 5432, HostPort: 5432}},
 		Mounts: []devcontainer.Mount{

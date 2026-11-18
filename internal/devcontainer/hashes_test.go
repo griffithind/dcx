@@ -14,10 +14,10 @@ func TestComputeConfigHash(t *testing.T) {
 	t.Run("image plan produces stable hash", func(t *testing.T) {
 		cfg := &DevContainerConfig{Image: "alpine:latest"}
 
-		hash1, err := ComputeConfigHash(cfg, "", nil, nil)
+		hash1, err := ComputeConfigHash(cfg, "", composeInputs{}, nil)
 		require.NoError(t, err)
 
-		hash2, err := ComputeConfigHash(cfg, "", nil, nil)
+		hash2, err := ComputeConfigHash(cfg, "", composeInputs{}, nil)
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, hash1)
@@ -29,9 +29,9 @@ func TestComputeConfigHash(t *testing.T) {
 
 		cfg2 := &DevContainerConfig{Image: "ubuntu:latest"}
 
-		hash1, err := ComputeConfigHash(cfg1, "", nil, nil)
+		hash1, err := ComputeConfigHash(cfg1, "", composeInputs{}, nil)
 		require.NoError(t, err)
-		hash2, err := ComputeConfigHash(cfg2, "", nil, nil)
+		hash2, err := ComputeConfigHash(cfg2, "", composeInputs{}, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -43,11 +43,11 @@ func TestComputeConfigHash(t *testing.T) {
 		cfg := &DevContainerConfig{}
 
 		require.NoError(t, os.WriteFile(df, []byte("FROM alpine:latest"), 0644))
-		hash1, err := ComputeConfigHash(cfg, df, nil, nil)
+		hash1, err := ComputeConfigHash(cfg, df, composeInputs{}, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(df, []byte("FROM ubuntu:latest"), 0644))
-		hash2, err := ComputeConfigHash(cfg, df, nil, nil)
+		hash2, err := ComputeConfigHash(cfg, df, composeInputs{}, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -59,11 +59,11 @@ func TestComputeConfigHash(t *testing.T) {
 		cfg := &DevContainerConfig{}
 
 		require.NoError(t, os.WriteFile(compose, []byte("services:\n  app:\n    image: alpine\n"), 0644))
-		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash1, err := ComputeConfigHash(cfg, "", composeInputs{Files: []string{compose}}, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(compose, []byte("services:\n  app:\n    image: ubuntu\n"), 0644))
-		hash2, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash2, err := ComputeConfigHash(cfg, "", composeInputs{Files: []string{compose}}, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -76,15 +76,16 @@ func TestComputeConfigHash(t *testing.T) {
 
 		compose := filepath.Join(dir, "docker-compose.yml")
 		require.NoError(t, os.WriteFile(compose, []byte("services:\n  app:\n    build: ./app\n"), 0644))
+		in := composeInputs{Files: []string{compose}, Dockerfiles: []string{filepath.Join(appDir, "Dockerfile")}}
 
 		cfg := &DevContainerConfig{}
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile"), []byte("FROM node:18"), 0644))
-		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash1, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile"), []byte("FROM node:20"), 0644))
-		hash2, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash2, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -99,15 +100,16 @@ func TestComputeConfigHash(t *testing.T) {
 		require.NoError(t, os.WriteFile(compose, []byte(
 			"services:\n  app:\n    build:\n      context: ./app\n      dockerfile: Dockerfile.dev\n",
 		), 0644))
+		in := composeInputs{Files: []string{compose}, Dockerfiles: []string{filepath.Join(appDir, "Dockerfile.dev")}}
 
 		cfg := &DevContainerConfig{}
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile.dev"), []byte("FROM node:18"), 0644))
-		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash1, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, os.WriteFile(filepath.Join(appDir, "Dockerfile.dev"), []byte("FROM node:20"), 0644))
-		hash2, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash2, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2)
@@ -127,15 +129,16 @@ func TestComputeConfigHash(t *testing.T) {
 		require.NoError(t, os.WriteFile(compose, []byte(
 			"services:\n  app:\n    build: ./app\n  worker:\n    build: ./worker\n  db:\n    image: postgres:16\n",
 		), 0644))
+		in := composeInputs{Files: []string{compose}, Dockerfiles: []string{filepath.Join(appDir, "Dockerfile"), filepath.Join(workerDir, "Dockerfile")}}
 
 		cfg := &DevContainerConfig{}
 
-		hash1, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash1, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		// Change only the worker Dockerfile
 		require.NoError(t, os.WriteFile(filepath.Join(workerDir, "Dockerfile"), []byte("FROM python:3.13"), 0644))
-		hash2, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash2, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, hash1, hash2, "changing any service's Dockerfile should change the hash")
@@ -144,9 +147,9 @@ func TestComputeConfigHash(t *testing.T) {
 	t.Run("feature options are part of the file", func(t *testing.T) {
 		cfg1 := &DevContainerConfig{Image: "alpine:latest", Features: map[string]interface{}{"feat1": map[string]interface{}{"version": "1.0"}}}
 		cfg2 := &DevContainerConfig{Image: "alpine:latest", Features: map[string]interface{}{"feat1": map[string]interface{}{"version": "2.0"}}}
-		hash1, err := ComputeConfigHash(cfg1, "", nil, nil)
+		hash1, err := ComputeConfigHash(cfg1, "", composeInputs{}, nil)
 		require.NoError(t, err)
-		hash2, err := ComputeConfigHash(cfg2, "", nil, nil)
+		hash2, err := ComputeConfigHash(cfg2, "", composeInputs{}, nil)
 		require.NoError(t, err)
 		assert.NotEqual(t, hash1, hash2)
 	})
@@ -159,15 +162,15 @@ func TestComputeConfigHash(t *testing.T) {
 		old := []*features.Feature{{ID: "ghcr.io/x/node:1", ManifestDigest: "sha256:old", Metadata: &features.FeatureMetadata{Version: "1.1.0"}}}
 		moved := []*features.Feature{{ID: "ghcr.io/x/node:1", ManifestDigest: "sha256:new", Metadata: &features.FeatureMetadata{Version: "1.2.0"}}}
 
-		c1, err := ComputeConfigHash(cfg, "", nil, old)
+		c1, err := ComputeConfigHash(cfg, "", composeInputs{}, old)
 		require.NoError(t, err)
-		c2, err := ComputeConfigHash(cfg, "", nil, moved)
+		c2, err := ComputeConfigHash(cfg, "", composeInputs{}, moved)
 		require.NoError(t, err)
 		assert.Equal(t, c1, c2, "the staleness key ignores feature digests")
 
-		i1, err := ComputeInputsHash(cfg, "", nil, old)
+		i1, err := ComputeInputsHash(cfg, "", composeInputs{}, old)
 		require.NoError(t, err)
-		i2, err := ComputeInputsHash(cfg, "", nil, moved)
+		i2, err := ComputeInputsHash(cfg, "", composeInputs{}, moved)
 		require.NoError(t, err)
 		assert.NotEqual(t, i1, i2, "the inputs hash sees them")
 	})
@@ -184,9 +187,9 @@ func TestComputeConfigHash(t *testing.T) {
 			{ID: "feat-a", Metadata: &features.FeatureMetadata{Version: "1.0"}},
 		}
 
-		hash1, err := ComputeConfigHash(cfg, "", nil, feats1)
+		hash1, err := ComputeConfigHash(cfg, "", composeInputs{}, feats1)
 		require.NoError(t, err)
-		hash2, err := ComputeConfigHash(cfg, "", nil, feats2)
+		hash2, err := ComputeConfigHash(cfg, "", composeInputs{}, feats2)
 		require.NoError(t, err)
 
 		assert.Equal(t, hash1, hash2)
@@ -198,120 +201,13 @@ func TestComputeConfigHash(t *testing.T) {
 		require.NoError(t, os.WriteFile(compose, []byte(
 			"services:\n  app:\n    build: ./nonexistent\n",
 		), 0644))
+		in := composeInputs{Files: []string{compose}, Dockerfiles: []string{filepath.Join(dir, "nonexistent", "Dockerfile")}}
 
 		cfg := &DevContainerConfig{}
 
-		hash, err := ComputeConfigHash(cfg, "", []string{compose}, nil)
+		hash, err := ComputeConfigHash(cfg, "", in, nil)
 		require.NoError(t, err)
 		assert.NotEmpty(t, hash)
-	})
-}
-
-func TestParseComposeDockerfilePaths(t *testing.T) {
-	t.Run("string-form build directive", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build: ./app\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/project/app/Dockerfile", paths[0])
-	})
-
-	t.Run("object-form build directive with explicit dockerfile", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build:\n      context: ./src\n      dockerfile: Dockerfile.prod\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/project/src/Dockerfile.prod", paths[0])
-	})
-
-	t.Run("object-form without dockerfile defaults to Dockerfile", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build:\n      context: ./src\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/project/src/Dockerfile", paths[0])
-	})
-
-	t.Run("multiple services with builds", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build: ./app\n  worker:\n    build:\n      context: ./worker\n      dockerfile: Dockerfile.worker\n  db:\n    image: postgres\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 2)
-		assert.Contains(t, paths, "/project/app/Dockerfile")
-		assert.Contains(t, paths, "/project/worker/Dockerfile.worker")
-	})
-
-	t.Run("image-only service produces no paths", func(t *testing.T) {
-		content := []byte("services:\n  db:\n    image: postgres:16\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		assert.Empty(t, paths)
-	})
-
-	t.Run("invalid YAML produces no paths", func(t *testing.T) {
-		content := []byte("not: valid: yaml: [[[")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		assert.Empty(t, paths)
-	})
-
-	t.Run("absolute context path is preserved", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build:\n      context: /absolute/path\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/absolute/path/Dockerfile", paths[0])
-	})
-
-	t.Run("absolute dockerfile path is preserved", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build:\n      context: ./app\n      dockerfile: /absolute/Dockerfile\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/absolute/Dockerfile", paths[0])
-	})
-
-	t.Run("build directive with only dockerfile and no context", func(t *testing.T) {
-		content := []byte("services:\n  app:\n    build:\n      dockerfile: Dockerfile.custom\n")
-		paths := parseComposeDockerfilePaths(content, "/project")
-
-		require.Len(t, paths, 1)
-		assert.Equal(t, "/project/Dockerfile.custom", paths[0])
-	})
-}
-
-func TestCollectComposeDockerfiles(t *testing.T) {
-	t.Run("deduplicates paths across compose files", func(t *testing.T) {
-		dir := t.TempDir()
-
-		compose1 := filepath.Join(dir, "docker-compose.yml")
-		compose2 := filepath.Join(dir, "docker-compose.override.yml")
-
-		require.NoError(t, os.WriteFile(compose1, []byte("services:\n  app:\n    build: ./app\n"), 0644))
-		require.NoError(t, os.WriteFile(compose2, []byte("services:\n  app:\n    build: ./app\n"), 0644))
-
-		paths := collectComposeDockerfiles([]string{compose1, compose2})
-
-		assert.Len(t, paths, 1)
-	})
-
-	t.Run("collects from multiple compose files", func(t *testing.T) {
-		dir := t.TempDir()
-
-		compose1 := filepath.Join(dir, "docker-compose.yml")
-		compose2 := filepath.Join(dir, "docker-compose.override.yml")
-
-		require.NoError(t, os.WriteFile(compose1, []byte("services:\n  app:\n    build: ./app\n"), 0644))
-		require.NoError(t, os.WriteFile(compose2, []byte("services:\n  worker:\n    build: ./worker\n"), 0644))
-
-		paths := collectComposeDockerfiles([]string{compose1, compose2})
-
-		assert.Len(t, paths, 2)
-	})
-
-	t.Run("skips unreadable compose files", func(t *testing.T) {
-		paths := collectComposeDockerfiles([]string{"/nonexistent/compose.yml"})
-		assert.Empty(t, paths)
 	})
 }
 
@@ -323,7 +219,7 @@ func TestConfigHashIsSemantic(t *testing.T) {
 		t.Helper()
 		cfg, err := Parse([]byte(jsonc))
 		require.NoError(t, err)
-		h, err := ComputeConfigHash(cfg, "", nil, nil)
+		h, err := ComputeConfigHash(cfg, "", composeInputs{}, nil)
 		require.NoError(t, err)
 		return h
 	}
@@ -380,9 +276,9 @@ func TestConfigHashComposeIndependentOfLocation(t *testing.T) {
 		return p
 	}
 	cfg := &DevContainerConfig{DockerComposeFile: StringOrSlice{"docker-compose.yml"}, Service: "app"}
-	h1, err := ComputeConfigHash(cfg, "", []string{write(t.TempDir())}, nil)
+	h1, err := ComputeConfigHash(cfg, "", composeInputs{Files: []string{write(t.TempDir())}}, nil)
 	require.NoError(t, err)
-	h2, err := ComputeConfigHash(cfg, "", []string{write(t.TempDir())}, nil)
+	h2, err := ComputeConfigHash(cfg, "", composeInputs{Files: []string{write(t.TempDir())}}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, h1, h2)
 }

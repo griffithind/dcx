@@ -77,6 +77,10 @@ type ComposePlan struct {
 
 	// ProjectName is the compose project name (sanitized for Docker).
 	ProjectName string
+
+	// Config is the compose model of the user's files (docker compose
+	// config); provisioning reads the services from it.
+	Config *ComposeConfig
 }
 
 // Type returns PlanTypeCompose.

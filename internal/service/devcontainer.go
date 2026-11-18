@@ -40,7 +40,7 @@ type DevContainerService struct {
 	// Test seams for Up's side effects outside the engine; nil uses the
 	// real implementations (agentctl.Provision, lifecycle.HookRunner).
 	provisionAgent func(context.Context, container.Engine, report.Reporter, agentctl.Options) error
-	newHooks       func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks
+	newHooks       func(devcontainer.Hooks, int) lifecycleHooks
 }
 
 // NewDevContainerService creates a new devcontainer service backed by the
@@ -126,6 +126,7 @@ func (s *DevContainerService) LoadWithOptions(ctx context.Context, opts LoadOpti
 		WorkspacePath: s.workspacePath,
 		ConfigPath:    s.configPath,
 		Images:        engineImages{engine: s.engine, report: s.report, pull: opts.PullForMetadata, refresh: opts.RefreshMetadata},
+		Compose:       engineCompose{engine: s.engine},
 		Lockfile:      lock,
 		ForcePull:     opts.ForcePull,
 		Report:        s.report,
@@ -164,6 +165,18 @@ func (e engineImages) ImageMetadata(ctx context.Context, imageRef string) (strin
 		return "", err
 	}
 	return labels[devcontainer.DevcontainerMetadataLabel], nil
+}
+
+// engineCompose reads compose models through the container engine.
+type engineCompose struct {
+	engine container.Engine
+}
+
+// ComposeConfig returns the project's model with every profile, so a
+// primary service in a profile is found (as devcontainers/cli reads it).
+func (e engineCompose) ComposeConfig(ctx context.Context, project, dir string, files []string) ([]byte, error) {
+	p := container.ComposeProject{Name: project, Dir: dir, Files: files}
+	return e.engine.ComposeOutput(ctx, p, "--profile", "*", "config", "--format", "json")
 }
 
 // createEnvironment prepares everything the environment runs (images

@@ -27,9 +27,16 @@ import (
 type fakeHooks struct {
 	initialize, create, start int
 	failCreate                error
+	onInitialize              func() // what initializeCommand does
 }
 
-func (h *fakeHooks) RunInitialize(context.Context) error { h.initialize++; return nil }
+func (h *fakeHooks) RunInitialize(context.Context) error {
+	h.initialize++
+	if h.onInitialize != nil {
+		h.onInitialize()
+	}
+	return nil
+}
 func (h *fakeHooks) RunCreateHooks(ctx context.Context, m lifecycle.Markers) error {
 	h.create++
 	if m != nil { // like the real runner
@@ -82,7 +89,7 @@ func (h *upHarness) up(opts UpOptions) error {
 		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID) // as the real provisioner does
 		return err
 	}
-	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
 	return svc.Up(context.Background(), opts)
 }
 
@@ -114,6 +121,21 @@ func TestUpCreatesAndCompletesSetup(t *testing.T) {
 	require.NoError(t, h.up(UpOptions{}))
 	assert.Len(t, h.engine.CallsTo("CreateContainer"), 1)
 	assert.Equal(t, fakeHooks{initialize: 2, create: 1, start: 1}, *h.hooks, "a ready environment runs only initializeCommand")
+}
+
+// initializeCommand runs before resolution, as in devcontainers/cli, so it
+// can generate what resolution reads (here a local feature).
+func TestInitializeCommandRunsBeforeResolution(t *testing.T) {
+	h := newUpHarness(t, `{"name": "up-test", "image": "alpine:3", "features": {"./generated": {}}}`)
+	h.hooks.onInitialize = func() {
+		dir := filepath.Join(h.workspace, ".devcontainer", "generated")
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer-feature.json"), []byte(`{"id": "generated", "version": "1.0.0"}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "install.sh"), []byte("#!/bin/sh\n"), 0o755))
+	}
+	require.NoError(t, h.up(UpOptions{}))
+	require.Len(t, h.containers(), 1)
+	assert.Contains(t, h.containers()[0].Labels[state.LabelFeaturesInstalled], "generated")
 }
 
 func TestUpResumesAfterAFailedHook(t *testing.T) {
@@ -260,7 +282,7 @@ func TestUpKeepsTheContainerOnInputDrift(t *testing.T) {
 	rec := &report.Recorder{}
 	svc := NewDevContainerService(h.engine, rec, h.workspace, "", false)
 	svc.provisionAgent = func(context.Context, container.Engine, report.Reporter, agentctl.Options) error { return nil }
-	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
 	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
 
 	require.Len(t, h.containers(), 1)
@@ -292,7 +314,7 @@ func TestUpPointsAtAContainerFromThePreviousIDScheme(t *testing.T) {
 		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID)
 		return err
 	}
-	svc.newHooks = func(*devcontainer.ResolvedDevContainer, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
 	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
 
 	var warned bool

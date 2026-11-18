@@ -112,6 +112,16 @@ func (g goldenImages) ImageMetadata(_ context.Context, _ string) (string, error)
 	return string(data), err
 }
 
+// goldenCompose serves a case's compose-config.json: `docker compose config
+// --format json` recorded for the case's workspace, with its path written
+// as <workspace>.
+type goldenCompose struct{ caseDir, workspace string }
+
+func (g goldenCompose) ComposeConfig(context.Context, string, string, []string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(g.caseDir, "compose-config.json"))
+	return []byte(strings.ReplaceAll(string(data), "<workspace>", g.workspace)), err
+}
+
 // TestResolveGolden runs ResolveWorkspace, the production pipeline, over
 // every case in testdata/resolve and compares a normalized view with the case's
 // expected.golden.json. Run with -update to rewrite the golden files.
@@ -122,6 +132,8 @@ func (g goldenImages) ImageMetadata(_ context.Context, _ string) (string, error)
 //	env            optional KEY=VALUE lines exported for the run
 //	config-path    optional --config value (relative to the workspace)
 //	image-metadata.json  optional devcontainer.metadata label of the image
+//	compose-config.json  the compose model of a compose case (recorded
+//	                     with docker compose config, see goldenCompose)
 func TestResolveGolden(t *testing.T) {
 	cases, err := os.ReadDir("testdata/resolve")
 	if err != nil {
@@ -155,6 +167,7 @@ func TestResolveGolden(t *testing.T) {
 				WorkspacePath: ws,
 				ConfigPath:    configPath,
 				Images:        goldenImages(caseDir),
+				Compose:       goldenCompose{caseDir, ws},
 				Lockfile:      LockfileUse,
 			})
 			if err != nil {

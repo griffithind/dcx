@@ -677,6 +677,15 @@ Changes since 0.7 that affect existing setups:
   builds everything once, before removing the old container, and creates
   from that result. `dcx build` uses build secrets, `--pull` and
   `--no-cache` as `up` does, also for compose services.
+- `initializeCommand` runs before dcx reads anything else (image metadata,
+  compose files, Dockerfiles, features), as in the official CLI, so it can
+  generate them.
+- Compose projects are read as `docker compose config` resolves them
+  everywhere: a build path in an override file in another folder is
+  relative to the project directory, and `extends`, `include` and `.env`
+  apply to the base image dcx reads metadata from. A compose environment
+  whose services build through `extends` or `include` may be recreated
+  once, since those Dockerfiles now count as config changes.
 - Per-workspace files in `~/.dcx` moved into `workspaces/<workspace ID>/`.
   A host key moves there the next time it is used (so editors' pins stay
   valid). Existing compose environments keep using their override at the

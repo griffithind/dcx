@@ -41,25 +41,3 @@ func TestDockerfileBaseImage(t *testing.T) {
 		})
 	}
 }
-
-func TestComposeServiceBaseImage(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "app", "Dockerfile"), "ARG V=1-20\nFROM mcr.microsoft.com/devcontainers/javascript-node:${V}\n")
-	base := filepath.Join(dir, "compose.yml")
-	writeFile(t, base, "services:\n  app:\n    image: postgres-should-be-overridden\n  db:\n    image: postgres:16\n")
-	override := filepath.Join(dir, "compose.override.yml")
-	writeFile(t, override, "services:\n  app:\n    build:\n      context: ./app\n      args:\n        V: 1-22\n")
-
-	assert.Equal(t, "mcr.microsoft.com/devcontainers/javascript-node:1-22", composeServiceBaseImage([]string{base, override}, "app"))
-	assert.Equal(t, "postgres:16", composeServiceBaseImage([]string{base, override}, "db"))
-
-	t.Setenv("DCX_TEST_TAG", "17")
-	writeFile(t, base, "services:\n  db:\n    image: postgres:${DCX_TEST_TAG}\n")
-	assert.Equal(t, "postgres:17", composeServiceBaseImage([]string{base}, "db"), "compose interpolation")
-
-	// The project's .env fills in what the environment doesn't set (R11).
-	writeFile(t, filepath.Join(dir, ".env"), "# versions\nexport PG_TAG=\"15\"\nDCX_TEST_TAG=99\n")
-	writeFile(t, base, "services:\n  db:\n    image: postgres:${PG_TAG}\n  app:\n    image: node:${DCX_TEST_TAG}\n")
-	assert.Equal(t, "postgres:15", composeServiceBaseImage([]string{base}, "db"))
-	assert.Equal(t, "node:17", composeServiceBaseImage([]string{base}, "app"), "the environment wins over .env")
-}

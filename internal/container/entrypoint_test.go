@@ -15,11 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cmdEngine answers the two engine calls prepareCommand makes.
+// cmdEngine answers the engine call prepareCommand makes.
 type cmdEngine struct {
 	Engine
-	images  map[string][2][]string
-	compose string
+	images map[string][2][]string
 }
 
 func (e *cmdEngine) ImageConfig(_ context.Context, ref string) (build.ImageConfig, error) {
@@ -27,8 +26,14 @@ func (e *cmdEngine) ImageConfig(_ context.Context, ref string) (build.ImageConfi
 	return build.ImageConfig{Entrypoint: c[0], Cmd: c[1]}, nil
 }
 
-func (e *cmdEngine) ComposeOutput(context.Context, ComposeProject, ...string) ([]byte, error) {
-	return []byte(e.compose), nil
+// modelPlan is a compose plan for service "app" with the given model.
+func modelPlan(t *testing.T, model string) *devcontainer.ComposePlan {
+	t.Helper()
+	plan := devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj")
+	cfg, err := devcontainer.ParseComposeConfig([]byte(model))
+	require.NoError(t, err)
+	plan.Config = cfg
+	return plan
 }
 
 func entrypointRuntime(fake *cmdEngine, plan devcontainer.ExecutionPlan, override bool) *Provisioner {
@@ -64,16 +69,12 @@ func TestFeatureEntrypointsChainTheImageCommand(t *testing.T) {
 }
 
 func TestFeatureEntrypointsChainTheComposeCommand(t *testing.T) {
-	fake := &cmdEngine{
-		images:  map[string][2][]string{"img": {{"/entry.sh"}, {"default"}}},
-		compose: `{"services":{"app":{"image":"img","command":["npm","start"]}}}`,
-	}
-	r := entrypointRuntime(fake, devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"), false)
+	fake := &cmdEngine{images: map[string][2][]string{"img": {{"/entry.sh"}, {"default"}}}}
+	r := entrypointRuntime(fake, modelPlan(t, `{"services":{"app":{"image":"img","command":["npm","start"]}}}`), false)
 	require.NoError(t, r.prepareCommand(context.Background(), "img"))
 	assert.Equal(t, []string{"/entry.sh", "npm", "start"}, r.spec("img").Cmd, "the service command replaces the image CMD")
 
-	fake.compose = `{"services":{"app":{"image":"img","entrypoint":"run.sh"}}}`
-	r = entrypointRuntime(fake, devcontainer.NewComposePlan([]string{"/w/compose.yml"}, "app", "proj"), false)
+	r = entrypointRuntime(fake, modelPlan(t, `{"services":{"app":{"image":"img","entrypoint":"run.sh"}}}`), false)
 	require.NoError(t, r.prepareCommand(context.Background(), "img"))
 	assert.Equal(t, []string{"/bin/sh", "-c", "run.sh"}, r.spec("img").Cmd, "a service entrypoint drops the image CMD")
 }

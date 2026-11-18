@@ -101,8 +101,8 @@ return cliCtx.Service.Up(...)   // Delegate to service
 
 **Up() Flow** (`internal/service/up.go`, idempotent steps; a failed or interrupted Up resumes on the next run):
 ```
-Load config → decideUp(state, setup complete, --recreate/--rebuild) → none | resume | start | create | recreate
-    → initialize (host initializeCommand)
+initialize (host initializeCommand, read from devcontainer.json alone, before resolution)
+    → load config → decideUp(state, setup complete, --recreate/--rebuild) → none | resume | start | create | recreate
     → container (create / recreate / start / resume)
     → agent (agentctl.Provision: versioned install, SSH secrets, setup, launch + readiness)
     → secrets (runtime secrets on tmpfs)
@@ -127,13 +127,13 @@ Load config → decideUp(state, setup complete, --recreate/--rebuild) → none |
 | `ssh_endpoint.go` | `planSSH` (agent port, listen address, network mode) and the recorded-endpoint readers |
 | `runtime.go` | `UpOptions`, `SSHAccess` (`--hosts`), `DownOptions` |
 
-**Provisioner plan dispatch:**
+**Provisioner plan dispatch** (`Create`, from what `Prepare` returned):
 ```go
 switch plan := r.resolved.Plan.(type) {
 case *devcontainer.ComposePlan:
-    return r.upCompose(ctx, opts, plan)
+    return r.createCompose(ctx, prepared.Image, access, plan)
 case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
-    return r.upSingle(ctx, opts)
+    return r.createSingle(ctx, prepared.Image, access)
 }
 ```
 
@@ -146,7 +146,8 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 | `config.go` | `DevContainerConfig` struct with custom unmarshalers |
 | `types.go` | `StringOrSlice` |
 | `hooks.go` | `Hooks` - resolved per-phase hook lists (image metadata, then features, then devcontainer.json); all run before `up` returns (`waitFor` has no effect) |
-| `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM` and compose files; no Docker) |
+| `baseimage.go` | `metadataImage` - the image whose devcontainer.metadata applies (parses Dockerfile `FROM`; for compose reads the compose model) |
+| `compose_config.go` | `ComposeConfig`, the compose model (`docker compose config --format json` via `ComposeConfigSource`): metadata discovery, the hashes' Dockerfiles and provisioning all read it |
 | `ports.go` | `PortList`/`Port` (forwardPorts, appPort), `ParsePortSpec` (`ParsePortSpecs` expands ranges), `PortForward.Collides` |
 | `workspace.go` | The workspace layout: the git root containing the workspace is mounted at `/workspaces/<folder>`; default `workspaceFolder`; `resolveWorkspaceMount` |
 | `gpu.go` | `GPURequirement` (hostRequirements.gpu) |
@@ -228,7 +229,7 @@ type ResolvedDevContainer struct {
 Sealed interface with three implementations:
 - `ImagePlan{Image}` - Pre-built image
 - `DockerfilePlan{Dockerfile, Context, Args, Target, CacheFrom, Options}` - Custom build
-- `ComposePlan{Files, Service, RunServices, ProjectName}` - Docker Compose
+- `ComposePlan{Files, Service, RunServices, ProjectName, Config}` - Docker Compose (`Config` is the compose model resolution read)
 
 ### ContainerState (`state/state.go`)
 ```go
@@ -260,6 +261,7 @@ devcontainer.json (JSONC)
 DevContainerConfig
     ↓ LoadConfig: JSONC tree → Raw; every string substituted once (substituteTree) → Local
 DevContainerConfig (substituted)               — Local
+    ↓ compose model (ComposeConfigSource: docker compose config, every profile)
     ↓ metadataImage: the image, or the FROM of a Dockerfile / compose build (baseimage.go)
     ↓ its devcontainer.metadata (ImageMetadataSource), variable-substituted
     ↓ MergeMetadata                                — Config
@@ -280,14 +282,15 @@ All of it is `devcontainer.ResolveWorkspace`; up, status, build, lock, config an
 CLI: dcx up [--recreate] [--rebuild] [--pull] [--hosts]
     ↓ NewCLIContext() → Service.Up(UpOptions)
 Service.Up (internal/service/up.go)
-    ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
     ├─ lockWorkspace ($DCX_HOME/workspaces/<id>/lock; Up, Down, Stop and Restart take it)
+    ├─ runInitialize: host initializeCommand on every up, before resolution (it may
+    │  generate compose files, a Dockerfile, features)
+    ├─ LoadWithOptions → devcontainer.ResolveWorkspace → ResolvedDevContainer
     ├─ dcxhome.WriteWorkspace (workspace.json: path, config, name)
     ├─ StateWithHash + setupComplete + agentctl.Listening
-    ├─ decideUp → none (initializeCommand only) | resume | start | create | recreate
+    ├─ decideUp → none | resume | start | create | recreate
     ├─ sshAccessFor (--hosts recorded on the container, kept until recreate)
     └─ steps, each idempotent:
-        initialize   host initializeCommand (lifecycle.HookRunner)
         container    start: startExisting
                      create/recreate (createEnvironment): Provisioner.Prepare
                        (base image → features layer → UID layer (layerImages),

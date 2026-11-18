@@ -118,7 +118,6 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	}
 	s.announceUp(ctx, action, setupDone, existing, resolved, opts)
 	if action == actionNone {
-		// Only initializeCommand runs (see up).
 		return &upRun{opts: opts, resolved: resolved, ids: ids, action: action, state: currentState, existing: existing}, nil
 	}
 	s.checkHostRequirements(ctx, resolved)
@@ -136,17 +135,16 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 
 // up is Up without taking the workspace lock (the caller holds it).
 func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
-	run, err := s.planUp(ctx, opts)
-	if err != nil || run == nil {
+	// initializeCommand runs on every up, as in devcontainers/cli, even
+	// when the container is already up and set up.
+	if err := s.runInitialize(ctx); err != nil {
 		return err
 	}
-	if run.action == actionNone {
-		// initializeCommand runs on every up, as in devcontainers/cli,
-		// even when the container is already up and set up.
-		return s.stepInitialize(ctx, run)
+	run, err := s.planUp(ctx, opts)
+	if err != nil || run == nil || run.action == actionNone {
+		return err
 	}
 	steps := []upStep{
-		{"initialize", s.stepInitialize},
 		{"container", s.stepContainer},
 		{"agent", s.stepAgent},
 		{"secrets", s.stepRuntimeSecrets},
@@ -317,10 +315,16 @@ func keepComposeProject(resolved *devcontainer.ResolvedDevContainer, existing *s
 	}
 }
 
-// stepInitialize runs initializeCommand on the host. Per the spec it runs
-// before the container is created or started, every time Up does work.
-func (s *DevContainerService) stepInitialize(ctx context.Context, r *upRun) error {
-	return s.hookRunner(r, 0).RunInitialize(ctx)
+// runInitialize runs initializeCommand on the host before anything is
+// resolved, as devcontainers/cli does: it may generate what resolution
+// reads (compose files, a Dockerfile, an .env file). It comes only from
+// devcontainer.json, so only that file is read for it.
+func (s *DevContainerService) runInitialize(ctx context.Context) error {
+	local, _, err := devcontainer.Load(s.workspacePath, s.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	return s.hookRunner(devcontainer.Hooks{Initialize: devcontainer.InitializeHooks(local)}, 0).RunInitialize(ctx)
 }
 
 // stepContainer makes sure the container exists, matches the config and
@@ -465,7 +469,7 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 	if err != nil {
 		return fmt.Errorf("resolve SSH port: %w", err)
 	}
-	runner := s.hookRunner(r, port)
+	runner := s.hookRunner(r.resolved.Hooks, port)
 	markers := s.markersFor(r.info)
 
 	var created lifecycle.Markers // a nil *containerMarkers must stay a nil interface
@@ -518,18 +522,13 @@ type lifecycleHooks interface {
 	RunStartHooks(ctx context.Context) error
 }
 
-// hookRunner returns the lifecycle hooks of this run; container hooks
-// connect to the agent on 127.0.0.1:sshPort.
-func (s *DevContainerService) hookRunner(r *upRun, sshPort int) lifecycleHooks {
+// hookRunner returns a runner for hooks; container hooks connect to the
+// agent on 127.0.0.1:sshPort.
+func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshPort int) lifecycleHooks {
 	if s.newHooks != nil {
-		return s.newHooks(r.resolved, sshPort)
+		return s.newHooks(hooks, sshPort)
 	}
-	return newHookRunner(s, r.resolved, sshPort)
-}
-
-// newHookRunner builds the real hook runner for the resolved config.
-func newHookRunner(s *DevContainerService, resolved *devcontainer.ResolvedDevContainer, sshPort int) *lifecycle.HookRunner {
-	return lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, resolved.Hooks, resolved.WorkspaceID)
+	return lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, hooks, s.Identity().WorkspaceID)
 }
 
 // startedSinceLastPostStart reports whether the container started after

@@ -23,9 +23,22 @@ type images map[string]string
 
 func (i images) ImageMetadata(_ context.Context, ref string) (string, error) { return i[ref], nil }
 
+// composeModel serves one compose model (docker compose config output).
+type composeModel string
+
+func (m composeModel) ComposeConfig(context.Context, string, string, []string) ([]byte, error) {
+	return []byte(m), nil
+}
+
 // resolve writes files (path -> content, relative to a new workspace named
 // "project") and resolves the workspace with the given image metadata.
 func resolve(t *testing.T, files map[string]string, meta images) *devcontainer.ResolvedDevContainer {
+	t.Helper()
+	return resolveWith(t, files, meta, "")
+}
+
+// resolveWith is resolve for a compose config with its compose model.
+func resolveWith(t *testing.T, files map[string]string, meta images, compose composeModel) *devcontainer.ResolvedDevContainer {
 	t.Helper()
 	ws := filepath.Join(t.TempDir(), "project")
 	for rel, content := range files {
@@ -36,6 +49,7 @@ func resolve(t *testing.T, files map[string]string, meta images) *devcontainer.R
 	resolved, err := devcontainer.ResolveWorkspace(context.Background(), devcontainer.ResolveOptions{
 		WorkspacePath: ws,
 		Images:        meta,
+		Compose:       compose,
 		Lockfile:      devcontainer.LockfileIgnore,
 	})
 	require.NoError(t, err)
@@ -150,10 +164,10 @@ func TestWorkspaceDefaults(t *testing.T) {
 // Compose plans: overrideCommand defaults to false, and the service and
 // files come from the config.
 func TestComposeDefaults(t *testing.T) {
-	r := resolve(t, map[string]string{
+	r := resolveWith(t, map[string]string{
 		".devcontainer/devcontainer.json":  `{"dockerComposeFile": ["docker-compose.yml"], "service": "app", "workspaceFolder": "/workspace"}`,
 		".devcontainer/docker-compose.yml": "services:\n  app:\n    image: base:1\n",
-	}, images{"base:1": `[{"remoteUser": "composeuser"}]`})
+	}, images{"base:1": `[{"remoteUser": "composeuser"}]`}, `{"services": {"app": {"image": "base:1"}}}`)
 	plan, ok := r.Plan.(*devcontainer.ComposePlan)
 	require.True(t, ok, "compose plan, got %T", r.Plan)
 	assert.Equal(t, "app", plan.Service)

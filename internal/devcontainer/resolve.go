@@ -25,6 +25,10 @@ type ResolveOptions struct {
 	ConfigPath string
 	// Images supplies base image metadata; nil resolves without it.
 	Images ImageMetadataSource
+	// Compose supplies the compose model of a compose config. It is
+	// required for one: metadata discovery, the staleness key and
+	// provisioning read the project as docker compose resolves it.
+	Compose ComposeConfigSource
 	// Lockfile pins feature versions: LockfileUse loads
 	// devcontainer-lock.json next to the config, LockfileIgnore does not.
 	Lockfile LockfileMode
@@ -45,7 +49,7 @@ const (
 )
 
 // ResolveWorkspace is the one resolution pipeline: it loads and substitutes
-// devcontainer.json, merges the base image's devcontainer.metadata, applies
+// devcontainer.json, reads the compose model of a compose config, merges the base image's devcontainer.metadata, applies
 // the lockfile, resolves features, computes the identity and the
 // staleness key, and returns the result. `dcx up`, status, build, lock,
 // config, doctor and the golden tests all resolve through it.
@@ -64,7 +68,17 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 	if err := Validate(local); err != nil {
 		return nil, fmt.Errorf("invalid configuration %s: %w", configPath, err)
 	}
-	metaImage := metadataImage(local, configPath)
+	var compose *ComposeConfig
+	if local.PlanType() == PlanTypeCompose {
+		if opts.Compose == nil {
+			return nil, fmt.Errorf("resolving a compose configuration needs docker compose")
+		}
+		project := NewIdentity(opts.WorkspacePath, local, configPath).ResourceName
+		if compose, err = loadComposeConfig(ctx, opts.Compose, project, configPath, composeFilePaths(local, configPath)); err != nil {
+			return nil, err
+		}
+	}
+	metaImage := metadataImage(local, configPath, compose)
 	// Image metadata gets the same substitution as devcontainer.json: a
 	// prebuilt image's feature mounts name volumes with ${devcontainerId}.
 	subCtx := NewSubstitutionContext(opts.WorkspacePath, configPath, loaded.Raw)
@@ -88,6 +102,7 @@ func ResolveWorkspace(ctx context.Context, opts ResolveOptions) (*ResolvedDevCon
 		ImageMetadata: imageConfigs,
 		MetadataImage: metaImage,
 		MetadataLabel: metaLabel,
+		ComposeConfig: compose,
 		Lockfile:      lf,
 		ForcePull:     opts.ForcePull,
 	})

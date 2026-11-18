@@ -1,0 +1,20 @@
+{
+  "name": "Override Dir",
+  "plan": {
+    "files": [
+      "<workspace>/.devcontainer/compose.yml",
+      "<workspace>/.devcontainer/extra/override.yml"
+    ],
+    "project": "override_dir-<id8>",
+    "runServices": null,
+    "service": "app",
+    "type": "compose"
+  },
+  "metadataImage": "mcr.example/base:1",
+  "resourceName": "override_dir-<id8>",
+  "sshHost": "override_dir.dcx",
+  "overrideCommand": false,
+  "workspaceFolder": "/workspace",
+  "remoteUser": "dev",
+  "effectiveUser": "dev"
+}

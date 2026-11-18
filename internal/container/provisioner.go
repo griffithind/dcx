@@ -969,9 +969,6 @@ func (r *Provisioner) getComposeBaseImage(ctx context.Context, plan *devcontaine
 	// Service uses build - compute built image name
 	projectName := plan.ProjectName
 	if projectName == "" {
-		projectName = svc.ProjectName
-	}
-	if projectName == "" {
 		projectName = r.resolved.ResourceName
 	}
 	return fmt.Sprintf("%s-%s", projectName, plan.Service), true, nil
@@ -1001,7 +998,6 @@ type composeServiceInfo struct {
 	Built       bool // the service has a build: section
 	NetworkMode string
 	User        string // the service's user: (features install for it)
-	ProjectName string // the compose files' top-level name
 	// Entrypoint and Command are the service's own (nil: not set).
 	Entrypoint []string
 	Command    []string
@@ -1011,40 +1007,20 @@ type composeServiceInfo struct {
 	Volumes map[string]bool
 }
 
-// composeService reads the primary service from the user's compose files
-// (`docker compose config`, so includes, extends and variables are
-// resolved). The result is cached for the provisioner's lifetime.
-func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.ComposePlan) (*composeServiceInfo, error) {
+// composeService reads the primary service from the compose model
+// resolution read (`docker compose config`, so includes, extends and
+// variables are resolved). The result is cached for the provisioner's
+// lifetime.
+func (r *Provisioner) composeService(_ context.Context, plan *devcontainer.ComposePlan) (*composeServiceInfo, error) {
 	if r.composeInfo != nil {
 		return r.composeInfo, nil
-	}
-	if len(plan.Files) == 0 {
-		return nil, fmt.Errorf("no compose files specified")
 	}
 	if plan.Service == "" {
 		return nil, fmt.Errorf("no primary service specified")
 	}
-	// Every profile, so a primary service in a profile is found (as
-	// devcontainers/cli reads the config).
-	output, err := r.engine.ComposeOutput(ctx, r.userCompose(plan), "--profile", "*", "config", "--format", "json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get compose config: %w", err)
-	}
-	var config struct {
-		Services map[string]struct {
-			Image       string          `json:"image"`
-			Build       json.RawMessage `json:"build"`
-			NetworkMode string          `json:"network_mode"`
-			Entrypoint  json.RawMessage `json:"entrypoint"`
-			Command     json.RawMessage `json:"command"`
-			Ports       []composePort   `json:"ports"`
-			User        string          `json:"user"`
-		} `json:"services"`
-		Name    string                     `json:"name"`
-		Volumes map[string]json.RawMessage `json:"volumes"`
-	}
-	if err := json.Unmarshal(output, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse compose config: %w", err)
+	config := plan.Config
+	if config == nil {
+		return nil, fmt.Errorf("the compose configuration was not resolved")
 	}
 	svc, ok := config.Services[plan.Service]
 	if !ok {
@@ -1052,10 +1028,9 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 	}
 	r.composeInfo = &composeServiceInfo{
 		Image:       svc.Image,
-		Built:       len(svc.Build) > 0 && string(svc.Build) != "null",
+		Built:       svc.Build != nil,
 		NetworkMode: svc.NetworkMode,
 		User:        svc.User,
-		ProjectName: config.Name,
 		Entrypoint:  composeArgv(svc.Entrypoint),
 		Command:     composeArgv(svc.Command),
 		Ports:       map[string][]devcontainer.PortForward{},
@@ -1063,7 +1038,7 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 	}
 	for name, s := range config.Services {
 		for _, p := range s.Ports {
-			if pf, ok := p.forward(); ok {
+			if pf, ok := p.Forward(); ok {
 				r.composeInfo.Ports[name] = append(r.composeInfo.Ports[name], pf)
 			}
 		}
@@ -1072,22 +1047,4 @@ func (r *Provisioner) composeService(ctx context.Context, plan *devcontainer.Com
 		r.composeInfo.Volumes[name] = true
 	}
 	return r.composeInfo, nil
-}
-
-// composePort is a published port in `docker compose config` output.
-type composePort struct {
-	Target    int    `json:"target"`
-	Published string `json:"published"`
-	HostIP    string `json:"host_ip"`
-	Protocol  string `json:"protocol"`
-}
-
-// forward converts a published port (false unless it is published on a
-// fixed host port: not for a Docker-assigned port or a range).
-func (p composePort) forward() (devcontainer.PortForward, bool) {
-	n, err := strconv.Atoi(p.Published)
-	if err != nil || p.Target <= 0 {
-		return devcontainer.PortForward{}, false
-	}
-	return devcontainer.PortForward{ContainerPort: p.Target, HostPort: n, Host: p.HostIP, Protocol: p.Protocol}, true
 }

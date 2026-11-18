@@ -56,6 +56,9 @@ type BuilderOptions struct {
 	MetadataImage string
 	MetadataLabel string
 
+	// ComposeConfig is the compose model of a compose config.
+	ComposeConfig *ComposeConfig
+
 	// Raw is devcontainer.json as written (no substitution), the input of
 	// the staleness key. Defaults to Local.
 	Raw *DevContainerConfig
@@ -91,6 +94,9 @@ func (b *Builder) Build(ctx context.Context, opts BuilderOptions) (*ResolvedDevC
 
 	planType := opts.Config.PlanType()
 	resolved.Plan = buildPlan(opts.Config, opts.ConfigPath, resolved.ResourceName)
+	if plan, ok := resolved.Plan.(*ComposePlan); ok {
+		plan.Config = opts.ComposeConfig
+	}
 	if planType == PlanTypeImage {
 		resolved.BaseImage = opts.Config.Image
 	}
@@ -381,24 +387,24 @@ func mergeMountByTarget(mounts []Mount, m Mount) []Mount {
 // computeHashes computes the configuration hash from all build inputs.
 func (b *Builder) computeHashes(resolved *ResolvedDevContainer, cfg *DevContainerConfig) error {
 	var dockerfilePath string
-	var composeFiles []string
+	var compose composeInputs
 
 	if df, ok := resolved.Plan.(*DockerfilePlan); ok {
 		dockerfilePath = df.Dockerfile
 	}
 	if cp, ok := resolved.Plan.(*ComposePlan); ok {
-		composeFiles = cp.Files
+		compose = composeInputs{Files: cp.Files, Dockerfiles: cp.Config.Dockerfiles()}
 	}
 
 	raw := resolved.Raw
 	if raw == nil {
 		raw = cfg
 	}
-	configHash, err := ComputeConfigHash(raw, dockerfilePath, composeFiles, resolved.Features)
+	configHash, err := ComputeConfigHash(raw, dockerfilePath, compose, resolved.Features)
 	if err != nil {
 		return err
 	}
-	inputsHash, err := ComputeInputsHash(cfg, dockerfilePath, composeFiles, resolved.Features)
+	inputsHash, err := ComputeInputsHash(cfg, dockerfilePath, compose, resolved.Features)
 	if err != nil {
 		return err
 	}
