@@ -87,7 +87,8 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 	// shutdownAction "none" (keep it running when tools detach) does not
 	// argue against.
 	if opts.Rebuild {
-		return false, s.up(ctx, UpOptions{Recreate: true, Rebuild: true})
+		_, err := s.up(ctx, UpOptions{Recreate: true, Rebuild: true})
+		return false, err
 	}
 	if !opts.Force && s.shutdownAction(info) == "none" {
 		return true, nil
@@ -98,7 +99,8 @@ func (s *DevContainerService) Restart(ctx context.Context, opts RestartOptions) 
 			return false, err
 		}
 	}
-	return false, s.up(ctx, UpOptions{})
+	_, err = s.up(ctx, UpOptions{})
+	return false, err
 }
 
 // shutdownAction is the workspace's shutdownAction: devcontainer.json's

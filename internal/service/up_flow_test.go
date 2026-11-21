@@ -90,7 +90,8 @@ func (h *upHarness) up(opts UpOptions) error {
 		return err
 	}
 	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
-	return svc.Up(context.Background(), opts)
+	_, err := svc.Up(context.Background(), opts)
+	return err
 }
 
 func (h *upHarness) containers() []state.ContainerSummary {
@@ -283,7 +284,8 @@ func TestUpKeepsTheContainerOnInputDrift(t *testing.T) {
 	svc := NewDevContainerService(h.engine, rec, h.workspace, "", false)
 	svc.provisionAgent = func(context.Context, container.Engine, report.Reporter, agentctl.Options) error { return nil }
 	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
-	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
+	_, err := svc.Up(context.Background(), UpOptions{})
+	require.NoError(t, err)
 
 	require.Len(t, h.containers(), 1)
 	assert.Equal(t, id, h.containers()[0].ID, "drift does not recreate")
@@ -315,7 +317,8 @@ func TestUpPointsAtAContainerFromThePreviousIDScheme(t *testing.T) {
 		return err
 	}
 	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
-	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
+	_, err := svc.Up(context.Background(), UpOptions{})
+	require.NoError(t, err)
 
 	var warned bool
 	for _, m := range rec.Messages() {

@@ -59,14 +59,14 @@ type upStep struct {
 // Up brings a devcontainer environment up: creates, recreates or starts the
 // container as needed, then (re)establishes everything a running
 // environment needs. It is also the only start path (`dcx up` on a stopped
-// container, `dcx restart`).
-func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) error {
+// container, `dcx restart`). It reports whether there was anything to do.
+func (s *DevContainerService) Up(ctx context.Context, opts UpOptions) (bool, error) {
 	// Decide and act under the workspace lock: a concurrent Up would see
 	// the same state and both would create (or recreate) the container,
 	// and a concurrent down could remove it mid-setup.
 	unlock, err := s.lockWorkspace(ctx, s.Identity().WorkspaceID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer unlock()
 	return s.up(ctx, opts)
@@ -134,16 +134,18 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	return run, nil
 }
 
-// up is Up without taking the workspace lock (the caller holds it).
-func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
+// up is Up without taking the workspace lock (the caller holds it). It
+// reports whether there was anything to do (false: the environment was
+// already up and set up).
+func (s *DevContainerService) up(ctx context.Context, opts UpOptions) (bool, error) {
 	// initializeCommand runs on every up, as in devcontainers/cli, even
 	// when the container is already up and set up.
 	if err := s.runInitialize(ctx); err != nil {
-		return err
+		return false, err
 	}
 	run, err := s.planUp(ctx, opts)
 	if err != nil || run == nil || run.action == actionNone {
-		return err
+		return false, err
 	}
 	steps := []upStep{
 		{"container", s.stepContainer},
@@ -157,13 +159,13 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) error {
 	}
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("interrupted before %s: %w", step.name, err)
+			return true, fmt.Errorf("interrupted before %s: %w", step.name, err)
 		}
 		if err := step.run(ctx, run); err != nil {
-			return err
+			return true, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // reportPreviousIDContainer points at a container this config created

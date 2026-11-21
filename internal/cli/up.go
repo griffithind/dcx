@@ -59,15 +59,18 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Service.Up decides what to do (nothing, resume an unfinished setup,
 	// start, create or recreate) and owns the complete sequence.
 	// Full up sequence required
-	if err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{
+	changed, err := cliCtx.Service.Up(cliCtx.Ctx, service.UpOptions{
 		Recreate:  recreate,
 		Rebuild:   rebuild,
 		Pull:      pull,
 		SSHAccess: access,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-
-	ui.Success("Devcontainer started successfully")
+	// With nothing to do, "Devcontainer is already running" says it all.
+	if changed {
+		ui.Success("Devcontainer started successfully")
+	}
 	return nil
 }

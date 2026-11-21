@@ -57,7 +57,7 @@ var defaultUserQuery = []string{"sh", "-c", "id -un 2>/dev/null || id -u"}
 // ~/.ssh/id_ed25519) apply on the next `dcx up`.
 func Provision(ctx context.Context, engine container.Engine, rep report.Reporter, opts Options) error {
 	rep = report.OrDiscard(rep)
-	rep.Infof("Installing dcx agent...")
+	rep.Infof("Starting dcx agent...")
 	installed, err := Deploy(ctx, engine, opts.ContainerName)
 	if err != nil {
 		return fmt.Errorf("failed to install dcx agent: %w", err)

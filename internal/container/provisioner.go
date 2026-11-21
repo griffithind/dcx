@@ -729,11 +729,14 @@ func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 	}
 	composePorts := r.composePublishedPorts()
 	ports := []devcontainer.PortForward{}
+	// Entries the compose file already publishes as they are: reported
+	// once per field, not once per port.
+	published := map[string][]string{}
 	add := func(field string, p devcontainer.PortForward) {
 		for _, q := range composePorts {
 			if q.Collides(p) {
 				if q.SamePort(p) {
-					r.report.Infof("%s: %s is already published by the compose file", field, p.DockerSpec())
+					published[field] = append(published[field], strconv.Itoa(p.HostPort))
 				} else {
 					r.report.Warnf("%s: skipping %s: the compose file publishes the same host port (%s)", field, p.DockerSpec(), q.DockerSpec())
 				}
@@ -758,6 +761,11 @@ func (r *Provisioner) buildPortBindings() []devcontainer.PortForward {
 			p.Host = "127.0.0.1"
 		}
 		add("forwardPorts", p)
+	}
+	for _, field := range []string{"appPort", "forwardPorts"} {
+		if list := published[field]; len(list) > 0 {
+			r.report.Infof("%s: already published by the compose file: %s", field, strings.Join(list, ", "))
+		}
 	}
 	if r.ssh != nil {
 		ports = append(ports, r.ssh.portForward())
