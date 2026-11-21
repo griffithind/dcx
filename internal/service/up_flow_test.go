@@ -351,3 +351,28 @@ func TestDownWaitsForTheWorkspaceLock(t *testing.T) {
 	require.NoError(t, <-done)
 	assert.Empty(t, h.containers())
 }
+
+// markerListings counts the execs that listed lifecycle markers.
+func markerListings(f *containertest.Fake) int {
+	n := 0
+	for _, c := range f.CallsTo("ExecOutput") {
+		if strings.Contains(strings.Join(c.Args, " "), "dcx-marker") {
+			n++
+		}
+	}
+	return n
+}
+
+// Markers are listed at most once per up: never for a container the run
+// created (it has none), and once for an existing one (the read that
+// decides what to do also serves the hooks).
+func TestUpListsMarkersAtMostOnce(t *testing.T) {
+	h := newUpHarness(t, upTestConfig)
+	h.hooks.failCreate = errors.New("postCreateCommand exited with code 1")
+	require.Error(t, h.up(UpOptions{}))
+	assert.Zero(t, markerListings(h.engine), "a container this run created has no markers to list")
+
+	require.NoError(t, h.up(UpOptions{}))
+	assert.Equal(t, 1, markerListings(h.engine), "resuming lists them once")
+	assert.Equal(t, 2, h.hooks.create, "and the failed setup still resumes")
+}

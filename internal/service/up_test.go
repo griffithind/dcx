@@ -51,21 +51,21 @@ func TestSetupComplete(t *testing.T) {
 	svc, _ := newTestService(t, fake)
 	ctx := context.Background()
 
-	done, err := svc.setupComplete(ctx, markerInfo(false))
+	done, err := svc.setupComplete(ctx, svc.markersFor(markerInfo(false)))
 	require.NoError(t, err)
 	assert.True(t, done, "legacy containers are assumed complete")
 
-	done, err = svc.setupComplete(ctx, markerInfo(true))
+	done, err = svc.setupComplete(ctx, svc.markersFor(markerInfo(true)))
 	require.NoError(t, err)
 	assert.False(t, done, "no ready marker: setup unfinished")
 
 	fake.Files = map[string][]byte{"c1:" + markerPath(phaseReady): []byte("x")}
-	done, err = svc.setupComplete(ctx, markerInfo(true))
+	done, err = svc.setupComplete(ctx, svc.markersFor(markerInfo(true)))
 	require.NoError(t, err)
 	assert.True(t, done)
 
 	fake.OutputFunc = func(string, []string) ([]byte, error) { return nil, errors.New("container not responding") }
-	_, err = svc.setupComplete(ctx, markerInfo(true))
+	_, err = svc.setupComplete(ctx, svc.markersFor(markerInfo(true)))
 	assert.Error(t, err)
 }
 

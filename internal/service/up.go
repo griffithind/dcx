@@ -43,6 +43,10 @@ type upRun struct {
 	state    state.ContainerState
 	existing *state.ContainerInfo // what the state lookup found before any change
 
+	// markers are the existing container's, already read to decide the
+	// action; nil when it was not running.
+	markers *containerMarkers
+
 	// Set by the steps.
 	info    *state.ContainerInfo // the container after create/start
 	started bool                 // the container was created or started by this run
@@ -106,8 +110,10 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	// reboot with a restart policy) the markers survive but the agent and
 	// the /run/secrets tmpfs do not.
 	setupDone, agentUp := false, false
+	var markers *containerMarkers
 	if currentState == state.StateRunning {
-		if setupDone, err = s.setupComplete(ctx, existing); err != nil {
+		markers = s.markersFor(existing)
+		if setupDone, err = s.setupComplete(ctx, markers); err != nil {
 			return nil, err
 		}
 		agentUp = setupDone && agentctl.Listening(ctx, s.engine, existing.Name, container.SSHListenAddr(existing))
@@ -124,7 +130,7 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	s.checkHostRequirements(ctx, resolved)
 	keepComposeProject(resolved, existing)
 
-	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, access: access, state: currentState, existing: existing}
+	run := &upRun{opts: opts, resolved: resolved, ids: ids, action: action, access: access, state: currentState, existing: existing, markers: markers}
 	// A container whose agent is gone after its setup completed was usually
 	// started outside dcx (docker restart, a reboot with a restart policy):
 	// postStartCommand runs when it started after the last one ran.
@@ -459,7 +465,13 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		alias = aliases[0]
 	}
 	runner := s.hookRunner(r.resolved.Hooks, alias)
-	markers := s.markersFor(r.info)
+	markers := r.markers
+	if markers == nil || r.info.ID != markers.container {
+		markers = s.markersFor(r.info)
+		if markers != nil && (r.action == actionCreate || r.action == actionRecreate) {
+			markers.done = map[string]bool{} // a container this run created has none
+		}
+	}
 
 	var created lifecycle.Markers // a nil *containerMarkers must stay a nil interface
 	if markers != nil {
@@ -547,8 +559,7 @@ func (s *DevContainerService) startedSinceLastPostStart(ctx context.Context, inf
 
 // setupComplete reports whether a running container finished its setup.
 // Containers created before lifecycle markers existed are assumed complete.
-func (s *DevContainerService) setupComplete(ctx context.Context, info *state.ContainerInfo) (bool, error) {
-	m := s.markersFor(info)
+func (s *DevContainerService) setupComplete(ctx context.Context, m *containerMarkers) (bool, error) {
 	if m == nil {
 		return true, nil
 	}
