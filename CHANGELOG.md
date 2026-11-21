@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `dcx upgrade` replaces dcx with the latest release: the binary is checked
+  against the release's `checksums.txt`, must report the release's version
+  when run, and replaces the old one in one rename, so a failed upgrade
+  leaves dcx as it was. `--check` only reports whether a newer release
+  exists. A dcx built from source is left alone.
+
 ## 0.8.0 (2026-11-21)
 
 dcx now follows the official devcontainers/cli wherever a `devcontainer.json`

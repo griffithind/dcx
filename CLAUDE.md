@@ -45,6 +45,7 @@ Entry points: `cmd/dcx` (`cli.Execute`), `cmd/dcx-agent` (`agent.Execute`), `age
 | `ssh.go` | `dcx ssh [-- cmd]`: one `docker ps` for the running container, then execs OpenSSH to the workspace alias with `hostconfig.ShareOptions` |
 | `status.go`, `list.go`, `logs.go` | Information; render what the service returns |
 | `build.go`, `clean.go`, `lock.go`, `config.go`, `doctor.go`, `completion.go` | The other commands |
+| `upgrade.go` | `dcx upgrade [--check]` over `selfupdate` (release builds only) |
 | `hosts_parser.go` | `--hosts` parsing |
 | `output.go` | `printJSON`; with `--json`, `Execute` prints errors as `{"error": …}` |
 
@@ -148,7 +149,7 @@ hooks                onCreate/updateContent/postCreate once (markers in /var/lib
 - `agent/`: the dcx-agent (SSH server, sessions, SFTP, `provision`, IP gate). `agentctl/`: its host side (`Deploy`, `Provision`). `agentproto/`: the shared contract (paths, port, secret locations, `SessionConfig`).
 - `ssh/`: host keys, known_hosts, authorized keys, port choice; `hostconfig` writes `~/.ssh/dcx/config` and gives dcx's own connections a shared connection per SSH agent (`ShareOptions`: the socket in the workspace folder, named by a hash of `SSH_AUTH_SOCK`, left out when the path is too long for OpenSSH).
 - `dcxhome/`: `$DCX_HOME` (default `~/.dcx`): known_hosts, the fallback client key, `workspaces/<id>/` (`WorkspaceDir`: host key, lock, compose override, `workspace.json`, shared SSH connection sockets). Never build these paths by hand.
-- `env/`: stdlib-only logic dcx and the agent share: dcx's `/etc/environment` block (the container's `Config.Env`, never `remoteEnv`), the `/etc/profile` PATH patch, the `userEnvProbe` command and output. `secrets/`: running secret commands on the host (concurrently, results sorted by name). `lockfile/`: `devcontainer-lock.json` I/O. `mount/`: `Mount`, `Parse`. `registryauth/`: docker credentials (runs credential helpers). `shell/`: `Quote`, `Join`. `report/`: `Reporter`. `ui/`: terminal output (data on stdout, progress on stderr, ANSI colour only on a terminal). `version/`.
+- `env/`: stdlib-only logic dcx and the agent share: dcx's `/etc/environment` block (the container's `Config.Env`, never `remoteEnv`), the `/etc/profile` PATH patch, the `userEnvProbe` command and output. `secrets/`: running secret commands on the host (concurrently, results sorted by name). `lockfile/`: `devcontainer-lock.json` I/O. `mount/`: `Mount`, `Parse`. `registryauth/`: docker credentials (runs credential helpers). `shell/`: `Quote`, `Join`. `report/`: `Reporter`. `selfupdate/`: `dcx upgrade` (latest release from the GitHub API, download checked against `checksums.txt`, the new binary must report the release's version, then one rename over the resolved executable). `ui/`: terminal output (data on stdout, progress on stderr, ANSI colour only on a terminal). `version/`.
 
 ## Key types
 

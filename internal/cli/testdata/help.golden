@@ -28,6 +28,7 @@ Build & Maintenance:
   build       Build the devcontainer images
   clean       Clean up orphaned resources
   lock        Generate or verify devcontainer-lock.json
+  upgrade     Upgrade dcx to the latest release
 
 Utilities:
   completion  Generate shell completion scripts
@@ -434,6 +435,29 @@ Flags:
       --pull[=true|false]       re-pull the base image and re-fetch features (for moving tags like :latest); applies when the container is created, so add --recreate for an existing one
       --rebuild[=true|false]    force rebuild images
       --recreate[=true|false]   force recreate containers
+
+Global Flags:
+  -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
+      --no-color[=true|false]   disable colored output
+  -q, --quiet[=true|false]      print only data and errors (no progress or warnings)
+  -v, --verbose[=true|false]    verbose output
+  -w, --workspace string        workspace directory (default: current directory)
+
+=== dcx upgrade
+Replace this dcx with the latest release from GitHub.
+
+The binary for this OS and architecture is downloaded over HTTPS and
+checked against the release's checksums.txt, and must report the release's
+version when run; only then does it replace this dcx, in one rename (a
+failure leaves this dcx as it was). Nothing happens when this dcx is the
+latest release. A dcx built from source is not replaced: rebuild it, or
+install a release with the install command.
+
+Usage:
+  dcx upgrade [flags]
+
+Flags:
+      --check[=true|false]   only report whether a newer release exists
 
 Global Flags:
   -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
