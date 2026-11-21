@@ -44,7 +44,7 @@ release: release-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/dcx
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/dcx
 	@echo "Generating checksums..."
-	cd $(BUILD_DIR) && sha256sum $(BINARY_NAME)-* > checksums.txt
+	cd $(BUILD_DIR) && sha256sum $(BINARY_NAME)-darwin-* $(BINARY_NAME)-linux-* > checksums.txt
 
 # Build optimized agent binaries for release
 release-agent:

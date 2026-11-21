@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (since 0.7.0)
+## 0.8.0 (2026-11-21)
 
 dcx now follows the official devcontainers/cli wherever a `devcontainer.json`
 means the same thing to both ([docs/compatibility.md](docs/compatibility.md)).

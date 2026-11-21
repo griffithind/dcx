@@ -10,10 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// shortHome is a $DCX_HOME short enough for a control socket: t.TempDir is
+// under macOS's long /var/folders/…, past the limit.
+func shortHome(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "dcx-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // Each SSH agent socket gets its own shared connection: one opened from a
 // shell with another agent would forward that agent instead.
 func TestControlPathIsPerAgent(t *testing.T) {
-	home := t.TempDir()
+	home := shortHome(t)
 	t.Setenv("DCX_HOME", home)
 
 	a, ok := controlPath("wk1", "/tmp/ssh-AAA/agent.1")
@@ -37,7 +47,7 @@ func TestControlPathIsPerAgent(t *testing.T) {
 // A path OpenSSH cannot bind would fail the connection itself, so sharing
 // is left out then.
 func TestShareOptionsSkipsLongPaths(t *testing.T) {
-	t.Setenv("DCX_HOME", t.TempDir())
+	t.Setenv("DCX_HOME", shortHome(t))
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent")
 	opts := ShareOptions("wk1")
 	require.Len(t, opts, 6)
