@@ -103,28 +103,38 @@ func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
 	})
 }
 
-// TestOverrideCommandDefaultImageE2E tests that image-based containers stay running
-// by default (overrideCommand defaults to true for image-based configs).
-func TestOverrideCommandDefaultImageE2E(t *testing.T) {
+// TestOverrideCommandDefaultE2E: without overrideCommand (true by default
+// for image configs) an image without a long-running command (alpine)
+// keeps running on dcx's keep-alive, takes commands, and up waits for the
+// create hooks (waitFor has no effect on a command-line up).
+func TestOverrideCommandDefaultE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Use an image that would normally exit (no long-running process)
-	// Without overrideCommand=true (or default true), this would exit immediately
 	devcontainerJSON := fmt.Sprintf(`{
 		"name": %q,
 		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"onCreateCommand": "echo 'onCreate executed'",
+		"updateContentCommand": "echo 'updateContent executed'",
+		"postCreateCommand": "echo 'postCreate executed'"
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
-	// Bring up the container - should succeed because overrideCommand defaults to true
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+	require.NoError(t, err, stderr)
+	for _, want := range []string{"onCreate executed", "updateContent executed", "postCreate executed"} {
+		assert.Contains(t, stdout, want, "up waits for every create hook")
+	}
+	assert.Contains(t, stderr, "Devcontainer started successfully")
+	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
 
-	// Verify the container is running by executing a command
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "container-is-running")
+	out, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "container-is-running")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "container-is-running")
+	assert.Contains(t, out, "container-is-running")
+	out, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
+	require.NoError(t, err)
+	assert.Contains(t, out, "sleep", "the keep-alive runs")
 }
 
 // TestOverrideCommandExplicitFalseE2E tests that setting overrideCommand to false
@@ -142,7 +152,9 @@ func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	}`, helpers.UniqueTestName(t))
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "Dockerfile"),
-		[]byte("FROM alpine:3.24\nCMD [\"tail\", \"-f\", \"/dev/null\"]\n"), 0o644))
+		// The command exits on SIGTERM, so stopping the container does not
+		// wait out Docker's 10 s timeout.
+		[]byte("FROM alpine:3.24\nCMD [\"sh\", \"-c\", \"trap 'exit 0' TERM; tail -f /dev/null & wait\"]\n"), 0o644))
 
 	helpers.RunDCXInDirSuccess(t, workspace, "up")
 
@@ -168,33 +180,4 @@ func TestOverrideCommandFalseWithoutTTYE2E(t *testing.T) {
 	_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
 	require.Error(t, err)
 	assert.Contains(t, stderr, "not running")
-}
-
-// TestWaitForDefaultE2E tests the default waitFor behavior (updateContentCommand per spec).
-// Note: This is a basic test to ensure the container comes up correctly with default waitFor.
-func TestWaitForDefaultE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"onCreateCommand": "echo 'onCreate executed'",
-		"updateContentCommand": "echo 'updateContent executed'",
-		"postCreateCommand": "echo 'postCreate executed'"
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	// With default waitFor=updateContentCommand, the up should wait for:
-	// - initializeCommand
-	// - onCreateCommand
-	// - updateContentCommand
-	// But NOT for postCreateCommand (runs in background)
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify lifecycle commands ran
-	assert.Contains(t, stdout, "onCreate")
-	assert.Contains(t, stdout, "updateContent")
 }

@@ -93,12 +93,14 @@ func TestComposeNonDefaultFileStopDownE2E(t *testing.T) {
   decoy:
     image: alpine:3.24
     command: sleep infinity
+    init: true
 `
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, decoy)
 	stack := `services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `

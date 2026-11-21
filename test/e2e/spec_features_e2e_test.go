@@ -12,45 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOverrideCommandE2E tests the overrideCommand feature.
-func TestOverrideCommandE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create config with overrideCommand: true
-	devcontainerJSON := `{
-		"name": "Override Command Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"overrideCommand": true
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up - should not exit immediately even though alpine has no default command
-	t.Run("container_stays_running_with_override", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Container should respond to exec commands
-	t.Run("exec_works_with_override", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "override-test")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "override-test")
-	})
-
-	// Verify the container is running a sleep process (our override command)
-	t.Run("sleep_process_running", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
-		require.NoError(t, err)
-		// Should have a sleep process running
-		assert.Contains(t, stdout, "sleep")
-	})
-}
-
 // TestShutdownActionNoneE2E tests shutdownAction: "none".
 func TestShutdownActionNoneE2E(t *testing.T) {
 	t.Parallel()
@@ -123,56 +84,33 @@ func TestShutdownActionStopContainerE2E(t *testing.T) {
 	})
 }
 
-// TestHostRequirementsValidationE2E tests hostRequirements validation.
+// TestHostRequirementsValidationE2E: CPU and memory minimums the host
+// can't meet warn and start anyway (many repositories set Codespaces-sized
+// ones); a required GPU on a host without a GPU runtime warns and starts
+// without GPUs, as the official CLI does (R6/C12); a storage requirement
+// can't be checked and is not reported.
 func TestHostRequirementsValidationE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// CPU and memory minimums the host can't meet warn and start anyway:
-	// many repositories set Codespaces-sized ones.
-	t.Run("warns_for_unmet_cpu_and_memory", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"cpus": 10000, "memory": "10000gb"`)
-		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	reqs := `"cpus": 10000, "memory": "10000gb", "storage": "10gb"`
+	gpuRuntime := false
+	if out, err := exec.Command("docker", "info", "--format", "{{json .Runtimes}}").Output(); err == nil && strings.Contains(string(out), "nvidia") {
+		gpuRuntime = true
+	} else {
+		reqs += `, "gpu": true`
+	}
+	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", reqs))
 
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-		require.NoError(t, err, "unmet cpu/memory must not block up: stdout=%s stderr=%s", stdout, stderr)
-		assert.Contains(t, stderr, "10000 CPUs recommended")
-		assert.Contains(t, stderr, "10000gb of memory recommended")
-	})
-
-	// Test with achievable requirements (should succeed)
-	t.Run("succeeds_with_achievable_requirements", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"cpus": 1, "memory": "512mb"`)
-		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-	})
-
-	// A required GPU on a host without a GPU runtime warns and starts
-	// without GPUs, as the official CLI does (R6/C12).
-	t.Run("required_gpu_without_runtime_warns", func(t *testing.T) {
-		if out, err := exec.Command("docker", "info", "--format", "{{json .Runtimes}}").Output(); err == nil && strings.Contains(string(out), "nvidia") {
-			t.Skip("the Docker host has a GPU runtime")
-		}
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"gpu": true`)
-		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-		require.NoError(t, err, "a missing GPU must not block up: stderr=%s", stderr)
+	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
+	require.NoError(t, err, "unmet requirements must not block up: stdout=%s stderr=%s", stdout, stderr)
+	assert.Contains(t, stderr, "10000 CPUs recommended")
+	assert.Contains(t, stderr, "10000gb of memory recommended")
+	if !gpuRuntime {
 		assert.Contains(t, stderr, "no GPU runtime")
-	})
-
-	// A storage requirement can't be checked and is not reported.
-	t.Run("ignores_storage_requirement", func(t *testing.T) {
-		devcontainerJSON := helpers.SimpleImageConfigWithHostReqs(t, "alpine:3.24", `"storage": "10gb"`)
-		workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-		require.NoError(t, err, "should succeed with storage requirement")
-		assert.Contains(t, stderr, "Devcontainer started successfully", "progress goes to stderr")
-		assert.NotContains(t, stderr, "torage")
-	})
+	}
+	assert.NotContains(t, stderr, "torage")
+	assert.Contains(t, stderr, "Devcontainer started successfully", "progress goes to stderr")
 }
 
 // TestRemoteUserE2E tests remoteUser configuration.

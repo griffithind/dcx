@@ -122,6 +122,7 @@ RUN --mount=type=secret,id=COMPOSE_BUILD_SECRET cat /run/secrets/COMPOSE_BUILD_S
       context: .
       dockerfile: Dockerfile
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `,

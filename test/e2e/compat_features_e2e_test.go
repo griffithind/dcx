@@ -69,7 +69,7 @@ func TestFeaturesInstallForTheComposeUserE2E(t *testing.T) {
 			"workspaceFolder": "/workspace",
 			"features": {"./rec": {}}
 		}`, helpers.UniqueTestName(t)),
-		".devcontainer/docker-compose.yml": "services:\n  app:\n    image: alpine:3.24\n    command: sleep infinity\n    user: nobody\n",
+		".devcontainer/docker-compose.yml": "services:\n  app:\n    image: alpine:3.24\n    command: sleep infinity\n    init: true\n    user: nobody\n",
 	}
 	for k, v := range recordingFeature("rec", `{"id": "rec"}`, `$_CONTAINER_USER|$_REMOTE_USER`) {
 		files[k] = v

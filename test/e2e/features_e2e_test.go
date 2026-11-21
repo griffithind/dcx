@@ -14,117 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLocalFeatureE2E tests installing a local feature.
-func TestLocalFeatureE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create workspace with local feature
-	workspace := createWorkspaceWithLocalFeature(t, "Local Feature Test")
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	t.Run("up_installs_feature", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Verify feature was installed by checking for marker file
-	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "feature installed")
-	})
-}
-
-// TestLocalFeatureWithOptionsE2E tests a feature that accepts options.
-func TestLocalFeatureWithOptionsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceWithOptionsFeature(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify feature options were passed
-	t.Run("feature_options_passed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
-		require.NoError(t, err)
-		// Our config sets greeting to "CustomHello"
-		assert.Contains(t, stdout, "GREETING=CustomHello")
-		assert.Contains(t, stdout, "ENABLED=true")
-		assert.Contains(t, stdout, "COUNT=5")
-	})
-}
-
-// TestLocalFeatureWithDependenciesE2E tests feature installation ordering.
-func TestLocalFeatureWithDependenciesE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceWithDependentFeatures(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify both features were installed
-	t.Run("simple_marker_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/simple-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "simple-marker installed")
-	})
-
-	// Verify the dependent feature found its dependency
-	t.Run("dependent_feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-deps-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "MESSAGE=depends")
-	})
-}
-
-// TestMultipleFeaturesE2E tests installing multiple features.
-func TestMultipleFeaturesE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceWithMultipleFeatures(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify all features installed
-	t.Run("all_features_installed", func(t *testing.T) {
-		// Check simple-marker
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/simple-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "simple-marker installed")
-
-		// Check with-options marker
-		stdout, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "GREETING")
-	})
-}
-
 // createWorkspaceWithLocalFeature creates a workspace with a simple local feature.
 func createWorkspaceWithLocalFeature(t *testing.T, name string) string {
 	t.Helper()
@@ -168,187 +57,6 @@ echo "feature installed" > /tmp/feature-marker
 			"./features/simple-marker": {}
 		}
 	}`, name)
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// createWorkspaceWithOptionsFeature creates a workspace with the with-options feature.
-func createWorkspaceWithOptionsFeature(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "with-options")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Copy feature from testdata
-	featureFixture := helpers.FeatureFixture(t, "with-options")
-
-	// Copy devcontainer-feature.json
-	data, err := os.ReadFile(filepath.Join(featureFixture, "devcontainer-feature.json"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), data, 0644)
-	require.NoError(t, err)
-
-	// Copy install.sh
-	data, err = os.ReadFile(filepath.Join(featureFixture, "install.sh"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), data, 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json with options
-	devcontainerJSON := `{
-		"name": "Feature Options Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/with-options": {
-				"greeting": "CustomHello",
-				"enabled": true,
-				"count": "5"
-			}
-		}
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// createWorkspaceWithDependentFeatures creates a workspace with features that have dependencies.
-func createWorkspaceWithDependentFeatures(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	featuresDir := filepath.Join(devcontainerDir, "features")
-	err := os.MkdirAll(featuresDir, 0755)
-	require.NoError(t, err)
-
-	// Create simple-marker feature
-	simpleDir := filepath.Join(featuresDir, "simple-marker")
-	err = os.MkdirAll(simpleDir, 0755)
-	require.NoError(t, err)
-
-	simpleJSON := `{
-		"id": "simple-marker",
-		"version": "1.0.0",
-		"name": "Simple Marker"
-	}`
-	err = os.WriteFile(filepath.Join(simpleDir, "devcontainer-feature.json"), []byte(simpleJSON), 0644)
-	require.NoError(t, err)
-
-	simpleInstall := `#!/bin/sh
-set -e
-echo "simple-marker installed" > /tmp/simple-marker
-`
-	err = os.WriteFile(filepath.Join(simpleDir, "install.sh"), []byte(simpleInstall), 0755)
-	require.NoError(t, err)
-
-	// Create with-dependencies feature
-	depsDir := filepath.Join(featuresDir, "with-dependencies")
-	err = os.MkdirAll(depsDir, 0755)
-	require.NoError(t, err)
-
-	depsFeatureFixture := helpers.FeatureFixture(t, "with-dependencies")
-
-	// Copy files from fixture
-	data, err := os.ReadFile(filepath.Join(depsFeatureFixture, "devcontainer-feature.json"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(depsDir, "devcontainer-feature.json"), data, 0644)
-	require.NoError(t, err)
-
-	data, err = os.ReadFile(filepath.Join(depsFeatureFixture, "install.sh"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(depsDir, "install.sh"), data, 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Dependencies Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/with-dependencies": {},
-			"./features/simple-marker": {}
-		}
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// createWorkspaceWithMultipleFeatures creates a workspace with multiple independent features.
-func createWorkspaceWithMultipleFeatures(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	featuresDir := filepath.Join(devcontainerDir, "features")
-	err := os.MkdirAll(featuresDir, 0755)
-	require.NoError(t, err)
-
-	// Create simple-marker feature
-	simpleDir := filepath.Join(featuresDir, "simple-marker")
-	err = os.MkdirAll(simpleDir, 0755)
-	require.NoError(t, err)
-
-	simpleJSON := `{
-		"id": "simple-marker",
-		"version": "1.0.0",
-		"name": "Simple Marker"
-	}`
-	err = os.WriteFile(filepath.Join(simpleDir, "devcontainer-feature.json"), []byte(simpleJSON), 0644)
-	require.NoError(t, err)
-
-	simpleInstall := `#!/bin/sh
-set -e
-echo "simple-marker installed" > /tmp/simple-marker
-`
-	err = os.WriteFile(filepath.Join(simpleDir, "install.sh"), []byte(simpleInstall), 0755)
-	require.NoError(t, err)
-
-	// Create with-options feature
-	optionsDir := filepath.Join(featuresDir, "with-options")
-	err = os.MkdirAll(optionsDir, 0755)
-	require.NoError(t, err)
-
-	optionsFixture := helpers.FeatureFixture(t, "with-options")
-
-	data, err := os.ReadFile(filepath.Join(optionsFixture, "devcontainer-feature.json"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(optionsDir, "devcontainer-feature.json"), data, 0644)
-	require.NoError(t, err)
-
-	data, err = os.ReadFile(filepath.Join(optionsFixture, "install.sh"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(optionsDir, "install.sh"), data, 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Multiple Features Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/simple-marker": {},
-			"./features/with-options": {}
-		}
-	}`
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
@@ -407,84 +115,6 @@ func TestFeatureCachingE2E(t *testing.T) {
 		assert.Contains(t, execStdout, "GREETING=ChangedHello")
 		assert.Contains(t, execStdout, "COUNT=10")
 	})
-}
-
-// TestFeatureWithMountsE2E tests that feature mounts are applied to the container.
-func TestFeatureWithMountsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceWithMountsFeature(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	t.Run("up_installs_feature", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-	})
-
-	// Verify the docker socket is mounted
-	t.Run("docker_socket_mounted", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ls", "-la", "/var/run/docker.sock")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "docker.sock")
-	})
-
-	// Verify feature marker was installed
-	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/dcx-features/with-mounts-marker.txt")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "with-mounts installed")
-	})
-}
-
-// createWorkspaceWithMountsFeature creates a workspace with a feature that has mounts.
-func createWorkspaceWithMountsFeature(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "with-mounts")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Copy feature from testdata
-	featureFixture := helpers.FeatureFixture(t, "with-mounts")
-
-	// Copy devcontainer-feature.json
-	data, err := os.ReadFile(filepath.Join(featureFixture, "devcontainer-feature.json"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), data, 0644)
-	require.NoError(t, err)
-
-	// Copy install.sh
-	data, err = os.ReadFile(filepath.Join(featureFixture, "install.sh"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), data, 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Mounts Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/with-mounts": {}
-		}
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
 }
 
 // createWorkspaceForCachingTest creates a workspace for the caching test with a unique name.
@@ -674,107 +304,11 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
 	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// TestFeatureSecurityRequirementsE2E tests that feature security requirements
-// (capAdd, init, containerEnv) are correctly applied to the container.
-func TestFeatureSecurityRequirementsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceWithSecurityFeature(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Build and run
-	t.Run("up_installs_feature_with_security_reqs", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-	})
-
-	// Verify the capability is present by checking /proc/self/status
-	t.Run("capability_applied", func(t *testing.T) {
-		// SYS_PTRACE capability (cap 19) should be in the effective set
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/proc/self/status")
-		require.NoError(t, err)
-		// The CapEff line shows effective capabilities as a hex bitmask
-		// SYS_PTRACE is capability 19, so bit 19 should be set
-		assert.Contains(t, stdout, "CapEff")
-	})
-
-	// Verify feature env var is present
-	t.Run("feature_env_applied", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "echo $FEATURE_TEST_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "security-feature-value")
-	})
-
-	// Verify feature marker was installed
-	t.Run("feature_installed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/security-feature-marker")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "security feature installed")
-	})
-}
-
-// createWorkspaceWithSecurityFeature creates a workspace with a feature that has security requirements.
-func createWorkspaceWithSecurityFeature(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "security-feature")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature metadata with security requirements
-	featureJSON := `{
-		"id": "security-feature",
-		"version": "1.0.0",
-		"name": "Security Feature",
-		"description": "Feature with security requirements",
-		"capAdd": ["SYS_PTRACE"],
-		"init": true,
-		"containerEnv": {
-			"FEATURE_TEST_VAR": "security-feature-value"
-		}
-	}`
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
-	require.NoError(t, err)
-
-	// Create install script
-	installScript := `#!/bin/sh
-set -e
-echo "security feature installed" > /tmp/security-feature-marker
-`
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/security-feature": {}
-		}
-	}`, "security-feature-test-"+helpers.UniqueTestName(t))
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
 	return workspace
@@ -970,5 +504,101 @@ echo "feature-b installed" > /tmp/feature-b-marker
 	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
 	require.NoError(t, err)
 
+	return workspace
+}
+
+// TestLocalFeaturesE2E installs five local features into one container
+// and checks each: a marker, options (with-options, set in
+// devcontainer.json), install order (with-dependencies installs after
+// simple-marker), a feature mount (with-mounts binds the Docker socket),
+// and security requirements with containerEnv (capAdd, init).
+func TestLocalFeaturesE2E(t *testing.T) {
+	t.Parallel()
+	helpers.RequireDockerAvailable(t)
+
+	workspace := createWorkspaceWithLocalFeatures(t)
+	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	assert.Contains(t, stdout, "Devcontainer started successfully")
+	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
+
+	cat := func(path string) string {
+		t.Helper()
+		out, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", path)
+		require.NoError(t, err, path)
+		return out
+	}
+	t.Run("marker", func(t *testing.T) {
+		assert.Contains(t, cat("/tmp/feature-marker"), "feature installed")
+		assert.Contains(t, cat("/tmp/simple-marker"), "simple-marker installed")
+	})
+	t.Run("options", func(t *testing.T) {
+		out := cat("/tmp/feature-options-marker")
+		assert.Contains(t, out, "GREETING=CustomHello")
+		assert.Contains(t, out, "ENABLED=true")
+		assert.Contains(t, out, "COUNT=5")
+	})
+	t.Run("dependencies", func(t *testing.T) {
+		assert.Contains(t, cat("/tmp/feature-deps-marker"), "MESSAGE=depends")
+	})
+	t.Run("mounts", func(t *testing.T) {
+		out, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ls", "-la", "/var/run/docker.sock")
+		require.NoError(t, err)
+		assert.Contains(t, out, "docker.sock")
+		assert.Contains(t, cat("/tmp/dcx-features/with-mounts-marker.txt"), "with-mounts installed")
+	})
+	t.Run("security", func(t *testing.T) {
+		assert.Contains(t, cat("/proc/self/status"), "CapEff")
+		out, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "echo $FEATURE_TEST_VAR")
+		require.NoError(t, err)
+		assert.Contains(t, out, "security-feature-value")
+		assert.Contains(t, cat("/tmp/security-feature-marker"), "security feature installed")
+	})
+}
+
+// createWorkspaceWithLocalFeatures creates the workspace TestLocalFeaturesE2E
+// brings up: simple-marker and security-feature written here, with-options,
+// with-dependencies and with-mounts copied from testdata/features.
+func createWorkspaceWithLocalFeatures(t *testing.T) string {
+	t.Helper()
+	workspace := t.TempDir()
+	features := filepath.Join(workspace, ".devcontainer", "features")
+	write := func(feature, file, content string, mode os.FileMode) {
+		dir := filepath.Join(features, feature)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, file), []byte(content), mode))
+	}
+	write("simple-marker", "devcontainer-feature.json", `{"id": "simple-marker", "version": "1.0.0", "name": "Simple Marker"}`, 0o644)
+	write("simple-marker", "install.sh", "#!/bin/sh\nset -e\necho \"feature installed\" > /tmp/feature-marker\necho \"simple-marker installed\" > /tmp/simple-marker\n", 0o755)
+	write("security-feature", "devcontainer-feature.json", `{
+		"id": "security-feature",
+		"version": "1.0.0",
+		"name": "Security Feature",
+		"capAdd": ["SYS_PTRACE"],
+		"init": true,
+		"containerEnv": {"FEATURE_TEST_VAR": "security-feature-value"}
+	}`, 0o644)
+	write("security-feature", "install.sh", "#!/bin/sh\nset -e\necho \"security feature installed\" > /tmp/security-feature-marker\n", 0o755)
+	for _, fixture := range []string{"with-options", "with-dependencies", "with-mounts"} {
+		src := helpers.FeatureFixture(t, fixture)
+		for _, file := range []string{"devcontainer-feature.json", "install.sh"} {
+			data, err := os.ReadFile(filepath.Join(src, file))
+			require.NoError(t, err)
+			write(fixture, file, string(data), 0o755)
+		}
+	}
+
+	devcontainerJSON := fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:3.24",
+		"workspaceFolder": "/workspace",
+		"features": {
+			"./features/simple-marker": {},
+			"./features/with-options": {"greeting": "CustomHello", "enabled": true, "count": "5"},
+			"./features/with-dependencies": {},
+			"./features/with-mounts": {},
+			"./features/security-feature": {}
+		}
+	}`, helpers.UniqueTestName(t))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "devcontainer.json"), []byte(devcontainerJSON), 0o644))
 	return workspace
 }

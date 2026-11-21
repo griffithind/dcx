@@ -64,12 +64,14 @@ func TestComposeSharedNetworkE2E(t *testing.T) {
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     network_mode: service:db
     volumes:
       - ..:/workspace:cached
   db:
     image: alpine:3.24
     command: sleep infinity
+    init: true
 `
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
 
@@ -99,6 +101,7 @@ func TestRecreateRemovesRenamedComposeServiceE2E(t *testing.T) {
   %s:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `, service)

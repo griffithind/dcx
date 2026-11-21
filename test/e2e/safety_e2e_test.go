@@ -85,6 +85,7 @@ func TestRecreatePreservesComposeNamedVolumesE2E(t *testing.T) {
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
       - data:/data

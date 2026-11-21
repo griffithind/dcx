@@ -34,6 +34,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
@@ -109,6 +110,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
     depends_on:
@@ -116,6 +118,7 @@ services:
   db:
     image: alpine:3.24
     command: sleep infinity
+    init: true
 `
 
 	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
@@ -152,6 +155,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
@@ -188,6 +192,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
@@ -225,6 +230,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
@@ -387,6 +393,7 @@ services:
   app:
     image: debian:bookworm-slim
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `
@@ -449,6 +456,7 @@ services:
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     volumes:
       - ..:/workspace:cached
 `

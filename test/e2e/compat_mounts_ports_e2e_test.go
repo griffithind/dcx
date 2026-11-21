@@ -65,6 +65,7 @@ func TestComposePublishedForwardPortE2E(t *testing.T) {
   app:
     image: alpine:3.24
     command: sleep infinity
+    init: true
     ports:
       - "127.0.0.1:%d:%d"
 `, port, port))

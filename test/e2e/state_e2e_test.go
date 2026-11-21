@@ -12,68 +12,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStateTransitionsE2E tests all valid state transitions.
-func TestStateTransitionsE2E(t *testing.T) {
+// TestStateLifecycleE2E walks one workspace through every state (absent,
+// running, stopped, and back), checking in each what state, status, doctor,
+// ssh, stop and down do there.
+func TestStateLifecycleE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
+	state := func() string { return helpers.GetContainerState(t, workspace) }
 
-	// absent -> running (via up)
+	t.Run("absent", func(t *testing.T) {
+		assert.Equal(t, "absent", state())
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
+		for _, want := range []string{"State:", "absent", "Workspace:", "Workspace ID:"} {
+			assert.Contains(t, stdout, want)
+		}
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "doctor")
+		require.NoError(t, err, "doctor works without a container")
+		assert.Contains(t, stdout, "Docker")
+		_, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
+		assert.Error(t, err, "ssh fails when no container exists")
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "down"), "No devcontainer found", "down is idempotent")
+	})
+
 	t.Run("absent_to_running", func(t *testing.T) {
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
-
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		state = helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
+		assert.Equal(t, "running", state())
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
+		for _, want := range []string{"State:", "running", "Primary Container", "ID:", "Name:"} {
+			assert.Contains(t, stdout, want)
+		}
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "doctor")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "Docker")
 	})
 
-	// running -> created (via stop)
-	t.Run("running_to_created", func(t *testing.T) {
+	t.Run("running_to_stopped", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "stop")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "created", state)
+		assert.Equal(t, "created", state())
+		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
+		assert.Contains(t, stdout, "State:")
+		assert.Contains(t, stdout, "created")
+		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
+		assert.Error(t, err, "ssh fails on a stopped container")
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "stop"), "already stopped", "stop is idempotent")
 	})
 
-	// created -> running (via up - smart start)
-	t.Run("created_to_running", func(t *testing.T) {
+	t.Run("stopped_to_running", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
+		assert.Equal(t, "running", state())
 	})
 
-	// running -> absent (via down)
 	t.Run("running_to_absent", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "down")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
+		assert.Equal(t, "absent", state())
 	})
 
-	// absent -> running again
-	t.Run("absent_to_running_again", func(t *testing.T) {
+	t.Run("up_from_absent", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
+		assert.Equal(t, "running", state())
 	})
 
-	// created -> absent (via down from stopped state)
-	t.Run("created_to_absent", func(t *testing.T) {
+	t.Run("stopped_to_absent", func(t *testing.T) {
 		helpers.RunDCXInDirSuccess(t, workspace, "stop")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "created", state)
-
+		assert.Equal(t, "created", state())
 		helpers.RunDCXInDirSuccess(t, workspace, "down")
-
-		state = helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
+		assert.Equal(t, "absent", state())
 	})
 }
 
@@ -129,153 +134,5 @@ func TestStaleDetectionE2E(t *testing.T) {
 		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "NEW_VAR")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "value")
-	})
-}
-
-// TestUpFromAbsentE2E tests that up works when no container exists.
-func TestUpFromAbsentE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Ensure nothing exists
-	helpers.RunDCXInDir(t, workspace, "down")
-
-	// Up should succeed and create container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "running", state)
-}
-
-// TestExecOnStoppedFailsE2E tests that exec fails on stopped container.
-func TestSSHOnStoppedFailsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Create and stop
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	helpers.RunDCXInDirSuccess(t, workspace, "stop")
-
-	// Exec should fail
-	_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
-	assert.Error(t, err, "exec should fail on stopped container")
-}
-
-// TestExecOnAbsentFailsE2E tests that exec fails when no container exists.
-func TestSSHOnAbsentFailsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Ensure nothing exists
-	helpers.RunDCXInDir(t, workspace, "down")
-
-	// Exec should fail
-	_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
-	assert.Error(t, err, "exec should fail when no container exists")
-}
-
-// TestStopIdempotentE2E tests that stop is idempotent.
-func TestStopIdempotentE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Create and stop
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	helpers.RunDCXInDirSuccess(t, workspace, "stop")
-
-	// Second stop should succeed
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "stop")
-	assert.Contains(t, stdout, "already stopped")
-}
-
-// TestDownIdempotentE2E tests that down is idempotent.
-func TestDownIdempotentE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Ensure nothing exists
-	helpers.RunDCXInDir(t, workspace, "down")
-
-	// Down on absent should succeed
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
-	assert.Contains(t, stdout, "No devcontainer found")
-}
-
-// TestStatusCommandE2E tests the status command output.
-func TestStatusCommandE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Status when absent
-	t.Run("status_absent", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "absent")
-		assert.Contains(t, stdout, "Workspace:")
-		assert.Contains(t, stdout, "Workspace ID:")
-	})
-
-	// Status when running
-	t.Run("status_running", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "running")
-		assert.Contains(t, stdout, "Primary Container")
-		assert.Contains(t, stdout, "ID:")
-		assert.Contains(t, stdout, "Name:")
-	})
-
-	// Status when stopped
-	t.Run("status_created", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "stop")
-
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
-		assert.Contains(t, stdout, "State:")
-		assert.Contains(t, stdout, "created")
-	})
-}
-
-// TestDoctorCommandE2E tests the doctor command.
-func TestDoctorCommandE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Doctor should work even when no container exists
-	t.Run("doctor_absent", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "doctor")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "Docker")
-	})
-
-	// Doctor with running container
-	t.Run("doctor_running", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "doctor")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "Docker")
 	})
 }
