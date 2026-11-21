@@ -64,10 +64,9 @@ DCX is a single-binary CLI for running devcontainers with built-in SSH support. 
 | `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newEngine`/`newDaemonEngine` (the only engine construction; tests swap in `containertest.Fake`; `-v` traces docker commands), `newService`, `CLIContext` (Docker, Service, Identity) |
 | `validate.go` | State validation helpers (`RequireRunningContainer`, `RequireExistingContainer`) |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
-| `ssh.go`, `run.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) and shortcuts on top of it |
+| `ssh.go` | `dcx ssh [-- cmd]` (execs OpenSSH to the workspace alias) |
 | `status.go`, `logs.go`, `list.go` | Information commands (`status` also shows the SSH endpoint and host key) |
 | `doctor.go` | System, config and (for a running workspace) SSH agent checks |
-| `upgrade.go` | Self-update from GitHub releases, verified against `checksums.txt`; semver comparison, `--force` |
 | `output.go` | `printJSON`; with `--json`, `Execute` prints errors as `{"error": …}` |
 
 Commands get their context, engine and service from `context.go` (`NewCLIContext`, or `commandContext` + `newEngine()` + `newService` for commands that must work without a Docker daemon); they never construct a service or Docker client themselves, so command-level tests run against `containertest.Fake` (`internal/cli/commands_engine_test.go`).
@@ -193,13 +192,12 @@ case *devcontainer.ImagePlan, *devcontainer.DockerfilePlan:
 - `internal/mount/` - `Mount` and `Parse`, the only mount string parser (devcontainer.json, image and feature metadata)
 - `internal/agent/` - The dcx-agent itself (SSH server, sessions, SFTP, setup); compiled into `cmd/dcx-agent`
 - `internal/agentctl/` - Host side of the agent: install/upgrade, SSH secrets, setup and launch (`Provision`)
-- `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config), `client` (in-process SSH for lifecycle hooks only)
+- `internal/ssh/` - Host keys, known_hosts, authorized-key collection, `hostconfig` (~/.ssh/dcx/config)
 - `internal/env/` - `/etc/environment` (the container's `Config.Env`, never `remoteEnv`) and `/etc/profile` patching; `userEnvProbe` (`$SHELL`, else the user's login shell; NUL-separated output)
 - `internal/secrets/` - Fetching runtime and build secrets (commands run on the host)
 - `internal/lockfile/` - `devcontainer-lock.json` read/write
 - `internal/ui/` - Terminal output: `Printf`/`Println`/tables are data on stdout (shown with `--quiet`); `Info`, `Success`, `Warning` and spinners are progress on stderr (silenced by `--quiet`); colour off with `NO_COLOR`, `--no-color` or a non-terminal
 - `internal/version/` - Build version
-- `internal/shortcuts/` - Shortcut resolution from customizations.dcx
 - `internal/agentproto/` - Contract shared by host and agent (binary path, port, secret paths, `SessionConfig`)
 - `internal/report/` - `Reporter` interface; library code reports progress through it and never prints
 - `internal/shell/` - The only POSIX shell quoter (`Quote`, `Join`)
@@ -306,7 +304,7 @@ Service.Up (internal/service/up.go)
         ssh config   ~/.ssh/dcx/config block, known_hosts pin (before the hooks, so a
                      failing hook still leaves a way in)
         hooks        onCreate/updateContent/postCreate once (markers), postStart per start
-                     (a PTY when dcx's stdout is a terminal; parallel commands all finish)
+                     (`ssh <alias>`, -tt when dcx's stdout is a terminal; parallel commands all finish)
                      (also after a restart outside dcx: StartedAt vs the poststart marker)
 ```
 
@@ -406,10 +404,8 @@ Stored in `customizations.dcx` within devcontainer.json:
 {
   "customizations": {
     "dcx": {
-      "shortcuts": {
-        "r": {"prefix": "rails", "passArgs": true},
-        "rw": "bin/jobs --skip-recurring"
-      }
+      "secrets": {"GITHUB_TOKEN": "gh auth token"},
+      "buildSecrets": {"npmrc": "cat ~/.npmrc"}
     }
   }
 }
@@ -464,7 +460,7 @@ make build && go test -v -tags=e2e -run TestE2EName ./test/e2e/...
 
 ## Package Rules
 
-- Users connect with OpenSSH (`dcx ssh`, `ssh <alias>`); dcx's own SSH client (`internal/ssh/client`) is for lifecycle hooks only.
+- Everything reaches the container over OpenSSH through the workspace's alias: users (`dcx ssh`, `ssh <alias>`) and container lifecycle hooks (`lifecycle.HookRunner`). dcx has no SSH client of its own.
 - Only `internal/cli` (and `internal/ui`) print. Everything else takes a `report.Reporter`; commands with `--json` output pass `report.Discard`.
 - Library code never constructs a Docker client; it receives a `container.Engine` (`build` uses the narrower `build.Engine`). Only `container/docker.go` runs `docker` (depguard enforces it); add an Engine method rather than calling `os/exec`. Use `containertest.Fake` in unit tests.
 - Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).

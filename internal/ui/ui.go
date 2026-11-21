@@ -1,13 +1,14 @@
-// Package ui provides terminal output utilities using pterm.
+// Package ui is dcx's terminal output: data on stdout, progress on stderr,
+// ANSI colour only on a terminal.
 package ui
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
-	"github.com/pterm/pterm"
 	"golang.org/x/term"
 )
 
@@ -29,42 +30,23 @@ type Config struct {
 }
 
 var (
-	config   Config
+	config   = Config{Verbosity: VerbosityNormal, Writer: os.Stdout, ErrWriter: os.Stderr}
+	color    bool
 	configMu sync.Mutex
 )
-
-func init() {
-	config = Config{
-		Verbosity: VerbosityNormal,
-		NoColor:   false,
-		Writer:    os.Stdout,
-		ErrWriter: os.Stderr,
-	}
-}
 
 // Configure sets up the UI with the given configuration.
 func Configure(cfg Config) {
 	configMu.Lock()
 	defer configMu.Unlock()
-
 	if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
 	}
 	if cfg.ErrWriter == nil {
 		cfg.ErrWriter = os.Stderr
 	}
-
 	config = cfg
-
-	if cfg.NoColor || !colorWanted(cfg.Writer) {
-		pterm.DisableColor()
-		pterm.DisableStyling()
-	} else {
-		pterm.EnableColor()
-		pterm.EnableStyling()
-	}
-
-	pterm.SetDefaultOutput(cfg.Writer)
+	color = !cfg.NoColor && colorWanted(cfg.Writer)
 }
 
 // colorWanted reports whether output to w should be coloured: it is a
@@ -77,11 +59,6 @@ func colorWanted(w io.Writer) bool {
 	return isTerminal(w)
 }
 
-// interactive reports whether progress (stderr) goes to a terminal.
-func interactive() bool {
-	return isTerminal(ErrWriter())
-}
-
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
@@ -92,15 +69,6 @@ func IsVerbose() bool {
 	configMu.Lock()
 	defer configMu.Unlock()
 	return config.Verbosity == VerbosityVerbose
-}
-
-// Debug prints a diagnostic line (the docker commands dcx runs) to stderr,
-// only with -v.
-func Debug(format string, args ...interface{}) {
-	if !IsVerbose() {
-		return
-	}
-	_, _ = fmt.Fprintln(ErrWriter(), Dim(fmt.Sprintf(format, args...)))
 }
 
 // IsQuiet returns true if quiet mode is enabled.
@@ -124,25 +92,12 @@ func ErrWriter() io.Writer {
 	return config.ErrWriter
 }
 
-// Success prints a success message to stderr if not in quiet mode.
-func Success(format string, args ...interface{}) {
-	if IsQuiet() {
-		return
+// Debug prints a diagnostic line (the docker commands dcx runs) to stderr,
+// only with -v.
+func Debug(format string, args ...interface{}) {
+	if IsVerbose() {
+		progress(Dim(fmt.Sprintf(format, args...)) + "\n")
 	}
-	pterm.Success.WithWriter(ErrWriter()).Printf(format+"\n", args...)
-}
-
-// Error prints an error message (always shown, even in quiet mode).
-func Error(format string, args ...interface{}) {
-	pterm.Error.WithWriter(ErrWriter()).Printf(format+"\n", args...)
-}
-
-// Warning prints a warning message if not in quiet mode.
-func Warning(format string, args ...interface{}) {
-	if IsQuiet() {
-		return
-	}
-	pterm.Warning.WithWriter(ErrWriter()).Printf(format+"\n", args...)
 }
 
 // Info prints a progress line ("Creating container...") to stderr unless
@@ -150,73 +105,109 @@ func Warning(format string, args ...interface{}) {
 // Progress and warnings go to stderr so stdout carries only the data a
 // command was asked for (`dcx config > out.json`, `dcx list | ...`).
 func Info(format string, args ...interface{}) {
-	if IsQuiet() {
-		return
+	if !IsQuiet() {
+		progress(fmt.Sprintf(format, args...) + "\n")
 	}
-	_, _ = fmt.Fprint(ErrWriter(), pterm.Sprintf(format+"\n", args...))
+}
+
+// Success prints a success message to stderr if not in quiet mode.
+func Success(format string, args ...interface{}) {
+	if !IsQuiet() {
+		progress(labelled(" SUCCESS ", "30;42", fmt.Sprintf(format, args...)))
+	}
+}
+
+// Warning prints a warning message if not in quiet mode.
+func Warning(format string, args ...interface{}) {
+	if !IsQuiet() {
+		progress(labelled(" WARNING ", "30;43", fmt.Sprintf(format, args...)))
+	}
+}
+
+// Error prints an error message (always shown, even in quiet mode).
+func Error(format string, args ...interface{}) {
+	progress(labelled("  ERROR  ", "97;41", fmt.Sprintf(format, args...)))
+}
+
+// PrintError prints a command's error (always shown).
+func PrintError(err error) {
+	if err != nil {
+		progress(style("31", "✗") + " " + err.Error() + "\n")
+	}
+}
+
+// labelled is message after a coloured label, continuation lines indented
+// under the message.
+func labelled(label, code, message string) string {
+	indent := "\n" + strings.Repeat(" ", len(label)+1)
+	return style(code, label) + " " + strings.ReplaceAll(message, "\n", indent) + "\n"
 }
 
 // Println prints a line of output the user asked for (status, lists,
 // reports). Data is printed even in quiet mode, which only silences
 // progress.
 func Println(args ...interface{}) {
-	pterm.Println(args...)
+	_, _ = fmt.Fprintln(Writer(), args...)
 }
 
 // Printf prints a formatted line of output the user asked for (see
 // Println).
 func Printf(format string, args ...interface{}) {
-	pterm.Printf(format+"\n", args...)
+	_, _ = fmt.Fprintf(Writer(), format+"\n", args...)
 }
 
 // RenderTable renders a table with headers and rows (data: printed even in
-// quiet mode).
+// quiet mode): columns separated by " │ ", a rule under the header.
 func RenderTable(headers []string, rows [][]string) error {
-	data := pterm.TableData{headers}
+	widths := make([]int, len(headers))
+	for _, row := range append([][]string{headers}, rows...) {
+		for i, cell := range row {
+			if i < len(widths) {
+				widths[i] = max(widths[i], visibleWidth(cell))
+			}
+		}
+	}
+	line := func(cells []string, cellStyle string) string {
+		var b strings.Builder
+		for i, w := range widths {
+			if i > 0 {
+				b.WriteString(style("90", " │ "))
+			}
+			cell := ""
+			if i < len(cells) {
+				cell = cells[i]
+			}
+			b.WriteString(style(cellStyle, cell) + strings.Repeat(" ", w-visibleWidth(cell)))
+		}
+		return b.String() + "\n"
+	}
+	total := 3 * (len(widths) - 1)
+	for _, w := range widths {
+		total += w
+	}
+	var b strings.Builder
+	b.WriteString(line(headers, "1"))
+	b.WriteString(style("90", strings.Repeat("─", total)) + "\n")
 	for _, row := range rows {
-		data = append(data, row)
+		b.WriteString(line(row, ""))
 	}
-	return pterm.DefaultTable.WithHasHeader().WithData(data).Render()
+	b.WriteString("\n")
+	_, err := io.WriteString(Writer(), b.String())
+	return err
 }
 
-// Spinner wraps pterm spinner with quiet mode support.
-type Spinner struct {
-	printer *pterm.SpinnerPrinter
-}
-
-// StartSpinner starts a spinner on stderr with the given message. In quiet
-// mode it does nothing; when stderr is not a terminal it prints the
-// message once instead of animating (no \r junk in logs and pipes).
-func StartSpinner(message string) *Spinner {
-	if IsQuiet() {
-		return &Spinner{}
+// visibleWidth is the number of runes s shows, ANSI escapes excluded.
+func visibleWidth(s string) int {
+	n, escape := 0, false
+	for _, r := range s {
+		switch {
+		case escape:
+			escape = r != 'm'
+		case r == '\x1b':
+			escape = true
+		default:
+			n++
+		}
 	}
-	if !interactive() {
-		Info("%s", message)
-		return &Spinner{}
-	}
-	s, _ := pterm.DefaultSpinner.WithWriter(ErrWriter()).Start(message)
-	return &Spinner{printer: s}
-}
-
-// Stop stops the spinner without a message (the caller reports the
-// outcome, e.g. by returning an error).
-func (s *Spinner) Stop() {
-	if s.printer != nil {
-		_ = s.printer.Stop()
-	}
-}
-
-// Success stops the spinner with a success message.
-func (s *Spinner) Success(message string) {
-	if s.printer != nil {
-		s.printer.Success(message)
-	}
-}
-
-// Fail stops the spinner with a failure message.
-func (s *Spinner) Fail(message string) {
-	if s.printer != nil {
-		s.printer.Fail(message)
-	}
+	return n
 }

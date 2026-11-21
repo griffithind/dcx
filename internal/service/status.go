@@ -32,7 +32,6 @@ type StatusReport struct {
 	// ConfigError says why the config could not be resolved ("" when it
 	// was).
 	ConfigError string
-	Shortcuts   int
 
 	// Drift reports that inputs changed while the files did not (see
 	// inputsDrifted): the container is current but not what an up from
@@ -102,11 +101,6 @@ func (s *DevContainerService) Status(ctx context.Context, detailed bool) (*Statu
 		return nil, fmt.Errorf("failed to get state: %w", err)
 	}
 
-	if r.Config != nil {
-		if custom := r.Config.DcxCustomizations(); custom != nil {
-			r.Shortcuts = len(custom.Shortcuts)
-		}
-	}
 	if r.Container != nil {
 		if aliases := hostconfig.Aliases(r.Container.Name); len(aliases) > 0 {
 			r.SSHAlias = aliases[0]

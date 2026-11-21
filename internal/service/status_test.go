@@ -104,9 +104,8 @@ func TestStatusFallsBackToTheRawConfig(t *testing.T) {
 	fake := &containertest.Fake{}
 	svc, _ := newTestService(t, fake)
 	fake.Containers = []state.ContainerSummary{statusContainer(t, svc, "some-hash", "")}
-	// A config that parses but does not resolve (two plans), with shortcuts.
-	writeConfig(t, svc, `{"image": "alpine:3", "dockerComposeFile": "c.yml", "service": "app",
-		"customizations": {"dcx": {"shortcuts": {"a": "echo a", "b": "echo b"}}}}`)
+	// A config that parses but does not resolve (two plans).
+	writeConfig(t, svc, `{"image": "alpine:3", "dockerComposeFile": "c.yml", "service": "app"}`)
 
 	r, err := svc.Status(context.Background(), false)
 	require.NoError(t, err)
@@ -114,7 +113,6 @@ func TestStatusFallsBackToTheRawConfig(t *testing.T) {
 	assert.Empty(t, r.ConfigHash, "staleness is not judged without a resolved config")
 	assert.Equal(t, state.StateRunning, r.State, "the container state is still reported")
 	require.NotNil(t, r.Config)
-	assert.Equal(t, 2, r.Shortcuts, "shortcuts come from the raw file")
 }
 
 // writeConfig replaces the test service's devcontainer.json.

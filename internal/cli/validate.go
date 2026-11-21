@@ -97,7 +97,7 @@ func ValidateState(cliCtx *CLIContext, opts StateValidationOptions) (*StateValid
 
 	// Print warnings
 	for _, w := range result.Warnings {
-		ui.Warning(w)
+		ui.Warning("%s", w)
 	}
 
 	return result, nil

@@ -40,7 +40,7 @@ type DevContainerService struct {
 	// Test seams for Up's side effects outside the engine; nil uses the
 	// real implementations (agentctl.Provision, lifecycle.HookRunner).
 	provisionAgent func(context.Context, container.Engine, report.Reporter, agentctl.Options) error
-	newHooks       func(devcontainer.Hooks, int) lifecycleHooks
+	newHooks       func(devcontainer.Hooks, string) lifecycleHooks
 }
 
 // NewDevContainerService creates a new devcontainer service backed by the

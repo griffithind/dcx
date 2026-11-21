@@ -24,7 +24,6 @@ type Status struct {
 	State         string `json:"state"`
 	SSHAlias      string `json:"sshAlias"`
 	ConfigHash    string `json:"configHash"`
-	Shortcuts     int    `json:"shortcuts"`
 	Container     *struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`

@@ -73,127 +73,6 @@ services:
 	})
 }
 
-// TestDcxConfigShortcutsE2E tests the shortcuts functionality from customizations.dcx.
-func TestDcxConfigShortcutsE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "shortcutstest",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"customizations": {
-			"dcx": {
-				"shortcuts": {
-					"hello": "echo hello from shortcut",
-					"greet": {"command": "echo greeting", "description": "Say hello"},
-					"say": {"prefix": "echo", "passArgs": true, "description": "Echo with args"}
-				}
-			}
-		}
-	}`
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// Bring up the environment
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test status shows shortcuts count
-	t.Run("status_shows_shortcuts_count", func(t *testing.T) {
-		assert.Equal(t, 3, helpers.GetStatus(t, workspace).Shortcuts)
-	})
-
-	// Test running simple command shortcut
-	t.Run("run_simple_command_shortcut", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "run", "hello")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "hello from shortcut")
-	})
-
-	// Test running command object shortcut
-	t.Run("run_command_object_shortcut", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "run", "greet")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "greeting")
-	})
-
-	// Test running prefix shortcut with args
-	t.Run("run_prefix_shortcut_with_args", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "run", "say", "hello", "world")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "hello world")
-	})
-
-	// Test running prefix shortcut without args
-	t.Run("run_prefix_shortcut_without_args", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "run", "say")
-		require.NoError(t, err)
-		// Just "echo" with no args outputs empty line
-		assert.Equal(t, "\n", stdout)
-	})
-
-	// Test unknown shortcut
-	t.Run("run_unknown_shortcut_fails", func(t *testing.T) {
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "run", "nonexistent")
-		require.Error(t, err)
-		assert.Contains(t, stderr, "unknown shortcut")
-	})
-}
-
-// TestDcxConfigFlagPassthroughE2E tests that flags are passed through to shortcuts.
-func TestDcxConfigFlagPassthroughE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "flagtest",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"customizations": {
-			"dcx": {
-				"shortcuts": {
-					"echoflags": {"prefix": "echo", "passArgs": true}
-				}
-			}
-		}
-	}`
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test that flags like --version are passed through to the command
-	t.Run("flags_pass_through_to_command", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "run", "echoflags", "--flag1", "-f", "value")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "--flag1")
-		assert.Contains(t, stdout, "-f")
-		assert.Contains(t, stdout, "value")
-	})
-}
-
 // TestDcxConfigStatusWithoutEnvironmentE2E tests status output when no environment exists.
 func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 	t.Parallel()
@@ -202,24 +81,16 @@ func TestDcxConfigStatusWithoutEnvironmentE2E(t *testing.T) {
 	devcontainerJSON := `{
 		"name": "noenvtest",
 		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"customizations": {
-			"dcx": {
-				"shortcuts": {
-					"test": "echo test"
-				}
-			}
-		}
+		"workspaceFolder": "/workspace"
 	}`
 
 	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
 
 	// Don't bring up, just check status
-	t.Run("status_shows_project_and_shortcuts_when_absent", func(t *testing.T) {
+	t.Run("status_shows_project_when_absent", func(t *testing.T) {
 		st := helpers.GetStatus(t, workspace)
 		assert.Contains(t, st.ResourceName, "noenvtest")
 		assert.Equal(t, "absent", st.State)
-		assert.Equal(t, 1, st.Shortcuts)
 		assert.Empty(t, st.SSHAlias, "no SSH alias before the environment exists")
 	})
 }

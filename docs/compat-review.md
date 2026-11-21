@@ -154,7 +154,7 @@ Decisions made on 2026-11-14 (see "Decisions" below):
 | M13 | `agentctl/provision.go:50,113-119`, `agent/server.go:252-265` | Without `remoteUser`/`containerUser`, sessions run as a numeric uid: `USER=1000` and a guessed `HOME=/home/1000`. Upstream uses the image's `USER` by name. | Low |
 | M6 | `service/up.go:129-133` | `initializeCommand` is skipped when the container is already running. Upstream runs it on every `up`. | Low |
 | M7 | `lifecycle/hooks.go:154-167` | In the object (parallel) form, dcx cancels the sibling commands when one fails. Upstream lets every command finish, then fails. | Low |
-| M5 | `ssh/client/client.go:64-80` | Hooks run without a PTY; upstream runs them with one. `docker run -it` in a hook fails, and output has no colours. | Low |
+| M5 | `lifecycle/hooks.go` (then `ssh/client/client.go`) | Hooks run without a PTY; upstream runs them with one. `docker run -it` in a hook fails, and output has no colours. | Low |
 | R13 | `container/docker.go:461-472` | The container is created with `-t -i -w <workspaceFolder>`; upstream passes none of these. With `overrideCommand: false`, an image command like `bash` keeps running in dcx but exits upstream. | Low |
 | R14, R15, R16 | `docker.go:921-960`, `spec.go:70-74`, `provisioner.go:199-209` | Smaller runtime differences:<br>- R14: dcx always runs `buildx build`; upstream falls back to plain `docker build`;<br>- R15: dcx keeps the container alive with `sleep infinity`; upstream uses a portable `sleep 1` loop;<br>- R16: no `--no-recreate` on compose create;<br>- R10: dcx builds every compose service; upstream builds only the primary and `runServices`. | Low |
 

@@ -15,7 +15,7 @@ formatters:
 linters:
   # The standard set (errcheck, govet, ineffassign, staticcheck, unused)
   # plus depguard, which enforces the package rules in CLAUDE.md, and
-  # noctx/bodyclose for the HTTP code (feature registries, upgrade).
+  # noctx/bodyclose for the HTTP code (feature registries).
   enable:
     - depguard
     - noctx
@@ -45,8 +45,6 @@ linters:
             - "!**/cmd/**"
           deny:
             - pkg: github.com/griffithind/dcx/internal/ui
-              desc: library code takes a report.Reporter; only internal/cli prints
-            - pkg: github.com/pterm/pterm
               desc: library code takes a report.Reporter; only internal/cli prints
 
         # The agent is compiled into a small static binary that runs in every

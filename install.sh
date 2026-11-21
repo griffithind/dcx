@@ -154,8 +154,7 @@ main() {
     echo "Get started:"
     echo "  dcx --help"
     echo ""
-    echo "To upgrade later:"
-    echo "  dcx upgrade"
+    echo "To upgrade later, run this installer again."
 }
 
 main "$@"

@@ -89,7 +89,7 @@ func (h *upHarness) up(opts UpOptions) error {
 		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID) // as the real provisioner does
 		return err
 	}
-	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
 	return svc.Up(context.Background(), opts)
 }
 
@@ -282,7 +282,7 @@ func TestUpKeepsTheContainerOnInputDrift(t *testing.T) {
 	rec := &report.Recorder{}
 	svc := NewDevContainerService(h.engine, rec, h.workspace, "", false)
 	svc.provisionAgent = func(context.Context, container.Engine, report.Reporter, agentctl.Options) error { return nil }
-	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
 	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
 
 	require.Len(t, h.containers(), 1)
@@ -314,7 +314,7 @@ func TestUpPointsAtAContainerFromThePreviousIDScheme(t *testing.T) {
 		_, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID)
 		return err
 	}
-	svc.newHooks = func(devcontainer.Hooks, int) lifecycleHooks { return h.hooks }
+	svc.newHooks = func(devcontainer.Hooks, string) lifecycleHooks { return h.hooks }
 	require.NoError(t, svc.Up(context.Background(), UpOptions{}))
 
 	var warned bool

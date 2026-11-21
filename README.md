@@ -14,7 +14,6 @@ A single-binary CLI for running [devcontainers](https://containers.dev/) with bu
 - **Smart rebuilds** - Only rebuilds when configuration actually changes
 - **Reproducible builds** - Lock feature versions with `dcx lock`
 - **Docker Compose** - Full support for compose-based devcontainers
-- **Command shortcuts** - Define project-specific aliases in devcontainer.json
 
 ## Quick Start
 
@@ -89,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/griffithind/dcx/main/install.sh | s
 ```
 
 Installs to `~/.local/bin/dcx`, after checking the download against the
-release's `checksums.txt`.
+release's `checksums.txt`. Run it again to upgrade.
 
 `go install github.com/griffithind/dcx/cmd/dcx@latest` is not a supported
 install method: dcx embeds the agent binaries it deploys into containers,
@@ -133,7 +132,6 @@ make install   # copies it to $(go env GOPATH)/bin
 |---------|-------------|
 | `dcx ssh` | Open an interactive shell (via OpenSSH, same session as `ssh <alias>`) |
 | `dcx ssh -- <cmd>` | Run a command in the container |
-| `dcx run <shortcut>` | Run a command shortcut defined in devcontainer.json |
 
 ### Information
 
@@ -152,7 +150,6 @@ make install   # copies it to $(go env GOPATH)/bin
 | `dcx lock` | Generate or verify the lockfile for reproducible builds (`--verify`, `--frozen`, `--json`) |
 | `dcx clean` | Remove unused dcx images (`--current`, `--all`, `--dangling`, `--dry-run`) |
 | `dcx doctor` | Check Docker, the configuration and, when it is running, the workspace's SSH agent (`--json`) |
-| `dcx upgrade` | Update dcx to the latest release, verified against its checksums (`--force` to downgrade or replace a development build) |
 
 `dcx status` shows the SSH alias and endpoint; `--detailed` adds the host
 key fingerprint, the allowed source addresses, the resolved plan and
@@ -186,10 +183,11 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   "image": "node:20",
   "customizations": {
     "dcx": {
-      "shortcuts": {
-        "test": "npm test",
-        "dev": { "prefix": "npm run", "passArgs": true },
-        "lint": { "command": "npm run lint", "description": "Run linter" }
+      "secrets": {
+        "GITHUB_TOKEN": "gh auth token"
+      },
+      "buildSecrets": {
+        "npmrc": "cat ~/.npmrc"
       }
     }
   }
@@ -216,22 +214,6 @@ DCX-specific settings are defined in your `devcontainer.json` under `customizati
   environments, and volumes named with `${devcontainerId}` are not shared.
   The files they share (devcontainer.json, features, `devcontainer-lock.json`)
   are read the same way.
-
-### Shortcuts
-
-Shortcuts can be defined as:
-
-- **Simple string**: `"test": "npm test"`
-- **Object with prefix**: `"dev": { "prefix": "npm run", "passArgs": true }` - runs `npm run <args>`
-- **Object with command**: `"lint": { "command": "npm run lint" }`
-
-Run shortcuts with:
-
-```bash
-dcx run test
-dcx run dev start    # runs: npm run start
-dcx run --list       # show available shortcuts
-```
 
 ### Secrets
 
@@ -572,13 +554,15 @@ Changes since 0.7 that affect existing setups:
 
 - `dcx shell` and `dcx exec` are gone. Use `dcx ssh` and `dcx ssh -- <cmd>`
   (or plain `ssh <alias>`). `dcx ssh` needs the OpenSSH client.
+- Container lifecycle hooks run through OpenSSH too (`ssh <alias>`), so
+  `dcx up` needs the OpenSSH client when the config has hooks.
 - `dcx ssh` connects instead of printing the command.
 - `dcx ssh info` is gone: `dcx status` shows the alias and endpoint
   (`--detailed` adds the host key), and `dcx doctor` probes the agent.
 - dcx's SSH host blocks moved to `~/.ssh/dcx/config`, included from the top
   of `~/.ssh/config`. Existing blocks move there on the next `dcx up`.
-- Shortcuts run through `sh -c`, so shell syntax in `command`/`prefix`
-  works; extra arguments are passed unchanged as `"$@"`.
+- `dcx run` and `customizations.dcx.shortcuts` are removed (shortcuts in a
+  config are ignored): run commands with `dcx ssh -- <cmd>`.
 - `dcx plan` is gone; `dcx status` shows the state and whether the config
   changed. The hidden `dcx debug` is gone too: use `dcx status --detailed --json`.
 - Progress and warnings go to stderr; stdout carries only the output you
@@ -591,8 +575,8 @@ Changes since 0.7 that affect existing setups:
 - JSON keys are camelCase (`dcx config` always prints JSON). `dcx list
   --json` calls the plan `planType` (it was `buildMethod`), as `status
   --json` does.
-- `dcx upgrade` verifies the release's checksums and no longer replaces a
-  development or newer build unless given `--force`.
+- `dcx upgrade` is removed: to upgrade, run the install command again (it
+  verifies the release's checksums).
 - `dockerComposeFile` together with `image` or `build` is rejected instead
   of silently picking one. `image` with `build` is accepted, as in the
   official CLI: the image is built and also tagged as `image` (a `build`
@@ -771,6 +755,7 @@ make release
 - Go 1.27+ (the version in `go.mod`, which CI and releases build with)
 - Docker Engine
 - docker compose CLI plugin
+- OpenSSH client (`dcx ssh` and container lifecycle hooks)
 
 ## Built With
 

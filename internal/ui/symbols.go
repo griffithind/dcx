@@ -1,7 +1,5 @@
 package ui
 
-import "github.com/pterm/pterm"
-
 // Symbols provides consistent symbols for CLI output.
 var Symbols = struct {
 	// Check results
@@ -24,13 +22,13 @@ var Symbols = struct {
 func StateColor(state string) string {
 	switch state {
 	case "running":
-		return pterm.FgGreen.Sprint(state)
+		return style("32", state)
 	case "stopped", "exited":
-		return pterm.FgYellow.Sprint(state)
+		return style("33", state)
 	case "error", "dead", "broken":
-		return pterm.FgRed.Sprint(state)
+		return style("31", state)
 	default:
-		return pterm.FgGray.Sprint(state)
+		return style("90", state)
 	}
 }
 
@@ -48,13 +46,13 @@ const (
 func FormatCheck(result CheckResult, message string) string {
 	switch result {
 	case CheckResultPass:
-		return pterm.FgGreen.Sprint(Symbols.CheckPass) + " " + message
+		return style("32", Symbols.CheckPass) + " " + message
 	case CheckResultFail:
-		return pterm.FgRed.Sprint(Symbols.CheckFail) + " " + message
+		return style("31", Symbols.CheckFail) + " " + message
 	case CheckResultWarn:
-		return pterm.FgYellow.Sprint(Symbols.CheckWarn) + " " + message
+		return style("33", Symbols.CheckWarn) + " " + message
 	case CheckResultSkip:
-		return pterm.FgGray.Sprint(Symbols.CheckSkip) + " " + pterm.FgGray.Sprint(message)
+		return style("90", Symbols.CheckSkip) + " " + style("90", message)
 	default:
 		return message
 	}
@@ -62,20 +60,31 @@ func FormatCheck(result CheckResult, message string) string {
 
 // FormatLabel formats a label with consistent styling.
 func FormatLabel(label, value string) string {
-	return pterm.FgBlue.Sprint(label+":") + " " + value
+	return style("34", label+":") + " " + value
 }
 
 // Bold returns bold text.
 func Bold(text string) string {
-	return pterm.Bold.Sprint(text)
+	return style("1", text)
 }
 
 // Dim returns dimmed text.
 func Dim(text string) string {
-	return pterm.FgGray.Sprint(text)
+	return style("90", text)
 }
 
 // Code returns code-styled text.
 func Code(text string) string {
-	return pterm.FgCyan.Sprint(text)
+	return style("36", text)
+}
+
+// style wraps text in an ANSI SGR code when colour is on.
+func style(code, text string) string {
+	configMu.Lock()
+	on := color
+	configMu.Unlock()
+	if !on || code == "" || text == "" {
+		return text
+	}
+	return "\x1b[" + code + "m" + text + "\x1b[0m"
 }

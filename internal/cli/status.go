@@ -80,9 +80,6 @@ func renderStatus(r *service.StatusReport, detailed bool) {
 	case r.State != state.StateAbsent:
 		label("", "SSH", ui.Dim("not configured (run 'dcx up' to configure)"))
 	}
-	if r.Shortcuts > 0 {
-		label("", "Shortcuts", fmt.Sprintf("%d defined (use 'dcx run --list' to view)", r.Shortcuts))
-	}
 	if r.ConfigError != "" {
 		label("", "Config", ui.Dim(r.ConfigError))
 	}
@@ -199,7 +196,6 @@ type statusJSON struct {
 	State         string         `json:"state"`
 	SSHAlias      string         `json:"sshAlias,omitempty"`
 	ConfigHash    string         `json:"configHash,omitempty"`
-	Shortcuts     int            `json:"shortcuts"`
 	ConfigError   string         `json:"configError,omitempty"`
 	Drift         bool           `json:"drift,omitempty"`
 	Container     *containerJSON `json:"container"`
@@ -247,7 +243,6 @@ func statusToJSON(r *service.StatusReport, detailed bool) statusJSON {
 		State:         string(r.State),
 		SSHAlias:      r.SSHAlias,
 		ConfigHash:    r.ConfigHash,
-		Shortcuts:     r.Shortcuts,
 		ConfigError:   r.ConfigError,
 		Drift:         r.Drift,
 	}

@@ -3,26 +3,29 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/report"
-	sshclient "github.com/griffithind/dcx/internal/ssh/client"
+	"github.com/griffithind/dcx/internal/shell"
+	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"golang.org/x/term"
 )
 
 // HookRunner executes lifecycle hooks.
 type HookRunner struct {
-	sshPort       int
+	sshAlias      string
 	report        report.Reporter
 	workspacePath string
 	hooks         devcontainer.Hooks
-	workspaceID   string
 
 	// Command executors; default to the real host/container execution and
 	// are replaced in tests.
@@ -30,16 +33,15 @@ type HookRunner struct {
 	execContainer func(context.Context, lifecyclecmd.Step) error
 }
 
-// NewHookRunner creates a new hook runner. Container hooks connect to the
-// agent on 127.0.0.1:sshPort (0 when only host hooks run); workspaceID
-// locates the workspace's pinned SSH host key.
-func NewHookRunner(sshPort int, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks, workspaceID string) *HookRunner {
+// NewHookRunner creates a new hook runner. Container hooks run with
+// OpenSSH through sshAlias, the workspace's host in dcx's SSH config (""
+// when only host hooks run), as users' own sessions do.
+func NewHookRunner(sshAlias string, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks) *HookRunner {
 	r := &HookRunner{
-		sshPort:       sshPort,
+		sshAlias:      sshAlias,
 		report:        report.OrDiscard(rep),
 		workspacePath: workspacePath,
 		hooks:         hooks,
-		workspaceID:   workspaceID,
 	}
 	r.execHost = r.executeHostCommand
 	r.execContainer = r.executeContainerCommand
@@ -192,48 +194,65 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, step lifecyclecmd.S
 	return cmd.Run()
 }
 
-// executeContainerCommand runs a single command in the container via SSH.
+// executeContainerCommand runs a single command in the container with
+// OpenSSH. The agent gives every session the workspace's remoteEnv and
+// probed user environment, so hooks see the same environment as shells.
+//
+// When dcx's output is a terminal the command gets a PTY (-tt), as
+// devcontainers/cli runs hooks on one, sized like dcx's terminal: ssh
+// can't read the size itself, because its stdin is /dev/null so that a
+// hook never reads the user's typing or puts their terminal in raw mode.
+// Without a terminal (CI, a pipe) there is none, so logs keep plain line
+// endings and stdout and stderr stay apart. Cancelling ctx (Ctrl-C, a
+// failed parallel hook) ends ssh, and the agent then stops the command.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecyclecmd.Step) error {
 	r.report.Infof("  > %s", step)
-	execCmd := stepArgv(step)
+	if r.sshAlias == "" {
+		return fmt.Errorf("SSH is not configured for the container")
+	}
+	var args []string
+	if config := hostconfig.ConfigFileOverride(); config != "" {
+		args = append(args, "-F", config)
+	}
+	remote := shell.Join(stepArgv(step))
+	if cols, rows, ok := terminalSize(); ok {
+		args = append(args, "-tt")
+		remote = fmt.Sprintf("stty cols %d rows %d 2>/dev/null; %s", cols, rows, remote)
+	} else {
+		args = append(args, "-T")
+	}
+	args = append(args, r.sshAlias, "--", remote)
 
-	// The agent gives every session the workspace's remoteEnv and probed
-	// user environment, so hooks see the same environment as shells.
-	exitCode, err := sshclient.Run(ctx, sshclient.RunOptions{
-		Port:        r.sshPort,
-		WorkspaceID: r.workspaceID,
-		Command:     execCmd,
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		TTY:         hookTerminal(),
-	})
-	if err != nil {
-		return err
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
-	if exitCode != 0 {
-		return fmt.Errorf("command exited with code %d", exitCode)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if exitErr.ExitCode() == 255 {
+			return fmt.Errorf("command exited with code 255 (or ssh could not connect)")
+		}
+		return fmt.Errorf("command exited with code %d", exitErr.ExitCode())
 	}
-	return nil
+	return err
 }
 
-// hookTerminal is the PTY container hooks run on: one the size of dcx's
-// terminal when its output is a terminal, as devcontainers/cli runs them
-// on a PTY. Without a terminal (CI, a pipe) hooks get none, so logs keep
-// plain line endings and stdout and stderr stay apart.
-func hookTerminal() *sshclient.TerminalSize {
+// terminalSize is dcx's terminal size when its output is a terminal.
+func terminalSize() (cols, rows int, ok bool) {
 	fd := int(os.Stdout.Fd())
 	if !term.IsTerminal(fd) {
-		return nil
+		return 0, 0, false
 	}
 	cols, rows, err := term.GetSize(fd)
 	if err != nil || cols <= 0 || rows <= 0 {
 		cols, rows = 80, 24
 	}
-	name := os.Getenv("TERM")
-	if name == "" {
-		name = "xterm-256color"
-	}
-	return &sshclient.TerminalSize{Term: name, Rows: rows, Cols: cols}
+	return cols, rows, true
 }
 
 // stepArgv is the argv that runs step: sh -c for the shell form.

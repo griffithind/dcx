@@ -6,7 +6,6 @@
   "state": "running",
   "sshAlias": "myapp.dcx",
   "configHash": "0123456789abcdef0123",
-  "shortcuts": 2,
   "container": {
     "id": "f00dfeedbeef0123456789",
     "name": "myapp-abcd1234",

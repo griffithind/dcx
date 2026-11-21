@@ -67,7 +67,6 @@ func runningReport() *service.StatusReport {
 			Features:        map[string]interface{}{"ghcr.io/devcontainers/features/node:1": nil, "ghcr.io/devcontainers/features/docker-in-docker:2": nil},
 		},
 		ConfigHash: "0123456789abcdef0123",
-		Shortcuts:  2,
 		PlanType:   devcontainer.PlanTypeImage,
 		BaseImage:  "mcr.microsoft.com/devcontainers/go:1",
 		Features:   []string{"ghcr.io/devcontainers/features/docker-in-docker:2", "ghcr.io/devcontainers/features/node:1"},

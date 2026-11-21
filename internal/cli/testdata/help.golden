@@ -17,7 +17,6 @@ Lifecycle Commands:
   up          Start the devcontainer environment
 
 Execution Commands:
-  run         Run a command shortcut in the container
   ssh         Open a shell or run a command in the container
 
 Information Commands:
@@ -29,7 +28,6 @@ Build & Maintenance:
   build       Build the devcontainer images
   clean       Clean up orphaned resources
   lock        Generate or verify devcontainer-lock.json
-  upgrade     Upgrade dcx to the latest version
 
 Utilities:
   completion  Generate shell completion scripts
@@ -336,47 +334,6 @@ Global Flags:
   -v, --verbose[=true|false]    verbose output
   -w, --workspace string        workspace directory (default: current directory)
 
-=== dcx run
-Run a configured command shortcut in the devcontainer.
-
-Shortcuts are defined in devcontainer.json under "customizations.dcx.shortcuts".
-
-Example devcontainer.json:
-{
-  "name": "myproject",
-  "image": "ubuntu",
-  "customizations": {
-    "dcx": {
-      "shortcuts": {
-        "rw": "bin/jobs --skip-recurring",
-        "r": {"prefix": "rails", "passArgs": true},
-        "test": {"prefix": "rails test", "passArgs": true, "description": "Run tests"}
-      }
-    }
-  }
-}
-
-Use --list to see all available shortcuts.
-
-Usage:
-  dcx run [shortcut] [args...] [flags]
-
-Examples:
-  dcx run rw                    # Runs: bin/jobs --skip-recurring
-  dcx run r server              # Runs: rails server
-  dcx run r console             # Runs: rails console
-  dcx run test test/models/     # Runs: rails test test/models/
-
-Flags:
-  -l, --list[=true|false]   list available shortcuts
-
-Global Flags:
-  -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
-      --no-color[=true|false]   disable colored output
-  -q, --quiet[=true|false]      print only data and errors (no progress or warnings)
-  -v, --verbose[=true|false]    verbose output
-  -w, --workspace string        workspace directory (default: current directory)
-
 === dcx ssh
 Open an interactive shell in the workspace's devcontainer, or run a
 command in it.
@@ -476,27 +433,6 @@ Flags:
       --pull[=true|false]       re-pull the base image and re-fetch features (for moving tags like :latest); applies when the container is created, so add --recreate for an existing one
       --rebuild[=true|false]    force rebuild images
       --recreate[=true|false]   force recreate containers
-
-Global Flags:
-  -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
-      --no-color[=true|false]   disable colored output
-  -q, --quiet[=true|false]      print only data and errors (no progress or warnings)
-  -v, --verbose[=true|false]    verbose output
-  -w, --workspace string        workspace directory (default: current directory)
-
-=== dcx upgrade
-Check for and install the latest release of dcx from GitHub.
-
-The binary is verified against the release's checksums.txt and replaced in
-place. Nothing happens when this dcx is the latest release or newer; a
-development build or a newer build is replaced only with --force, which
-also reinstalls the current release.
-
-Usage:
-  dcx upgrade [flags]
-
-Flags:
-      --force[=true|false]   install the latest release even over a development, newer or identical build
 
 Global Flags:
   -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)

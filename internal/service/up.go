@@ -15,6 +15,7 @@ import (
 	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/secrets"
+	"github.com/griffithind/dcx/internal/ssh/hostconfig"
 	"github.com/griffithind/dcx/internal/state"
 )
 
@@ -324,7 +325,7 @@ func (s *DevContainerService) runInitialize(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	return s.hookRunner(devcontainer.Hooks{Initialize: devcontainer.InitializeHooks(local)}, 0).RunInitialize(ctx)
+	return s.hookRunner(devcontainer.Hooks{Initialize: devcontainer.InitializeHooks(local)}, "").RunInitialize(ctx)
 }
 
 // stepContainer makes sure the container exists, matches the config and
@@ -465,11 +466,11 @@ func (s *DevContainerService) writeSessionConfig(ctx context.Context, r *upRun, 
 // then postStartCommand when the container was started by this run or its
 // first start never completed.
 func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
-	port, err := container.SSHHostPort(ctx, s.engine, r.info)
-	if err != nil {
-		return fmt.Errorf("resolve SSH port: %w", err)
+	alias := ""
+	if aliases := hostconfig.Aliases(r.info.Name); len(aliases) > 0 {
+		alias = aliases[0]
 	}
-	runner := s.hookRunner(r.resolved.Hooks, port)
+	runner := s.hookRunner(r.resolved.Hooks, alias)
 	markers := s.markersFor(r.info)
 
 	var created lifecycle.Markers // a nil *containerMarkers must stay a nil interface
@@ -522,13 +523,13 @@ type lifecycleHooks interface {
 	RunStartHooks(ctx context.Context) error
 }
 
-// hookRunner returns a runner for hooks; container hooks connect to the
-// agent on 127.0.0.1:sshPort.
-func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshPort int) lifecycleHooks {
+// hookRunner returns a runner for hooks; container hooks run with OpenSSH
+// through sshAlias (written by the ssh config step).
+func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshAlias string) lifecycleHooks {
 	if s.newHooks != nil {
-		return s.newHooks(hooks, sshPort)
+		return s.newHooks(hooks, sshAlias)
 	}
-	return lifecycle.NewHookRunner(sshPort, s.report, s.workspacePath, hooks, s.Identity().WorkspaceID)
+	return lifecycle.NewHookRunner(sshAlias, s.report, s.workspacePath, hooks)
 }
 
 // startedSinceLastPostStart reports whether the container started after
