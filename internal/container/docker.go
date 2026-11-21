@@ -35,6 +35,70 @@ type Docker struct {
 	// buildx records whether the buildx plugin is installed (asked once).
 	buildxOnce sync.Once
 	buildx     bool
+
+	// images caches `docker image inspect` results by reference for the
+	// command's lifetime; pulls, builds, removals and compose runs clear
+	// it, since they can move a tag.
+	imagesMu sync.Mutex
+	images   map[string]*imageInspect
+}
+
+// imageInspect is the part of `docker image inspect` dcx reads.
+type imageInspect struct {
+	ID     string `json:"Id"`
+	Config struct {
+		User       string            `json:"User"`
+		Entrypoint []string          `json:"Entrypoint"`
+		Cmd        []string          `json:"Cmd"`
+		Labels     map[string]string `json:"Labels"`
+	} `json:"Config"`
+}
+
+// errImageNotFound is inspectImage's error for a missing image.
+var errImageNotFound = errors.New("image not found")
+
+// inspectImage returns the image's inspect data, from the cache when the
+// reference was inspected since the images last changed. A missing image
+// is not cached (a pull or build usually follows).
+func (d *Docker) inspectImage(ctx context.Context, imageRef string) (*imageInspect, error) {
+	d.imagesMu.Lock()
+	cached, ok := d.images[imageRef]
+	d.imagesMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+	cmd := d.command(ctx, "image", "inspect", "--format", "json", imageRef)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, fmt.Errorf("%w: %s", errImageNotFound, imageRef)
+		}
+		return nil, fmt.Errorf("failed to inspect image: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	var results []imageInspect
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, fmt.Errorf("failed to parse image inspect output: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("%w: %s", errImageNotFound, imageRef)
+	}
+	d.imagesMu.Lock()
+	if d.images == nil {
+		d.images = map[string]*imageInspect{}
+	}
+	d.images[imageRef] = &results[0]
+	d.imagesMu.Unlock()
+	return &results[0], nil
+}
+
+// forgetImages clears the inspect cache after images may have changed.
+func (d *Docker) forgetImages() {
+	d.imagesMu.Lock()
+	d.images = nil
+	d.imagesMu.Unlock()
 }
 
 // WithTrace makes d report every docker command line to trace before
@@ -170,6 +234,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 		} `json:"State"`
 		Config struct {
 			Labels map[string]string `json:"Labels"`
+			Env    []string          `json:"Env"`
 		} `json:"Config"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -189,6 +254,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 			Running: c.State.Running,
 			Labels:  labels,
 			Created: c.Created,
+			Env:     c.Config.Env,
 		})
 	}
 	return result, nil
@@ -302,10 +368,8 @@ func (d *Docker) PortMapping(ctx context.Context, containerName string, containe
 
 // ImageExists checks if an image exists locally.
 func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	cmd := d.command(ctx, "image", "inspect", imageRef)
-	if err := cmd.Run(); err != nil {
-		// Exit code 1 means image not found
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+	if _, err := d.inspectImage(ctx, imageRef); err != nil {
+		if errors.Is(err, errImageNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -316,61 +380,34 @@ func (d *Docker) ImageExists(ctx context.Context, imageRef string) (bool, error)
 // ImageLabels returns the labels for an image.
 // ImageConfig returns an image's USER, ENTRYPOINT and CMD.
 func (d *Docker) ImageConfig(ctx context.Context, imageRef string) (build.ImageConfig, error) {
-	output, err := runOutput(d.command(ctx, "image", "inspect", "--format", "json", imageRef))
+	img, err := d.inspectImage(ctx, imageRef)
 	if err != nil {
-		return build.ImageConfig{}, fmt.Errorf("failed to inspect image: %w", err)
+		return build.ImageConfig{}, err
 	}
-	var results []struct {
-		Config struct {
-			User       string   `json:"User"`
-			Entrypoint []string `json:"Entrypoint"`
-			Cmd        []string `json:"Cmd"`
-		} `json:"Config"`
-	}
-	if err := json.Unmarshal(output, &results); err != nil {
-		return build.ImageConfig{}, fmt.Errorf("failed to parse image inspect output: %w", err)
-	}
-	if len(results) == 0 {
-		return build.ImageConfig{}, fmt.Errorf("image not found: %s", imageRef)
-	}
-	c := results[0].Config
+	c := img.Config
 	return build.ImageConfig{User: c.User, Entrypoint: c.Entrypoint, Cmd: c.Cmd}, nil
 }
 
 func (d *Docker) ImageLabels(ctx context.Context, imageRef string) (map[string]string, error) {
-	cmd := d.command(ctx, "image", "inspect", "--format", "json", imageRef)
-	output, err := runOutput(cmd)
+	img, err := d.inspectImage(ctx, imageRef)
 	if err != nil {
-		return nil, fmt.Errorf("failed to inspect image: %w", err)
+		return nil, err
 	}
-
-	var results []struct {
-		Config struct {
-			Labels map[string]string `json:"Labels"`
-		} `json:"Config"`
-	}
-	if err := json.Unmarshal(output, &results); err != nil {
-		return nil, fmt.Errorf("failed to parse image inspect output: %w", err)
-	}
-
-	if len(results) == 0 {
-		return nil, nil
-	}
-	return results[0].Config.Labels, nil
+	return img.Config.Labels, nil
 }
 
 // ImageID returns the ID of an image.
 func (d *Docker) ImageID(ctx context.Context, imageRef string) (string, error) {
-	cmd := d.command(ctx, "image", "inspect", "--format", "{{.Id}}", imageRef)
-	output, err := runOutput(cmd)
+	img, err := d.inspectImage(ctx, imageRef)
 	if err != nil {
-		return "", fmt.Errorf("failed to inspect image: %w", err)
+		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+	return img.ID, nil
 }
 
 // PullImageWithProgress pulls an image with optional progress display.
 func (d *Docker) PullImageWithProgress(ctx context.Context, imageRef string, progressOut io.Writer) error {
+	defer d.forgetImages()
 	cmd := d.command(ctx, "pull", imageRef)
 	if progressOut != nil {
 		cmd.Stdout = progressOut
@@ -634,6 +671,7 @@ func (d *Docker) listImages(ctx context.Context, filters ...string) ([]imageInfo
 
 // removeImage removes an image by ID using docker rmi.
 func (d *Docker) removeImage(ctx context.Context, imageID string) error {
+	defer d.forgetImages()
 	cmd := d.command(ctx, "rmi", imageID)
 	return cmd.Run()
 }
@@ -682,6 +720,7 @@ func isDcxImage(img imageInfo) bool {
 // workspaceID limits the cleanup to one workspace's images
 // (dcx/<workspaceID>:*); "" cleans every dcx image.
 func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID string) (*CleanupResult, error) {
+	defer d.forgetImages()
 	result := &CleanupResult{}
 
 	images, err := d.listImages(ctx)
@@ -715,6 +754,7 @@ func (d *Docker) CleanupDerivedImages(ctx context.Context, workspaceID string) (
 
 // CleanupDanglingImages removes dangling (untagged) images.
 func (d *Docker) CleanupDanglingImages(ctx context.Context) (*CleanupResult, error) {
+	defer d.forgetImages()
 	result := &CleanupResult{}
 
 	images, err := d.listImages(ctx, "dangling=true")
@@ -874,6 +914,7 @@ func (d *Docker) WriteFileInContainer(ctx context.Context, containerName string,
 // Paths in opts are absolute (build.Builder resolves them). Output streams
 // to opts.Progress, or to dcx's stdout/stderr.
 func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptions) error {
+	defer d.forgetImages()
 	d.buildxOnce.Do(func() {
 		d.buildx = d.command(ctx, "buildx", "version").Run() == nil
 	})
@@ -956,6 +997,7 @@ func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest s
 
 // Compose runs `docker compose` for project p, streaming its output.
 func (d *Docker) Compose(ctx context.Context, p ComposeProject, args ...string) error {
+	defer d.forgetImages()
 	cmd := d.command(ctx, p.args(args...)...)
 	cmd.Dir = p.Dir
 	cmd.Stdout = os.Stdout

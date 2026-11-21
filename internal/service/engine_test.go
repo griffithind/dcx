@@ -143,3 +143,25 @@ func TestLoadSurvivesFailedMetadataPull(t *testing.T) {
 	}
 	assert.True(t, warned, "a failed pull should be reported, not fatal")
 }
+
+// /etc/environment gets the container's Config.Env, and remoteEnv's
+// ${containerEnv:...} resolves against it, from the container lookup up
+// already made (no inspect of its own).
+func TestEnvironmentComesFromTheContainerLookup(t *testing.T) {
+	fake := &containertest.Fake{Outputs: map[string]string{
+		`sh -c if [ -e "$1" ]; then cat "$1"; fi dcx-read /etc/environment`: "",
+	}}
+	svc, _ := newTestService(t, fake)
+	resolved := &devcontainer.ResolvedDevContainer{
+		ContainerEnv: map[string]string{"A": "config"},
+		RemoteEnv:    map[string]string{"R": "${containerEnv:FROM_IMAGE}"},
+		UserEnvProbe: "none",
+	}
+	info := &state.ContainerInfo{ID: "c1", Name: "c1", Env: []string{"FROM_IMAGE=image", "A=config"}}
+
+	_, remoteEnv, err := svc.setupContainerEnvironment(context.Background(), resolved, info)
+	require.NoError(t, err)
+	assert.Equal(t, "image", remoteEnv["R"])
+	assert.Contains(t, string(fake.Files["c1:/etc/environment"]), `FROM_IMAGE="image"`)
+	assert.Empty(t, fake.CallsTo("InspectContainer"))
+}

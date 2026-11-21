@@ -34,6 +34,9 @@ type Options struct {
 	// AllowedCIDRs widens the agent's connection allowlist beyond loopback
 	// (`dcx up --hosts`).
 	AllowedCIDRs []string
+	// NewContainer says dcx just created the container, so no agent can be
+	// running in it: nothing to wait for or to check before launching.
+	NewContainer bool
 }
 
 func (o Options) listenAddr() string {
@@ -62,7 +65,7 @@ func Provision(ctx context.Context, engine container.Engine, rep report.Reporter
 	if err != nil {
 		return fmt.Errorf("failed to install dcx agent: %w", err)
 	}
-	if installed {
+	if installed && !opts.NewContainer {
 		if err := waitOutdatedGone(ctx, engine, opts.ContainerName, opts.listenAddr()); err != nil {
 			return err
 		}
@@ -70,8 +73,9 @@ func Provision(ctx context.Context, engine container.Engine, rep report.Reporter
 	if err := writeSecrets(ctx, engine, opts); err != nil {
 		return fmt.Errorf("failed to mount SSH secrets: %w", err)
 	}
-	// After an install nothing is listening (waitOutdatedGone checked).
-	if err := launch(ctx, engine, opts, !installed); err != nil {
+	// After an install nothing is listening (waitOutdatedGone checked),
+	// nor in a container dcx just created.
+	if err := launch(ctx, engine, opts, !installed && !opts.NewContainer); err != nil {
 		return fmt.Errorf("failed to launch SSH agent: %w", err)
 	}
 	return nil

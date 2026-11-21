@@ -38,9 +38,9 @@ func TestContainerMarkersRoundTrip(t *testing.T) {
 	assert.True(t, done)
 	assert.Contains(t, fake.Files, "c1:"+lifecycleMarkerDir+"/ready.done")
 
-	writes := fake.CallsTo("WriteFileInContainer")
-	require.Len(t, writes, 1, "one exec marks a phase, creating the directory")
-	assert.Equal(t, lifecycleMarkerDir, writes[0].Args[4])
+	require.NoError(t, m.Mark(ctx, phasePostStart, phaseReady))
+	assert.Len(t, fake.CallsTo("ExecAsRoot"), 2, "one exec marks any number of phases")
+	assert.Contains(t, fake.Files, "c1:"+lifecycleMarkerDir+"/poststart.done")
 	assert.Len(t, fake.CallsTo("ExecOutput"), 1, "the markers are listed once")
 }
 

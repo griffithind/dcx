@@ -51,6 +51,9 @@ type ContainerInfo struct {
 	ComposeProject string
 	PrimaryService string
 	Labels         *ContainerLabels
+	// Env is the container's Config.Env (image ENV, features' and the
+	// config's containerEnv), from the same inspect as everything else.
+	Env []string
 }
 
 // IsSingleContainer returns true if this is a single-container (non-compose) devcontainer.

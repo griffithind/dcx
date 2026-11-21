@@ -397,6 +397,7 @@ func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
 		WorkDir:       r.resolved.WorkspaceFolder,
 		ListenAddr:    container.SSHListenAddr(r.info),
 		AllowedCIDRs:  container.RecordedSSHAccess(r.info).AllowedCIDRs,
+		NewContainer:  r.action == actionCreate || r.action == actionRecreate,
 	})
 }
 
@@ -490,19 +491,19 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		}
 		firstStartPending = !ready
 	}
+	var record []string
 	if r.started || firstStartPending {
 		if err := runner.RunStartHooks(ctx); err != nil {
 			return fmt.Errorf("lifecycle hooks failed: %w", err)
 		}
-		if markers != nil {
-			if err := markers.Mark(ctx, phasePostStart); err != nil {
-				return fmt.Errorf("record postStartCommand: %w", err)
-			}
-		}
+		record = append(record, phasePostStart)
 	}
-	if markers != nil && firstStartPending {
-		if err := markers.Mark(ctx, phaseReady); err != nil {
-			return fmt.Errorf("record setup completion: %w", err)
+	if firstStartPending {
+		record = append(record, phaseReady)
+	}
+	if markers != nil && len(record) > 0 {
+		if err := markers.Mark(ctx, record...); err != nil {
+			return fmt.Errorf("record setup progress: %w", err)
 		}
 	}
 	return nil
@@ -615,15 +616,31 @@ func (m *containerMarkers) Done(ctx context.Context, phase string) (bool, error)
 	return m.done[path.Base(markerPath(phase))], nil
 }
 
-func (m *containerMarkers) Mark(ctx context.Context, phase string) error {
-	stamp := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
-	if err := m.engine.WriteFileInContainer(ctx, m.container, container.FileWrite{
-		Path: markerPath(phase), Content: stamp, Dirs: []string{lifecycleMarkerDir},
-	}); err != nil {
+// markScript writes the timestamp ($2) to each marker file (names after
+// it) in the marker directory ($1), creating it, in one exec.
+const markScript = `set -e
+dir=$1 stamp=$2
+shift 2
+mkdir -p "$dir"
+chmod 0755 "$dir"
+umask 077
+for name in "$@"; do printf '%s\n' "$stamp" > "$dir/$name"; done`
+
+func (m *containerMarkers) Mark(ctx context.Context, phases ...string) error {
+	if len(phases) == 0 {
+		return nil
+	}
+	argv := []string{"sh", "-c", markScript, "dcx-mark", lifecycleMarkerDir, time.Now().UTC().Format(time.RFC3339)}
+	for _, phase := range phases {
+		argv = append(argv, path.Base(markerPath(phase)))
+	}
+	if _, err := m.engine.ExecAsRoot(ctx, m.container, argv); err != nil {
 		return err
 	}
 	if m.done != nil {
-		m.done[path.Base(markerPath(phase))] = true
+		for _, phase := range phases {
+			m.done[path.Base(markerPath(phase))] = true
+		}
 	}
 	return nil
 }

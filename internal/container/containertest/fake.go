@@ -364,8 +364,7 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 
 // FileMarkers makes marker listings (`sh -c … dcx-marker <dir>`, printing
 // the names of the files in dir) and `cat <path>` answer from Files, so
-// lifecycle markers written with WriteFileInContainer are found (and read)
-// again.
+// lifecycle markers dcx wrote are found (and read) again.
 func (f *Fake) FileMarkers() {
 	f.OutputFunc = func(name string, argv []string) ([]byte, error) {
 		read := func(path string) ([]byte, bool) {
@@ -410,6 +409,17 @@ func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("ExecAsRoot", append([]string{name}, argv...)...)
+	// Lifecycle markers (sh -c <script> dcx-mark <dir> <stamp> <names>...)
+	// land in Files, where FileMarkers finds them.
+	if len(argv) > 5 && argv[0] == "sh" && argv[3] == "dcx-mark" {
+		if f.Files == nil {
+			f.Files = map[string][]byte{}
+		}
+		for _, n := range argv[6:] {
+			f.Files[name+":"+argv[4]+"/"+n] = []byte(argv[5] + "\n")
+		}
+		return nil, nil
+	}
 	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
 		return []byte(out), nil
 	}

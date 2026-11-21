@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -55,9 +56,12 @@ func NewHookRunner(sshAlias string, rep report.Reporter, workspacePath string, h
 // Done fails closed: when it cannot tell (the container did not answer)
 // it returns an error rather than "not done", which would re-run a
 // once-only hook.
+//
+// Mark records several phases at once, so phases without hooks cost no
+// extra exec.
 type Markers interface {
 	Done(ctx context.Context, phase string) (bool, error)
-	Mark(ctx context.Context, phase string) error
+	Mark(ctx context.Context, phases ...string) error
 }
 
 // Phase names used with Markers.
@@ -77,8 +81,10 @@ func (r *HookRunner) RunInitialize(ctx context.Context) error {
 // updateContentCommand, postCreateCommand), each phase's hooks in order
 // (image metadata, features, devcontainer.json). All of them finish before
 // `dcx up` returns: waitFor (when an editor may connect) does not apply to
-// a command-line tool. Phases recorded as done in markers
-// are skipped, and each completed phase is recorded. markers may be nil.
+// a command-line tool. Phases recorded as done in markers are skipped, and
+// each completed phase is recorded: one with hooks as soon as they
+// finished, together with the phases without hooks before it (which are
+// recorded at the end otherwise). markers may be nil.
 func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error {
 	phases := []struct {
 		name  string
@@ -89,6 +95,7 @@ func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error 
 		{PhasePostCreate, r.hooks.PostCreate},
 	}
 
+	var pending []string // completed phases without hooks, not yet recorded
 	for _, p := range phases {
 		if markers != nil {
 			done, err := markers.Done(ctx, p.name)
@@ -105,10 +112,17 @@ func (r *HookRunner) RunCreateHooks(ctx context.Context, markers Markers) error 
 		if err := r.runPhase(ctx, p.name, p.hooks, r.execContainer); err != nil {
 			return err
 		}
-		if markers != nil {
-			if err := markers.Mark(ctx, p.name); err != nil {
+		pending = append(pending, p.name)
+		if markers != nil && len(p.hooks) > 0 {
+			if err := markers.Mark(ctx, pending...); err != nil {
 				return fmt.Errorf("record %s completion: %w", p.name, err)
 			}
+			pending = nil
+		}
+	}
+	if markers != nil && len(pending) > 0 {
+		if err := markers.Mark(ctx, pending...); err != nil {
+			return fmt.Errorf("record %s completion: %w", strings.Join(pending, ", "), err)
 		}
 	}
 	return nil

@@ -19,8 +19,9 @@ import (
 )
 
 type memMarkers struct {
-	mu   sync.Mutex
-	done map[string]bool
+	mu    sync.Mutex
+	done  map[string]bool
+	marks [][]string // each Mark call's phases
 }
 
 func (m *memMarkers) Done(_ context.Context, p string) (bool, error) {
@@ -40,15 +41,18 @@ type unreachableMarkers struct{}
 func (unreachableMarkers) Done(context.Context, string) (bool, error) {
 	return false, errors.New("container not responding")
 }
-func (unreachableMarkers) Mark(context.Context, string) error { return nil }
+func (unreachableMarkers) Mark(context.Context, ...string) error { return nil }
 
-func (m *memMarkers) Mark(_ context.Context, p string) error {
+func (m *memMarkers) Mark(_ context.Context, phases ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.done == nil {
 		m.done = map[string]bool{}
 	}
-	m.done[p] = true
+	for _, p := range phases {
+		m.done[p] = true
+	}
+	m.marks = append(m.marks, phases)
 	return nil
 }
 
@@ -109,6 +113,29 @@ func TestRunCreateHooksResumesAfterFailure(t *testing.T) {
 	require.NoError(t, r2.RunCreateHooks(context.Background(), markers))
 	assert.Equal(t, []string{"post-create"}, *ran2, "completed phases must not rerun")
 	assert.True(t, markers.is(PhasePostCreate))
+}
+
+// Phases without hooks are recorded together with the next phase that
+// runs, or all at once at the end, so they cost no exec of their own.
+func TestRunCreateHooksRecordsEmptyPhasesTogether(t *testing.T) {
+	hooks := hookConfig(t)
+	hooks.OnCreate, hooks.UpdateContent = nil, nil
+	markers := &memMarkers{}
+	r, _ := testRunner(hooks, "")
+	require.NoError(t, r.RunCreateHooks(context.Background(), markers))
+	assert.Equal(t, [][]string{{PhaseOnCreate, PhaseUpdateContent, PhasePostCreate}}, markers.marks)
+
+	hooks.PostCreate = nil
+	markers = &memMarkers{}
+	r, _ = testRunner(hooks, "")
+	require.NoError(t, r.RunCreateHooks(context.Background(), markers))
+	assert.Equal(t, [][]string{{PhaseOnCreate, PhaseUpdateContent, PhasePostCreate}}, markers.marks)
+
+	markers = &memMarkers{}
+	r, _ = testRunner(hookConfig(t), "")
+	require.NoError(t, r.RunCreateHooks(context.Background(), markers))
+	assert.Equal(t, [][]string{{PhaseOnCreate}, {PhaseUpdateContent}, {PhasePostCreate}}, markers.marks,
+		"a phase with hooks is recorded as soon as it finished")
 }
 
 // When markers cannot be read, no once-only hook runs (R16): "can't tell"

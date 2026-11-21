@@ -282,8 +282,8 @@ func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, res
 		envToPatch[k] = v
 	}
 	remoteEnv = resolved.RemoteEnv
-	if details, err := s.engine.InspectContainer(ctx, containerInfo.ID); err == nil && details != nil {
-		containerEnv := devcontainer.EnvListToMap(details.Env)
+	if containerInfo.Env != nil {
+		containerEnv := devcontainer.EnvListToMap(containerInfo.Env)
 		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, containerEnv)
 		envToPatch = containerEnv
 	}
