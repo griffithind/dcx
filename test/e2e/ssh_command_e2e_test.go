@@ -14,17 +14,9 @@ import (
 // This consolidates basic exec, shell commands, and exit code tests.
 func TestSSHCommandE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container once for all subtests
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := alpineEnv(t)
+	workspace := env.Dir
 
 	// Basic exec tests
 	t.Run("basic", func(t *testing.T) {
@@ -113,27 +105,10 @@ func TestSSHCommandE2E(t *testing.T) {
 	})
 }
 
-// TestExecWithEnvE2E tests exec with environment variables from config.
-// This needs its own container due to the different containerEnv configuration.
+// TestSSHCommandWithEnvE2E: containerEnv reaches `dcx ssh` commands.
 func TestSSHCommandWithEnvE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Exec Env Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {
-			"MY_TEST_VAR": "exec-test-value"
-		}
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Test env var is accessible
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "MY_TEST_VAR")
+	stdout, _, err := helpers.RunDCXInDir(t, richEnv(t).Dir, "ssh", "--", "printenv", "MY_TEST_VAR")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "exec-test-value")
 }
@@ -141,17 +116,9 @@ func TestSSHCommandWithEnvE2E(t *testing.T) {
 // TestExecBinaryDataE2E tests that binary data is streamed correctly through exec.
 func TestSSHCommandBinaryDataE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := alpineEnv(t)
+	workspace := env.Dir
 
 	// Test that binary data with null bytes is handled correctly
 	t.Run("binary_output", func(t *testing.T) {

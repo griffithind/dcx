@@ -7,71 +7,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestDcxConfigProjectNameE2E tests that the project name from devcontainer.json name field is used for container naming.
+// TestDcxConfigProjectNameE2E: the devcontainer's name gives the SSH alias,
+// the compose project (<name>-<id8>), the container name and the label.
 func TestDcxConfigProjectNameE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
+	env := composeEnv(t)
+	slug := devcontainer.SanitizeProjectName(env.Name)
+	alias := slug + ".dcx"
+	assert.Contains(t, env.UpOutput, "SSH configured: ssh "+alias)
 
-	devcontainerJSON := `{
-		"name": "testproject",
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`
+	st := helpers.GetStatus(t, env.Dir)
+	assert.Equal(t, alias, st.SSHAlias)
+	project := st.ResourceName
+	require.True(t, strings.HasPrefix(project, slug+"-"), "project = %q", project)
+	assert.Equal(t, project+"-app-1", helpers.ContainerName(t, env.Dir))
 
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// Test dcx up with project name
-	t.Run("up_uses_project_name", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-		// SSH should be configured with project name
-		assert.Contains(t, stdout, "SSH configured: ssh testproject.dcx")
-	})
-
-	// Test status shows project name
-	t.Run("status_shows_project_name", func(t *testing.T) {
-		st := helpers.GetStatus(t, workspace)
-		assert.Contains(t, st.ResourceName, "testproject", "resource name comes from the devcontainer name")
-		assert.Equal(t, "testproject.dcx", st.SSHAlias)
-	})
-
-	// The compose project is "<name>-<workspace id prefix>" so two checkouts
-	// with the same name don't share containers or volumes.
-	project := helpers.GetStatus(t, workspace).ResourceName
-
-	t.Run("container_name_uses_project", func(t *testing.T) {
-		require.True(t, strings.HasPrefix(project, "testproject-"), "project = %q", project)
-		assert.Equal(t, project+"-app-1", helpers.ContainerName(t, workspace))
-	})
-
-	// Test compose_project label is set correctly
-	t.Run("compose_project_label", func(t *testing.T) {
-		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`,
-			project+"-app-1")
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to inspect container: %s", output)
-
-		labelValue := strings.TrimSpace(string(output))
-		assert.Equal(t, project, labelValue)
-	})
+	out, err := exec.Command("docker", "inspect", "--format",
+		`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`, project+"-app-1").CombinedOutput()
+	require.NoError(t, err, "failed to inspect container: %s", out)
+	assert.Equal(t, project, strings.TrimSpace(string(out)))
 }
 
 // TestDcxConfigStatusWithoutEnvironmentE2E tests status output when no environment exists.

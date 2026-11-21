@@ -69,3 +69,17 @@ func TestImageInspectIsCachedUntilImagesChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, calls(t, log), 3, "a pull clears the cache: pull, then inspect again")
 }
+
+// Builds run without buildx's default attestations: they gave identical
+// builds new image IDs, so features and UID layers keyed on the parent
+// image ID were rebuilt on every create.
+func TestDockerCommandsDisableDefaultAttestations(t *testing.T) {
+	t.Setenv("BUILDX_NO_DEFAULT_ATTESTATIONS", "")
+	require.NoError(t, os.Unsetenv("BUILDX_NO_DEFAULT_ATTESTATIONS"))
+	cmd := NewDockerCLI().command(context.Background(), "build", ".")
+	assert.Contains(t, cmd.Env, "BUILDX_NO_DEFAULT_ATTESTATIONS=1")
+
+	t.Setenv("BUILDX_NO_DEFAULT_ATTESTATIONS", "0")
+	cmd = NewDockerCLI().command(context.Background(), "build", ".")
+	assert.NotContains(t, cmd.Env, "BUILDX_NO_DEFAULT_ATTESTATIONS=1", "a value the user set is kept")
+}

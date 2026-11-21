@@ -68,9 +68,11 @@ test-unit: build-agent
 	go test -v -race ./internal/...
 
 # Run end-to-end tests (requires Docker, builds first). go test's default
-# 10-minute timeout is too short for a cold runner pulling images.
+# 10-minute timeout is too short for a cold runner pulling images. The tests
+# mostly wait on Docker, so twice as many run as there are CPUs.
+E2E_PARALLEL ?= $(shell expr $(NCPU) \* 2)
 test-e2e: build
-	go test -v -tags=e2e -timeout 30m -parallel=$(NCPU) ./test/e2e/...
+	go test -v -tags=e2e -timeout 30m -parallel=$(E2E_PARALLEL) ./test/e2e/...
 
 # Run conformance tests (devcontainer spec compliance)
 test-conformance:

@@ -71,25 +71,3 @@ func TestInitializeCommandRunsBeforeCreateE2E(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, strings.Count(string(data), "init"), "initializeCommand runs on every start")
 }
-
-// postAttachCommand runs when a user attaches an interactive `dcx ssh`.
-func TestPostAttachRunsOnShellE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"postAttachCommand": "echo attached >> /tmp/attach.log"
-	}`, helpers.UniqueTestName(t)))
-
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-	_, _, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-f", "/tmp/attach.log")
-	assert.Error(t, err, "postAttachCommand must not run on up or for commands")
-
-	out, err := helpers.RunDCXInPTY(t, ws, "exit\n", "ssh")
-	require.NoError(t, err, out)
-
-	assert.Equal(t, "attached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
-}

@@ -91,87 +91,19 @@ services:
 	})
 }
 
-// TestComposeMultiServiceE2E tests compose with multiple services.
+// TestComposeMultiServiceE2E: a project whose primary service depends on
+// another starts both and takes commands; a second up changes nothing.
 func TestComposeMultiServiceE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"runServices": ["app", "db"],
-		"workspaceFolder": "/workspace"
-	}`, helpers.UniqueTestName(t))
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-    depends_on:
-      - db
-  db:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// Bring up the environment
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Contains(t, stdout, "Devcontainer started successfully")
-
-	// Verify state
-	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "running", state)
-
-	// Verify we can exec into the primary service
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "test")
+	env := composeEnv(t)
+	assert.Contains(t, env.UpOutput, "Devcontainer started successfully")
+	assert.Equal(t, "running", helpers.GetContainerState(t, env.Dir))
+	stdout, _, err := helpers.RunDCXInDir(t, env.Dir, "ssh", "--", "echo", "test")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "test")
-}
 
-// TestComposeUpIdempotent tests that dcx up is idempotent.
-func TestComposeUpIdempotent(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`, helpers.UniqueTestName(t))
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// First up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Second up should succeed without recreating
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Contains(t, stdout, "already running")
-
-	// State should still be running
-	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "running", state)
+	assert.Contains(t, helpers.RunDCXInDirSuccess(t, env.Dir, "up"), "already running", "up is idempotent")
+	assert.Equal(t, "running", helpers.GetContainerState(t, env.Dir))
 }
 
 // TestComposeRecreate tests the --recreate flag.
@@ -212,87 +144,24 @@ services:
 	assert.NotEqual(t, before.ID, after.ID, "--recreate must replace the container")
 }
 
-// TestComposeContainerLabelsE2E tests that all required labels are set on compose containers.
+// TestComposeContainerLabelsE2E: the primary compose container carries
+// dcx's labels.
 func TestComposeContainerLabelsE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`, helpers.UniqueTestName(t))
-
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-`
-
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Get container name from status
-	containerName := helpers.ContainerName(t, workspace)
-
-	// Test all labels in a single subtest group
-	t.Run("labels", func(t *testing.T) {
-		// workspace_path label
-		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`,
-			containerName)
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to inspect container: %s", output)
-		assert.Equal(t, workspace, strings.TrimSpace(string(output)))
-
-		// build_method label
-		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.build.method"}}`,
-			containerName)
-		output, err = cmd.CombinedOutput()
-		require.NoError(t, err)
-		assert.Equal(t, "compose", strings.TrimSpace(string(output)))
-
-		// compose_project label
-		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.compose.project"}}`,
-			containerName)
-		output, err = cmd.CombinedOutput()
-		require.NoError(t, err)
-		assert.NotEmpty(t, strings.TrimSpace(string(output)))
-
-		// compose_service label
-		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.compose.service"}}`,
-			containerName)
-		output, err = cmd.CombinedOutput()
-		require.NoError(t, err)
-		assert.Equal(t, "app", strings.TrimSpace(string(output)))
-
-		// primary label
-		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.container.primary"}}`,
-			containerName)
-		output, err = cmd.CombinedOutput()
-		require.NoError(t, err)
-		assert.Equal(t, "true", strings.TrimSpace(string(output)))
-
-		// managed label
-		cmd = exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.managed"}}`,
-			containerName)
-		output, err = cmd.CombinedOutput()
-		require.NoError(t, err)
-		assert.Equal(t, "true", strings.TrimSpace(string(output)))
-	})
+	env := composeEnv(t)
+	containerName := helpers.ContainerName(t, env.Dir)
+	label := func(name string) string {
+		out, err := exec.Command("docker", "inspect", "--format",
+			`{{index .Config.Labels "com.griffithind.dcx.`+name+`"}}`, containerName).CombinedOutput()
+		require.NoError(t, err, "failed to inspect container: %s", out)
+		return strings.TrimSpace(string(out))
+	}
+	assert.Equal(t, env.Dir, label("workspace.path"))
+	assert.Equal(t, "compose", label("build.method"))
+	assert.NotEmpty(t, label("compose.project"))
+	assert.Equal(t, "app", label("compose.service"))
+	assert.Equal(t, "true", label("container.primary"))
+	assert.Equal(t, "true", label("managed"))
 }
 
 // TestComposeLocalFeatureCachingE2E tests feature caching with local features.

@@ -5,10 +5,13 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
+	"github.com/griffithind/dcx/internal/devcontainer"
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -507,16 +510,26 @@ echo "feature-b installed" > /tmp/feature-b-marker
 	return workspace
 }
 
-// TestLocalFeaturesE2E installs five local features into one container
+// TestLocalFeaturesE2E installs seven local features into one container
 // and checks each: a marker, options (with-options, set in
 // devcontainer.json), install order (with-dependencies installs after
 // simple-marker), a feature mount (with-mounts binds the Docker socket),
-// and security requirements with containerEnv (capAdd, init).
+// security requirements with containerEnv (capAdd, init), containerEnv
+// extending the image's PATH with ${devcontainerId} in mount names
+// (pathfeature, and a devcontainer.json mount), and a feature entrypoint
+// and postCreateCommand that runs before devcontainer.json's
+// (with-entrypoint).
 func TestLocalFeaturesE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
 	workspace := createWorkspaceWithLocalFeatures(t)
+	id := devcontainer.ComputeID(workspace)
+	t.Cleanup(func() {
+		for _, v := range []string{"dcx-e2e-cache-" + id, "dcx-e2e-feat-" + id} {
+			_ = exec.Command("docker", "volume", "rm", "-f", v).Run()
+		}
+	})
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.Contains(t, stdout, "Devcontainer started successfully")
 	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
@@ -545,6 +558,22 @@ func TestLocalFeaturesE2E(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out, "docker.sock")
 		assert.Contains(t, cat("/tmp/dcx-features/with-mounts-marker.txt"), "with-mounts installed")
+	})
+	t.Run("path_and_devcontainer_id", func(t *testing.T) {
+		path := dcxExec(t, workspace, "sh", "-c", "echo $PATH")
+		assert.True(t, strings.HasPrefix(path, "/opt/pathfeature/bin:"), "PATH = %q", path)
+		assert.Contains(t, path, "/usr/bin", "image PATH must be kept, got %q", path)
+		assert.NotContains(t, path, "${PATH}")
+		assert.Equal(t, "2", dcxExec(t, workspace, "sh", "-c", "grep -E ' /(cache|featdata) ' /proc/mounts | wc -l"))
+		out, err := exec.Command("docker", "volume", "ls", "--format", "{{.Name}}", "--filter", "name=dcx-e2e-").Output()
+		require.NoError(t, err)
+		for _, v := range strings.Fields(string(out)) {
+			assert.NotContains(t, v, "${", "volume name must be substituted: %q", v)
+		}
+	})
+	t.Run("entrypoint_and_hooks", func(t *testing.T) {
+		assert.Equal(t, "ran with 0 args", strings.TrimSpace(cat("/tmp/entrypoint-ran")), "the feature entrypoint ran")
+		assert.Equal(t, "feature\nlocal", strings.TrimSpace(cat("/tmp/post-create.log")), "feature hooks run before devcontainer.json's")
 	})
 	t.Run("security", func(t *testing.T) {
 		assert.Contains(t, cat("/proc/self/status"), "CapEff")
@@ -578,6 +607,30 @@ func createWorkspaceWithLocalFeatures(t *testing.T) string {
 		"containerEnv": {"FEATURE_TEST_VAR": "security-feature-value"}
 	}`, 0o644)
 	write("security-feature", "install.sh", "#!/bin/sh\nset -e\necho \"security feature installed\" > /tmp/security-feature-marker\n", 0o755)
+	// containerEnv extending PATH, and a mount named with ${devcontainerId}.
+	write("pathfeature", "devcontainer-feature.json", `{
+		"id": "pathfeature", "version": "1.0.0", "name": "Path feature",
+		"containerEnv": {"PATH": "/opt/pathfeature/bin:${PATH}"},
+		"mounts": [{"source": "dcx-e2e-feat-${devcontainerId}", "target": "/featdata", "type": "volume"}]
+	}`, 0o644)
+	write("pathfeature", "install.sh", "#!/bin/sh\nmkdir -p /opt/pathfeature/bin\n", 0o755)
+	// An entrypoint, and a postCreateCommand that runs before devcontainer.json's.
+	write("with-entrypoint", "devcontainer-feature.json", `{
+		"id": "with-entrypoint",
+		"version": "1.0.0",
+		"name": "With Entrypoint",
+		"entrypoint": "/usr/local/share/with-entrypoint-init.sh",
+		"postCreateCommand": "echo feature >> /tmp/post-create.log"
+	}`, 0o644)
+	write("with-entrypoint", "install.sh", `#!/bin/sh
+set -e
+cat > /usr/local/share/with-entrypoint-init.sh <<'EOF'
+#!/bin/sh
+echo "ran with $# args" > /tmp/entrypoint-ran
+exec "$@"
+EOF
+chmod +x /usr/local/share/with-entrypoint-init.sh
+`, 0o755)
 	for _, fixture := range []string{"with-options", "with-dependencies", "with-mounts"} {
 		src := helpers.FeatureFixture(t, fixture)
 		for _, file := range []string{"devcontainer-feature.json", "install.sh"} {
@@ -596,8 +649,12 @@ func createWorkspaceWithLocalFeatures(t *testing.T) string {
 			"./features/with-options": {"greeting": "CustomHello", "enabled": true, "count": "5"},
 			"./features/with-dependencies": {},
 			"./features/with-mounts": {},
-			"./features/security-feature": {}
-		}
+			"./features/security-feature": {},
+			"./features/pathfeature": {},
+			"./features/with-entrypoint": {}
+		},
+		"mounts": ["source=dcx-e2e-cache-${devcontainerId},target=/cache,type=volume"],
+		"postCreateCommand": {"local": "echo local >> /tmp/post-create.log"}
 	}`, helpers.UniqueTestName(t))
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "devcontainer.json"), []byte(devcontainerJSON), 0o644))
 	return workspace

@@ -23,16 +23,13 @@ import (
 // deploying it again is a no-op (only the recorded digest is compared).
 func TestInstallAgentE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
 	binary, err := dcxembed.Binary("amd64")
 	if err != nil || len(binary) < 1024*1024 {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	containerName := helpers.ContainerName(t, workspace)
+	containerName := helpers.ContainerName(t, alpineEnv(t).Dir)
 	require.NotEmpty(t, containerName, "should find container name")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

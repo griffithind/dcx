@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,63 +74,54 @@ func TestSingleImageBasedE2E(t *testing.T) {
 	})
 }
 
-// TestSingleDockerfileBasedE2E tests devcontainer with Dockerfile.
-func TestSingleDockerfileBasedE2E(t *testing.T) {
+// TestDockerfileLifecycleE2E walks a Dockerfile config through dcx build
+// (with and without the cache), up (the Dockerfile ran), clean (an image
+// in use is kept), an edit applied with up --rebuild, down, and clean (the
+// image no container uses is removed). clean --current touches only this
+// workspace's images, so the test runs in parallel.
+func TestDockerfileLifecycleE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Create temp workspace with Dockerfile config
-	tmpDir := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create Dockerfile
-	dockerfile := `FROM alpine:3.24
-RUN echo "built from dockerfile" > /built-marker
-`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Dockerfile Test",
-		"build": {
-			"dockerfile": "Dockerfile"
-		},
+	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
+		"name": %q,
+		"build": {"dockerfile": "Dockerfile"},
 		"workspaceFolder": "/workspace"
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
+	}`, helpers.UniqueTestName(t)))
+	dockerfile := filepath.Join(ws, ".devcontainer", "Dockerfile")
+	writeVersion := func(v string) {
+		require.NoError(t, os.WriteFile(dockerfile, []byte("FROM alpine:3.24\nRUN echo \""+v+"\" > /version\n"), 0o644))
+	}
+	writeVersion("version1")
 
-	// Setup cleanup
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, tmpDir, "down")
-	})
+	assert.NotEmpty(t, helpers.RunDCXInDirSuccess(t, ws, "build"), "build should produce output")
+	assert.NotEmpty(t, helpers.RunDCXInDirSuccess(t, ws, "build", "--no-cache"), "no-cache build should produce output")
 
-	// Test dcx up with Dockerfile
-	t.Run("up_builds_and_runs", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
+	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "Devcontainer started successfully")
+	assert.Equal(t, "running", helpers.GetContainerState(t, ws))
+	assert.Equal(t, "version1", dcxExec(t, ws, "cat", "/version"), "the Dockerfile ran")
 
-		state := helpers.GetContainerState(t, tmpDir)
-		assert.Equal(t, "running", state)
-	})
-
-	// Test that built content exists
-	t.Run("dockerfile_executed", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/built-marker")
+	image := strings.TrimSpace(func() string {
+		out, err := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", helpers.ContainerID(t, ws)).Output()
 		require.NoError(t, err)
-		assert.Contains(t, stdout, "built from dockerfile")
-	})
+		return string(out)
+	}())
+	require.True(t, strings.HasPrefix(image, "dcx/"), "image %q", image)
+	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
+	require.NoError(t, exec.Command("docker", "image", "inspect", image).Run(), "in-use image must be kept")
 
-	// Clean up
-	t.Run("down_removes_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "down")
-		assert.Contains(t, stdout, "removed")
-	})
+	writeVersion("version2")
+	helpers.RunDCXInDirSuccess(t, ws, "up", "--rebuild")
+	assert.Equal(t, "version2", dcxExec(t, ws, "cat", "/version"), "--rebuild applies the edit")
+
+	rebuilt := strings.TrimSpace(func() string {
+		out, err := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", helpers.ContainerID(t, ws)).Output()
+		require.NoError(t, err)
+		return string(out)
+	}())
+	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "down"), "removed")
+	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
+	assert.Error(t, exec.Command("docker", "image", "inspect", rebuilt).Run(), "unused dcx image must be removed")
 }
 
 // TestSingleContainerWithMounts tests volume mounts.
@@ -158,74 +150,12 @@ func TestSingleContainerWithMounts(t *testing.T) {
 	assert.Contains(t, stdout, "mounted content")
 }
 
-// TestSingleContainerRebuild tests the --rebuild flag.
-func TestSingleContainerRebuild(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create temp workspace with Dockerfile
-	tmpDir := t.TempDir()
-
-	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create Dockerfile
-	dockerfile := `FROM alpine:3.24
-RUN echo "version1" > /version
-`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "Rebuild Test",
-		"build": {
-			"dockerfile": "Dockerfile"
-		},
-		"workspaceFolder": "/workspace"
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, tmpDir, "down")
-	})
-
-	// First up
-	helpers.RunDCXInDirSuccess(t, tmpDir, "up")
-
-	// Verify version1
-	stdout, _, err := helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/version")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "version1")
-
-	// Modify Dockerfile
-	dockerfile = `FROM alpine:3.24
-RUN echo "version2" > /version
-`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
-	require.NoError(t, err)
-
-	// Rebuild
-	helpers.RunDCXInDirSuccess(t, tmpDir, "up", "--rebuild")
-
-	// Verify version2
-	stdout, _, err = helpers.RunDCXInDir(t, tmpDir, "ssh", "--", "cat", "/version")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "version2")
-}
-
 // TestSingleContainerLabelsE2E tests that all required labels are set on containers.
 func TestSingleContainerLabelsE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := alpineEnv(t)
+	workspace := env.Dir
 
 	// Get container name from status
 	containerName := helpers.ContainerName(t, workspace)
@@ -304,58 +234,4 @@ func TestSingleContainerLabelsE2E(t *testing.T) {
 		assert.NotEmpty(t, labelValue, "config_hash label should be set")
 	})
 
-}
-
-// TestBuildNoCacheE2E tests that --no-cache flag forces a rebuild.
-func TestBuildNoCacheE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create temp workspace with Dockerfile
-	tmpDir := t.TempDir()
-
-	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create Dockerfile with a marker
-	dockerfile := `FROM alpine:3.24
-RUN echo "build-marker" > /build-marker
-`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := `{
-		"name": "NoCache Test",
-		"build": {
-			"dockerfile": "Dockerfile"
-		},
-		"workspaceFolder": "/workspace"
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, tmpDir, "down")
-	})
-
-	// First build
-	t.Run("first_build_succeeds", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "build")
-		assert.NotEmpty(t, stdout, "build should produce output")
-	})
-
-	// Build with --no-cache should rebuild
-	t.Run("no_cache_forces_rebuild", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "build", "--no-cache")
-		// Should see building output since cache is disabled
-		assert.NotEmpty(t, stdout, "no-cache build should produce output")
-	})
-
-	// Up should work after build
-	t.Run("up_after_build", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, tmpDir, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-	})
 }

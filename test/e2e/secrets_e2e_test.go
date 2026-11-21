@@ -25,23 +25,13 @@ func sshOut(t *testing.T, ws string, argv ...string) string {
 	return strings.TrimSpace(helpers.StripANSI(stdout))
 }
 
-// TestRuntimeSecretsImage: several secrets on the /run/secrets tmpfs,
-// mode 0400, owned by the (root) remote user.
+// TestRuntimeSecretsImage: runtime secrets are files on the /run/secrets
+// tmpfs, 0400, owned by the (root) session user.
 func TestRuntimeSecretsImage(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"customizations": {"dcx": {"secrets": {
-			"SECRET_ONE": "echo value-one",
-			"SECRET_TWO": "echo value-two"
-		}}}
-	}`, helpers.UniqueTestName(t)))
-	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "Fetching runtime secrets")
-
+	env := richEnv(t)
+	ws := env.Dir
+	assert.Contains(t, env.UpOutput, "Fetching runtime secrets")
 	assert.Equal(t, "value-one", sshOut(t, ws, "cat", "/run/secrets/SECRET_ONE"))
 	assert.Equal(t, "value-two", sshOut(t, ws, "cat", "/run/secrets/SECRET_TWO"))
 	assert.Contains(t, sshOut(t, ws, "df", "-T", "/run/secrets"), "tmpfs", "secrets are never written to disk")

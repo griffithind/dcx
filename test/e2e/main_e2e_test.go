@@ -21,6 +21,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
+	helpers.DownSharedWorkspaces()
 	helpers.RemoveTestImages()
 	cleanup()
 	os.Exit(code)

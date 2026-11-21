@@ -5,7 +5,6 @@ package e2e
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,56 +44,6 @@ func TestRunArgsPassThroughE2E(t *testing.T) {
 	// --rm was ignored: the container survives a stop.
 	helpers.RunDCXInDirSuccess(t, workspace, "stop")
 	assert.Equal(t, "created", helpers.GetContainerState(t, workspace))
-}
-
-// ${devcontainerId} must be substituted in mounts, including mounts
-// contributed by features, and a feature's containerEnv PATH must extend
-// (not replace) the image PATH.
-func TestDevcontainerIDAndFeatureEnvE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"mounts": ["source=dcx-e2e-cache-${devcontainerId},target=/cache,type=volume"],
-		"features": {"./pathfeature": {}}
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	featDir := filepath.Join(workspace, ".devcontainer", "pathfeature")
-	require.NoError(t, os.MkdirAll(featDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featDir, "devcontainer-feature.json"), []byte(`{
-		"id": "pathfeature", "version": "1.0.0", "name": "Path feature",
-		"containerEnv": {"PATH": "/opt/pathfeature/bin:${PATH}"},
-		"mounts": [{"source": "dcx-e2e-feat-${devcontainerId}", "target": "/featdata", "type": "volume"}]
-	}`), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(featDir, "install.sh"), []byte("#!/bin/sh\nmkdir -p /opt/pathfeature/bin\n"), 0o755))
-
-	var volumes []string
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-		for _, v := range volumes {
-			_ = exec.Command("docker", "volume", "rm", "-f", v).Run()
-		}
-	})
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	path := dcxExec(t, workspace, "sh", "-c", "echo $PATH")
-	assert.True(t, strings.HasPrefix(path, "/opt/pathfeature/bin:"), "PATH = %q", path)
-	assert.Contains(t, path, "/usr/bin", "image PATH must be kept, got %q", path)
-	assert.NotContains(t, path, "${PATH}")
-
-	mounts := dcxExec(t, workspace, "sh", "-c", "grep -E ' /(cache|featdata) ' /proc/mounts | wc -l")
-	assert.Equal(t, "2", mounts)
-
-	out, err := exec.Command("docker", "volume", "ls", "--format", "{{.Name}}", "--filter", "name=dcx-e2e-").Output()
-	require.NoError(t, err)
-	for _, v := range strings.Fields(string(out)) {
-		volumes = append(volumes, v)
-		assert.NotContains(t, v, "${", "volume name must be substituted: %q", v)
-	}
 }
 
 // A config passed with --config must get the same substitution as an

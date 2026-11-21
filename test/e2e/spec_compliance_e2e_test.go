@@ -13,94 +13,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRemoteEnvE2E tests that remoteEnv variables are applied to exec sessions.
-// Per devcontainer spec, remoteEnv is set for user sessions (docker exec) not at container creation.
+// TestRemoteEnvE2E: remoteEnv reaches sessions; with containerEnv, remoteEnv
+// wins for a variable both set.
 func TestRemoteEnvE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"remoteEnv": {
-			"REMOTE_VAR_1": "remote-value-1",
-			"REMOTE_VAR_2": "remote-value-2",
-			"EDITOR": "vim"
-		}
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	t.Run("remoteEnv_is_available_in_exec", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "REMOTE_VAR_1")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "remote-value-1")
-	})
-
-	t.Run("multiple_remoteEnv_vars", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "printenv REMOTE_VAR_1 && printenv REMOTE_VAR_2")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "remote-value-1")
-		assert.Contains(t, stdout, "remote-value-2")
-	})
-
-	t.Run("remoteEnv_EDITOR", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "EDITOR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "vim")
-	})
-}
-
-// TestRemoteEnvAndContainerEnvE2E tests that both containerEnv and remoteEnv work together.
-// containerEnv is set at container creation, remoteEnv is set per exec session.
-func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {
-			"CONTAINER_VAR": "container-value",
-			"SHARED_VAR": "from-container"
-		},
-		"remoteEnv": {
-			"REMOTE_VAR": "remote-value",
-			"SHARED_VAR": "from-remote"
-		}
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	t.Run("containerEnv_is_available", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "CONTAINER_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "container-value")
-	})
-
-	t.Run("remoteEnv_is_available", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "REMOTE_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "remote-value")
-	})
-
-	t.Run("remoteEnv_can_override_containerEnv", func(t *testing.T) {
-		// Per spec, remoteEnv is applied per session and should override containerEnv
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "SHARED_VAR")
-		require.NoError(t, err)
-		// remoteEnv should take precedence in exec sessions
-		assert.Contains(t, stdout, "from-remote")
-	})
+	workspace := richEnv(t).Dir
+	for name, want := range map[string]string{
+		"REMOTE_VAR_1":  "remote-value-1",
+		"REMOTE_VAR_2":  "remote-value-2",
+		"EDITOR":        "vim",
+		"REMOTE_VAR":    "remote-value",
+		"CONTAINER_VAR": "container-value",
+		"SHARED_VAR":    "from-remote",
+	} {
+		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", name)
+		require.NoError(t, err, name)
+		assert.Contains(t, stdout, want, name)
+	}
+	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "printenv REMOTE_VAR_1 && printenv REMOTE_VAR_2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "remote-value-1")
+	assert.Contains(t, stdout, "remote-value-2")
 }
 
 // TestOverrideCommandDefaultE2E: without overrideCommand (true by default
@@ -109,30 +42,17 @@ func TestRemoteEnvAndContainerEnvE2E(t *testing.T) {
 // create hooks (waitFor has no effect on a command-line up).
 func TestOverrideCommandDefaultE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"onCreateCommand": "echo 'onCreate executed'",
-		"updateContentCommand": "echo 'updateContent executed'",
-		"postCreateCommand": "echo 'postCreate executed'"
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "up")
-	require.NoError(t, err, stderr)
+	env := richEnv(t)
 	for _, want := range []string{"onCreate executed", "updateContent executed", "postCreate executed"} {
-		assert.Contains(t, stdout, want, "up waits for every create hook")
+		assert.Contains(t, env.UpOutput, want, "up waits for every create hook")
 	}
-	assert.Contains(t, stderr, "Devcontainer started successfully")
-	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
+	assert.Contains(t, env.UpOutput, "Devcontainer started successfully")
+	assert.Equal(t, "running", helpers.GetContainerState(t, env.Dir))
 
-	out, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "container-is-running")
+	out, _, err := helpers.RunDCXInDir(t, env.Dir, "ssh", "--", "echo", "container-is-running")
 	require.NoError(t, err)
 	assert.Contains(t, out, "container-is-running")
-	out, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "ps", "aux")
+	out, _, err = helpers.RunDCXInDir(t, env.Dir, "ssh", "--", "ps", "aux")
 	require.NoError(t, err)
 	assert.Contains(t, out, "sleep", "the keep-alive runs")
 }

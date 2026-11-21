@@ -113,7 +113,23 @@ func (d *Docker) command(ctx context.Context, args ...string) *exec.Cmd {
 	if d.trace != nil {
 		d.trace(shell.Join(append([]string{"docker"}, args...)))
 	}
-	return exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = dockerEnv()
+	return cmd
+}
+
+// dockerEnv is the environment docker commands run with: dcx's own, with
+// buildx's default attestations off. Their build metadata gave every
+// build, buildx's or compose's, a new image ID even when every step was
+// cached, so the layers dcx keys on the parent image ID (features, UID)
+// were rebuilt on every create. An older buildx or compose ignores the
+// variable; --provenance in build.options still asks for one.
+func dockerEnv() []string {
+	env := os.Environ()
+	if _, set := os.LookupEnv("BUILDX_NO_DEFAULT_ATTESTATIONS"); !set {
+		env = append(env, "BUILDX_NO_DEFAULT_ATTESTATIONS=1")
+	}
+	return env
 }
 
 // NewDocker returns a Docker CLI engine after checking that the daemon is
@@ -892,7 +908,7 @@ func (d *Docker) BuildImage(ctx context.Context, opts build.DockerfileBuildOptio
 	}
 	cmd := d.command(ctx, buildArgs(opts, d.buildx)...)
 	if !d.buildx {
-		cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+		cmd.Env = append(cmd.Env, "DOCKER_BUILDKIT=1")
 	}
 	if opts.Progress != nil {
 		cmd.Stdout = opts.Progress

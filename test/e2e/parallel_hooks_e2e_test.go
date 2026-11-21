@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -18,42 +17,14 @@ import (
 // string, postCreateCommand as an object mixing strings and an array, and
 // postStartCommand as an array.
 //
-// postCreateCommand's cmd1-cmd3 prove they ran concurrently without timing
+// The configuration is debianEnv's. postCreateCommand's cmd1-cmd3 prove they ran concurrently without timing
 // thresholds: each checks in, then waits for the other two. Run in
 // sequence, the first would wait in vain and fail the hook (after a
 // generous 20 s), so `up` succeeding with every "saw all" file present
 // means they ran at the same time.
 func TestLifecycleCommandFormatsE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	rendezvous := func(name string) string {
-		return `mkdir -p /tmp/rv && touch /tmp/rv/` + name + ` && i=0; while [ "$(ls /tmp/rv | wc -l)" -lt 3 ]; do i=$((i+1)); [ $i -gt 200 ] && exit 1; sleep 0.1; done; touch /tmp/saw-all-` + name + ` && echo ` + name + ` > /tmp/` + name + `.txt`
-	}
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "debian:bookworm-slim",
-		"workspaceFolder": "/workspace",
-		"initializeCommand": {
-			"init1": "touch .init1-marker",
-			"init2": "touch .init2-marker"
-		},
-		"onCreateCommand": {
-			"setup1": "echo oncreate1 > /tmp/oncreate1.txt",
-			"setup2": "echo oncreate2 > /tmp/oncreate2.txt"
-		},
-		"updateContentCommand": "echo string-format > /tmp/updatecontent.txt",
-		"postCreateCommand": {
-			"cmd1": %q,
-			"cmd2": %q,
-			"cmd3": %q,
-			"array": ["sh", "-c", "echo array-in-object > /tmp/array.txt"]
-		},
-		"postStartCommand": ["sh", "-c", "echo array-format > /tmp/poststart.txt"]
-	}`, helpers.UniqueTestName(t), rendezvous("cmd1"), rendezvous("cmd2"), rendezvous("cmd3"))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	workspace := debianEnv(t).Dir
 
 	// initializeCommand ran on the host, in the workspace.
 	assert.FileExists(t, workspace+"/.init1-marker", "initializeCommand init1")

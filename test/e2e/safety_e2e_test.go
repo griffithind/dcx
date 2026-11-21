@@ -120,11 +120,10 @@ volumes:
 // configured.
 func TestSecretsDirIsTmpfsE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
+	env := alpineEnv(t)
+	workspace := env.Dir
 
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
 	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--",
 		"awk", `$2=="/run/secrets"{print $3}`, "/proc/mounts")
 	require.NoError(t, err, stderr)

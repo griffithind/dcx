@@ -17,18 +17,10 @@ import (
 // SSH protocol's auth-agent channel) with the agent helpers.Isolate serves.
 func TestSSHAgentForwardingE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Bring up the environment
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := alpineEnv(t)
+	workspace := env.Dir
 
 	// Verify SSH_AUTH_SOCK is set inside the container during exec
 	t.Run("ssh_auth_sock_set", func(t *testing.T) {
@@ -50,8 +42,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	// The forwarded agent is the e2e run's agent (helpers.Isolate): it
 	// lists exactly that agent's key.
 	t.Run("ssh_add_lists_the_host_key", func(t *testing.T) {
-		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
-		require.NoError(t, err, "failed to install openssh-client")
+		requireSSHClient(t, workspace)
 
 		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ssh-add", "-l")
 		require.NoError(t, err, "ssh-add -l: %s", stderr)
@@ -62,17 +53,10 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 // TestSSHAgentConcurrentExecE2E tests that concurrent execs don't interfere with each other.
 func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
 	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := alpineEnv(t)
+	workspace := env.Dir
 
 	// Test that concurrent execs each have working agent access
 	t.Run("concurrent_execs_have_agent", func(t *testing.T) {
@@ -116,8 +100,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 	// Test that one exec finishing doesn't kill another's agent
 	t.Run("cleanup_doesnt_affect_other_execs", func(t *testing.T) {
 		// Install openssh-client first
-		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
-		require.NoError(t, err, "failed to install openssh-client")
+		requireSSHClient(t, workspace)
 
 		// Start a long-running exec
 		var wg sync.WaitGroup
@@ -142,7 +125,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Run a quick exec that will finish first
-		_, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "quick-exec")
+		_, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "quick-exec")
 		require.NoError(t, err, "quick exec should succeed")
 
 		// Wait for long exec to complete

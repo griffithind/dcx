@@ -4,6 +4,9 @@ package e2e
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,10 +24,13 @@ func recordingFeature(name, metadata, record string) map[string]string {
 	}
 }
 
-// TestFeatureInstallEnvironmentE2E: features install for the image's USER
-// when there is no containerUser (F3), a feature's containerEnv is set
-// before its install.sh runs (F4), and its options reach only its own
-// install.sh (F5); installsAfter orders the two.
+// TestFeatureInstallEnvironmentE2E builds features on an image whose USER is
+// not root: they install as root whatever the USER (needs-root records its
+// uid), the image's USER is restored afterwards, features install for the
+// image's user when there is no containerUser (F3), a feature's
+// containerEnv is set before its install.sh runs (F4), and its options
+// reach only its own install.sh (F5); installsAfter orders first and
+// second.
 func TestFeatureInstallEnvironmentE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -33,9 +39,14 @@ func TestFeatureInstallEnvironmentE2E(t *testing.T) {
 		".devcontainer/devcontainer.json": fmt.Sprintf(`{
 			"name": %q,
 			"build": {"dockerfile": "Dockerfile"},
-			"features": {"./first": {"greeting": "hi there"}, "./second": {}}
+			"workspaceFolder": "/workspace",
+			"remoteUser": "app",
+			"updateRemoteUserUID": false,
+			"features": {"./first": {"greeting": "hi there"}, "./second": {}, "./needs-root": {}}
 		}`, helpers.UniqueTestName(t)),
-		".devcontainer/Dockerfile": "FROM alpine:3.24\nRUN adduser -D app\nUSER app\n",
+		".devcontainer/Dockerfile":                           "FROM alpine:3.24\nRUN adduser -D app\nUSER app\n",
+		".devcontainer/needs-root/devcontainer-feature.json": `{"id": "needs-root", "version": "1.0.0", "name": "Needs Root"}`,
+		".devcontainer/needs-root/install.sh":                "#!/bin/sh\nset -e\nid -u > /usr/local/share/installed-as\n",
 	}
 	for k, v := range recordingFeature("first",
 		`{"id": "first", "options": {"greeting": {"type": "string", "default": "hello"}}, "containerEnv": {"FIRST_HOME": "/opt/first"}}`,
@@ -46,12 +57,17 @@ func TestFeatureInstallEnvironmentE2E(t *testing.T) {
 		files[k] = v
 	}
 	ws := helpers.CreateWorkspaceFiles(t, files)
-
+	require.NoError(t, os.Chmod(filepath.Join(ws, ".devcontainer", "needs-root", "install.sh"), 0o755))
 	helpers.RunDCXInDirSuccess(t, ws, "up")
+
 	stdout, stderr, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "cat", "/opt/rec/first", "/opt/rec/second")
 	require.NoError(t, err, "stdout=%s stderr=%s", stdout, stderr)
 	assert.Equal(t, []string{"app|app|hi there|/opt/first", "unset|/opt/first"}, strings.Split(strings.TrimSpace(stdout), "\n"),
 		"first sees the image user, its option and its containerEnv; second sees no option of first")
+	assert.Equal(t, "0", dcxExec(t, ws, "cat", "/usr/local/share/installed-as"), "the feature installed as root")
+	out, err := exec.Command("docker", "inspect", "--format", "{{.Config.User}}", helpers.ContainerName(t, ws)).Output()
+	require.NoError(t, err)
+	assert.Equal(t, "app", strings.TrimSpace(string(out)), "the image's USER is restored")
 }
 
 // TestFeaturesInstallForTheComposeUserE2E: without a containerUser,

@@ -136,45 +136,20 @@ func TestSSHServerE2E(t *testing.T) {
 	})
 }
 
-// TestSSHServerMultipleContainersE2E tests SSH with multiple containers.
+// TestSSHServerMultipleContainersE2E: two workspaces get different aliases,
+// each reaching its own container.
 func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create two separate workspaces with unique container names
-	devcontainerJSON1 := helpers.SimpleImageConfigWithName("alpine:3.24", helpers.UniqueTestName(t)+"_1")
-	devcontainerJSON2 := helpers.SimpleImageConfigWithName("alpine:3.24", helpers.UniqueTestName(t)+"_2")
-	workspace1 := helpers.CreateTempWorkspace(t, devcontainerJSON1)
-	workspace2 := helpers.CreateTempWorkspace(t, devcontainerJSON2)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace1, "down")
-		helpers.RunDCXInDir(t, workspace2, "down")
-	})
-
-	// Start both containers (SSH is always configured)
-	stdout1 := helpers.RunDCXInDirSuccess(t, workspace1, "up")
-	stdout2 := helpers.RunDCXInDirSuccess(t, workspace2, "up")
-
-	// Extract hostnames
-	hostname1 := extractSSHHostname(t, stdout1)
-	hostname2 := extractSSHHostname(t, stdout2)
-
+	hostname1 := extractSSHHostname(t, alpineEnv(t).UpOutput)
+	hostname2 := extractSSHHostname(t, richEnv(t).UpOutput)
 	require.NotEqual(t, hostname1, hostname2, "Different workspaces should have different hostnames")
 
-	// Verify we can reach both containers and they have different hostnames
-	t.Run("correct_routing", func(t *testing.T) {
-		// Get hostname from each container - they should be different container IDs
-		containerHostname1, _, err := runSSH(t, hostname1, "hostname")
-		require.NoError(t, err)
-
-		containerHostname2, _, err := runSSH(t, hostname2, "hostname")
-		require.NoError(t, err)
-
-		// Container hostnames (IDs) should be different
-		assert.NotEqual(t, strings.TrimSpace(containerHostname1), strings.TrimSpace(containerHostname2),
-			"Each SSH hostname should route to a different container")
-	})
+	containerHostname1, _, err := runSSH(t, hostname1, "hostname")
+	require.NoError(t, err)
+	containerHostname2, _, err := runSSH(t, hostname2, "hostname")
+	require.NoError(t, err)
+	assert.NotEqual(t, strings.TrimSpace(containerHostname1), strings.TrimSpace(containerHostname2),
+		"Each SSH hostname should route to a different container")
 }
 
 // TestSSHPortStableAcrossDownUpE2E verifies the SSH host port does not
@@ -214,79 +189,35 @@ func TestSSHPortStableAcrossDownUpE2E(t *testing.T) {
 // TestSSHServerAlwaysEnabledE2E verifies that SSH is always configured when running dcx up.
 func TestSSHServerAlwaysEnabledE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	env := alpineEnv(t)
 
 	// SSH is always configured
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	stdout := env.UpOutput
 	assert.Contains(t, stdout, "SSH configured", "SSH should always be configured with dcx up")
 }
 
-// TestSSHFromDifferentDirectoryE2E tests that SSH works from any directory.
-// With the TCP transport the generated ~/.ssh/config is self-contained
-// (HostName/Port/IdentityFile), so cwd has no bearing on whether the
-// connection succeeds or on the resolved remote working directory.
+// TestSSHFromDifferentDirectoryE2E: `ssh <alias>` run from any directory
+// gets the workspace's working directory and user (they come from the
+// agent, not from where ssh runs), and the container records the workspace
+// path.
 func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
+	env := alpineEnv(t)
+	hostname := extractSSHHostname(t, env.UpOutput)
 
-	devcontainerJSON := `{
-		"name": "ssh-dir-test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/test-workspace",
-		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/test-workspace",
-		"remoteUser": "root"
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	output, err := exec.Command("docker", "inspect", "--format",
+		`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`, helpers.ContainerName(t, env.Dir)).CombinedOutput()
+	require.NoError(t, err, "failed to inspect container: %s", output)
+	assert.Equal(t, env.Dir, strings.TrimSpace(string(output)), "workspace_path label should be set to the workspace directory")
 
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	hostname := extractSSHHostname(t, stdout)
-
-	// Get the actual container name from status
-	containerName := helpers.ContainerName(t, workspace)
-
-	// Verify workspace_path label is set on container
-	t.Run("workspace_path_label_set", func(t *testing.T) {
-		cmd := exec.Command("docker", "inspect", "--format",
-			`{{index .Config.Labels "com.griffithind.dcx.workspace.path"}}`,
-			containerName)
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "failed to inspect container: %s", output)
-
-		labelValue := strings.TrimSpace(string(output))
-		assert.Equal(t, workspace, labelValue,
-			"workspace_path label should be set to the workspace directory")
-	})
-
-	// Test `ssh <host>` from /tmp. With TCP transport, cwd is irrelevant —
-	// the generated block has HostName/Port baked in.
-	t.Run("ssh_from_different_directory", func(t *testing.T) {
-		cmd := helpers.SSHCommand(
-			"-o", "BatchMode=yes",
-			"-o", "ConnectTimeout=10",
-			hostname, "pwd")
-		cmd.Dir = "/tmp"
-
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "SSH from /tmp failed: %s", output)
-		assert.Contains(t, string(output), "/test-workspace",
-			"SSH should use correct working directory from config even when run from different directory")
-	})
-
-	t.Run("ssh_user_from_different_directory", func(t *testing.T) {
-		cmd := helpers.SSHCommand(
-			"-o", "BatchMode=yes",
-			"-o", "ConnectTimeout=10",
-			hostname, "whoami")
-		cmd.Dir = "/tmp"
-
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "SSH whoami from /tmp failed: %s", output)
-		assert.Contains(t, string(output), "root",
-			"SSH should use correct user from config even when run from different directory")
-	})
+	for cmd, want := range map[string]string{"pwd": "/workspace", "whoami": "root"} {
+		c := helpers.SSHCommand("-o", "BatchMode=yes", "-o", "ConnectTimeout=10", hostname, cmd)
+		c.Dir = "/tmp"
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, "ssh %s from /tmp: %s", cmd, out)
+		assert.Contains(t, string(out), want, "ssh %s from another directory", cmd)
+	}
 }
 
 // TestSSHServerCleanupE2E tests that the SSH server process is cleaned up after SSH session ends.
@@ -349,14 +280,8 @@ echo "$n"`
 // This verifies the RawCommand() fix - commands with quotes and nested shells must work.
 func TestSSHCommandHandlingE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Start with SSH enabled
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	hostname := extractSSHHostname(t, stdout)
+	hostname := extractSSHHostname(t, alpineEnv(t).UpOutput)
 
 	// Test simple echo
 	t.Run("simple_echo", func(t *testing.T) {

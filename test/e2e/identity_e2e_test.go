@@ -101,33 +101,3 @@ func TestFeaturesUIDAndLocalFeatureEditsE2E(t *testing.T) {
 	assert.Equal(t, "v2", dcxExec(t, ws, "cat", "/marker"))
 	assert.Equal(t, want, dcxExec(t, ws, "id", "-u", "dev"))
 }
-
-// `dcx clean` must remove dcx-built images that no container uses (it used
-// to match a repository name dcx never produced). The test uses --current so
-// it never removes the developer's own images.
-func TestCleanRemovesUnusedDcxImagesE2E(t *testing.T) {
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"build": {"dockerfile": "Dockerfile"},
-		"workspaceFolder": "/workspace"
-	}`, helpers.UniqueTestName(t)))
-	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "Dockerfile"), []byte("FROM alpine:3.24\nRUN echo clean-test > /x\n"), 0o644))
-
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-	id := containerID(t, ws)
-	img, err := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", id).Output()
-	require.NoError(t, err)
-	image := strings.TrimSpace(string(img))
-	require.True(t, strings.HasPrefix(image, "dcx/"), "image %q", image)
-
-	// In use: kept.
-	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
-	require.NoError(t, exec.Command("docker", "image", "inspect", image).Run(), "in-use image must be kept")
-
-	// Unused after down: removed.
-	helpers.RunDCXInDirSuccess(t, ws, "down")
-	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
-	assert.Error(t, exec.Command("docker", "image", "inspect", image).Run(), "unused dcx image must be removed")
-}

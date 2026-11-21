@@ -30,21 +30,10 @@ func TestUIDUpdateE2E(t *testing.T) {
 		t.Skip("Skipping UID update test when running as root")
 	}
 
-	// Create config with remoteUser that has a different UID
-	// node:20-alpine has a 'node' user with UID 1000
-	devcontainerJSON := `{
-		"name": "` + helpers.UniqueTestName(t) + `",
-		"image": "node:20-alpine",
-		"remoteUser": "node",
-		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspace",
-		"workspaceFolder": "/workspace"
-	}`
-
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Contains(t, stdout, "Devcontainer started successfully")
+	// node:20-alpine's node user has UID 1000; dcx updates it to the host's.
+	env := nodeEnv(t)
+	workspace := env.Dir
+	assert.Contains(t, env.UpOutput, "Devcontainer started successfully")
 
 	// Check the user's UID inside the container
 	t.Run("uid_matches_host", func(t *testing.T) {
@@ -122,70 +111,4 @@ func TestUIDUpdateDisabledE2E(t *testing.T) {
 		assert.Equal(t, "1000", containerUID,
 			"Container user UID should remain original (1000) when updateRemoteUserUID is false")
 	})
-}
-
-// TestUIDUpdateRootUserE2E tests that root user is not updated.
-func TestUIDUpdateRootUserE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create config with remoteUser: root
-	devcontainerJSON := `{
-		"name": "` + helpers.UniqueTestName(t) + `",
-		"image": "alpine:3.24",
-		"remoteUser": "root",
-		"workspaceFolder": "/workspace"
-	}`
-
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Check the user's UID inside the container - should be 0 (root)
-	t.Run("root_uid_not_updated", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
-		require.NoError(t, err)
-
-		containerUID := strings.TrimSpace(stdout)
-		assert.Equal(t, "0", containerUID, "Root user UID should remain 0")
-	})
-}
-
-// TestUIDUpdateNoFeaturesE2E tests UID update works without features.
-func TestUIDUpdateNoFeaturesE2E(t *testing.T) {
-	// Skip on Windows
-	if runtime.GOOS == "windows" {
-		t.Skip("UID update not supported on Windows")
-	}
-
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	hostUID := os.Getuid()
-	if hostUID == 0 {
-		t.Skip("Skipping UID update test when running as root")
-	}
-
-	// Simple config without features
-	devcontainerJSON := `{
-		"name": "` + helpers.UniqueTestName(t) + `",
-		"image": "node:20-alpine",
-		"remoteUser": "node",
-		"workspaceFolder": "/workspace"
-	}`
-
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// Verify UID is updated even without features
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "id", "-u")
-	require.NoError(t, err)
-
-	containerUID := strings.TrimSpace(stdout)
-	expectedUID := strconv.Itoa(hostUID)
-
-	assert.Equal(t, expectedUID, containerUID,
-		"UID should be updated even without features")
 }

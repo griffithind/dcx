@@ -32,11 +32,9 @@ func plainSSH(t *testing.T, alias string, stdin string, args ...string) (string,
 // where a container user could plant symlinks for the root agent to follow.
 func TestAgentFilesRootOwnedE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	ws := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, ws, "down") })
-	helpers.RunDCXInDirSuccess(t, ws, "up")
+	env := alpineEnv(t)
+	ws := env.Dir
 	c := helpers.ContainerName(t, ws)
 
 	out, err := exec.Command("docker", "exec", c, "stat", "-c", "%n %U %a",
