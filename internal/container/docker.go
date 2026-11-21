@@ -235,6 +235,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 		Config struct {
 			Labels map[string]string `json:"Labels"`
 			Env    []string          `json:"Env"`
+			User   string            `json:"User"`
 		} `json:"Config"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -255,6 +256,7 @@ func parseContainerSummaries(data []byte) ([]state.ContainerSummary, error) {
 			Labels:  labels,
 			Created: c.Created,
 			Env:     c.Config.Env,
+			User:    c.Config.User,
 		})
 	}
 	return result, nil
@@ -840,18 +842,6 @@ func (d *Docker) ExecInContainer(ctx context.Context, containerName string, argv
 	return cmd.Run()
 }
 
-// ExecDetachedAsRoot starts a command in a container as root, as a
-// background process (`docker exec -d`). Docker returns once the command
-// has been spawned; its lifecycle is owned by the container.
-func (d *Docker) ExecDetachedAsRoot(ctx context.Context, containerName string, argv []string) error {
-	args := append([]string{"exec", "-d", "--user", "root", containerName}, argv...)
-	cmd := d.command(ctx, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker exec -d failed: %w, output: %s", err, output)
-	}
-	return nil
-}
-
 // ExecAsRoot runs argv in the container as root and returns its combined
 // output.
 func (d *Docker) ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error) {
@@ -870,42 +860,21 @@ func (d *Docker) ExecOutput(ctx context.Context, containerName string, argv []st
 	return runOutput(d.command(ctx, args...))
 }
 
-// ExecOutputAs runs argv in the container as user ("" = the container's
-// default user) and returns its stdout. A non-zero exit is an error.
-func (d *Docker) ExecOutputAs(ctx context.Context, containerName, user string, argv []string) ([]byte, error) {
-	args := []string{"exec"}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	args = append(append(args, containerName), argv...)
-	return runOutput(d.command(ctx, args...))
-}
-
-// writeFileScript writes stdin to $1 as root: it creates the directories
-// after $3 (mode 0755), then writes with umask 077 and applies the owner
-// ($2) and mode ($3). Every value is a positional argument; nothing is
-// interpolated into the script.
-const writeFileScript = `set -e
-f=$1 owner=$2 mode=$3
-shift 3
-for d in "$@"; do mkdir -p "$d"; chmod 0755 "$d"; done
-umask 077
-cat > "$f"
-[ -z "$owner" ] || chown "$owner" "$f"
-[ -z "$mode" ] || chmod "$mode" "$f"`
-
-// WriteFileInContainer writes f inside a container with a single docker
-// exec (docker cp cannot write to the /run/secrets tmpfs). The content
-// goes through stdin, so it never appears in a command line.
-func (d *Docker) WriteFileInContainer(ctx context.Context, containerName string, f FileWrite) error {
-	args := append([]string{"exec", "-i", "--user", "root", containerName,
-		"sh", "-c", writeFileScript, "dcx-write", f.Path, f.Owner, f.Mode}, f.Dirs...)
+// ExecAsRootWithInput runs argv as root in the container with input on
+// stdin and returns its stdout (secrets travel this way, never in a
+// command line). On failure the error carries stderr; stdout is still
+// returned, for commands that report their failure there.
+func (d *Docker) ExecAsRootWithInput(ctx context.Context, containerName string, argv []string, input []byte) ([]byte, error) {
+	args := append([]string{"exec", "-i", "--user", "root", containerName}, argv...)
 	cmd := d.command(ctx, args...)
-	cmd.Stdin = bytes.NewReader(f.Content)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("write %s failed: %w, output: %s", f.Path, err, output)
+	cmd.Stdin = bytes.NewReader(input)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	return nil
+	return out, nil
 }
 
 // BuildImage runs `docker buildx build --load` for opts, or, without the

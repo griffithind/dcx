@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/lifecycle"
 	"github.com/griffithind/dcx/internal/secrets"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
@@ -150,8 +150,6 @@ func (s *DevContainerService) up(ctx context.Context, opts UpOptions) (bool, err
 	steps := []upStep{
 		{"container", s.stepContainer},
 		{"agent", s.stepAgent},
-		{"secrets", s.stepRuntimeSecrets},
-		{"environment", s.stepEnvironment},
 		// SSH access before the hooks: when a hook fails, the user can
 		// still get in to see why.
 		{"ssh config", s.stepSSHConfig},
@@ -383,9 +381,31 @@ func (s *DevContainerService) fetchBuildSecrets(ctx context.Context, resolved *d
 	return paths, cleanup, nil
 }
 
-// stepAgent installs (or upgrades) the dcx-agent, writes its SSH secrets
-// and makes sure it is listening.
+// stepAgent installs (or upgrades) the dcx-agent and provisions it in one
+// call: the SSH and runtime secrets (/run/secrets is a tmpfs emptied on
+// every stop, so they are fetched on every Up that does work),
+// /etc/environment, the userEnvProbe, the session configuration every SSH
+// session gets, and the listener.
 func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
+	var runtimeSecrets []agentproto.Secret
+	if len(r.resolved.RuntimeSecrets) > 0 {
+		s.report.Infof("Fetching runtime secrets...")
+		fetched, err := secrets.NewFetcher(s.logger).FetchSecrets(ctx, r.resolved.RuntimeSecrets)
+		if err != nil {
+			return fmt.Errorf("failed to fetch secrets: %w", err)
+		}
+		if err := container.CheckSecretsFit(fetched); err != nil {
+			return err
+		}
+		for _, f := range fetched {
+			if err := secrets.ValidateName(f.Name); err != nil {
+				return err
+			}
+			runtimeSecrets = append(runtimeSecrets, agentproto.Secret{Name: f.Name, Value: f.Value})
+		}
+	}
+	environment, session := sessionSetup(r.resolved, r.info)
+
 	provision := agentctl.Provision
 	if s.provisionAgent != nil {
 		provision = s.provisionAgent
@@ -394,74 +414,40 @@ func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
 		ContainerName: r.info.Name,
 		WorkspaceID:   r.ids.WorkspaceID,
 		User:          r.resolved.EffectiveUser,
+		DefaultUser:   r.info.User,
 		WorkDir:       r.resolved.WorkspaceFolder,
 		ListenAddr:    container.SSHListenAddr(r.info),
 		AllowedCIDRs:  container.RecordedSSHAccess(r.info).AllowedCIDRs,
 		NewContainer:  r.action == actionCreate || r.action == actionRecreate,
+		Secrets:       runtimeSecrets,
+		SecretsOwner:  r.resolved.EffectiveUser,
+		Environment:   environment,
+		Probe:         string(env.ParseProbeType(r.resolved.UserEnvProbe)),
+		Session:       session,
 	})
 }
 
-// stepRuntimeSecrets fetches and mounts runtime secrets. /run/secrets is a
-// tmpfs emptied on every stop, so this runs on every Up that does work.
-func (s *DevContainerService) stepRuntimeSecrets(ctx context.Context, r *upRun) error {
-	if len(r.resolved.RuntimeSecrets) == 0 {
-		return nil
+// sessionSetup returns what /etc/environment gets (the container's
+// environment: image ENV, features' containerEnv, containerEnv, as
+// devcontainers/cli writes it) and what every SSH session gets: remoteEnv
+// with ${containerEnv:...} resolved against that environment, and
+// postAttachCommand. remoteEnv never goes to /etc/environment: the file is
+// world-readable and remoteEnv often holds tokens.
+func sessionSetup(resolved *devcontainer.ResolvedDevContainer, info *state.ContainerInfo) (map[string]string, agentproto.SessionConfig) {
+	environment := make(map[string]string, len(resolved.ContainerEnv))
+	for k, v := range resolved.ContainerEnv {
+		environment[k] = v
 	}
-	s.report.Infof("Fetching runtime secrets...")
-	fetched, err := secrets.NewFetcher(s.logger).FetchSecrets(ctx, r.resolved.RuntimeSecrets)
-	if err != nil {
-		return fmt.Errorf("failed to fetch secrets: %w", err)
+	remoteEnv := resolved.RemoteEnv
+	if info != nil && info.Env != nil {
+		environment = devcontainer.EnvListToMap(info.Env)
+		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, environment)
 	}
-	s.report.Infof("Mounting secrets...")
-	if err := container.MountSecretsToContainer(ctx, s.engine, r.info.Name, fetched, r.resolved.EffectiveUser); err != nil {
-		return fmt.Errorf("failed to mount secrets: %w", err)
+	return environment, agentproto.SessionConfig{
+		Env:        remoteEnv,
+		Unset:      resolved.RemoteEnvUnset,
+		PostAttach: lifecycle.AttachSteps(resolved.Hooks.PostAttach),
 	}
-	return nil
-}
-
-// stepEnvironment patches /etc/environment, probes the user environment
-// used by lifecycle hooks, and writes the session configuration every SSH
-// session gets (environment and postAttachCommand).
-func (s *DevContainerService) stepEnvironment(ctx context.Context, r *upRun) error {
-	probed, remoteEnv, err := s.setupContainerEnvironment(ctx, r.resolved, r.info)
-	if err != nil {
-		s.report.Warnf("Environment setup failed: %v", err)
-	}
-	if err := s.writeSessionConfig(ctx, r, sessionConfig(r.resolved, probed, remoteEnv)); err != nil {
-		return fmt.Errorf("write session configuration: %w", err)
-	}
-	return nil
-}
-
-// sessionConfig is what every SSH session gets: the probed user
-// environment overlaid with remoteEnv, and postAttachCommand.
-func sessionConfig(resolved *devcontainer.ResolvedDevContainer, probed, remoteEnv map[string]string) agentproto.SessionConfig {
-	cfg := agentproto.SessionConfig{}
-	if len(probed)+len(remoteEnv) > 0 {
-		cfg.Env = make(map[string]string, len(probed)+len(remoteEnv))
-		for k, v := range probed {
-			cfg.Env[k] = v
-		}
-		for k, v := range remoteEnv {
-			cfg.Env[k] = v
-		}
-	}
-	cfg.PostAttach = lifecycle.AttachSteps(resolved.Hooks.PostAttach)
-	cfg.Unset = resolved.RemoteEnvUnset
-	return cfg
-}
-
-// writeSessionConfig writes cfg where the agent reads it for every session.
-// It is world-readable because the agent may run as a non-root user; it
-// holds nothing a session would not see anyway.
-func (s *DevContainerService) writeSessionConfig(ctx context.Context, r *upRun, cfg agentproto.SessionConfig) error {
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return s.engine.WriteFileInContainer(ctx, r.info.Name, container.FileWrite{
-		Path: agentproto.SessionConfigPath, Content: data, Mode: "0644",
-	})
 }
 
 // stepHooks runs the once-per-container hooks that have not completed yet,

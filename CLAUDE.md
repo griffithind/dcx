@@ -87,9 +87,11 @@ container            start: startExisting
                      Provisioner.Create(Prepared): planSSH, prepareCommand, docker create /
                      compose up with the override. Nothing is built after the old environment
                      is removed.
-agent                agentctl.Provision: digest-checked install, root-owned SSH secrets, setup, launch
-secrets              runtime secrets on the /run/secrets tmpfs
-environment          /etc/environment, userEnvProbe, /run/dcx/session.json
+agent                runtime secrets fetched on the host; agentctl.Provision: digest-checked install
+                     (probe, copy, install), then one `dcx-agent provision` exec as root with an
+                     agentproto.ProvisionRequest on stdin: root-owned SSH secrets, runtime secrets on
+                     the /run/secrets tmpfs, /etc/environment, /etc/profile, userEnvProbe,
+                     /run/dcx/session.json, and the listener (started detached, waited for)
 ssh config           ~/.ssh/dcx/config block and known_hosts pin (before the hooks, so a failing
                      hook still leaves a way in)
 hooks                onCreate/updateContent/postCreate once (markers in /var/lib/dcx/lifecycle),
@@ -140,10 +142,10 @@ hooks                onCreate/updateContent/postCreate once (markers in /var/lib
 - `features/`: `Manager.ResolveAll`; `ParseFeatureSource` (upstream's reference rules, legacy ids); `resolver.go` (local, OCI with `registryauth` credentials and digest-verified manifests, HTTPS; cache in `~/.cache/dcx/features`: immutable `sha256/<hex>` entries plus `refs/` from tags and URLs to digests, re-checked after 24 h); `ordering.go` (upstream's rounds: `orderFeatures`, `sameFeature`, `compareFeatures`); `dockerfile.go` (features layer, per-feature env files); `lock.go` (`GenerateLockfile`, `VerifyLockfile`).
 - `build/`: `Builder` over the narrow `build.Engine`; `dockerfile.go`, `features.go`, `metadata.go` (the image's `devcontainer.metadata` label), `uid.go` (UID layer).
 - `lifecycle/`: `HookRunner` (host hooks with `os/exec`, container hooks with `ssh <alias>`), `Markers`. `lifecyclecmd/`: `Command` (string / array / named), the only lifecycle-command parser.
-- `agent/`: the dcx-agent (SSH server, sessions, SFTP, setup, IP gate). `agentctl/`: its host side (`Provision`). `agentproto/`: the shared contract (paths, port, secret locations, `SessionConfig`).
+- `agent/`: the dcx-agent (SSH server, sessions, SFTP, `provision`, IP gate). `agentctl/`: its host side (`Deploy`, `Provision`). `agentproto/`: the shared contract (paths, port, secret locations, `SessionConfig`).
 - `ssh/`: host keys, known_hosts, authorized keys, port choice; `hostconfig` writes `~/.ssh/dcx/config`.
 - `dcxhome/`: `$DCX_HOME` (default `~/.dcx`): known_hosts, the fallback client key, `workspaces/<id>/` (`WorkspaceDir`: host key, lock, compose override, `workspace.json`). Never build these paths by hand.
-- `env/`: `/etc/environment` (the container's `Config.Env`, never `remoteEnv`), `/etc/profile`, `userEnvProbe`. `secrets/`: running secret commands on the host. `lockfile/`: `devcontainer-lock.json` I/O. `mount/`: `Mount`, `Parse`. `registryauth/`: docker credentials (runs credential helpers). `shell/`: `Quote`, `Join`. `report/`: `Reporter`. `ui/`: terminal output (data on stdout, progress on stderr, ANSI colour only on a terminal). `version/`.
+- `env/`: stdlib-only logic dcx and the agent share: dcx's `/etc/environment` block (the container's `Config.Env`, never `remoteEnv`), the `/etc/profile` PATH patch, the `userEnvProbe` command and output. `secrets/`: running secret commands on the host. `lockfile/`: `devcontainer-lock.json` I/O. `mount/`: `Mount`, `Parse`. `registryauth/`: docker credentials (runs credential helpers). `shell/`: `Quote`, `Join`. `report/`: `Reporter`. `ui/`: terminal output (data on stdout, progress on stderr, ANSI colour only on a terminal). `version/`.
 
 ## Key types
 
@@ -186,14 +188,14 @@ Substitution: `${localEnv:VAR[:default]}`, `${containerEnv:VAR}` (at exec time),
 
 ## Agent
 
-`dcx-agent` is embedded gzipped and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned, never `/tmp`), checked by a SHA-256 sidecar. It runs as root; sessions switch to the session user (`remoteUser`/`containerUser`, else the container's default user by name) with `$SHELL`, else the login shell, else `/bin/sh`. `dcx-agent setup` first creates `/var/lib/dcx`, `/run/dcx`, the shell integration and the log. It is reached on the container's published port, the compose `service:` owner's, or the host port with host networking. Every session gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. Subcommands: `listen`, `ping`, `setup`, `sftp-server` (stdlib `flag`, no Cobra, to keep it small).
+`dcx-agent` is embedded gzipped and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned, never `/tmp`), checked by a SHA-256 sidecar. It runs as root; sessions switch to the session user (`remoteUser`/`containerUser`, else the container's default user by name) with `$SHELL`, else the login shell, else `/bin/sh`. Everything it needs arrives in one `dcx-agent provision` call (`agentproto.ProvisionRequest` on stdin, `ProvisionResult` on stdout), which creates `/var/lib/dcx`, `/run/dcx`, the shell integration and the log, writes the secrets (atomically, never through a symlink), `/etc/environment`, `/etc/profile` and the session configuration, and starts the listener. It is reached on the container's published port, the compose `service:` owner's, or the host port with host networking. Every session gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. Subcommands: `provision`, `listen`, `ping`, `sftp-server` (stdlib `flag`, no Cobra, to keep it small).
 
 ## Rules
 
 - Everything reaches the container over OpenSSH through the workspace's alias: users (`dcx ssh`, `ssh <alias>`) and container hooks (`lifecycle.HookRunner`). dcx has no SSH client of its own.
 - Only `internal/cli` and `internal/ui` print. Everything else takes a `report.Reporter`; `--json` commands pass `report.Discard`.
 - Library code receives a `container.Engine` (`build` the narrower `build.Engine`) and never constructs one. Only `container/docker.go` runs `docker` (depguard enforces it): add an Engine method rather than calling `os/exec`.
-- Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
+- Container-side setup belongs in the agent (`provision`), in Go; keep `sh -c` scripts to what must run before the agent exists (deploy) or around it (markers). Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
 - Substitution happens once, in `devcontainer.LoadConfig` (image metadata in `parseImageMetadata`); never substitute again downstream.
 - Read `docs/compatibility.md` before changing resolution, features or the runtime; record a new difference from devcontainers/cli there.

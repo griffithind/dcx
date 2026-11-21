@@ -21,6 +21,7 @@ type ContainerSummary struct {
 	Labels  map[string]string
 	Created time.Time
 	Env     []string // Config.Env
+	User    string   // Config.User
 }
 
 // ContainerDetails is detailed container info returned by InspectContainer.
@@ -112,6 +113,7 @@ func containerInfoFromSummary(c *ContainerSummary) *ContainerInfo {
 		PrimaryService: l.ComposeService,
 		Labels:         l,
 		Env:            c.Env,
+		User:           c.User,
 	}
 }
 

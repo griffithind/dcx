@@ -54,6 +54,9 @@ type ContainerInfo struct {
 	// Env is the container's Config.Env (image ENV, features' and the
 	// config's containerEnv), from the same inspect as everything else.
 	Env []string
+	// User is the container's Config.User, the user `docker exec` runs as
+	// by default ("" is root).
+	User string
 }
 
 // IsSingleContainer returns true if this is a single-container (non-compose) devcontainer.

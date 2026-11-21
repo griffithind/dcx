@@ -2,180 +2,105 @@ package agentctl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container/containertest"
+	"github.com/griffithind/dcx/internal/report"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func agentOpts(cidrs ...string) Options {
-	return Options{ContainerName: "c1", WorkspaceID: "wk_test", User: "dev", WorkDir: "/workspaces/app", AllowedCIDRs: cidrs}
-}
-
-func isPing(argv []string) bool {
-	return len(argv) >= 2 && argv[0] == agentproto.BinaryPath && argv[1] == "ping"
-}
-
-func TestLaunchSkipsWhenAlreadyListening(t *testing.T) {
-	fake := &containertest.Fake{}
+// currentAgent is a fake engine whose container already has the embedded
+// agent, so Provision goes straight to the provision call.
+func currentAgent(t *testing.T) *containertest.Fake {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-
-	err := launch(context.Background(), fake, agentOpts(), true)
-	require.NoError(t, err)
-	assert.Empty(t, fake.CallsTo("ExecDetachedAsRoot"))
+	bin := agentBinary(t)
+	return &containertest.Fake{Outputs: map[string]string{probeKey: "x86_64\n" + sha256Hex(bin) + "\n"}}
 }
 
-func TestLaunchStartsAndWaitsForReadiness(t *testing.T) {
-	var pings atomic.Int32
-	fake := &containertest.Fake{ExecFunc: func(_ string, argv []string) error {
-		// Not listening on the idempotency probe and the first two readiness
-		// polls; listening afterwards.
-		if isPing(argv) && pings.Add(1) <= 3 {
-			return errors.New("connection refused")
+func provisionResult(res agentproto.ProvisionResult) func(string, []string, []byte) ([]byte, error) {
+	return func(string, []string, []byte) ([]byte, error) {
+		data, err := json.Marshal(res)
+		return data, err
+	}
+}
+
+// Everything the agent needs travels in one exec, as root, on stdin.
+func TestProvisionSendsOneRequest(t *testing.T) {
+	fake := currentAgent(t)
+	fake.InputFunc = provisionResult(agentproto.ProvisionResult{Started: true})
+	opts := Options{
+		ContainerName: "c1", WorkspaceID: "wk_test", User: "dev", DefaultUser: "node",
+		WorkDir: "/workspaces/app", AllowedCIDRs: []string{"10.0.0.0/24"},
+		Secrets:      []agentproto.Secret{{Name: "token", Value: []byte("t0k")}},
+		SecretsOwner: "dev",
+		Environment:  map[string]string{"A": "1"},
+		Probe:        "loginInteractiveShell",
+		Session:      agentproto.SessionConfig{Env: map[string]string{"R": "remote"}},
+	}
+	require.NoError(t, Provision(context.Background(), fake, nil, opts))
+
+	calls := fake.CallsTo("ExecAsRootWithInput")
+	require.Len(t, calls, 1)
+	assert.Equal(t, []string{"c1", agentproto.BinaryPath, "provision"}, calls[0].Args)
+	for _, c := range fake.Calls() {
+		assert.NotContains(t, strings.Join(c.Args, " "), "t0k", "secrets never reach a command line")
+	}
+
+	var req agentproto.ProvisionRequest
+	require.NoError(t, json.Unmarshal(fake.Inputs[0], &req))
+	assert.Contains(t, string(req.HostKey), "PRIVATE KEY")
+	assert.Contains(t, string(req.AuthorizedKeys), "ssh-ed25519", "the dcx fallback key is always authorized")
+	assert.Equal(t, opts.Secrets, req.Secrets)
+	assert.Equal(t, "dev", req.SecretsOwner)
+	assert.Equal(t, opts.Environment, req.Environment)
+	assert.Equal(t, "loginInteractiveShell", req.Probe)
+	assert.Equal(t, "dev", req.ProbeUser)
+	assert.Equal(t, opts.Session, req.Session)
+	assert.Equal(t, agentproto.ListenConfig{
+		Addr: agentproto.ListenAddr("0.0.0.0"), User: "dev", WorkDir: "/workspaces/app", AllowCIDRs: []string{"10.0.0.0/24"},
+	}, req.Listen)
+	assert.Equal(t, "node", req.DefaultUser)
+}
+
+// What the agent reports reaches the user; a failure is an error.
+func TestProvisionReportsTheResult(t *testing.T) {
+	fake := currentAgent(t)
+	fake.InputFunc = provisionResult(agentproto.ProvisionResult{
+		Warnings: []string{"Environment probe failed: boom"},
+		Skipped:  []string{"QUOTED"},
+	})
+	rec := &report.Recorder{}
+	require.NoError(t, Provision(context.Background(), fake, rec, Options{ContainerName: "c1", WorkspaceID: "wk_test"}))
+	var warnings []string
+	for _, m := range rec.Messages() {
+		if m.Level == report.LevelWarn {
+			warnings = append(warnings, m.Text)
 		}
-		return nil
-	}}
-	t.Setenv("HOME", t.TempDir())
+	}
+	assert.Equal(t, []string{
+		"Environment probe failed: boom",
+		"Not written to /etc/environment (name or value it cannot express; sessions still get them): QUOTED",
+	}, warnings)
 
-	err := launch(context.Background(), fake, agentOpts("10.0.0.0/24"), true)
-	require.NoError(t, err)
-
-	launches := fake.CallsTo("ExecDetachedAsRoot")
-	require.Len(t, launches, 1)
-	argv := strings.Join(launches[0].Args, " ")
-	assert.Contains(t, argv, agentproto.BinaryPath+" listen")
-	assert.Contains(t, argv, "--addr "+agentproto.ListenAddr("0.0.0.0"))
-	assert.Contains(t, argv, "--host-key "+agentproto.HostKeyPath)
-	assert.Contains(t, argv, "--authorized-keys "+agentproto.AuthorizedKeysPath)
-	assert.Contains(t, argv, "--user dev")
-	assert.Contains(t, argv, "--workdir /workspaces/app")
-	assert.Contains(t, argv, "--allow-cidrs 10.0.0.0/24")
-	assert.GreaterOrEqual(t, pings.Load(), int32(4), "launch must wait until the agent answers")
-}
-
-func TestLaunchFailsWhenAgentNeverListens(t *testing.T) {
-	old := readyTimeout
-	readyTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { readyTimeout = old })
-
-	fake := &containertest.Fake{ExecFunc: func(_ string, argv []string) error {
-		if isPing(argv) {
-			return errors.New("connection refused")
-		}
-		return nil
-	}}
-	t.Setenv("HOME", t.TempDir())
-
-	err := launch(context.Background(), fake, agentOpts(), true)
+	fake = currentAgent(t)
+	fake.InputFunc = func(string, []string, []byte) ([]byte, error) {
+		return []byte(`{"error":"dcx agent did not start listening within 15s; agent log:\nbind: address in use"}`), errors.New("exit status 1")
+	}
+	err := Provision(context.Background(), fake, nil, Options{ContainerName: "c1", WorkspaceID: "wk_test"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "did not start listening")
-}
+	assert.Contains(t, err.Error(), "address in use", "the agent's explanation is kept")
 
-func TestWriteSecretsWritesKeysWithOwnerAndModes(t *testing.T) {
-	fake := &containertest.Fake{}
-	t.Setenv("HOME", t.TempDir())
-
-	err := writeSecrets(context.Background(), fake, agentOpts())
-	require.NoError(t, err)
-
-	hostKey, ok := fake.Files["c1:"+agentproto.HostKeyPath]
-	require.True(t, ok, "host key must be written")
-	assert.Contains(t, string(hostKey), "PRIVATE KEY")
-	authKeys, ok := fake.Files["c1:"+agentproto.AuthorizedKeysPath]
-	require.True(t, ok, "authorized_keys must be written")
-	assert.Contains(t, string(authKeys), "ssh-ed25519", "the dcx fallback key is always authorized")
-
-	modes := map[string]string{}
-	for _, c := range fake.CallsTo("WriteFileInContainer") {
-		modes[c.Args[1]] = c.Args[3]
-		assert.Equal(t, "root", c.Args[2], "secrets are owned by the (root) agent")
+	fake = currentAgent(t)
+	fake.InputFunc = func(string, []string, []byte) ([]byte, error) {
+		return nil, errors.New("exec failed: no such container")
 	}
-	assert.Equal(t, "0400", modes[agentproto.HostKeyPath])
-	assert.Equal(t, "0444", modes[agentproto.AuthorizedKeysPath])
-	assert.Len(t, modes, 2, "one exec per file")
-}
-
-// When the agent never starts listening, the error must include its log so
-// the cause (bad host key permissions, port in use, ...) is visible.
-func TestLaunchTimeoutIncludesAgentLog(t *testing.T) {
-	old := readyTimeout
-	readyTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { readyTimeout = old })
-
-	fake := &containertest.Fake{
-		ExecFunc: func(_ string, argv []string) error {
-			if isPing(argv) {
-				return errors.New("connection refused")
-			}
-			return nil
-		},
-		Outputs: map[string]string{
-			"tail -n 20 " + agentproto.LogPath: "dcx-agent: listen 0.0.0.0:48022: address already in use\n",
-		},
-	}
-	t.Setenv("HOME", t.TempDir())
-
-	err := launch(context.Background(), fake, agentOpts(), true)
+	err = Provision(context.Background(), fake, nil, Options{ContainerName: "c1", WorkspaceID: "wk_test"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "address already in use")
-
-	launch := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
-	assert.Contains(t, launch, agentproto.LogPath, "agent output must be captured")
-
-	// Root-owned dirs and the log are prepared as root first.
-	setup := fake.CallsTo("ExecAsRoot")
-	require.Len(t, setup, 1)
-	assert.Equal(t, []string{"c1", agentproto.BinaryPath, "setup"}, setup[0].Args)
-}
-
-// notListeningUntilLaunched answers pings only after the agent was launched.
-func notListeningUntilLaunched(fake *containertest.Fake) func(string, []string) error {
-	return func(_ string, argv []string) error {
-		if isPing(argv) && len(fake.CallsTo("ExecDetachedAsRoot")) == 0 {
-			return errors.New("connection refused")
-		}
-		return nil
-	}
-}
-
-// Without a session user, sessions run as the container's default user by
-// name (M13), so they get its USER and HOME.
-func TestLaunchWithoutSessionUserUsesContainerDefaultUser(t *testing.T) {
-	fake := &containertest.Fake{Outputs: map[string]string{strings.Join(defaultUserQuery, " "): "node\n"}}
-	fake.ExecFunc = notListeningUntilLaunched(fake)
-	t.Setenv("HOME", t.TempDir())
-
-	opts := agentOpts()
-	opts.User = ""
-	require.NoError(t, launch(context.Background(), fake, opts, true))
-	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
-	assert.Contains(t, argv, "--user node")
-}
-
-func TestLaunchHonoursListenAddr(t *testing.T) {
-	var pinged []string
-	fake := &containertest.Fake{}
-	fake.ExecFunc = func(name string, argv []string) error {
-		if isPing(argv) {
-			pinged = append(pinged, argv[len(argv)-1])
-		}
-		return notListeningUntilLaunched(fake)(name, argv)
-	}
-	t.Setenv("HOME", t.TempDir())
-
-	opts := agentOpts()
-	opts.ListenAddr = "127.0.0.1:40123"
-	require.NoError(t, launch(context.Background(), fake, opts, true))
-	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
-	assert.Contains(t, argv, "--addr 127.0.0.1:40123")
-	require.NotEmpty(t, pinged)
-	for _, addr := range pinged {
-		assert.Equal(t, "127.0.0.1:40123", addr, "probes must use the agent's port")
-	}
+	assert.Contains(t, err.Error(), "no such container")
 }

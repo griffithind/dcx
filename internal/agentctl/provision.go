@@ -1,16 +1,14 @@
 // Package agentctl provisions the dcx-agent in a container: it installs (or
-// upgrades) the binary, writes the agent's SSH secrets, prepares its
-// root-owned directories and makes sure it is listening. Everything goes
-// through the container engine.
+// upgrades) the binary, then hands the agent everything it needs in one
+// `dcx-agent provision` call. Everything goes through the container engine.
 package agentctl
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container"
@@ -24,8 +22,10 @@ type Options struct {
 	// WorkspaceID selects the workspace's persistent SSH host key.
 	WorkspaceID string
 	// User is the user sessions run as (remoteUser); "" means the
-	// container's default user.
+	// container's default user, DefaultUser.
 	User string
+	// DefaultUser is the container's Config.User.
+	DefaultUser string
 	// WorkDir is where sessions start; "" means /workspace.
 	WorkDir string
 	// ListenAddr is the agent's listen address; "" means
@@ -35,8 +35,19 @@ type Options struct {
 	// (`dcx up --hosts`).
 	AllowedCIDRs []string
 	// NewContainer says dcx just created the container, so no agent can be
-	// running in it: nothing to wait for or to check before launching.
+	// running in it: nothing to wait for after installing.
 	NewContainer bool
+
+	// Secrets are the runtime secrets, owned by SecretsOwner ("" is root).
+	Secrets      []agentproto.Secret
+	SecretsOwner string
+	// Environment is written to dcx's block of /etc/environment.
+	Environment map[string]string
+	// Probe is the userEnvProbe ("none" or "" skips it).
+	Probe string
+	// Session is what every session gets; its Env (remoteEnv) is laid over
+	// the probed environment.
+	Session agentproto.SessionConfig
 }
 
 func (o Options) listenAddr() string {
@@ -46,17 +57,12 @@ func (o Options) listenAddr() string {
 	return o.ListenAddr
 }
 
-// readyTimeout bounds how long Provision waits for a launched agent.
-var readyTimeout = 15 * time.Second
-
-// defaultUserQuery prints the container default user's name (as
-// devcontainers/cli does, so sessions get its USER and HOME), or its uid
-// when the passwd database has no name for it.
-var defaultUserQuery = []string{"sh", "-c", "id -un 2>/dev/null || id -u"}
-
-// Provision makes the container's agent current and listening. It is
-// idempotent: an up-to-date, listening agent is left alone apart from its
-// secrets, which are rewritten so host key changes (a regenerated
+// Provision makes the container's agent current, provisioned and
+// listening: it installs the agent when it is missing or outdated, then
+// runs `dcx-agent provision` once, as root, with the request on stdin (the
+// SSH and runtime secrets, /etc/environment, the userEnvProbe, the session
+// configuration, the listener). It is idempotent: a listening agent keeps
+// running, and its secrets are rewritten so key changes (a regenerated
 // ~/.ssh/id_ed25519) apply on the next `dcx up`.
 func Provision(ctx context.Context, engine container.Engine, rep report.Reporter, opts Options) error {
 	rep = report.OrDiscard(rep)
@@ -70,111 +76,70 @@ func Provision(ctx context.Context, engine container.Engine, rep report.Reporter
 			return err
 		}
 	}
-	if err := writeSecrets(ctx, engine, opts); err != nil {
-		return fmt.Errorf("failed to mount SSH secrets: %w", err)
+
+	req, err := request(opts)
+	if err != nil {
+		return err
 	}
-	// After an install nothing is listening (waitOutdatedGone checked),
-	// nor in a container dcx just created.
-	if err := launch(ctx, engine, opts, !installed && !opts.NewContainer); err != nil {
-		return fmt.Errorf("failed to launch SSH agent: %w", err)
+	input, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	out, runErr := engine.ExecAsRootWithInput(ctx, opts.ContainerName, []string{agentproto.BinaryPath, "provision"}, input)
+	var res agentproto.ProvisionResult
+	if err := json.Unmarshal(out, &res); err != nil {
+		if runErr != nil {
+			return fmt.Errorf("failed to provision dcx agent: %w", runErr)
+		}
+		return fmt.Errorf("failed to provision dcx agent: unreadable result: %w", err)
+	}
+	for _, w := range res.Warnings {
+		rep.Warnf("%s", w)
+	}
+	if len(res.Skipped) > 0 {
+		rep.Warnf("Not written to /etc/environment (name or value it cannot express; sessions still get them): %s", strings.Join(res.Skipped, ", "))
+	}
+	if res.Error != "" {
+		return fmt.Errorf("failed to provision dcx agent: %s", res.Error)
+	}
+	if runErr != nil {
+		return fmt.Errorf("failed to provision dcx agent: %w", runErr)
 	}
 	return nil
 }
 
-// writeSecrets writes the workspace's persistent host key and the user's
-// authorized public keys into /run/secrets/dcx/.
-//
-// Both are root-owned, like the agent that reads them; the host key is
-// 0400.
-func writeSecrets(ctx context.Context, engine container.Engine, opts Options) error {
+// request builds the provision request: the workspace's persistent host
+// key and the user's authorized public keys, then opts.
+func request(opts Options) (agentproto.ProvisionRequest, error) {
 	keyPath, _, err := dcxssh.EnsureHostKey(opts.WorkspaceID)
 	if err != nil {
-		return fmt.Errorf("ensure host key: %w", err)
+		return agentproto.ProvisionRequest{}, fmt.Errorf("ensure host key: %w", err)
 	}
 	hostKey, err := os.ReadFile(keyPath)
 	if err != nil {
-		return fmt.Errorf("read host key: %w", err)
+		return agentproto.ProvisionRequest{}, fmt.Errorf("read host key: %w", err)
 	}
 	authKeys, err := dcxssh.AuthorizedKeys()
 	if err != nil {
-		return fmt.Errorf("collect authorized keys: %w", err)
+		return agentproto.ProvisionRequest{}, fmt.Errorf("collect authorized keys: %w", err)
 	}
-	return container.MountDCXSecrets(ctx, engine, opts.ContainerName, []container.DCXSecret{
-		{Name: "authorized_keys", Value: authKeys, Mode: "0444", Owner: "root"},
-		{Name: "ssh_host_ed25519_key", Value: hostKey, Mode: "0400", Owner: "root"},
-	})
-}
-
-// launch starts the agent's SSH listener unless one already answers
-// (checked when mayBeListening), then waits until it does, so lifecycle
-// hooks (which connect over SSH) don't race its startup.
-func launch(ctx context.Context, engine container.Engine, opts Options, mayBeListening bool) error {
-	addr := opts.listenAddr()
-	if mayBeListening && Listening(ctx, engine, opts.ContainerName, addr) {
-		return nil
-	}
-
-	// The agent runs as root and switches to the session user for each
-	// session, so any remoteUser works whatever the image's USER is.
-	// Without one, sessions run as the container's default user.
-	user := opts.User
-	if user == "" {
-		name, err := engine.ExecOutput(ctx, opts.ContainerName, defaultUserQuery)
-		if err != nil {
-			return fmt.Errorf("determine the container's default user: %w", err)
-		}
-		user = strings.TrimSpace(string(name))
-	}
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir = "/workspace"
-	}
-	argv := []string{
-		agentproto.BinaryPath, "listen",
-		"--addr", addr,
-		"--host-key", agentproto.HostKeyPath,
-		"--authorized-keys", agentproto.AuthorizedKeysPath,
-		"--user", user,
-		"--workdir", workDir,
-	}
-	if len(opts.AllowedCIDRs) > 0 {
-		argv = append(argv, "--allow-cidrs", strings.Join(opts.AllowedCIDRs, ","))
-	}
-
-	// `dcx-agent setup` prepares the root-owned directories, shell
-	// integration and log file.
-	if _, err := engine.ExecAsRoot(ctx, opts.ContainerName, []string{
-		agentproto.BinaryPath, "setup",
-	}); err != nil {
-		return fmt.Errorf("prepare agent: %w", err)
-	}
-
-	// Keep the agent's output in its log so a failed start can be explained
-	// (`docker exec -d` discards it). argv is passed as positional
-	// arguments, never interpolated into the script.
-	wrapped := append([]string{"sh", "-c", `exec "$0" "$@" >` + agentproto.LogPath + ` 2>&1`}, argv...)
-	if err := engine.ExecDetachedAsRoot(ctx, opts.ContainerName, wrapped); err != nil {
-		return err
-	}
-
-	deadline := time.Now().Add(readyTimeout)
-	for time.Now().Before(deadline) {
-		if Listening(ctx, engine, opts.ContainerName, addr) {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	msg := fmt.Sprintf("dcx agent did not start listening within %s", readyTimeout)
-	if out, err := engine.ExecOutput(ctx, opts.ContainerName, []string{"tail", "-n", "20", agentproto.LogPath}); err == nil {
-		if log := strings.TrimSpace(string(out)); log != "" {
-			msg += "; agent log:\n" + log
-		}
-	}
-	return errors.New(msg)
+	return agentproto.ProvisionRequest{
+		HostKey:        hostKey,
+		AuthorizedKeys: authKeys,
+		Secrets:        opts.Secrets,
+		SecretsOwner:   opts.SecretsOwner,
+		Environment:    opts.Environment,
+		Probe:          opts.Probe,
+		ProbeUser:      opts.User,
+		Session:        opts.Session,
+		Listen: agentproto.ListenConfig{
+			Addr:       opts.listenAddr(),
+			User:       opts.User,
+			WorkDir:    opts.WorkDir,
+			AllowCIDRs: opts.AllowedCIDRs,
+		},
+		DefaultUser: opts.DefaultUser,
+	}, nil
 }
 
 // Listening reports whether the container's agent, listening on

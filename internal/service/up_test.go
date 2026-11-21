@@ -7,11 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/lifecyclecmd"
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,26 +67,6 @@ func TestSetupComplete(t *testing.T) {
 	fake.OutputFunc = func(string, []string) ([]byte, error) { return nil, errors.New("container not responding") }
 	_, err = svc.setupComplete(ctx, markerInfo(true))
 	assert.Error(t, err)
-}
-
-func TestSessionConfigMergesEnvAndAttachSteps(t *testing.T) {
-	resolved := &devcontainer.ResolvedDevContainer{
-		Hooks: devcontainer.Hooks{PostAttach: []devcontainer.Hook{
-			{Source: devcontainer.HookFromConfig, Command: &lifecyclecmd.Command{Shell: "echo hi"}},
-		}},
-	}
-	cfg := sessionConfig(resolved,
-		map[string]string{"PATH": "/probed/bin", "NVM_DIR": "/nvm"},
-		map[string]string{"PATH": "/remote/bin"},
-	)
-	assert.Equal(t, map[string]string{"PATH": "/remote/bin", "NVM_DIR": "/nvm"}, cfg.Env, "remoteEnv overrides the probed environment")
-	assert.Equal(t, []agentproto.AttachStep{
-		{Label: "devcontainer.json", Commands: []agentproto.AttachCommand{{Shell: "echo hi"}}},
-	}, cfg.PostAttach)
-
-	empty := sessionConfig(&devcontainer.ResolvedDevContainer{}, nil, nil)
-	assert.Nil(t, empty.Env)
-	assert.Empty(t, empty.PostAttach)
 }
 
 func TestDecideUp(t *testing.T) {

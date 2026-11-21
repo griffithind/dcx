@@ -40,7 +40,7 @@ func TestRuntimeSecretsImage(t *testing.T) {
 			"SECRET_TWO": "echo value-two"
 		}}}
 	}`, helpers.UniqueTestName(t)))
-	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "Mounting secrets")
+	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "Fetching runtime secrets")
 
 	assert.Equal(t, "value-one", sshOut(t, ws, "cat", "/run/secrets/SECRET_ONE"))
 	assert.Equal(t, "value-two", sshOut(t, ws, "cat", "/run/secrets/SECRET_TWO"))
@@ -94,7 +94,7 @@ RUN --mount=type=secret,id=SENSITIVE echo "secret was accessed" > /build-status
 	})
 	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
 	assert.Contains(t, stdout, "Fetching build secrets")
-	assert.Contains(t, stdout, "Mounting secrets")
+	assert.Contains(t, stdout, "Fetching runtime secrets")
 
 	assert.Equal(t, "build-time-only", sshOut(t, ws, "cat", "/build-time-value"))
 	assert.Equal(t, "secret was accessed", sshOut(t, ws, "cat", "/build-status"))

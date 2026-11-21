@@ -15,7 +15,6 @@ import (
 	"github.com/griffithind/dcx/internal/container"
 	"github.com/griffithind/dcx/internal/dcxhome"
 	"github.com/griffithind/dcx/internal/devcontainer"
-	"github.com/griffithind/dcx/internal/env"
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/report"
@@ -264,72 +263,6 @@ func (s *DevContainerService) startExisting(ctx context.Context, resolved *devco
 		return fmt.Errorf("failed to create provisioner: %w", err)
 	}
 	return explainPortConflict(prov.Start(ctx), recordedSSHPort(existing))
-}
-
-// setupContainerEnvironment applies patches and probes the user environment.
-// It returns the probed environment (injected into lifecycle hooks and
-// sessions) and remoteEnv with ${containerEnv:…} resolved.
-func (s *DevContainerService) setupContainerEnvironment(ctx context.Context, resolved *devcontainer.ResolvedDevContainer, containerInfo *state.ContainerInfo) (probed, remoteEnv map[string]string, err error) {
-	patcher := env.NewPatcher(s.engine)
-	prober := env.NewProber(s.engine)
-
-	// /etc/environment gets the container's environment (image ENV,
-	// features' containerEnv, containerEnv), as devcontainers/cli writes
-	// it. remoteEnv is not written there: the file is world-readable and
-	// remoteEnv often holds tokens; sessions get it from the agent.
-	envToPatch := make(map[string]string)
-	for k, v := range resolved.ContainerEnv {
-		envToPatch[k] = v
-	}
-	remoteEnv = resolved.RemoteEnv
-	if containerInfo.Env != nil {
-		containerEnv := devcontainer.EnvListToMap(containerInfo.Env)
-		remoteEnv = devcontainer.ResolveContainerEnvRefs(remoteEnv, containerEnv)
-		envToPatch = containerEnv
-	}
-
-	// Always reconcile dcx's block, so removed variables disappear too.
-	if s.verbose {
-		s.report.Infof("  [env] Patching /etc/environment with %d variables...", len(envToPatch))
-	}
-	if skipped, err := patcher.PatchEtcEnvironment(ctx, containerInfo.ID, envToPatch); err != nil {
-		s.report.Warnf("Failed to patch /etc/environment: %v", err)
-	} else if len(skipped) > 0 {
-		s.report.Warnf("Not written to /etc/environment (name or value it cannot express; sessions still get them): %s", strings.Join(skipped, ", "))
-	}
-
-	// Patch /etc/profile to preserve PATH from features
-	if s.verbose {
-		s.report.Infof("  [env] Patching /etc/profile for PATH preservation...")
-	}
-	if err := patcher.PatchEtcProfile(ctx, containerInfo.ID); err != nil {
-		s.report.Warnf("Failed to patch /etc/profile: %v", err)
-	}
-
-	// Probe the user environment (loginInteractiveShell unless configured).
-	probeType := env.ParseProbeType(resolved.UserEnvProbe)
-	if probeType == env.ProbeNone {
-		return nil, remoteEnv, nil
-	}
-
-	// Probe as the user sessions run as (remoteUser after image metadata
-	// is merged), not the raw config's value.
-	user := resolved.EffectiveUser
-
-	if s.verbose {
-		s.report.Infof("  [env] Probing user environment (mode: %s)...", probeType)
-	}
-
-	probedEnv, err := prober.Probe(ctx, containerInfo.ID, probeType, user)
-	if err != nil {
-		return nil, remoteEnv, fmt.Errorf("environment probe failed: %w", err)
-	}
-
-	if s.verbose && probedEnv != nil {
-		s.report.Infof("  [env] Captured %d environment variables", len(probedEnv))
-	}
-
-	return probedEnv, remoteEnv, nil
 }
 
 // setupSSHAccess configures SSH access to the container.

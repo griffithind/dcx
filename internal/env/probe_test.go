@@ -51,8 +51,8 @@ func TestParseEnvOutput(t *testing.T) {
 		"OPTS":            "--foo=bar",
 		"EMPTY":           "",
 		"BASH_FUNC_nvm%%": "() {  echo nvm\n}",
-	}, parseEnvOutput(out), "startup noise is skipped and multi-line values survive")
-	assert.Empty(t, parseEnvOutput(""))
+	}, ParseProbeOutput(out), "startup noise is skipped and multi-line values survive")
+	assert.Empty(t, ParseProbeOutput(""))
 }
 
 // The probe script runs the user's login shell and reports its
@@ -66,7 +66,7 @@ func TestProbeScriptRuns(t *testing.T) {
 	c.Env = append(os.Environ(), "DCX_PROBE_TEST=line1\nline2")
 	out, err := c.Output()
 	require.NoError(t, err)
-	env := parseEnvOutput(string(out))
+	env := ParseProbeOutput(string(out))
 	assert.Equal(t, "line1\nline2", env["DCX_PROBE_TEST"])
 	assert.NotEmpty(t, env["PATH"])
 }

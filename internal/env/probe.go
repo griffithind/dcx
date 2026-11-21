@@ -1,13 +1,11 @@
-// Package env handles user environment probing for devcontainers.
+// Package env is the container environment logic dcx and dcx-agent share:
+// the userEnvProbe (its command and output) and the system files the agent
+// maintains (dcx's block of /etc/environment, the /etc/profile PATH
+// patch). It is stdlib-only, because the agent binary compiles it in.
 package env
 
 import (
-	"context"
-	"fmt"
 	"strings"
-	"time"
-
-	"github.com/griffithind/dcx/internal/container"
 )
 
 // ProbeType represents the type of shell probe to use.
@@ -79,48 +77,10 @@ func ParseProbeType(s string) ProbeType {
 	}
 }
 
-// Prober probes container environments.
-type Prober struct {
-	engine  container.Engine
-	timeout time.Duration
-}
-
-// NewProber creates an environment prober that runs through engine.
-func NewProber(engine container.Engine) *Prober {
-	return &Prober{engine: engine, timeout: 10 * time.Second}
-}
-
-// Probe executes the environment probe in the container and returns the environment variables.
-func (p *Prober) Probe(ctx context.Context, containerID string, probeType ProbeType, user string) (map[string]string, error) {
-	if probeType == ProbeNone || probeType == "" {
-		return nil, nil
-	}
-
-	cmd := ProbeCommand(probeType)
-	if cmd == nil {
-		return nil, nil
-	}
-
-	// Execute probe with timeout
-	probeCtx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
-
-	output, err := p.engine.ExecOutputAs(probeCtx, containerID, user, cmd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to probe environment: %w", err)
-	}
-
-	env := parseEnvOutput(string(output))
-
-	// Remove PWD as it's not meaningful for exec context
-	delete(env, "PWD")
-
-	return env, nil
-}
-
-// parseEnvOutput parses the probe's output: whatever the shell printed,
-// the marker, then NUL-separated KEY=VALUE entries.
-func parseEnvOutput(output string) map[string]string {
+// ParseProbeOutput parses the probe's output: whatever the shell printed,
+// the marker, then NUL-separated KEY=VALUE entries. PWD is dropped: it
+// is the probe's directory, not the session's.
+func ParseProbeOutput(output string) map[string]string {
 	env := make(map[string]string)
 	if i := strings.LastIndex(output, probeMarker+"\x00"); i >= 0 {
 		output = output[i+len(probeMarker)+1:]
@@ -130,5 +90,6 @@ func parseEnvOutput(output string) map[string]string {
 			env[entry[:idx]] = entry[idx+1:]
 		}
 	}
+	delete(env, "PWD")
 	return env
 }

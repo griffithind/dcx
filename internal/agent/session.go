@@ -154,34 +154,9 @@ func (s *Server) sessionCredential() (*syscall.Credential, error) {
 	if s.cfg.User == "" {
 		return nil, nil
 	}
-	u, err := lookupUser(s.cfg.User)
+	cred, err := credentialFor(s.cfg.User)
 	if err != nil {
-		if id, perr := parseUint32(s.cfg.User); perr == nil {
-			if id == uint32(os.Geteuid()) {
-				return nil, nil
-			}
-			return &syscall.Credential{Uid: id, Gid: id}, nil
-		}
-		return nil, fmt.Errorf("session user %q not found in the container", s.cfg.User)
-	}
-	uid, err := parseUint32(u.Uid)
-	if err != nil {
-		return nil, fmt.Errorf("session user %q: %w", s.cfg.User, err)
-	}
-	gid, err := parseUint32(u.Gid)
-	if err != nil {
-		return nil, fmt.Errorf("session user %q: %w", s.cfg.User, err)
-	}
-	if uid == uint32(os.Geteuid()) {
-		return nil, nil
-	}
-	cred := &syscall.Credential{Uid: uid, Gid: gid}
-	if ids, err := u.GroupIds(); err == nil {
-		for _, id := range ids {
-			if g, err := parseUint32(id); err == nil {
-				cred.Groups = append(cred.Groups, g)
-			}
-		}
+		return nil, fmt.Errorf("session %w", err)
 	}
 	return cred, nil
 }

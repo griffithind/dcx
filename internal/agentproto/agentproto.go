@@ -121,3 +121,82 @@ func PingAddr(listenAddr string) string {
 	}
 	return net.JoinHostPort("127.0.0.1", port)
 }
+
+// ProvisionRequest is what `dcx-agent provision` reads on stdin (JSON). dcx
+// sends it, as root, on every `dcx up` that does anything: the agent then
+// writes the SSH and runtime secrets, rewrites dcx's block of
+// /etc/environment, patches /etc/profile once, probes the user's
+// environment, writes the session configuration and starts its listener
+// unless one already answers. Secrets travel on stdin only, never in a
+// command line.
+type ProvisionRequest struct {
+	// HostKey (0400) and AuthorizedKeys (0444) go to DCXSecretsDir, root-owned.
+	HostKey        []byte `json:"hostKey"`
+	AuthorizedKeys []byte `json:"authorizedKeys"`
+
+	// Secrets are the runtime secrets, written to SecretsDir/<name> (0400,
+	// owned by SecretsOwner; "" is root).
+	Secrets      []Secret `json:"secrets,omitempty"`
+	SecretsOwner string   `json:"secretsOwner,omitempty"`
+
+	// Environment is the container's environment, written as dcx's block
+	// of /etc/environment (variables the format cannot express are
+	// skipped and reported).
+	Environment map[string]string `json:"environment"`
+
+	// Probe is the userEnvProbe ("loginInteractiveShell", "loginShell",
+	// "interactiveShell"; "" or "none" skips it). It runs as ProbeUser
+	// ("" is DefaultUser).
+	Probe     string `json:"probe,omitempty"`
+	ProbeUser string `json:"probeUser,omitempty"`
+
+	// Session is written to SessionConfigPath, its Env (remoteEnv) laid
+	// over the probed environment.
+	Session SessionConfig `json:"session"`
+
+	// Listen is the listener to start when none answers.
+	Listen ListenConfig `json:"listen"`
+
+	// DefaultUser is the container's Config.User ("name", "uid" or
+	// "uid:gid"; "" is root). When Listen.User or ProbeUser is empty, the
+	// agent uses it, by name when the passwd database has one (as
+	// `id -un` would).
+	DefaultUser string `json:"defaultUser,omitempty"`
+}
+
+// Secret is a runtime secret: a file name under SecretsDir and its value.
+type Secret struct {
+	Name  string `json:"name"`
+	Value []byte `json:"value"`
+}
+
+// ListenConfig is the agent's listener: its address, session user,
+// working directory and the extra CIDRs it accepts beyond loopback.
+type ListenConfig struct {
+	Addr       string   `json:"addr"`
+	User       string   `json:"user"`
+	WorkDir    string   `json:"workDir"`
+	AllowCIDRs []string `json:"allowCIDRs,omitempty"`
+}
+
+// ProvisionResult is what `dcx-agent provision` prints on stdout (JSON),
+// also when it fails.
+type ProvisionResult struct {
+	// Skipped lists the variables not written to /etc/environment.
+	Skipped []string `json:"skipped,omitempty"`
+	// Probed counts the variables the userEnvProbe captured.
+	Probed int `json:"probed"`
+	// Warnings are problems that did not stop provisioning (a failed probe).
+	Warnings []string `json:"warnings,omitempty"`
+	// Started is true when the listener was started (not already running).
+	Started bool `json:"started"`
+	// Error is set when provisioning failed.
+	Error string `json:"error,omitempty"`
+}
+
+// ProvisionMarkerEtcProfile records that /etc/profile was patched.
+const ProvisionMarkerEtcProfile = StateDir + "/.patchEtcProfileMarker"
+
+// LegacyMarkerEtcEnvironment was written by older dcx versions, which
+// appended to /etc/environment once; provision removes it.
+const LegacyMarkerEtcEnvironment = StateDir + "/.patchEtcEnvironmentMarker"

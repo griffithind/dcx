@@ -40,12 +40,10 @@ type Engine interface {
 	ComposeOutput(ctx context.Context, project ComposeProject, args ...string) ([]byte, error)
 
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
-	ExecDetachedAsRoot(ctx context.Context, containerName string, argv []string) error
 	ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error)
-	ExecOutputAs(ctx context.Context, containerName, user string, argv []string) ([]byte, error)
 	ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error)
 	CopyToContainer(ctx context.Context, src, containerName, dest string) error
-	WriteFileInContainer(ctx context.Context, containerName string, f FileWrite) error
+	ExecAsRootWithInput(ctx context.Context, containerName string, argv []string, input []byte) ([]byte, error)
 
 	// Image maintenance (dcx clean).
 	CleanupDerivedImages(ctx context.Context, workspaceID string) (*CleanupResult, error)
@@ -54,14 +52,3 @@ type Engine interface {
 }
 
 var _ Engine = (*Docker)(nil)
-
-// FileWrite is a file WriteFileInContainer writes, as root, in one exec:
-// Dirs are created first (and set to 0755, parents before children), then
-// the file is written with umask 077 and given Owner and Mode.
-type FileWrite struct {
-	Path    string
-	Content []byte
-	Owner   string // chown argument; "" keeps root
-	Mode    string // chmod argument; "" keeps 0600 for a new file
-	Dirs    []string
-}

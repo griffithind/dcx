@@ -18,7 +18,7 @@ var zshIntegration string
 //go:embed shell/fish.fish
 var fishIntegration string
 
-// shellIntegrationDir is root-owned; `dcx-agent setup` (run as root by
+// shellIntegrationDir is root-owned; `dcx-agent provision` (run as root by
 // dcx) writes the scripts, the listener only reads them.
 var shellIntegrationDir = agentproto.ShellIntegrationDir
 

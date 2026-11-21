@@ -46,8 +46,13 @@ type Fake struct {
 	Outputs map[string]string
 	// OutputFunc answers ExecOutput calls Outputs does not match.
 	OutputFunc func(containerName string, argv []string) ([]byte, error)
-	// Files records WriteFileInContainer content by "<container>:<path>".
+	// Files records files written into containers (agent copies, lifecycle
+	// markers) by "<container>:<path>".
 	Files map[string][]byte
+	// Inputs records the stdin of every ExecAsRootWithInput call, and
+	// InputFunc, when set, answers those calls.
+	Inputs    [][]byte
+	InputFunc func(containerName string, argv []string, input []byte) ([]byte, error)
 	// ComposeOutputs maps space-joined compose arguments (after the
 	// project flags) to ComposeOutput's result.
 	ComposeOutputs map[string]string
@@ -395,16 +400,6 @@ func (f *Fake) FileMarkers() {
 	}
 }
 
-func (f *Fake) ExecOutputAs(_ context.Context, name, user string, argv []string) ([]byte, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.record("ExecOutputAs", append([]string{name, user}, argv...)...)
-	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
-		return []byte(out), nil
-	}
-	return nil, fmt.Errorf("exec failed")
-}
-
 func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -429,20 +424,16 @@ func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte
 	return nil, nil
 }
 
-func (f *Fake) ExecDetachedAsRoot(_ context.Context, name string, argv []string) error {
+func (f *Fake) ExecAsRootWithInput(_ context.Context, name string, argv []string, input []byte) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("ExecDetachedAsRoot", append([]string{name}, argv...)...)
-	return nil
-}
-
-func (f *Fake) WriteFileInContainer(_ context.Context, name string, w container.FileWrite) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.record("WriteFileInContainer", name, w.Path, w.Owner, w.Mode, strings.Join(w.Dirs, ","))
-	if f.Files == nil {
-		f.Files = map[string][]byte{}
+	f.record("ExecAsRootWithInput", append([]string{name}, argv...)...)
+	f.Inputs = append(f.Inputs, append([]byte(nil), input...))
+	if f.InputFunc != nil {
+		return f.InputFunc(name, argv, input)
 	}
-	f.Files[name+":"+w.Path] = append([]byte(nil), w.Content...)
-	return nil
+	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
+		return []byte(out), nil
+	}
+	return nil, nil
 }

@@ -115,3 +115,7 @@ Existing containers keep working; `dcx up --recreate` picks up every change.
 - The agent runs as root and switches to the session user.
 - dcx builds with Go 1.27 and has fewer dependencies (no pterm, no
   self-update library, no in-process SSH client).
+- `dcx up` makes far fewer docker calls: a plain create takes about 1 s
+  instead of 3.3 s. The agent sets the container up itself in one call
+  (secrets, /etc/environment, the environment probe, its listener).
+  Runtime secrets are now owned by the user's group too.
