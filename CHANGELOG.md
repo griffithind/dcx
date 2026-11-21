@@ -119,8 +119,13 @@ Existing containers keep working; `dcx up --recreate` picks up every change.
   instead of 3.3 s, starting a stopped container 0.5 s. The agent sets the
   container up itself in one call (secrets, /etc/environment, the
   environment probe, its listener); the agent binary and lifecycle markers
-  are copied, not written by `docker exec`; the hooks of one `up` share an
-  SSH connection; commands no longer check the daemon before starting.
+  are copied, not written by `docker exec`; commands no longer check the
+  daemon before starting.
+- `dcx ssh` and container hooks share one SSH connection per workspace and
+  SSH agent, kept for 10 minutes after the last session: `dcx ssh -- cmd`
+  takes about 20 ms instead of 150 ms. A shell with another SSH agent gets
+  its own connection, so agent forwarding is always the shell's. Plain
+  `ssh <alias>` is unchanged.
 - Reconnecting to a container whose agent stopped no longer reruns
   `postStartCommand` when the container had started within the same second
   as the last one.

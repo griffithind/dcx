@@ -343,7 +343,8 @@ container is running, then hands over to OpenSSH using the host alias
 'dcx up' configured. The session is exactly what 'ssh <alias>' gives
 editors and other tools: the remote user, remoteEnv, the probed user
 environment, SSH agent forwarding, and postAttachCommand for interactive
-shells.
+shells. Sessions share one connection per SSH agent, kept open for 10
+minutes after the last one ends, so later commands start at once.
 
 Arguments after '--' keep their quoting:
 

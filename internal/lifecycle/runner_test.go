@@ -60,7 +60,7 @@ func (m *memMarkers) Mark(_ context.Context, phases ...string) error {
 func testRunner(hooks devcontainer.Hooks, failOn string) (*HookRunner, *[]string) {
 	var mu sync.Mutex
 	var ran []string
-	r := NewHookRunner("", report.Discard, "/ws", hooks)
+	r := NewHookRunner("", nil, report.Discard, "/ws", hooks)
 	exec := func(_ context.Context, c lifecyclecmd.Step) error {
 		mu.Lock()
 		ran = append(ran, c.String())
@@ -196,7 +196,7 @@ func TestRunInitializeUsesHost(t *testing.T) {
 // devcontainers/cli; the phase fails afterwards, naming the failure.
 func TestParallelFailureLetsOthersFinish(t *testing.T) {
 	hooks := devcontainer.Hooks{OnCreate: []devcontainer.Hook{local(t, `{"fail": "fail", "slow": "slow"}`)}}
-	r := NewHookRunner("", report.Discard, "/ws", hooks)
+	r := NewHookRunner("", nil, report.Discard, "/ws", hooks)
 	var finished atomic.Bool
 	r.execContainer = func(ctx context.Context, c lifecyclecmd.Step) error {
 		if c.Name == "fail" {

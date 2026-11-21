@@ -42,7 +42,7 @@ Entry points: `cmd/dcx` (`cli.Execute`), `cmd/dcx-agent` (`agent.Execute`), `age
 | `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newEngine` (the only engine construction, never contacts the daemon; `-v` traces docker commands), `newService`, `CLIContext` |
 | `validate.go` | `RequireRunningContainer`, `RequireExistingContainer` |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
-| `ssh.go` | `dcx ssh [-- cmd]`: execs OpenSSH to the workspace alias |
+| `ssh.go` | `dcx ssh [-- cmd]`: one `docker ps` for the running container, then execs OpenSSH to the workspace alias with `hostconfig.ShareOptions` |
 | `status.go`, `list.go`, `logs.go` | Information; render what the service returns |
 | `build.go`, `clean.go`, `lock.go`, `config.go`, `doctor.go`, `completion.go` | The other commands |
 | `hosts_parser.go` | `--hosts` parsing |
@@ -98,8 +98,8 @@ ssh config           ~/.ssh/dcx/config block and known_hosts pin (before the hoo
 hooks                onCreate/updateContent/postCreate once (markers in /var/lib/dcx/lifecycle, read and
                      written with `docker cp`),
                      postStart per start (also after a restart outside dcx: StartedAt vs the
-                     poststart marker); run as `ssh <alias>` sharing one connection (ControlMaster), -tt when
-                     dcx's stdout is a terminal
+                     poststart marker); run as `ssh <alias>`, -tt when dcx's stdout is a terminal, sharing
+                     one connection per SSH agent (hostconfig.ShareOptions) that `dcx ssh` reuses
 ```
 
 ### container (`internal/container/`)
@@ -146,8 +146,8 @@ hooks                onCreate/updateContent/postCreate once (markers in /var/lib
 - `build/`: `Builder` over the narrow `build.Engine`; `dockerfile.go`, `features.go`, `metadata.go` (the image's `devcontainer.metadata` label), `uid.go` (UID layer).
 - `lifecycle/`: `HookRunner` (host hooks with `os/exec`, container hooks with `ssh <alias>`), `Markers`. `lifecyclecmd/`: `Command` (string / array / named), the only lifecycle-command parser.
 - `agent/`: the dcx-agent (SSH server, sessions, SFTP, `provision`, IP gate). `agentctl/`: its host side (`Deploy`, `Provision`). `agentproto/`: the shared contract (paths, port, secret locations, `SessionConfig`).
-- `ssh/`: host keys, known_hosts, authorized keys, port choice; `hostconfig` writes `~/.ssh/dcx/config`.
-- `dcxhome/`: `$DCX_HOME` (default `~/.dcx`): known_hosts, the fallback client key, `workspaces/<id>/` (`WorkspaceDir`: host key, lock, compose override, `workspace.json`). Never build these paths by hand.
+- `ssh/`: host keys, known_hosts, authorized keys, port choice; `hostconfig` writes `~/.ssh/dcx/config` and gives dcx's own connections a shared connection per SSH agent (`ShareOptions`: the socket in the workspace folder, named by a hash of `SSH_AUTH_SOCK`, left out when the path is too long for OpenSSH).
+- `dcxhome/`: `$DCX_HOME` (default `~/.dcx`): known_hosts, the fallback client key, `workspaces/<id>/` (`WorkspaceDir`: host key, lock, compose override, `workspace.json`, shared SSH connection sockets). Never build these paths by hand.
 - `env/`: stdlib-only logic dcx and the agent share: dcx's `/etc/environment` block (the container's `Config.Env`, never `remoteEnv`), the `/etc/profile` PATH patch, the `userEnvProbe` command and output. `secrets/`: running secret commands on the host. `lockfile/`: `devcontainer-lock.json` I/O. `mount/`: `Mount`, `Parse`. `registryauth/`: docker credentials (runs credential helpers). `shell/`: `Quote`, `Join`. `report/`: `Reporter`. `ui/`: terminal output (data on stdout, progress on stderr, ANSI colour only on a terminal). `version/`.
 
 ## Key types

@@ -53,8 +53,6 @@ func (h *fakeHooks) RunCreateHooks(ctx context.Context, m lifecycle.Markers) err
 }
 func (h *fakeHooks) RunStartHooks(context.Context) error { h.start++; return nil }
 
-func (h *fakeHooks) Multiplex() func() { return func() {} }
-
 // upHarness is a workspace with an image config, a fake engine whose
 // containers keep marker files, and fakes for the agent and the hooks.
 type upHarness struct {

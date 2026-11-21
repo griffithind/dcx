@@ -23,6 +23,9 @@ const (
 	ComposeOverrideFile = "docker-compose.dcx.yml"
 	// RecordFile is the Workspace record.
 	RecordFile = "workspace.json"
+	// ControlSocketPrefix starts the names of the workspace's shared SSH
+	// connection sockets (one per SSH agent; hostconfig.ShareOptions).
+	ControlSocketPrefix = "ssh-"
 )
 
 // WorkspaceDir returns the workspace's folder, $DCX_HOME/workspaces/<id>,

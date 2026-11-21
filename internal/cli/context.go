@@ -21,7 +21,7 @@ type CLIContext struct {
 	// Ctx is the context for the operation.
 	Ctx context.Context
 
-	// Docker is the container engine (the daemon was reachable).
+	// Docker is the container engine.
 	Docker container.Engine
 
 	// Service is the devcontainer service for devcontainer operations.

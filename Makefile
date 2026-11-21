@@ -23,8 +23,8 @@ build-agent:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
 	@echo "Compressing agent binaries for embedding..."
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
+	gzip -n -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -n -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
 
 # Build main CLI with embedded agent binaries
 build: build-agent
@@ -53,8 +53,8 @@ release-agent:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 ./cmd/dcx-agent
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(RELEASE_LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 ./cmd/dcx-agent
 	@echo "Compressing agent binaries for embedding..."
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
-	gzip -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
+	gzip -n -c $(BUILD_DIR)/$(AGENT_NAME)-linux-amd64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-amd64.gz
+	gzip -n -c $(BUILD_DIR)/$(AGENT_NAME)-linux-arm64 > $(EMBED_DIR)/$(AGENT_NAME)-linux-arm64.gz
 
 # Install to $(go env GOPATH)/bin
 install: build

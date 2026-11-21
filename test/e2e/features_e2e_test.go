@@ -251,6 +251,9 @@ func TestLocalFeaturesE2E(t *testing.T) {
 	workspace := createWorkspaceWithLocalFeatures(t)
 	id := devcontainer.ComputeID(workspace)
 	t.Cleanup(func() {
+		// Cleanups run last first: take the container down (also done by
+		// the workspace's own cleanup, later) so its volumes are not in use.
+		helpers.RunDCXInDir(t, workspace, "down")
 		for _, v := range []string{"dcx-e2e-cache-" + id, "dcx-e2e-feat-" + id} {
 			_ = exec.Command("docker", "volume", "rm", "-f", v).Run()
 		}
@@ -319,7 +322,7 @@ func TestLocalFeaturesE2E(t *testing.T) {
 // with-dependencies and with-mounts copied from testdata/features.
 func createWorkspaceWithLocalFeatures(t *testing.T) string {
 	t.Helper()
-	workspace := t.TempDir()
+	workspace := helpers.CreateWorkspaceFiles(t, nil) // taken down when the test ends
 	features := filepath.Join(workspace, ".devcontainer", "features")
 	write := func(feature, file, content string, mode os.FileMode) {
 		dir := filepath.Join(features, feature)

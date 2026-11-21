@@ -175,10 +175,29 @@ echo "$n"`
 		assert.Equal(t, "attached\nattached", dcxExec(t, workspace, "cat", "/tmp/attach.log"))
 	})
 
+	// dcx ssh sessions share one connection (per SSH agent), left open for
+	// the next one; its socket is in the workspace's $DCX_HOME folder.
+	var controlSockets []string
+	t.Run("dcx_ssh_shares_a_connection", func(t *testing.T) {
+		helpers.RunDCXInDirSuccess(t, workspace, "ssh", "--", "true")
+		dir := filepath.Join(os.Getenv("DCX_HOME"), "workspaces", helpers.GetStatus(t, workspace).WorkspaceID)
+		var err error
+		controlSockets, err = filepath.Glob(filepath.Join(dir, "ssh-*"))
+		require.NoError(t, err)
+		require.Len(t, controlSockets, 1, "one shared connection for the run's agent")
+		out, err := exec.Command("ssh", "-o", "ControlPath="+controlSockets[0], "-O", "check", hostname).CombinedOutput()
+		require.NoError(t, err, "the shared connection stays open: %s", out)
+		assert.Equal(t, "shared", dcxExec(t, workspace, "echo", "shared"))
+	})
+
 	// Test dcx down removes SSH config
 	t.Run("down_removes_ssh_config", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
 		assert.Contains(t, stdout, "removed")
+		for _, socket := range controlSockets {
+			assert.Eventually(t, func() bool { _, err := os.Stat(socket); return os.IsNotExist(err) },
+				5*time.Second, 50*time.Millisecond, "the shared connection closes with the container")
+		}
 
 		// Verify SSH config entry was removed
 

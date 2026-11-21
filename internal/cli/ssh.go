@@ -8,6 +8,7 @@ import (
 
 	"github.com/griffithind/dcx/internal/shell"
 	"github.com/griffithind/dcx/internal/ssh/hostconfig"
+	"github.com/griffithind/dcx/internal/state"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -23,7 +24,8 @@ container is running, then hands over to OpenSSH using the host alias
 'dcx up' configured. The session is exactly what 'ssh <alias>' gives
 editors and other tools: the remote user, remoteEnv, the probed user
 environment, SSH agent forwarding, and postAttachCommand for interactive
-shells.
+shells. Sessions share one connection per SSH agent, kept open for 10
+minutes after the last one ends, so later commands start at once.
 
 Arguments after '--' keep their quoting:
 
@@ -66,7 +68,7 @@ func runSSH(cmd *cobra.Command, args []string) error {
 // (a shell command line, run by the remote user's shell). OpenSSH's exit
 // status becomes dcx's.
 func sshInto(remote string) error {
-	alias, err := runningWorkspaceAlias()
+	alias, share, err := runningWorkspaceAlias()
 	if err != nil {
 		return err
 	}
@@ -79,6 +81,7 @@ func sshInto(remote string) error {
 	if config := hostconfig.ConfigFileOverride(); config != "" {
 		argv = append(argv, "-F", config)
 	}
+	argv = append(argv, share...)
 	if remote != "" {
 		// A terminal only when both ends are one, so interactive commands
 		// (rails console, vim) work and piped output stays clean.
@@ -96,18 +99,32 @@ func sshInto(remote string) error {
 }
 
 // runningWorkspaceAlias checks that the workspace's container is running
-// and returns the SSH alias `dcx up` configured for it.
-func runningWorkspaceAlias() (string, error) {
+// and returns the SSH alias `dcx up` configured for it, and the options
+// that share the connection with dcx's other sessions
+// (hostconfig.ShareOptions). One `docker ps` finds a running container;
+// only when it finds none does the full state lookup say why.
+func runningWorkspaceAlias() (alias string, share []string, err error) {
 	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
-	info, err := RequireRunningContainer(cliCtx)
-	if err != nil {
-		return "", err
+	id := cliCtx.Identity.WorkspaceID
+	name := ""
+	rows, err := cliCtx.Docker.ListContainerRows(cliCtx.Ctx, map[string]string{
+		state.LabelWorkspaceID: id,
+		state.LabelIsPrimary:   "true",
+	})
+	if err == nil && len(rows) == 1 && rows[0].State == "running" {
+		name = rows[0].Name
+	} else {
+		info, err := RequireRunningContainer(cliCtx)
+		if err != nil {
+			return "", nil, err
+		}
+		name = info.Name
 	}
-	aliases := hostconfig.Aliases(info.Name)
+	aliases := hostconfig.Aliases(name)
 	if len(aliases) == 0 {
-		return "", fmt.Errorf("SSH is not configured for this devcontainer; run 'dcx up'")
+		return "", nil, fmt.Errorf("SSH is not configured for this devcontainer; run 'dcx up'")
 	}
-	return aliases[0], nil
+	return aliases[0], hostconfig.ShareOptions(id), nil
 }

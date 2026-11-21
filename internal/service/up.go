@@ -479,7 +479,6 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		alias = aliases[0]
 	}
 	runner := s.hookRunner(r.resolved.Hooks, alias)
-	defer runner.Multiplex()()
 	markers := r.markers
 	if markers == nil || r.info.ID != markers.container {
 		markers = s.markersFor(r.info)
@@ -536,16 +535,20 @@ type lifecycleHooks interface {
 	RunInitialize(ctx context.Context) error
 	RunCreateHooks(ctx context.Context, markers lifecycle.Markers) error
 	RunStartHooks(ctx context.Context) error
-	Multiplex() (stop func())
 }
 
 // hookRunner returns a runner for hooks; container hooks run with OpenSSH
-// through sshAlias (written by the ssh config step).
+// through sshAlias (written by the ssh config step), sharing one
+// connection, which later `dcx ssh` sessions reuse.
 func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshAlias string) lifecycleHooks {
 	if s.newHooks != nil {
 		return s.newHooks(hooks, sshAlias)
 	}
-	return lifecycle.NewHookRunner(sshAlias, s.report, s.workspacePath, hooks)
+	var share []string
+	if sshAlias != "" {
+		share = hostconfig.ShareOptions(s.Identity().WorkspaceID)
+	}
+	return lifecycle.NewHookRunner(sshAlias, share, s.report, s.workspacePath, hooks)
 }
 
 // startedSinceLastPostStart reports whether the container started after

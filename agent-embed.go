@@ -23,7 +23,9 @@ var agentFS embed.FS
 
 // Digest identifies the agent binary for arch: the SHA-256 of its
 // compressed form, which is cheap to compute (no decompression) and
-// changes with the binary.
+// changes with the binary. The Makefile compresses with `gzip -n` (no
+// name or time in the header), so rebuilding an identical binary keeps
+// the digest and running containers keep their agent.
 func Digest(arch string) (string, error) {
 	arch, err := goArch(arch)
 	if err != nil {

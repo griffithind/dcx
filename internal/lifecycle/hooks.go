@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,8 +28,8 @@ type HookRunner struct {
 	workspacePath string
 	hooks         devcontainer.Hooks
 
-	// sshOptions are added to every container hook's ssh command (the
-	// shared connection, see Multiplex).
+	// sshOptions are added to every container hook's ssh command
+	// (hostconfig.ShareOptions: hooks share one connection).
 	sshOptions []string
 
 	// Command executors; default to the real host/container execution and
@@ -41,10 +40,12 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner. Container hooks run with
 // OpenSSH through sshAlias, the workspace's host in dcx's SSH config (""
-// when only host hooks run), as users' own sessions do.
-func NewHookRunner(sshAlias string, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks) *HookRunner {
+// when only host hooks run), as users' own sessions do, with sshOptions
+// added.
+func NewHookRunner(sshAlias string, sshOptions []string, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks) *HookRunner {
 	r := &HookRunner{
 		sshAlias:      sshAlias,
+		sshOptions:    sshOptions,
 		report:        report.OrDiscard(rep),
 		workspacePath: workspacePath,
 		hooks:         hooks,
@@ -211,36 +212,6 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, step lifecyclecmd.S
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-// Multiplex makes the container hooks run until stop share one SSH
-// connection (OpenSSH's ControlMaster, started by the first): a new
-// connection costs about 100 ms, a session on a shared one a few. The
-// control socket lives in a fresh private temporary directory (a socket
-// path is limited to about 100 bytes, so not under $DCX_HOME); when even
-// that path is too long, hooks connect one by one as before. stop closes
-// the connection and removes the directory.
-func (r *HookRunner) Multiplex() (stop func()) {
-	dir, err := os.MkdirTemp("", "dcx-ssh-")
-	if err != nil {
-		return func() {}
-	}
-	socket := filepath.Join(dir, "c")
-	if len(socket) > 100 {
-		_ = os.RemoveAll(dir)
-		return func() {}
-	}
-	r.sshOptions = []string{"-o", "ControlMaster=auto", "-o", "ControlPath=" + socket, "-o", "ControlPersist=30"}
-	return func() {
-		r.sshOptions = nil
-		if _, err := os.Stat(socket); err == nil {
-			args := append(r.configArgs(), "-o", "ControlPath="+socket, "-O", "exit", r.sshAlias)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = exec.CommandContext(ctx, "ssh", args...).Run()
-			cancel()
-		}
-		_ = os.RemoveAll(dir)
-	}
 }
 
 // configArgs selects dcx's SSH config when it is not the user's default.

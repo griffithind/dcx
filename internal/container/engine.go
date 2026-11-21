@@ -16,9 +16,9 @@ import (
 // context.go and never builds a client itself.
 type Engine interface {
 	state.ContainerClient
-	// LabelValues lists the values of a few short labels of the matching
-	// containers without inspecting them.
-	LabelValues(ctx context.Context, filter map[string]string, keys ...string) ([]map[string]string, error)
+	// ListContainerRows lists the matching containers' names, states and a
+	// few short labels without inspecting them.
+	ListContainerRows(ctx context.Context, filter map[string]string, labels ...string) ([]ContainerRow, error)
 	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
 	StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error
 	RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error
@@ -60,3 +60,10 @@ type Engine interface {
 }
 
 var _ Engine = (*Docker)(nil)
+
+// ContainerRow is a container as ListContainerRows lists it.
+type ContainerRow struct {
+	Name   string
+	State  string // "running", "exited", ...
+	Labels map[string]string
+}

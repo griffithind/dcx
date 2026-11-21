@@ -238,13 +238,14 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 	return summaries, nil
 }
 
-// LabelValues returns, for every container (running or not) matching the
-// filter labels, the values of keys, in one `docker ps`: no inspect. Only
-// for labels whose values hold no tab or newline (ports, IDs).
-func (d *Docker) LabelValues(ctx context.Context, filter map[string]string, keys ...string) ([]map[string]string, error) {
-	cols := make([]string, len(keys))
-	for i, k := range keys {
-		cols[i] = fmt.Sprintf("{{.Label %q}}", k)
+// ListContainerRows lists the containers (running or not) matching the
+// filter labels with their name, state and the values of labels, in one
+// `docker ps`: no inspect. Only for labels whose values hold no tab or
+// newline (ports, IDs).
+func (d *Docker) ListContainerRows(ctx context.Context, filter map[string]string, labels ...string) ([]ContainerRow, error) {
+	cols := []string{"{{.Names}}", "{{.State}}"}
+	for _, k := range labels {
+		cols = append(cols, fmt.Sprintf("{{.Label %q}}", k))
 	}
 	args := []string{"ps", "-a", "--no-trunc", "--format", strings.Join(cols, "\t")}
 	for k, v := range filter {
@@ -254,17 +255,18 @@ func (d *Docker) LabelValues(ctx context.Context, filter map[string]string, keys
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
-	var rows []map[string]string
+	var rows []ContainerRow
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
 		vals := strings.Split(line, "\t")
-		row := make(map[string]string, len(keys))
-		for i, k := range keys {
-			if i < len(vals) {
-				row[k] = vals[i]
-			}
+		for len(vals) < len(cols) {
+			vals = append(vals, "")
+		}
+		row := ContainerRow{Name: vals[0], State: vals[1], Labels: make(map[string]string, len(labels))}
+		for i, k := range labels {
+			row.Labels[k] = vals[2+i]
 		}
 		rows = append(rows, row)
 	}

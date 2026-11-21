@@ -120,12 +120,12 @@ func (f *Fake) ListContainersWithLabels(_ context.Context, labels map[string]str
 	return out, nil
 }
 
-// LabelValues answers from Containers.
-func (f *Fake) LabelValues(_ context.Context, filter map[string]string, keys ...string) ([]map[string]string, error) {
+// ListContainerRows answers from Containers.
+func (f *Fake) ListContainerRows(_ context.Context, filter map[string]string, labels ...string) ([]container.ContainerRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("LabelValues")
-	var rows []map[string]string
+	f.record("ListContainerRows")
+	var rows []container.ContainerRow
 	for _, c := range f.Containers {
 		match := true
 		for k, v := range filter {
@@ -137,9 +137,13 @@ func (f *Fake) LabelValues(_ context.Context, filter map[string]string, keys ...
 		if !match {
 			continue
 		}
-		row := map[string]string{}
-		for _, k := range keys {
-			row[k] = c.Labels[k]
+		st := c.State
+		if st == "" && c.Running {
+			st = "running"
+		}
+		row := container.ContainerRow{Name: c.Name, State: st, Labels: map[string]string{}}
+		for _, k := range labels {
+			row.Labels[k] = c.Labels[k]
 		}
 		rows = append(rows, row)
 	}
