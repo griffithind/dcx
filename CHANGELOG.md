@@ -129,6 +129,8 @@ Existing containers keep working; `dcx up --recreate` picks up every change.
 - Secret commands (`customizations.dcx.secrets` and `buildSecrets`) run at
   the same time instead of one after another; when one fails, the others
   are stopped.
+- Compose build secrets work with buildx versions whose `bake` asks for
+  `--allow=fs.read=…` to read files outside the build context.
 - Reconnecting to a container whose agent stopped no longer reruns
   `postStartCommand` when the container had started within the same second
   as the last one.

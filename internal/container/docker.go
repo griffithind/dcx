@@ -124,7 +124,7 @@ func (d *Docker) command(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 // dockerEnv is the environment docker commands run with: dcx's own, with
-// buildx's default attestations off. Their build metadata gave every
+// bake's filesystem check (see below) and buildx's default attestations off. Their build metadata gave every
 // build, buildx's or compose's, a new image ID even when every step was
 // cached, so the layers dcx keys on the parent image ID (features, UID)
 // were rebuilt on every create. An older buildx or compose ignores the
@@ -133,6 +133,14 @@ func dockerEnv() []string {
 	env := os.Environ()
 	if _, set := os.LookupEnv("BUILDX_NO_DEFAULT_ATTESTATIONS"); !set {
 		env = append(env, "BUILDX_NO_DEFAULT_ATTESTATIONS=1")
+	}
+	// Compose builds through `buildx bake`, which some versions refuse to
+	// let read files outside the build context without an --allow compose
+	// cannot pass: the build secrets' temporary files ("additional
+	// privileges requested: pass --allow=fs.read=…"). Compose's builds read
+	// them before it used bake, and dcx writes those files itself.
+	if _, set := os.LookupEnv("BUILDX_BAKE_ENTITLEMENTS_FS"); !set {
+		env = append(env, "BUILDX_BAKE_ENTITLEMENTS_FS=0")
 	}
 	return env
 }

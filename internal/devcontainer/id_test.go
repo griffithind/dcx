@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -38,5 +39,20 @@ func TestWorkspaceIDDependsOnNonDefaultConfig(t *testing.T) {
 	}
 	if again := WorkspaceID(ws, filepath.Join(ws, ".devcontainer", "a", "devcontainer.json")); again != a {
 		t.Error("per-config IDs must be stable")
+	}
+}
+
+// A workspace reached through a symlink (macOS's /var is /private/var)
+// keeps the path-only ID for a default config path that does not exist
+// yet: the config path resolves under the workspace's resolved folder.
+func TestWorkspaceIDResolvesMissingConfigUnderSymlink(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	cfg := filepath.Join(link, ".devcontainer", "devcontainer.json")
+	if got, want := WorkspaceID(link, cfg), ComputeID(link); got != want {
+		t.Errorf("WorkspaceID through a symlink = %s, want the path-only ID %s", got, want)
 	}
 }

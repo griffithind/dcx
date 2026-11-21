@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
@@ -190,9 +191,11 @@ func TestStartListenerTimeoutIncludesLog(t *testing.T) {
 	p, _, _ := testProvisioner(t)
 	require.NoError(t, p.setup())
 	require.NoError(t, os.WriteFile(p.logPath, []byte("bind: address already in use\n"), 0o600))
-	p.binary = "/bin/true"
+	trueBin, err := exec.LookPath("true") // /bin/true on Linux, /usr/bin/true on macOS
+	require.NoError(t, err)
+	p.binary = trueBin
 
-	err := p.startListener(context.Background(), agentproto.ListenConfig{Addr: "0.0.0.0:48022"})
+	err = p.startListener(context.Background(), agentproto.ListenConfig{Addr: "0.0.0.0:48022"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not start listening")
 	assert.Contains(t, err.Error(), "address already in use")

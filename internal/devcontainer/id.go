@@ -58,14 +58,27 @@ func WorkspaceID(workspacePath, configPath string) string {
 	return hashID(root + "\x00" + rel)
 }
 
-// canonicalPath resolves symlinks and normalizes path (falling back to the
-// path as given when it can't be resolved).
+// canonicalPath resolves symlinks and normalizes path. A path that does
+// not exist (yet) keeps its last elements as given under its deepest
+// existing directory, resolved: on macOS a workspace under /var resolves to
+// /private/var, and a config path inside it must too.
 func canonicalPath(path string) string {
-	p, err := realPath(path)
+	return normalizePath(resolveExisting(path))
+}
+
+func resolveExisting(path string) string {
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		p = path
+		return path
 	}
-	return normalizePath(p)
+	if p, err := filepath.EvalSymlinks(abs); err == nil {
+		return p
+	}
+	dir := filepath.Dir(abs)
+	if dir == abs {
+		return abs
+	}
+	return filepath.Join(resolveExisting(dir), filepath.Base(abs))
 }
 
 // hashID is base32(sha256(s))[0:12], lower case.
@@ -158,15 +171,6 @@ func ResourceName(displayName, workspaceID string) string {
 
 // SSHHostSuffix is appended to a workspace's name to form its SSH alias.
 const SSHHostSuffix = ".dcx"
-
-// realPath returns the absolute path with symlinks resolved.
-func realPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(abs)
-}
 
 // normalizePath cleans path, uses forward slashes and drops a trailing one.
 func normalizePath(path string) string {
