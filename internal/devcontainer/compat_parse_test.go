@@ -11,7 +11,7 @@ import (
 )
 
 // These cover configs the reference implementation (devcontainers/cli)
-// accepts and dcx used to reject or read differently (docs/compat-review.md).
+// accepts and dcx used to reject or read differently (docs/compatibility.md).
 
 func TestParseScalarValuesInStringMaps(t *testing.T) {
 	cfg, err := Parse([]byte(`{

@@ -203,8 +203,8 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, step lifecyclecmd.S
 // can't read the size itself, because its stdin is /dev/null so that a
 // hook never reads the user's typing or puts their terminal in raw mode.
 // Without a terminal (CI, a pipe) there is none, so logs keep plain line
-// endings and stdout and stderr stay apart. Cancelling ctx (Ctrl-C, a
-// failed parallel hook) ends ssh, and the agent then stops the command.
+// endings and stdout and stderr stay apart. Cancelling ctx (Ctrl-C) ends
+// ssh, and the agent then stops the command.
 func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecyclecmd.Step) error {
 	r.report.Infof("  > %s", step)
 	if r.sshAlias == "" {
