@@ -50,11 +50,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	ctx, stop := commandContext()
 	defer stop()
 
-	docker, err := newDaemonEngine()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Docker: %w", err)
-	}
-	svc := newService(docker, ui.Reporter())
+	svc := newService(newEngine(), ui.Reporter())
 
 	if dryRun {
 		return showCleanStats(ctx, svc)

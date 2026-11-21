@@ -39,7 +39,7 @@ Entry points: `cmd/dcx` (`cli.Execute`), `cmd/dcx-agent` (`agent.Execute`), `age
 | File | Purpose |
 |------|---------|
 | `root.go` | Root command, global flags (`--workspace`, `--config`, `--quiet`, `--verbose`, `--no-color`) |
-| `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newEngine`/`newDaemonEngine` (the only engine construction; `-v` traces docker commands), `newService`, `CLIContext` |
+| `context.go` | Composition root: `commandContext` (Ctrl-C aware), `newEngine` (the only engine construction, never contacts the daemon; `-v` traces docker commands), `newService`, `CLIContext` |
 | `validate.go` | `RequireRunningContainer`, `RequireExistingContainer` |
 | `up.go`, `down.go`, `stop.go`, `restart.go` | Lifecycle commands |
 | `ssh.go` | `dcx ssh [-- cmd]`: execs OpenSSH to the workspace alias |
@@ -88,15 +88,18 @@ container            start: startExisting
                      compose up with the override. Nothing is built after the old environment
                      is removed.
 agent                runtime secrets fetched on the host; agentctl.Provision: digest-checked install
-                     (probe, copy, install), then one `dcx-agent provision` exec as root with an
+                     (`docker cp` out of the digest, one `docker cp` of a root-owned tar), then one
+                     `dcx-agent provision` exec as root with an
                      agentproto.ProvisionRequest on stdin: root-owned SSH secrets, runtime secrets on
                      the /run/secrets tmpfs, /etc/environment, /etc/profile, userEnvProbe,
                      /run/dcx/session.json, and the listener (started detached, waited for)
 ssh config           ~/.ssh/dcx/config block and known_hosts pin (before the hooks, so a failing
                      hook still leaves a way in)
-hooks                onCreate/updateContent/postCreate once (markers in /var/lib/dcx/lifecycle),
+hooks                onCreate/updateContent/postCreate once (markers in /var/lib/dcx/lifecycle, read and
+                     written with `docker cp`),
                      postStart per start (also after a restart outside dcx: StartedAt vs the
-                     poststart marker); run as `ssh <alias>`, -tt when dcx's stdout is a terminal
+                     poststart marker); run as `ssh <alias>` sharing one connection (ControlMaster), -tt when
+                     dcx's stdout is a terminal
 ```
 
 ### container (`internal/container/`)
@@ -188,14 +191,14 @@ Substitution: `${localEnv:VAR[:default]}`, `${containerEnv:VAR}` (at exec time),
 
 ## Agent
 
-`dcx-agent` is embedded gzipped and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned, never `/tmp`), checked by a SHA-256 sidecar. It runs as root; sessions switch to the session user (`remoteUser`/`containerUser`, else the container's default user by name) with `$SHELL`, else the login shell, else `/bin/sh`. Everything it needs arrives in one `dcx-agent provision` call (`agentproto.ProvisionRequest` on stdin, `ProvisionResult` on stdout), which creates `/var/lib/dcx`, `/run/dcx`, the shell integration and the log, writes the secrets (atomically, never through a symlink), `/etc/environment`, `/etc/profile` and the session configuration, and starts the listener. It is reached on the container's published port, the compose `service:` owner's, or the host port with host networking. Every session gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. Subcommands: `provision`, `listen`, `ping`, `sftp-server` (stdlib `flag`, no Cobra, to keep it small).
+`dcx-agent` is embedded gzipped and deployed to `/var/lib/dcx/bin/dcx-agent` (root-owned, never `/tmp`), checked by a sidecar holding `dcxembed.Digest` (the SHA-256 of the gzipped binary); the binary is for the daemon's architecture. It runs as root; sessions switch to the session user (`remoteUser`/`containerUser`, else the container's default user by name) with `$SHELL`, else the login shell, else `/bin/sh`. Everything it needs arrives in one `dcx-agent provision` call (`agentproto.ProvisionRequest` on stdin, `ProvisionResult` on stdout), which creates `/var/lib/dcx`, `/run/dcx`, the shell integration and the log, writes the secrets (atomically, never through a symlink), `/etc/environment`, `/etc/profile` and the session configuration, and starts the listener. It is reached on the container's published port, the compose `service:` owner's, or the host port with host networking. Every session gets `/run/dcx/session.json` (`agentproto.SessionConfig`: userEnvProbe + remoteEnv, postAttachCommand for interactive sessions), written by `up`. Host keys are created only by `up` (`EnsureHostKey`); everything else uses `LoadHostKey`. Subcommands: `provision`, `listen`, `ping`, `sftp-server` (stdlib `flag`, no Cobra, to keep it small).
 
 ## Rules
 
 - Everything reaches the container over OpenSSH through the workspace's alias: users (`dcx ssh`, `ssh <alias>`) and container hooks (`lifecycle.HookRunner`). dcx has no SSH client of its own.
 - Only `internal/cli` and `internal/ui` print. Everything else takes a `report.Reporter`; `--json` commands pass `report.Discard`.
 - Library code receives a `container.Engine` (`build` the narrower `build.Engine`) and never constructs one. Only `container/docker.go` runs `docker` (depguard enforces it): add an Engine method rather than calling `os/exec`.
-- Container-side setup belongs in the agent (`provision`), in Go; keep `sh -c` scripts to what must run before the agent exists (deploy) or around it (markers). Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
+- Container-side setup belongs in the agent (`provision`), in Go; files dcx places before the agent runs (the agent itself, lifecycle markers) go in with `Engine.WriteFiles` (one `docker cp`, root-owned). Keep `sh -c` scripts to what must run around the agent (stopping an outdated one). Build shell command lines with `shell.Quote`/`shell.Join`; never interpolate values into `sh -c` scripts (pass them as positional args).
 - Agent paths, ports and secret locations come from `agentproto`.
 - Substitution happens once, in `devcontainer.LoadConfig` (image metadata in `parseImageMetadata`); never substitute again downstream.
 - Read `docs/compatibility.md` before changing resolution, features or the runtime; record a new difference from devcontainers/cli there.

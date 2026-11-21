@@ -4,7 +4,9 @@ package dcxembed
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,34 +21,56 @@ import (
 //go:embed agentbin
 var agentFS embed.FS
 
-var (
-	binaries   = map[string][]byte{}
-	binaryErrs = map[string]error{}
-	loadOnce   sync.Once
-)
-
-// Binary returns the decompressed Linux agent binary for the given architecture.
-func Binary(arch string) ([]byte, error) {
-	loadOnce.Do(func() {
-		for _, a := range []string{"amd64", "arm64"} {
-			binaries[a], binaryErrs[a] = load(a)
-		}
-	})
-	switch arch {
-	case "amd64", "x86_64":
-		arch = "amd64"
-	case "arm64", "aarch64":
-		arch = "arm64"
-	default:
-		return nil, fmt.Errorf("unsupported architecture: %s", arch)
+// Digest identifies the agent binary for arch: the SHA-256 of its
+// compressed form, which is cheap to compute (no decompression) and
+// changes with the binary.
+func Digest(arch string) (string, error) {
+	arch, err := goArch(arch)
+	if err != nil {
+		return "", err
 	}
-	if err := binaryErrs[arch]; err != nil {
-		return nil, err
+	compressed, err := compressedBinary(arch)
+	if err != nil {
+		return "", err
 	}
-	return binaries[arch], nil
+	sum := sha256.Sum256(compressed)
+	return hex.EncodeToString(sum[:]), nil
 }
 
-func load(arch string) ([]byte, error) {
+// Binary returns the decompressed Linux agent binary for the given
+// architecture, decompressing it once per process.
+func Binary(arch string) ([]byte, error) {
+	arch, err := goArch(arch)
+	if err != nil {
+		return nil, err
+	}
+	once, _ := decompressed.LoadOrStore(arch, sync.OnceValues(func() ([]byte, error) {
+		compressed, err := compressedBinary(arch)
+		if err != nil {
+			return nil, err
+		}
+		return decompress(compressed)
+	}))
+	return once.(func() ([]byte, error))()
+}
+
+// decompressed holds each architecture's decompression (func() ([]byte,
+// error) from sync.OnceValues), so a background Binary call started early
+// is not repeated.
+var decompressed sync.Map
+
+// goArch maps uname and Docker architecture names to Go's.
+func goArch(arch string) (string, error) {
+	switch arch {
+	case "amd64", "x86_64":
+		return "amd64", nil
+	case "arm64", "aarch64":
+		return "arm64", nil
+	}
+	return "", fmt.Errorf("unsupported architecture: %s", arch)
+}
+
+func compressedBinary(arch string) ([]byte, error) {
 	compressed, err := agentFS.ReadFile("agentbin/dcx-agent-linux-" + arch + ".gz")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("linux/%s agent binary not embedded: build dcx with `make build` (it runs `make build-agent` first)", arch)
@@ -57,7 +81,7 @@ func load(arch string) ([]byte, error) {
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("linux/%s agent binary is empty: rebuild with `make build`", arch)
 	}
-	return decompress(compressed)
+	return compressed, nil
 }
 
 func decompress(data []byte) ([]byte, error) {

@@ -36,10 +36,7 @@ func init() {
 }
 
 func runRestart(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	skipped, err := cliCtx.Service.Restart(cliCtx.Ctx, service.RestartOptions{

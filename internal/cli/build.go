@@ -33,10 +33,7 @@ func init() {
 }
 
 func runBuild(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	// Start spinner for progress feedback

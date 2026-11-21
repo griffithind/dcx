@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +28,10 @@ type HookRunner struct {
 	report        report.Reporter
 	workspacePath string
 	hooks         devcontainer.Hooks
+
+	// sshOptions are added to every container hook's ssh command (the
+	// shared connection, see Multiplex).
+	sshOptions []string
 
 	// Command executors; default to the real host/container execution and
 	// are replaced in tests.
@@ -208,6 +213,44 @@ func (r *HookRunner) executeHostCommand(ctx context.Context, step lifecyclecmd.S
 	return cmd.Run()
 }
 
+// Multiplex makes the container hooks run until stop share one SSH
+// connection (OpenSSH's ControlMaster, started by the first): a new
+// connection costs about 100 ms, a session on a shared one a few. The
+// control socket lives in a fresh private temporary directory (a socket
+// path is limited to about 100 bytes, so not under $DCX_HOME); when even
+// that path is too long, hooks connect one by one as before. stop closes
+// the connection and removes the directory.
+func (r *HookRunner) Multiplex() (stop func()) {
+	dir, err := os.MkdirTemp("", "dcx-ssh-")
+	if err != nil {
+		return func() {}
+	}
+	socket := filepath.Join(dir, "c")
+	if len(socket) > 100 {
+		_ = os.RemoveAll(dir)
+		return func() {}
+	}
+	r.sshOptions = []string{"-o", "ControlMaster=auto", "-o", "ControlPath=" + socket, "-o", "ControlPersist=30"}
+	return func() {
+		r.sshOptions = nil
+		if _, err := os.Stat(socket); err == nil {
+			args := append(r.configArgs(), "-o", "ControlPath="+socket, "-O", "exit", r.sshAlias)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = exec.CommandContext(ctx, "ssh", args...).Run()
+			cancel()
+		}
+		_ = os.RemoveAll(dir)
+	}
+}
+
+// configArgs selects dcx's SSH config when it is not the user's default.
+func (r *HookRunner) configArgs() []string {
+	if config := hostconfig.ConfigFileOverride(); config != "" {
+		return []string{"-F", config}
+	}
+	return nil
+}
+
 // executeContainerCommand runs a single command in the container with
 // OpenSSH. The agent gives every session the workspace's remoteEnv and
 // probed user environment, so hooks see the same environment as shells.
@@ -224,10 +267,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecycle
 	if r.sshAlias == "" {
 		return fmt.Errorf("SSH is not configured for the container")
 	}
-	var args []string
-	if config := hostconfig.ConfigFileOverride(); config != "" {
-		args = append(args, "-F", config)
-	}
+	args := append(r.configArgs(), r.sshOptions...)
 	remote := shell.Join(stepArgv(step))
 	if cols, rows, ok := terminalSize(); ok {
 		args = append(args, "-tt")

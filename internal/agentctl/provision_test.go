@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	dcxembed "github.com/griffithind/dcx"
 	"github.com/griffithind/dcx/internal/agentproto"
 	"github.com/griffithind/dcx/internal/container/containertest"
 	"github.com/griffithind/dcx/internal/report"
@@ -19,8 +20,10 @@ import (
 func currentAgent(t *testing.T) *containertest.Fake {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	bin := agentBinary(t)
-	return &containertest.Fake{Outputs: map[string]string{probeKey: "x86_64\n" + sha256Hex(bin) + "\n"}}
+	agentBinary(t)
+	digest, err := dcxembed.Digest("amd64")
+	require.NoError(t, err)
+	return &containertest.Fake{Files: map[string][]byte{"c1:" + agentproto.BinaryPath + ".sha256": []byte(digest + "\n")}}
 }
 
 func provisionResult(res agentproto.ProvisionResult) func(string, []string, []byte) ([]byte, error) {

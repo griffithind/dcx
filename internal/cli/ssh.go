@@ -98,10 +98,7 @@ func sshInto(remote string) error {
 // runningWorkspaceAlias checks that the workspace's container is running
 // and returns the SSH alias `dcx up` configured for it.
 func runningWorkspaceAlias() (string, error) {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return "", err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	info, err := RequireRunningContainer(cliCtx)

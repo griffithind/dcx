@@ -26,10 +26,7 @@ func init() {
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	if err := cliCtx.Service.Down(cliCtx.Ctx, service.DownOptions{

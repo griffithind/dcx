@@ -30,10 +30,7 @@ Examples:
 }
 
 func runListEnvironments(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	envs, err := cliCtx.Service.List(cliCtx.Ctx, listShowAll)

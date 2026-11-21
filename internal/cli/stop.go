@@ -23,10 +23,7 @@ will not be stopped unless --force is used.`,
 }
 
 func runStop(cmd *cobra.Command, args []string) error {
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	outcome, err := cliCtx.Service.Stop(cliCtx.Ctx, service.StopOptions{Force: stopForce})

@@ -33,10 +33,7 @@ Examples:
 
 func runLogs(cmd *cobra.Command, args []string) error {
 	// Initialize CLI context
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	// Validate container exists (doesn't need to be running)

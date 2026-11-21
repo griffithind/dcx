@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,20 +43,12 @@ func commandContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// newEngine and newDaemonEngine are the only places the CLI gets a container
-// engine; tests replace them with containertest.Fake. newEngine does not
-// contact the daemon (commands that work without Docker, or report its
-// absence themselves); newDaemonEngine first checks it is reachable.
-var (
-	newEngine       = func() container.Engine { return container.NewDockerCLI().WithTrace(traceDocker) }
-	newDaemonEngine = func() (container.Engine, error) {
-		d, err := container.NewDocker()
-		if err != nil {
-			return nil, err
-		}
-		return d.WithTrace(traceDocker), nil
-	}
-)
+// newEngine is the only place the CLI gets a container engine; tests
+// replace it with containertest.Fake. It does not contact the daemon: a
+// command that needs Docker reports docker's own error ("Cannot connect to
+// the Docker daemon …") from its first operation, and checking first cost
+// every command a round trip.
+var newEngine = func() container.Engine { return container.NewDockerCLI().WithTrace(traceDocker) }
 
 // traceDocker shows each docker command line with -v, so a failure can be
 // understood and reproduced by hand.
@@ -69,18 +60,12 @@ func newService(engine container.Engine, rep report.Reporter) *service.DevContai
 	return service.NewDevContainerService(engine, rep, workspacePath, configPath, verbose)
 }
 
-// NewCLIContext creates the context, Docker engine (checking the daemon is
-// reachable), service and identifiers for a command that talks to Docker.
-// The caller must call Close() when done.
-func NewCLIContext() (*CLIContext, error) {
+// NewCLIContext creates the context, Docker engine, service and
+// identifiers for a command that talks to Docker. The caller must call
+// Close() when done.
+func NewCLIContext() *CLIContext {
 	ctx, stop := commandContext()
-
-	docker, err := newDaemonEngine()
-	if err != nil {
-		stop()
-		return nil, fmt.Errorf("failed to connect to Docker: %w", err)
-	}
-
+	docker := newEngine()
 	svc := newService(docker, ui.Reporter())
 	ids := svc.Identity()
 
@@ -90,7 +75,7 @@ func NewCLIContext() (*CLIContext, error) {
 		Docker:   docker,
 		Service:  svc,
 		Identity: ids,
-	}, nil
+	}
 }
 
 // Close releases resources held by the CLIContext.

@@ -22,12 +22,11 @@ func withFakeEngine(t *testing.T, fake *containertest.Fake, config string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(ws, ".devcontainer"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "devcontainer.json"), []byte(config), 0o644))
 
-	oldEngine, oldDaemon, oldWS, oldCfg := newEngine, newDaemonEngine, workspacePath, configPath
+	oldEngine, oldWS, oldCfg := newEngine, workspacePath, configPath
 	newEngine = func() container.Engine { return fake }
-	newDaemonEngine = func() (container.Engine, error) { return fake, nil }
 	workspacePath, configPath = ws, ""
 	t.Cleanup(func() {
-		newEngine, newDaemonEngine, workspacePath, configPath = oldEngine, oldDaemon, oldWS, oldCfg
+		newEngine, workspacePath, configPath = oldEngine, oldWS, oldCfg
 		doctorConfig, doctorSystem, doctorJSON = false, false, false
 		lockJSON = false
 		cleanAll, cleanDangling, cleanCurrent, dryRun = false, false, false, false

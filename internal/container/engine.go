@@ -16,6 +16,9 @@ import (
 // context.go and never builds a client itself.
 type Engine interface {
 	state.ContainerClient
+	// LabelValues lists the values of a few short labels of the matching
+	// containers without inspecting them.
+	LabelValues(ctx context.Context, filter map[string]string, keys ...string) ([]map[string]string, error)
 	InspectContainer(ctx context.Context, containerID string) (*state.ContainerDetails, error)
 	StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error
 	RemoveContainer(ctx context.Context, containerID string, force, removeVolumes bool) error
@@ -42,7 +45,12 @@ type Engine interface {
 	ExecInContainer(ctx context.Context, containerName string, argv []string) error
 	ExecOutput(ctx context.Context, containerName string, argv []string) ([]byte, error)
 	ExecAsRoot(ctx context.Context, containerName string, argv []string) ([]byte, error)
-	CopyToContainer(ctx context.Context, src, containerName, dest string) error
+	// WriteFiles creates root-owned files in the container; ReadDir reads
+	// the files directly in a directory (none when it is missing), and
+	// ReadFile one file (wrapping fs.ErrNotExist when it is missing).
+	WriteFiles(ctx context.Context, containerName string, files []File) error
+	ReadDir(ctx context.Context, containerName, dir string) (map[string][]byte, error)
+	ReadFile(ctx context.Context, containerName, file string) ([]byte, error)
 	ExecAsRootWithInput(ctx context.Context, containerName string, argv []string, input []byte) ([]byte, error)
 
 	// Image maintenance (dcx clean).

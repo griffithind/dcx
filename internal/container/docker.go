@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"regexp"
@@ -35,6 +36,10 @@ type Docker struct {
 	// buildx records whether the buildx plugin is installed (asked once).
 	buildxOnce sync.Once
 	buildx     bool
+
+	// info is the daemon's `docker info`, asked once per command.
+	infoMu sync.Mutex
+	info   *SystemInfo
 
 	// images caches `docker image inspect` results by reference for the
 	// command's lifetime; pulls, builds, removals and compose runs clear
@@ -132,20 +137,9 @@ func dockerEnv() []string {
 	return env
 }
 
-// NewDocker returns a Docker CLI engine after checking that the daemon is
-// reachable.
-func NewDocker() (*Docker, error) {
-	d := &Docker{}
-	if _, err := runOutput(d.command(context.Background(), "version", "--format", "{{.Server.Version}}")); err != nil {
-		return nil, fmt.Errorf("docker not accessible: %w", err)
-	}
-	return d, nil
-}
-
-// NewDockerCLI returns a Docker CLI engine without contacting the daemon.
-// Commands that may not need Docker at all (config, plan, lock) use it so
-// they keep working when Docker is unavailable; operations report errors
-// when they are actually attempted.
+// NewDockerCLI returns a Docker CLI engine. It does not contact the
+// daemon: operations report docker's error when they are attempted, so
+// commands that may not need Docker (config, lock) work without it.
 func NewDockerCLI() *Docker {
 	return &Docker{}
 }
@@ -171,6 +165,11 @@ type SystemInfo struct {
 // This reflects Docker's configured resource limits, which may be less than the host's
 // actual resources (e.g., Docker Desktop VM limits, cgroup limits).
 func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
+	d.infoMu.Lock()
+	defer d.infoMu.Unlock()
+	if d.info != nil {
+		return d.info, nil
+	}
 	cmd := d.command(ctx, "info", "--format", "json")
 	output, err := runOutput(cmd)
 	if err != nil {
@@ -190,7 +189,7 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 		return nil, fmt.Errorf("failed to parse Docker info: %w", err)
 	}
 
-	return &SystemInfo{
+	d.info = &SystemInfo{
 		NCPU:          info.NCPU,
 		MemTotal:      uint64(info.MemTotal),
 		OSType:        info.OSType,
@@ -200,7 +199,8 @@ func (d *Docker) Info(ctx context.Context) (*SystemInfo, error) {
 		SELinux: slices.ContainsFunc(info.Security, func(opt string) bool {
 			return opt == "name=selinux" || strings.HasPrefix(opt, "name=selinux,")
 		}),
-	}, nil
+	}
+	return d.info, nil
 }
 
 // ListContainersWithLabels returns containers matching label filters.
@@ -236,6 +236,39 @@ func (d *Docker) ListContainersWithLabels(ctx context.Context, labels map[string
 	// A container removed between `ps` and `inspect` makes inspect exit
 	// non-zero while still printing the others; that is not an error here.
 	return summaries, nil
+}
+
+// LabelValues returns, for every container (running or not) matching the
+// filter labels, the values of keys, in one `docker ps`: no inspect. Only
+// for labels whose values hold no tab or newline (ports, IDs).
+func (d *Docker) LabelValues(ctx context.Context, filter map[string]string, keys ...string) ([]map[string]string, error) {
+	cols := make([]string, len(keys))
+	for i, k := range keys {
+		cols[i] = fmt.Sprintf("{{.Label %q}}", k)
+	}
+	args := []string{"ps", "-a", "--no-trunc", "--format", strings.Join(cols, "\t")}
+	for k, v := range filter {
+		args = append(args, "--filter", fmt.Sprintf("label=%s=%s", k, v))
+	}
+	out, err := runOutput(d.command(ctx, args...))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	var rows []map[string]string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		vals := strings.Split(line, "\t")
+		row := make(map[string]string, len(keys))
+		for i, k := range keys {
+			if i < len(vals) {
+				row[k] = vals[i]
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 // parseContainerSummaries parses `docker inspect --format json` output.
@@ -971,13 +1004,58 @@ func buildArgs(opts build.DockerfileBuildOptions, buildx bool) []string {
 	return args
 }
 
-// CopyToContainer copies a host file into the container (`docker cp`).
-func (d *Docker) CopyToContainer(ctx context.Context, src, containerName, dest string) error {
-	out, err := d.command(ctx, "cp", src, containerName+":"+dest).CombinedOutput()
+// WriteFiles creates files (and directories) in the container, owned by
+// root, with one `docker cp` of a tar stream: no exec, and no shell
+// script.
+func (d *Docker) WriteFiles(ctx context.Context, containerName string, files []File) error {
+	archive, err := filesArchive(files)
 	if err != nil {
+		return err
+	}
+	cmd := d.command(ctx, "cp", "-", containerName+":/")
+	cmd.Stdin = bytes.NewReader(archive)
+	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker cp: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ReadDir returns the regular files directly in dir in the container, by
+// name, with one `docker cp`; none when dir does not exist.
+func (d *Docker) ReadDir(ctx context.Context, containerName, dir string) (map[string][]byte, error) {
+	out, err := d.copyOut(ctx, containerName, dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string][]byte{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return dirFromArchive(bytes.NewReader(out))
+}
+
+// ReadFile returns a file in the container (up to 1 MiB), with one
+// `docker cp`; the error wraps fs.ErrNotExist when it does not exist.
+func (d *Docker) ReadFile(ctx context.Context, containerName, file string) ([]byte, error) {
+	out, err := d.copyOut(ctx, containerName, file)
+	if err != nil {
+		return nil, err
+	}
+	return fileFromArchive(bytes.NewReader(out))
+}
+
+// copyOut returns `docker cp <c>:<p> -`, the archive of p.
+func (d *Docker) copyOut(ctx context.Context, containerName, p string) ([]byte, error) {
+	cmd := d.command(ctx, "cp", containerName+":"+p, "-")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if strings.Contains(stderr.String(), "Could not find the file") {
+			return nil, fmt.Errorf("%s in container %s: %w", p, containerName, fs.ErrNotExist)
+		}
+		return nil, fmt.Errorf("docker cp: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
 }
 
 // Compose runs `docker compose` for project p, streaming its output.

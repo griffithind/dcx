@@ -126,14 +126,13 @@ func (r *Provisioner) networkMode(ctx context.Context) (string, error) {
 // claimed again when they start.
 func (r *Provisioner) chooseSSHPort(ctx context.Context) (int, error) {
 	claimed := map[int]bool{}
-	containers, err := r.engine.ListContainersWithLabels(ctx, map[string]string{state.LabelManaged: "true"})
+	rows, err := r.engine.LabelValues(ctx, map[string]string{state.LabelManaged: "true"}, state.LabelWorkspaceID, state.LabelSSHPort)
 	if err != nil {
 		return 0, fmt.Errorf("list dcx containers: %w", err)
 	}
-	for _, c := range containers {
-		l := state.ContainerLabelsFromMap(c.Labels)
-		if l.WorkspaceID != r.resolved.WorkspaceID && l.SSHPort > 0 {
-			claimed[l.SSHPort] = true
+	for _, row := range rows {
+		if port, err := strconv.Atoi(row[state.LabelSSHPort]); err == nil && port > 0 && row[state.LabelWorkspaceID] != r.resolved.WorkspaceID {
+			claimed[port] = true
 		}
 	}
 	port, err := dcxssh.PickPort(r.resolved.WorkspaceID, func(p int) bool {

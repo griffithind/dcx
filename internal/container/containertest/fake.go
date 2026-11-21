@@ -46,9 +46,12 @@ type Fake struct {
 	Outputs map[string]string
 	// OutputFunc answers ExecOutput calls Outputs does not match.
 	OutputFunc func(containerName string, argv []string) ([]byte, error)
-	// Files records files written into containers (agent copies, lifecycle
-	// markers) by "<container>:<path>".
+	// Files holds files in containers (the agent, lifecycle markers) by
+	// "<container>:<path>": WriteFiles writes them, ReadDir and ReadFile
+	// read them.
 	Files map[string][]byte
+	// ReadErr, when set, is what ReadDir and ReadFile fail with.
+	ReadErr error
 	// Inputs records the stdin of every ExecAsRootWithInput call, and
 	// InputFunc, when set, answers those calls.
 	Inputs    [][]byte
@@ -115,6 +118,32 @@ func (f *Fake) ListContainersWithLabels(_ context.Context, labels map[string]str
 		}
 	}
 	return out, nil
+}
+
+// LabelValues answers from Containers.
+func (f *Fake) LabelValues(_ context.Context, filter map[string]string, keys ...string) ([]map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("LabelValues")
+	var rows []map[string]string
+	for _, c := range f.Containers {
+		match := true
+		for k, v := range filter {
+			if c.Labels[k] != v {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		row := map[string]string{}
+		for _, k := range keys {
+			row[k] = c.Labels[k]
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func (f *Fake) find(id string) *state.ContainerSummary {
@@ -203,7 +232,7 @@ func (f *Fake) Info(context.Context) (*container.SystemInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("Info")
-	return &container.SystemInfo{NCPU: 8, MemTotal: 16 << 30, ServerVersion: "28.0.0", SELinux: f.SELinux}, nil
+	return &container.SystemInfo{NCPU: 8, MemTotal: 16 << 30, Architecture: "x86_64", ServerVersion: "28.0.0", SELinux: f.SELinux}, nil
 }
 
 func (f *Fake) CreateContainer(_ context.Context, opts container.ContainerSpec) (string, error) {
@@ -309,19 +338,54 @@ func (f *Fake) BuildImage(_ context.Context, opts build.DockerfileBuildOptions) 
 	return nil
 }
 
-func (f *Fake) CopyToContainer(_ context.Context, src, name, dest string) error {
+// WriteFiles records the files (not directories) in Files.
+func (f *Fake) WriteFiles(_ context.Context, name string, files []container.File) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("CopyToContainer", src, name, dest)
+	args := []string{name}
 	if f.Files == nil {
 		f.Files = map[string][]byte{}
 	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
+	for _, file := range files {
+		args = append(args, file.Path)
+		if !file.Mode.IsDir() {
+			f.Files[name+":"+file.Path] = append([]byte(nil), file.Data...)
+		}
 	}
-	f.Files[name+":"+dest] = data
+	f.record("WriteFiles", args...)
 	return nil
+}
+
+// ReadDir answers from Files.
+func (f *Fake) ReadDir(_ context.Context, name, dir string) (map[string][]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ReadDir", name, dir)
+	if f.ReadErr != nil {
+		return nil, f.ReadErr
+	}
+	prefix := name + ":" + strings.TrimSuffix(dir, "/") + "/"
+	out := map[string][]byte{}
+	for key, data := range f.Files {
+		if rest, ok := strings.CutPrefix(key, prefix); ok && !strings.Contains(rest, "/") {
+			out[rest] = data
+		}
+	}
+	return out, nil
+}
+
+// ReadFile answers from Files.
+func (f *Fake) ReadFile(_ context.Context, name, file string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.record("ReadFile", name, file)
+	if f.ReadErr != nil {
+		return nil, f.ReadErr
+	}
+	if data, ok := f.Files[name+":"+file]; ok {
+		return data, nil
+	}
+	return nil, fmt.Errorf("%s: %w", file, os.ErrNotExist)
 }
 
 func (f *Fake) Compose(_ context.Context, p container.ComposeProject, args ...string) error {
@@ -367,54 +431,10 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 	return nil, fmt.Errorf("exec failed")
 }
 
-// FileMarkers makes marker listings (`sh -c … dcx-marker <dir>`, printing
-// the names of the files in dir) and `cat <path>` answer from Files, so
-// lifecycle markers dcx wrote are found (and read) again.
-func (f *Fake) FileMarkers() {
-	f.OutputFunc = func(name string, argv []string) ([]byte, error) {
-		read := func(path string) ([]byte, bool) {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			data, ok := f.Files[name+":"+path]
-			return data, ok
-		}
-		switch {
-		case len(argv) == 5 && argv[0] == "sh" && argv[3] == "dcx-marker":
-			prefix := name + ":" + strings.TrimSuffix(argv[4], "/") + "/"
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			var out strings.Builder
-			for key := range f.Files {
-				if rest, ok := strings.CutPrefix(key, prefix); ok && !strings.Contains(rest, "/") {
-					out.WriteString(rest + "\n")
-				}
-			}
-			return []byte(out.String()), nil
-		case len(argv) == 2 && argv[0] == "cat":
-			if data, ok := read(argv[1]); ok {
-				return data, nil
-			}
-			return nil, fmt.Errorf("cat: %s: no such file", argv[1])
-		}
-		return nil, fmt.Errorf("exec failed")
-	}
-}
-
 func (f *Fake) ExecAsRoot(_ context.Context, name string, argv []string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.record("ExecAsRoot", append([]string{name}, argv...)...)
-	// Lifecycle markers (sh -c <script> dcx-mark <dir> <stamp> <names>...)
-	// land in Files, where FileMarkers finds them.
-	if len(argv) > 5 && argv[0] == "sh" && argv[3] == "dcx-mark" {
-		if f.Files == nil {
-			f.Files = map[string][]byte{}
-		}
-		for _, n := range argv[6:] {
-			f.Files[name+":"+argv[4]+"/"+n] = []byte(argv[5] + "\n")
-		}
-		return nil, nil
-	}
 	if out, ok := f.Outputs[strings.Join(argv, " ")]; ok {
 		return []byte(out), nil
 	}

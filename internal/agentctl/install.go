@@ -2,10 +2,9 @@ package agentctl
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"runtime"
 	"strings"
 	"time"
@@ -18,101 +17,105 @@ import (
 // Deploy makes sure the container has the agent binary that matches this
 // dcx build, at agentproto.BinaryPath.
 //
-// The installed binary is identified by a sidecar file holding its SHA-256,
-// so upgrading dcx replaces an older agent instead of keeping it forever.
-// The new binary is copied to a staging path and renamed into place, so an
-// interrupted copy never leaves a truncated binary (a running agent keeps
-// executing its old inode). The binary directory is root-owned, so no
-// container user can swap the binary the root agent executes.
+// The installed binary is identified by a sidecar file holding its digest
+// (dcxembed.Digest), so upgrading dcx replaces an older agent instead of
+// keeping it forever. Reading the sidecar and installing are one
+// `docker cp` each: the install writes the root-owned binary directory,
+// the binary and the sidecar in one archive, so no container user can swap
+// the binary the root agent executes. Unpacking replaces the binary's
+// directory entry (a running agent keeps executing its old inode), and the
+// sidecar comes last, so an interrupted copy is installed again next time.
+// The binary is for the daemon's architecture: it is static, and the
+// container shares the daemon's kernel.
 //
-// Installing also signals agent processes still running a replaced binary
-// (or the legacy /tmp one); waitOutdatedGone then waits for them to exit.
-// The probe, the copy and the install are three execs.
+// fresh says the container was just created or started, so it has no
+// agent running; otherwise installing also signals agent processes still
+// running a replaced binary (or the legacy /tmp one), and waitOutdatedGone
+// then waits for them to exit. created says it was just created, so there
+// is no installed agent to check.
 //
 // Returns true when a binary was installed.
-func Deploy(ctx context.Context, engine container.Engine, containerName string) (bool, error) {
-	return deployTo(ctx, engine, containerName, agentproto.BinaryPath)
-}
-
-func deployTo(ctx context.Context, engine container.Engine, containerName, binaryPath string) (bool, error) {
-	arch, installed, err := probe(ctx, engine, containerName, binaryPath)
+func Deploy(ctx context.Context, engine container.Engine, containerName string, fresh, created bool) (bool, error) {
+	if !created {
+		if current, err := installedCurrent(ctx, engine, containerName); err != nil || current {
+			return false, err
+		}
+	}
+	info, err := engine.Info(ctx)
 	if err != nil {
 		return false, err
+	}
+	arch := info.Architecture
+	if arch == "" {
+		arch = runtime.GOARCH
 	}
 	binary, err := dcxembed.Binary(arch)
 	if err != nil || len(binary) == 0 {
 		return false, fmt.Errorf("no agent binary available for architecture %s: %v", arch, err)
 	}
-	want := sha256Hex(binary)
-	if installed == want {
-		return false, nil
-	}
-
-	tmpFile, err := os.CreateTemp("", "dcx-agent-*")
+	digest, err := dcxembed.Digest(arch)
 	if err != nil {
-		return false, fmt.Errorf("create temp agent binary: %w", err)
+		return false, err
 	}
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
-	if _, err := tmpFile.Write(binary); err != nil {
-		_ = tmpFile.Close()
-		return false, fmt.Errorf("write temp agent binary: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return false, fmt.Errorf("write temp agent binary: %w", err)
-	}
-
-	staging := binaryPath + ".new"
-	if err := engine.CopyToContainer(ctx, tmpFile.Name(), containerName, staging); err != nil {
+	if err := engine.WriteFiles(ctx, containerName, []container.File{
+		{Path: agentproto.StateDir, Mode: fs.ModeDir | 0o755},
+		{Path: agentproto.BinaryDir, Mode: fs.ModeDir | 0o755},
+		{Path: agentproto.BinaryPath, Mode: 0o755, Data: binary},
+		{Path: agentproto.BinaryPath + digestSuffix, Mode: 0o644, Data: []byte(digest + "\n")},
+	}); err != nil {
 		return false, fmt.Errorf("failed to copy agent to container: %w", err)
 	}
-
-	if _, err := engine.ExecAsRoot(ctx, containerName, []string{
-		"sh", "-c", installScript, "dcx-deploy", staging, binaryPath, want, agentproto.LegacyBinaryPath,
-	}); err != nil {
-		return false, fmt.Errorf("failed to install agent: %w", err)
+	if !fresh {
+		if _, err := engine.ExecAsRoot(ctx, containerName, []string{
+			"sh", "-c", signalOutdatedScript, "dcx-deploy", agentproto.BinaryPath, agentproto.LegacyBinaryPath,
+		}); err != nil {
+			return false, fmt.Errorf("failed to stop the outdated agent: %w", err)
+		}
 	}
 	return true, nil
 }
 
-// probeScript prints the container's architecture and the installed
-// agent's recorded digest (nothing when the binary or digest is missing),
-// after making sure the binary's directory ($1's) exists, root-owned:
-// install -d fixes owner and mode even when it exists.
-const probeScript = `uname -m
-install -d -o root -g root -m 0755 "$(dirname "$1")"
-if [ -x "$1" ]; then cat "$1.sha256" 2>/dev/null; fi
-exit 0`
+// Prefetch decompresses the agent binary for arch in the background, so a
+// Deploy that follows (after creating a container) does not wait for it.
+func Prefetch(arch string) {
+	go func() { _, _ = dcxembed.Binary(arch) }()
+}
 
-// installScript moves the staged binary ($1) into place ($2) atomically,
-// records its digest ($3), then signals agent processes still running a
-// replaced binary (/proc/<pid>/exe is "<path> (deleted)") or the legacy
-// one ($4). Every value is a positional argument.
-const installScript = `chown root:root "$1" && chmod 0755 "$1" && mv -f "$1" "$2" && printf '%s\n' "$3" > "$2.sha256" || exit 1
-for d in /proc/[0-9]*; do
+// digestSuffix names the sidecar next to the binary.
+const digestSuffix = ".sha256"
+
+// installedCurrent reports whether the container's agent is this build's
+// (for either architecture: only one can have been installed).
+func installedCurrent(ctx context.Context, engine container.Engine, containerName string) (bool, error) {
+	data, err := engine.ReadFile(ctx, containerName, agentproto.BinaryPath+digestSuffix)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read the installed agent's digest: %w", err)
+	}
+	installed := strings.TrimSpace(string(data))
+	if installed == "" {
+		return false, nil
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		if digest, err := dcxembed.Digest(arch); err == nil && digest == installed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// signalOutdatedScript signals agent processes still running a replaced
+// binary (/proc/<pid>/exe is "<path> (deleted)", $1) or the legacy one
+// ($2). Every value is a positional argument.
+const signalOutdatedScript = `for d in /proc/[0-9]*; do
   exe="$(readlink "$d/exe" 2>/dev/null)"
   case "$exe" in
-    "$2 (deleted)"|"$4"|"$4 (deleted)") kill "${d#/proc/}" 2>/dev/null ;;
+    "$1 (deleted)"|"$2"|"$2 (deleted)") kill "${d#/proc/}" 2>/dev/null ;;
   esac
 done
 exit 0`
-
-// probe returns the container's architecture and the installed agent's
-// digest ("" when there is none).
-func probe(ctx context.Context, engine container.Engine, containerName, binaryPath string) (arch, digest string, err error) {
-	out, err := engine.ExecAsRoot(ctx, containerName, []string{"sh", "-c", probeScript, "dcx-deploy", binaryPath})
-	if err != nil {
-		return "", "", fmt.Errorf("failed to prepare the agent directory: %w", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	arch = strings.TrimSpace(lines[0])
-	if arch == "" {
-		arch = runtime.GOARCH
-	}
-	if len(lines) > 1 {
-		digest = strings.TrimSpace(lines[len(lines)-1])
-	}
-	return arch, digest, nil
-}
 
 // waitOutdatedGone waits until no agent answers on listenAddr, after
 // Deploy signalled outdated ones, so a fresh agent can bind.
@@ -134,9 +137,4 @@ func waitGone(ctx context.Context, engine container.Engine, containerName, binar
 		}
 	}
 	return fmt.Errorf("outdated agent still listening on %s", listenAddr)
-}
-
-func sha256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
 }

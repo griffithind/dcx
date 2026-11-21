@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"path"
 	"strings"
 	"time"
@@ -135,7 +136,7 @@ func (s *DevContainerService) planUp(ctx context.Context, opts UpOptions) (*upRu
 	// started outside dcx (docker restart, a reboot with a restart policy):
 	// postStartCommand runs when it started after the last one ran.
 	if action == actionResume && setupDone {
-		run.started = s.startedSinceLastPostStart(ctx, existing)
+		run.started = s.startedSinceLastPostStart(ctx, existing, markers)
 	}
 	return run, nil
 }
@@ -340,12 +341,24 @@ func (s *DevContainerService) stepContainer(ctx context.Context, r *upRun) error
 	switch r.action {
 	case actionResume:
 		// The container is running; only the setup steps remain.
+		r.info = r.existing
+		return nil
 	case actionStart:
 		if err := s.startExisting(ctx, r.resolved, r.existing); err != nil {
 			return err
 		}
 		r.started = true
+		// Starting changes nothing the later steps read (the container's
+		// ID, name, labels, user and environment).
+		started := *r.existing
+		started.Running, started.Status = true, "running"
+		r.info = &started
+		return nil
 	case actionCreate, actionRecreate:
+		// A new container needs the agent: decompress it while creating.
+		if info, err := s.engine.Info(ctx); err == nil {
+			agentctl.Prefetch(info.Architecture)
+		}
 		buildSecrets, cleanup, err := s.fetchBuildSecrets(ctx, r.resolved)
 		if err != nil {
 			return err
@@ -424,7 +437,8 @@ func (s *DevContainerService) stepAgent(ctx context.Context, r *upRun) error {
 		WorkDir:       r.resolved.WorkspaceFolder,
 		ListenAddr:    container.SSHListenAddr(r.info),
 		AllowedCIDRs:  container.RecordedSSHAccess(r.info).AllowedCIDRs,
-		NewContainer:  r.action == actionCreate || r.action == actionRecreate,
+		Fresh:         r.started,
+		Created:       r.action == actionCreate || r.action == actionRecreate,
 		Secrets:       runtimeSecrets,
 		SecretsOwner:  r.resolved.EffectiveUser,
 		Environment:   environment,
@@ -465,11 +479,12 @@ func (s *DevContainerService) stepHooks(ctx context.Context, r *upRun) error {
 		alias = aliases[0]
 	}
 	runner := s.hookRunner(r.resolved.Hooks, alias)
+	defer runner.Multiplex()()
 	markers := r.markers
 	if markers == nil || r.info.ID != markers.container {
 		markers = s.markersFor(r.info)
 		if markers != nil && (r.action == actionCreate || r.action == actionRecreate) {
-			markers.done = map[string]bool{} // a container this run created has none
+			markers.done = map[string][]byte{} // a container this run created has none
 		}
 	}
 
@@ -521,6 +536,7 @@ type lifecycleHooks interface {
 	RunInitialize(ctx context.Context) error
 	RunCreateHooks(ctx context.Context, markers lifecycle.Markers) error
 	RunStartHooks(ctx context.Context) error
+	Multiplex() (stop func())
 }
 
 // hookRunner returns a runner for hooks; container hooks run with OpenSSH
@@ -536,7 +552,10 @@ func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshAlias stri
 // postStartCommand last ran (the poststart marker, else the ready marker).
 // When that can't be told it answers true: re-running postStart after a
 // reconnect is the lesser evil next to skipping it after a restart.
-func (s *DevContainerService) startedSinceLastPostStart(ctx context.Context, info *state.ContainerInfo) bool {
+func (s *DevContainerService) startedSinceLastPostStart(ctx context.Context, info *state.ContainerInfo, m *containerMarkers) bool {
+	if m == nil {
+		return true
+	}
 	details, err := s.engine.InspectContainer(ctx, info.ID)
 	if err != nil || details == nil {
 		return true
@@ -546,11 +565,11 @@ func (s *DevContainerService) startedSinceLastPostStart(ctx context.Context, inf
 		return true
 	}
 	for _, phase := range []string{phasePostStart, phaseReady} {
-		out, err := s.engine.ExecOutput(ctx, info.ID, []string{"cat", markerPath(phase)})
-		if err != nil {
+		stamp, err := m.stamp(ctx, phase)
+		if err != nil || stamp == "" {
 			continue
 		}
-		if ran, err := time.Parse(time.RFC3339, strings.TrimSpace(string(out))); err == nil {
+		if ran, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
 			return started.After(ran)
 		}
 	}
@@ -579,64 +598,71 @@ func (s *DevContainerService) markersFor(info *state.ContainerInfo) *containerMa
 	return &containerMarkers{engine: s.engine, container: info.ID}
 }
 
-// containerMarkers stores lifecycle markers as files in the container.
-// containerMarkers reads the container's markers with one exec, the first
-// time Done is asked, and keeps that list up to date as it marks phases
-// (Up holds the workspace lock, so nothing else writes them meanwhile).
+// containerMarkers stores lifecycle markers as files in the container,
+// each holding the time it was written. It reads them all with one
+// `docker cp` the first time it is asked, and keeps that copy up to date
+// as it marks phases (Up holds the workspace lock, so nothing else writes
+// them meanwhile).
 type containerMarkers struct {
 	engine    container.Engine
 	container string
-	done      map[string]bool // marker file names; nil until loaded
+	done      map[string][]byte // marker file contents by name; nil until loaded
 }
 
 var _ lifecycle.Markers = (*containerMarkers)(nil)
 
-func markerPath(phase string) string {
-	return path.Join(lifecycleMarkerDir, strings.ReplaceAll(phase, "/", "_")+".done")
+func markerName(phase string) string {
+	return strings.ReplaceAll(phase, "/", "_") + ".done"
 }
 
-// markerList prints the names in the marker directory ($1), nothing when
-// it does not exist yet.
-const markerList = `if [ -d "$1" ]; then ls -1A "$1"; fi`
+func markerPath(phase string) string { return path.Join(lifecycleMarkerDir, markerName(phase)) }
+
+func (m *containerMarkers) load(ctx context.Context) error {
+	if m.done != nil {
+		return nil
+	}
+	files, err := m.engine.ReadDir(ctx, m.container, lifecycleMarkerDir)
+	if err != nil {
+		return err
+	}
+	m.done = files
+	return nil
+}
 
 func (m *containerMarkers) Done(ctx context.Context, phase string) (bool, error) {
-	if m.done == nil {
-		out, err := m.engine.ExecOutput(ctx, m.container, []string{"sh", "-c", markerList, "dcx-marker", lifecycleMarkerDir})
-		if err != nil {
-			return false, err
-		}
-		m.done = map[string]bool{}
-		for _, name := range strings.Fields(string(out)) {
-			m.done[name] = true
-		}
+	if err := m.load(ctx); err != nil {
+		return false, err
 	}
-	return m.done[path.Base(markerPath(phase))], nil
+	_, ok := m.done[markerName(phase)]
+	return ok, nil
 }
 
-// markScript writes the timestamp ($2) to each marker file (names after
-// it) in the marker directory ($1), creating it, in one exec.
-const markScript = `set -e
-dir=$1 stamp=$2
-shift 2
-mkdir -p "$dir"
-chmod 0755 "$dir"
-umask 077
-for name in "$@"; do printf '%s\n' "$stamp" > "$dir/$name"; done`
+// stamp returns the time phase was recorded ("" when it was not).
+func (m *containerMarkers) stamp(ctx context.Context, phase string) (string, error) {
+	if err := m.load(ctx); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(m.done[markerName(phase)])), nil
+}
 
+// Mark records phases, with the time, in one `docker cp`.
 func (m *containerMarkers) Mark(ctx context.Context, phases ...string) error {
 	if len(phases) == 0 {
 		return nil
 	}
-	argv := []string{"sh", "-c", markScript, "dcx-mark", lifecycleMarkerDir, time.Now().UTC().Format(time.RFC3339)}
+	// Nanoseconds: startedSinceLastPostStart compares the stamp with the
+	// container's start time, often in the same second.
+	stamp := []byte(time.Now().UTC().Format(time.RFC3339Nano) + "\n")
+	files := []container.File{{Path: lifecycleMarkerDir, Mode: fs.ModeDir | 0o755}}
 	for _, phase := range phases {
-		argv = append(argv, path.Base(markerPath(phase)))
+		files = append(files, container.File{Path: markerPath(phase), Mode: 0o600, Data: stamp})
 	}
-	if _, err := m.engine.ExecAsRoot(ctx, m.container, argv); err != nil {
+	if err := m.engine.WriteFiles(ctx, m.container, files); err != nil {
 		return err
 	}
 	if m.done != nil {
 		for _, phase := range phases {
-			m.done[path.Base(markerPath(phase))] = true
+			m.done[markerName(phase)] = stamp
 		}
 	}
 	return nil

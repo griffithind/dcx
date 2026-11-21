@@ -53,6 +53,8 @@ func (h *fakeHooks) RunCreateHooks(ctx context.Context, m lifecycle.Markers) err
 }
 func (h *fakeHooks) RunStartHooks(context.Context) error { h.start++; return nil }
 
+func (h *fakeHooks) Multiplex() func() { return func() {} }
+
 // upHarness is a workspace with an image config, a fake engine whose
 // containers keep marker files, and fakes for the agent and the hooks.
 type upHarness struct {
@@ -72,7 +74,6 @@ func newUpHarness(t *testing.T, config string) *upHarness {
 	h.writeConfig(config)
 
 	h.engine = &containertest.Fake{Registry: map[string]map[string]string{"alpine:3": {}}}
-	h.engine.FileMarkers() // marker files exist once written
 	return h
 }
 
@@ -352,11 +353,11 @@ func TestDownWaitsForTheWorkspaceLock(t *testing.T) {
 	assert.Empty(t, h.containers())
 }
 
-// markerListings counts the execs that listed lifecycle markers.
+// markerListings counts the reads of the lifecycle markers.
 func markerListings(f *containertest.Fake) int {
 	n := 0
-	for _, c := range f.CallsTo("ExecOutput") {
-		if strings.Contains(strings.Join(c.Args, " "), "dcx-marker") {
+	for _, c := range f.CallsTo("ReadDir") {
+		if len(c.Args) == 2 && c.Args[1] == lifecycleMarkerDir {
 			n++
 		}
 	}

@@ -5,6 +5,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// inspectFile returns a file in the container, read as root.
+func inspectFile(t *testing.T, container, path string) string {
+	t.Helper()
+	out, err := exec.Command("docker", "exec", "--user", "root", container, "cat", path).CombinedOutput()
+	require.NoError(t, err, string(out))
+	return strings.TrimSpace(string(out))
+}
 
 // TestStateLifecycleE2E walks one workspace through every state (absent,
 // running, stopped, and back), checking in each what state, status, doctor,
@@ -83,6 +92,21 @@ func TestStateLifecycleE2E(t *testing.T) {
 		assert.Equal(t, 1, postStartRuns(t))
 	})
 
+	// An agent from another dcx build that stopped answering is replaced
+	// and restarted on the next up, without rerunning postStartCommand.
+	t.Run("outdated_agent_replaced", func(t *testing.T) {
+		name := helpers.ContainerName(t, workspace)
+		sidecar := "/var/lib/dcx/bin/dcx-agent.sha256"
+		current := inspectFile(t, name, sidecar)
+		out, err := exec.Command("docker", "exec", "--user", "root", name, "sh", "-c",
+			"echo outdated > "+sidecar+"; pkill -f '[d]cx-agent listen'; true").CombinedOutput()
+		require.NoError(t, err, string(out))
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "up"), "reconnecting")
+		assert.Equal(t, current, inspectFile(t, name, sidecar), "the current agent is installed again")
+		assert.Equal(t, 1, postStartRuns(t))
+		assert.Equal(t, 3, initRuns(t))
+	})
+
 	t.Run("running_to_stopped", func(t *testing.T) {
 		name := helpers.ContainerName(t, workspace)
 		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "stop"), "stopped")
@@ -100,7 +124,7 @@ func TestStateLifecycleE2E(t *testing.T) {
 		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "up"), "started")
 		assert.Equal(t, "running", state())
 		assert.Equal(t, 2, postStartRuns(t), "postStartCommand runs on every start")
-		assert.Equal(t, 3, initRuns(t), "initializeCommand runs when a stopped container starts")
+		assert.Equal(t, 4, initRuns(t), "initializeCommand runs when a stopped container starts")
 	})
 
 	t.Run("restart", func(t *testing.T) {

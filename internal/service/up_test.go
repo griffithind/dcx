@@ -21,7 +21,6 @@ func markerInfo(withMarkers bool) *state.ContainerInfo {
 
 func TestContainerMarkersRoundTrip(t *testing.T) {
 	fake := &containertest.Fake{}
-	fake.FileMarkers()
 	svc, _ := newTestService(t, fake)
 	m := svc.markersFor(markerInfo(true))
 	require.NotNil(t, m)
@@ -37,9 +36,9 @@ func TestContainerMarkersRoundTrip(t *testing.T) {
 	assert.Contains(t, fake.Files, "c1:"+lifecycleMarkerDir+"/ready.done")
 
 	require.NoError(t, m.Mark(ctx, phasePostStart, phaseReady))
-	assert.Len(t, fake.CallsTo("ExecAsRoot"), 2, "one exec marks any number of phases")
+	assert.Len(t, fake.CallsTo("WriteFiles"), 2, "one copy marks any number of phases")
 	assert.Contains(t, fake.Files, "c1:"+lifecycleMarkerDir+"/poststart.done")
-	assert.Len(t, fake.CallsTo("ExecOutput"), 1, "the markers are listed once")
+	assert.Len(t, fake.CallsTo("ReadDir"), 1, "the markers are read once")
 }
 
 // A running container whose setup never finished must not be reported as
@@ -47,7 +46,6 @@ func TestContainerMarkersRoundTrip(t *testing.T) {
 // container that cannot be asked is an error, not "unfinished".
 func TestSetupComplete(t *testing.T) {
 	fake := &containertest.Fake{}
-	fake.FileMarkers()
 	svc, _ := newTestService(t, fake)
 	ctx := context.Background()
 
@@ -64,7 +62,7 @@ func TestSetupComplete(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, done)
 
-	fake.OutputFunc = func(string, []string) ([]byte, error) { return nil, errors.New("container not responding") }
+	fake.ReadErr = errors.New("container not responding")
 	_, err = svc.setupComplete(ctx, svc.markersFor(markerInfo(true)))
 	assert.Error(t, err)
 }

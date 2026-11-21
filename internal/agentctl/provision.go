@@ -34,9 +34,10 @@ type Options struct {
 	// AllowedCIDRs widens the agent's connection allowlist beyond loopback
 	// (`dcx up --hosts`).
 	AllowedCIDRs []string
-	// NewContainer says dcx just created the container, so no agent can be
-	// running in it: nothing to wait for after installing.
-	NewContainer bool
+	// Fresh says dcx just created or started the container, so no agent can
+	// be running in it: nothing to stop or wait for after installing.
+	// Created says dcx just created it, so it has no agent installed yet.
+	Fresh, Created bool
 
 	// Secrets are the runtime secrets, owned by SecretsOwner ("" is root).
 	Secrets      []agentproto.Secret
@@ -67,11 +68,11 @@ func (o Options) listenAddr() string {
 func Provision(ctx context.Context, engine container.Engine, rep report.Reporter, opts Options) error {
 	rep = report.OrDiscard(rep)
 	rep.Infof("Starting dcx agent...")
-	installed, err := Deploy(ctx, engine, opts.ContainerName)
+	installed, err := Deploy(ctx, engine, opts.ContainerName, opts.Fresh, opts.Created)
 	if err != nil {
 		return fmt.Errorf("failed to install dcx agent: %w", err)
 	}
-	if installed && !opts.NewContainer {
+	if installed && !opts.Fresh {
 		if err := waitOutdatedGone(ctx, engine, opts.ContainerName, opts.listenAddr()); err != nil {
 			return err
 		}

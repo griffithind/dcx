@@ -3,7 +3,6 @@ package agentctl
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,40 +22,55 @@ func agentBinary(t *testing.T) []byte {
 	return bin
 }
 
-// probeKey is the probe exec as the fake engine records it.
-var probeKey = strings.Join([]string{"sh", "-c", probeScript, "dcx-deploy", agentproto.BinaryPath}, " ")
-
 func TestDeployInstallsIntoRootOwnedDir(t *testing.T) {
 	bin := agentBinary(t)
-	fake := &containertest.Fake{Outputs: map[string]string{probeKey: "x86_64\n"}}
+	fake := &containertest.Fake{}
 
-	installed, err := Deploy(context.Background(), fake, "c1")
+	installed, err := Deploy(context.Background(), fake, "c1", true, true)
 	require.NoError(t, err)
 	assert.True(t, installed)
 
-	// Three execs: the probe (which also creates the root-owned binary
-	// directory), the copy, and the install (which also signals outdated
-	// agents).
+	// One copy writes the root-owned directories, the binary and, last, its
+	// digest; a new container has no agent to check or stop, so nothing
+	// else runs.
+	writes := fake.CallsTo("WriteFiles")
+	require.Len(t, writes, 1)
+	assert.Equal(t, []string{"c1", agentproto.StateDir, agentproto.BinaryDir, agentproto.BinaryPath, agentproto.BinaryPath + ".sha256"}, writes[0].Args)
+	assert.Equal(t, bin, fake.Files["c1:"+agentproto.BinaryPath], "the copy is the embedded binary (the daemon's architecture)")
+	digest, err := dcxembed.Digest("amd64")
+	require.NoError(t, err)
+	assert.Equal(t, digest+"\n", string(fake.Files["c1:"+agentproto.BinaryPath+".sha256"]))
+	assert.Empty(t, fake.CallsTo("ExecAsRoot"))
+	assert.Empty(t, fake.CallsTo("ReadFile"))
+}
+
+func TestDeployStopsOutdatedAgentInRunningContainer(t *testing.T) {
+	agentBinary(t)
+	fake := &containertest.Fake{Files: map[string][]byte{"c1:" + agentproto.BinaryPath + ".sha256": []byte("old\n")}}
+
+	installed, err := Deploy(context.Background(), fake, "c1", false, false)
+	require.NoError(t, err)
+	assert.True(t, installed)
 	root := fake.CallsTo("ExecAsRoot")
-	require.Len(t, root, 2)
-	assert.Equal(t, []string{"c1", "sh", "-c", probeScript, "dcx-deploy", agentproto.BinaryPath}, root[0].Args)
-	assert.Contains(t, probeScript, `install -d -o root -g root -m 0755`)
-	// Paths and digest are positional arguments of a fixed script.
-	assert.Equal(t, []string{agentproto.BinaryPath + ".new", agentproto.BinaryPath, sha256Hex(bin), agentproto.LegacyBinaryPath},
-		root[1].Args[len(root[1].Args)-4:])
-	assert.Len(t, fake.CallsTo("CopyToContainer"), 1)
-	assert.Equal(t, bin, fake.Files["c1:"+agentproto.BinaryPath+".new"], "the staged copy is the embedded binary")
+	require.Len(t, root, 1)
+	// The paths are positional arguments of a fixed script.
+	assert.Equal(t, []string{"c1", "sh", "-c", signalOutdatedScript, "dcx-deploy", agentproto.BinaryPath, agentproto.LegacyBinaryPath}, root[0].Args)
 }
 
 func TestDeploySkipsMatchingBinary(t *testing.T) {
-	bin := agentBinary(t)
-	fake := &containertest.Fake{Outputs: map[string]string{probeKey: "x86_64\n" + sha256Hex(bin) + "\n"}}
+	agentBinary(t)
+	for _, arch := range []string{"amd64", "arm64"} {
+		digest, err := dcxembed.Digest(arch)
+		require.NoError(t, err)
+		fake := &containertest.Fake{Files: map[string][]byte{"c1:" + agentproto.BinaryPath + ".sha256": []byte(digest + "\n")}}
 
-	installed, err := Deploy(context.Background(), fake, "c1")
-	require.NoError(t, err)
-	assert.False(t, installed)
-	assert.Empty(t, fake.CallsTo("CopyToContainer"))
-	assert.Len(t, fake.CallsTo("ExecAsRoot"), 1, "a current agent costs one exec")
+		installed, err := Deploy(context.Background(), fake, "c1", false, false)
+		require.NoError(t, err)
+		assert.False(t, installed)
+		assert.Empty(t, fake.CallsTo("WriteFiles"))
+		assert.Empty(t, fake.CallsTo("ExecAsRoot"))
+		assert.Len(t, fake.CallsTo("ReadFile"), 1, "a current agent costs one read")
+	}
 }
 
 func TestWaitGoneWaitsForListenerToGo(t *testing.T) {

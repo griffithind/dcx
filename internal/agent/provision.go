@@ -466,7 +466,7 @@ func (p *provisioner) startListener(ctx context.Context, cfg agentproto.ListenCo
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(5 * time.Millisecond): // it is usually up within milliseconds
 		}
 	}
 	msg := fmt.Sprintf("dcx agent did not start listening within %s", listenTimeout)

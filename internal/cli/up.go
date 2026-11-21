@@ -50,10 +50,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 		access = &a
 	}
 
-	cliCtx, err := NewCLIContext()
-	if err != nil {
-		return err
-	}
+	cliCtx := NewCLIContext()
 	defer cliCtx.Close()
 
 	// Service.Up decides what to do (nothing, resume an unfinished setup,

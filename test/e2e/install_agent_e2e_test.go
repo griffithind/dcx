@@ -37,7 +37,7 @@ func TestInstallAgentE2E(t *testing.T) {
 	binaryPath := agentproto.BinaryPath
 
 	for i := range 2 {
-		updated, err := agentctl.Deploy(ctx, container.NewDockerCLI(), containerName)
+		updated, err := agentctl.Deploy(ctx, container.NewDockerCLI(), containerName, false, false)
 		require.NoError(t, err, "deploy %d", i+1)
 		assert.False(t, updated, "deploy %d: dcx up already installed the current agent", i+1)
 	}
