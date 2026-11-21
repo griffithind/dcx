@@ -1,7 +1,7 @@
 # dcx
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go 1.24+](https://img.shields.io/badge/Go-1.24+-00ADD8.svg)](https://go.dev/)
+[![Go 1.27+](https://img.shields.io/badge/Go-1.27+-00ADD8.svg)](https://go.dev/)
 
 A single-binary CLI for running [devcontainers](https://containers.dev/) with built-in SSH support. No Node.js required. Works with any editor.
 
@@ -768,7 +768,7 @@ make release
 
 ### Requirements
 
-- Go 1.24+
+- Go 1.27+ (the version in `go.mod`, which CI and releases build with)
 - Docker Engine
 - docker compose CLI plugin
 

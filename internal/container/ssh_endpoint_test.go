@@ -14,7 +14,7 @@ import (
 	"github.com/griffithind/dcx/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const sshTestWorkspace = "ws_ssh_endpoint"

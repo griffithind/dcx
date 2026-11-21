@@ -1,4 +1,5 @@
-Name         | State   | Containers                                 | Workspace                                         
-myapp        | running | myapp-abcd1234-app-1*, myapp-abcd1234-db-1 | /home/dev/myapp                                   
-nonamexxxxxx | created | noname-nonamexx*                           | .../path/that/goes/on/and/on/until/it/is/truncated
+Name         │ State   │ Containers                                 │ Workspace                                         
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+myapp        │ running │ myapp-abcd1234-app-1*, myapp-abcd1234-db-1 │ /home/dev/myapp                                   
+nonamexxxxxx │ created │ noname-nonamexx*                           │ .../path/that/goes/on/and/on/until/it/is/truncated
 

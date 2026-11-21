@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // composeOverride renders a ContainerSpec as a compose override file for

@@ -15,7 +15,7 @@ import (
 	"github.com/griffithind/dcx/internal/features"
 	"github.com/griffithind/dcx/internal/lockfile"
 	"github.com/griffithind/dcx/internal/report"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Builder constructs a ResolvedDevContainer from configuration and resolves all references.
