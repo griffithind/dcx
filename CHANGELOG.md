@@ -126,6 +126,9 @@ Existing containers keep working; `dcx up --recreate` picks up every change.
   takes about 20 ms instead of 150 ms. A shell with another SSH agent gets
   its own connection, so agent forwarding is always the shell's. Plain
   `ssh <alias>` is unchanged.
+- Secret commands (`customizations.dcx.secrets` and `buildSecrets`) run at
+  the same time instead of one after another; when one fails, the others
+  are stopped.
 - Reconnecting to a container whose agent stopped no longer reruns
   `postStartCommand` when the container had started within the same second
   as the last one.

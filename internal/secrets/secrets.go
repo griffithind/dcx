@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
 )
@@ -58,34 +61,54 @@ func NewFetcher(logger *slog.Logger) *Fetcher {
 	return &Fetcher{logger: logger}
 }
 
-// FetchSecrets executes commands to fetch all configured secrets.
-// Returns an error if any required secret command fails.
+// FetchSecrets runs the commands of all configured secrets and returns
+// them sorted by name. The commands run at the same time: each is usually
+// a call to a secret manager's CLI (op, doppler, vault) taking a large
+// part of a second. When one fails, the others are cancelled and the error
+// names the first failing secret in name order.
 func (f *Fetcher) FetchSecrets(ctx context.Context, configs map[string]devcontainer.SecretConfig) ([]Secret, error) {
 	if len(configs) == 0 {
 		return nil, nil
 	}
-
-	result := make([]Secret, 0, len(configs))
-
-	for name, config := range configs {
+	names := make([]string, 0, len(configs))
+	for name := range configs {
 		if err := ValidateName(name); err != nil {
 			return nil, err
 		}
-		f.logger.Debug("Fetching secret", "name", name)
-
-		value, err := f.executeCommand(ctx, string(config))
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch secret %q: %w", name, err)
-		}
-
-		result = append(result, Secret{
-			Name:  name,
-			Value: value,
-		})
-
-		f.logger.Debug("Successfully fetched secret", "name", name)
+		names = append(names, name)
 	}
+	sort.Strings(names)
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	result := make([]Secret, len(names))
+	errs := make([]error, len(names))
+	// cancelled[i]: secret i failed after another failure cancelled it.
+	cancelled := make([]bool, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.logger.Debug("Fetching secret", "name", name)
+			value, err := f.executeCommand(ctx, string(configs[name]))
+			if err != nil {
+				errs[i], cancelled[i] = err, ctx.Err() != nil
+				cancel()
+				return
+			}
+			result[i] = Secret{Name: name, Value: value}
+			f.logger.Debug("Successfully fetched secret", "name", name)
+		}()
+	}
+	wg.Wait()
+	for _, includeCancelled := range []bool{false, true} {
+		for i, err := range errs {
+			if err != nil && (includeCancelled || !cancelled[i]) {
+				return nil, fmt.Errorf("failed to fetch secret %q: %w", names[i], err)
+			}
+		}
+	}
 	return result, nil
 }
 
@@ -93,6 +116,9 @@ func (f *Fetcher) FetchSecrets(ctx context.Context, configs map[string]devcontai
 func (f *Fetcher) executeCommand(ctx context.Context, command string) ([]byte, error) {
 	// Use shell to execute the command
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// Cancelling kills the shell; a command it started (op, sleep) may
+	// still hold the output open, so stop waiting for it shortly after.
+	cmd.WaitDelay = 500 * time.Millisecond
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

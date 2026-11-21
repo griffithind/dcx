@@ -5,9 +5,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/griffithind/dcx/internal/devcontainer"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFetchSecrets(t *testing.T) {
@@ -216,4 +220,38 @@ func TestFetchSecretsRejectsUnsafeNameBeforeRunningCommand(t *testing.T) {
 	if _, statErr := os.Stat(marker); statErr == nil {
 		t.Error("secret command must not run when the name is invalid")
 	}
+}
+
+// Secret commands run at the same time: three that each take 300 ms take
+// about 300 ms together, and come back sorted by name.
+func TestFetchSecretsRunsCommandsConcurrently(t *testing.T) {
+	f := NewFetcher(nil)
+	start := time.Now()
+	got, err := f.FetchSecrets(context.Background(), map[string]devcontainer.SecretConfig{
+		"C": "sleep 0.3; echo c",
+		"A": "sleep 0.3; echo a",
+		"B": "sleep 0.3; echo b",
+	})
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 800*time.Millisecond)
+	require.Len(t, got, 3)
+	for i, want := range []string{"A", "B", "C"} {
+		assert.Equal(t, want, got[i].Name)
+		assert.Equal(t, strings.ToLower(want), string(got[i].Value))
+	}
+}
+
+// A failing command stops the others, and the error names it, not one
+// that was stopped.
+func TestFetchSecretsReportsTheFailingCommand(t *testing.T) {
+	f := NewFetcher(nil)
+	start := time.Now()
+	_, err := f.FetchSecrets(context.Background(), map[string]devcontainer.SecretConfig{
+		"A_SLOW": "sleep 5; echo a",
+		"B_BAD":  "echo nope >&2; exit 3",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"B_BAD"`)
+	assert.Contains(t, err.Error(), "nope")
+	assert.Less(t, time.Since(start), 3*time.Second, "the slow command is cancelled")
 }
