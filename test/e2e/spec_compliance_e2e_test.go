@@ -4,8 +4,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -57,28 +55,12 @@ func TestOverrideCommandDefaultE2E(t *testing.T) {
 	assert.Contains(t, out, "sleep", "the keep-alive runs")
 }
 
-// TestOverrideCommandExplicitFalseE2E tests that setting overrideCommand to false
-// does not override the container's command.
+// TestOverrideCommandExplicitFalseE2E: with overrideCommand false dcx does
+// not replace the image's command with its keep-alive: PID 1 is the image's
+// own command (devUserEnv's).
 func TestOverrideCommandExplicitFalseE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// With overrideCommand=false dcx must not replace the image's command
-	// with its keep-alive: PID 1 is the image's own command.
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"build": {"dockerfile": "Dockerfile"},
-		"overrideCommand": false
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "Dockerfile"),
-		// The command exits on SIGTERM, so stopping the container does not
-		// wait out Docker's 10 s timeout.
-		[]byte("FROM alpine:3.24\nCMD [\"sh\", \"-c\", \"trap 'exit 0' TERM; tail -f /dev/null & wait\"]\n"), 0o644))
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
+	stdout, _, err := helpers.RunDCXInDir(t, devUserEnv(t).Dir, "ssh", "--", "sh", "-c", "tr '\\0' ' ' < /proc/1/cmdline")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "tail -f /dev/null")
 	assert.NotContains(t, stdout, "dcx-keepalive")

@@ -56,34 +56,6 @@ func TestShutdownActionNoneE2E(t *testing.T) {
 	})
 }
 
-// TestShutdownActionStopContainerE2E tests shutdownAction: "stopContainer" (default).
-func TestShutdownActionStopContainerE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Shutdown Stop Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"overrideCommand": true,
-		"shutdownAction": "stopContainer"
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
-
-	// Stop should work without force
-	t.Run("stop_works_without_force", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "stop")
-		assert.Contains(t, stdout, "stopped")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "created", state)
-	})
-}
-
 // TestHostRequirementsValidationE2E: CPU and memory minimums the host
 // can't meet warn and start anyway (many repositories set Codespaces-sized
 // ones); a required GPU on a host without a GPU runtime warns and starts

@@ -41,22 +41,38 @@ var (
 func SharedWorkspace(t *testing.T, key string, files map[string]string) *Shared {
 	t.Helper()
 	RequireDockerAvailable(t)
-	sharedMu.Lock()
-	s, ok := sharedEnv[key]
-	if !ok {
-		s = &Shared{}
-		sharedEnv[key] = s
-	}
-	sharedMu.Unlock()
-
-	s.once.Do(func() { s.err = s.bringUp(t, key, files) })
+	s := sharedEntry(key)
+	bin := GetDCXBinary(t)
+	s.once.Do(func() { s.err = s.bringUp(bin, key, files) })
 	if s.err != nil {
 		t.Fatalf("shared environment %q: %v", key, s.err)
 	}
 	return s
 }
 
-func (s *Shared) bringUp(t *testing.T, key string, files map[string]string) error {
+// StartShared begins bringing the shared environment key up in the
+// background (a no-op once it has started), so tests that later ask for it
+// with SharedWorkspace wait less. Tests waiting for an environment hold a
+// parallel slot, so starting them all at once matters.
+func StartShared(t *testing.T, key string, files map[string]string) {
+	t.Helper()
+	s := sharedEntry(key)
+	bin := GetDCXBinary(t)
+	go s.once.Do(func() { s.err = s.bringUp(bin, key, files) })
+}
+
+func sharedEntry(key string) *Shared {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	s, ok := sharedEnv[key]
+	if !ok {
+		s = &Shared{}
+		sharedEnv[key] = s
+	}
+	return s
+}
+
+func (s *Shared) bringUp(bin, key string, files map[string]string) error {
 	dir, err := os.MkdirTemp("", "dcx-shared-"+key+"-")
 	if err != nil {
 		return err
@@ -78,10 +94,14 @@ func (s *Shared) bringUp(t *testing.T, key string, files map[string]string) erro
 			return err
 		}
 	}
-	stdout, stderr, err := RunDCXInDir(t, dir, "up")
-	s.UpOutput = stdout + stderr
+	cmd := exec.Command(bin, "up")
+	cmd.Dir = dir
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err = cmd.Run()
+	s.UpOutput = stdout.String() + stderr.String()
 	if err != nil {
-		return fmt.Errorf("dcx up: %w\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		return fmt.Errorf("dcx up: %w\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
 	return nil
 }

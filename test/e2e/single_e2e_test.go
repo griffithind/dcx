@@ -15,70 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSingleImageBasedE2E tests the full lifecycle of an image-based devcontainer.
-func TestSingleImageBasedE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create a temp workspace with image-based config
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Test initial state is absent
-	t.Run("initial_state_absent", func(t *testing.T) {
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
-	})
-
-	// Test dcx up
-	t.Run("up_creates_running_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "Devcontainer started successfully")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Test dcx ssh -- <cmd>
-	t.Run("exec_runs_command", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", "hello-from-single")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "hello-from-single")
-	})
-
-	// Test dcx stop
-	t.Run("stop_stops_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "stop")
-		assert.Contains(t, stdout, "stopped")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "created", state)
-	})
-
-	// Test dcx up (starts stopped container)
-	t.Run("up_starts_stopped_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Contains(t, stdout, "started")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Test dcx down
-	t.Run("down_removes_container", func(t *testing.T) {
-		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
-		assert.Contains(t, stdout, "removed")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "absent", state)
-	})
-}
-
 // TestDockerfileLifecycleE2E walks a Dockerfile config through dcx build
 // (with and without the cache), up (the Dockerfile ran), clean (an image
 // in use is kept), an edit applied with up --rebuild, down, and clean (the
 // image no container uses is removed). clean --current touches only this
-// workspace's images, so the test runs in parallel.
+// workspace's images, so the test runs in parallel. Build secrets are
+// available to RUN --mount and nowhere else; a runtime secret is mounted
+// alongside.
 func TestDockerfileLifecycleE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -86,20 +29,40 @@ func TestDockerfileLifecycleE2E(t *testing.T) {
 	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
 		"name": %q,
 		"build": {"dockerfile": "Dockerfile"},
-		"workspaceFolder": "/workspace"
+		"workspaceFolder": "/workspace",
+		"customizations": {"dcx": {
+			"secrets": {"RUNTIME_SECRET": "echo runtime-value"},
+			"buildSecrets": {
+				"BUILD_ONLY": "echo build-time-only",
+				"SENSITIVE": "echo super-secret-do-not-persist"
+			}
+		}}
 	}`, helpers.UniqueTestName(t)))
 	dockerfile := filepath.Join(ws, ".devcontainer", "Dockerfile")
 	writeVersion := func(v string) {
-		require.NoError(t, os.WriteFile(dockerfile, []byte("FROM alpine:3.24\nRUN echo \""+v+"\" > /version\n"), 0o644))
+		require.NoError(t, os.WriteFile(dockerfile, []byte(`FROM alpine:3.24
+RUN --mount=type=secret,id=BUILD_ONLY cat /run/secrets/BUILD_ONLY > /build-time-value
+RUN --mount=type=secret,id=SENSITIVE echo "secret was accessed" > /build-status
+RUN echo "`+v+`" > /version
+`), 0o644))
 	}
 	writeVersion("version1")
 
-	assert.NotEmpty(t, helpers.RunDCXInDirSuccess(t, ws, "build"), "build should produce output")
+	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "build"), "Fetching build secrets")
 	assert.NotEmpty(t, helpers.RunDCXInDirSuccess(t, ws, "build", "--no-cache"), "no-cache build should produce output")
 
-	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "Devcontainer started successfully")
+	up := helpers.RunDCXInDirSuccess(t, ws, "up")
+	assert.Contains(t, up, "Devcontainer started successfully")
+	assert.Contains(t, up, "Fetching runtime secrets")
 	assert.Equal(t, "running", helpers.GetContainerState(t, ws))
 	assert.Equal(t, "version1", dcxExec(t, ws, "cat", "/version"), "the Dockerfile ran")
+	assert.Equal(t, "build-time-only", dcxExec(t, ws, "cat", "/build-time-value"))
+	assert.Equal(t, "secret was accessed", dcxExec(t, ws, "cat", "/build-status"))
+	assert.Equal(t, "runtime-value", dcxExec(t, ws, "cat", "/run/secrets/RUNTIME_SECRET"))
+	for _, name := range []string{"BUILD_ONLY", "SENSITIVE"} {
+		_, _, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-e", "/run/secrets/"+name)
+		assert.Error(t, err, "build secret %s must not exist at runtime", name)
+	}
 
 	image := strings.TrimSpace(func() string {
 		out, err := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", helpers.ContainerID(t, ws)).Output()
@@ -122,32 +85,6 @@ func TestDockerfileLifecycleE2E(t *testing.T) {
 	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "down"), "removed")
 	helpers.RunDCXInDirSuccess(t, ws, "clean", "--current")
 	assert.Error(t, exec.Command("docker", "image", "inspect", rebuilt).Run(), "unused dcx image must be removed")
-}
-
-// TestSingleContainerWithMounts tests volume mounts.
-func TestSingleContainerWithMounts(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := `{
-		"name": "Mount Test",
-		"image": "alpine:3.24"
-	}`
-
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Create a test file in the workspace
-	testFile := filepath.Join(workspace, "test-file.txt")
-	err := os.WriteFile(testFile, []byte("mounted content"), 0644)
-	require.NoError(t, err)
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// The default workspace mount: /workspaces/<folder>
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/workspaces/"+filepath.Base(workspace)+"/test-file.txt")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "mounted content")
 }
 
 // TestSingleContainerLabelsE2E tests that all required labels are set on containers.

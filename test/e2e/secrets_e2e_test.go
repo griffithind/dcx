@@ -13,8 +13,8 @@ import (
 )
 
 // The secret plumbing (names, modes, owners, the tmpfs size check) is unit
-// tested in internal/container; these tests check it end to end, one
-// container per plan type.
+// tested in internal/container; these tests check it end to end (the
+// Dockerfile plan in TestDockerfileLifecycleE2E).
 
 // sshOut runs a command in the workspace over dcx ssh and returns its
 // trimmed output, failing the test on error.
@@ -42,57 +42,10 @@ func TestRuntimeSecretsImage(t *testing.T) {
 // its secrets.
 func TestRuntimeSecretsNonRootUser(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "node:20-slim",
-		"remoteUser": "node",
-		"workspaceFolder": "/workspace",
-		"customizations": {"dcx": {"secrets": {"USER_SECRET": "echo non-root-secret-value"}}}
-	}`, helpers.UniqueTestName(t)))
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-
+	ws := nodeEnv(t).Dir
 	assert.Equal(t, "node", sshOut(t, ws, "whoami"))
 	assert.Equal(t, "non-root-secret-value", sshOut(t, ws, "cat", "/run/secrets/USER_SECRET"))
 	assert.Equal(t, "400 node", sshOut(t, ws, "stat", "-c", "%a %U", "/run/secrets/USER_SECRET"))
-}
-
-// TestSecretsDockerfile: a build secret is available to RUN --mount and
-// nowhere else; a runtime secret is mounted alongside.
-func TestSecretsDockerfile(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateWorkspaceFiles(t, map[string]string{
-		".devcontainer/Dockerfile": `FROM alpine:3.24
-RUN --mount=type=secret,id=BUILD_ONLY cat /run/secrets/BUILD_ONLY > /build-time-value
-RUN --mount=type=secret,id=SENSITIVE echo "secret was accessed" > /build-status
-`,
-		".devcontainer/devcontainer.json": fmt.Sprintf(`{
-			"name": %q,
-			"build": {"dockerfile": "Dockerfile"},
-			"workspaceFolder": "/workspace",
-			"customizations": {"dcx": {
-				"secrets": {"RUNTIME_SECRET": "echo runtime-value"},
-				"buildSecrets": {
-					"BUILD_ONLY": "echo build-time-only",
-					"SENSITIVE": "echo super-secret-do-not-persist"
-				}
-			}}
-		}`, helpers.UniqueTestName(t)),
-	})
-	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
-	assert.Contains(t, stdout, "Fetching build secrets")
-	assert.Contains(t, stdout, "Fetching runtime secrets")
-
-	assert.Equal(t, "build-time-only", sshOut(t, ws, "cat", "/build-time-value"))
-	assert.Equal(t, "secret was accessed", sshOut(t, ws, "cat", "/build-status"))
-	assert.Equal(t, "runtime-value", sshOut(t, ws, "cat", "/run/secrets/RUNTIME_SECRET"))
-	for _, name := range []string{"BUILD_ONLY", "SENSITIVE"} {
-		_, _, err := helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-e", "/run/secrets/"+name)
-		assert.Error(t, err, "build secret %s must not exist at runtime", name)
-	}
 }
 
 // TestSecretsCompose: build secrets reach a compose service's build, and

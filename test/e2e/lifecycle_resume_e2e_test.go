@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -45,29 +44,4 @@ func TestFailedCreateHookResumesE2E(t *testing.T) {
 
 	// Now complete: a further up is a no-op.
 	assert.Contains(t, helpers.RunDCXInDirSuccess(t, ws, "up"), "already running")
-}
-
-// initializeCommand runs on the host before the container is created, so
-// it can prepare things the container needs at creation time (here: a bind
-// mount source). It also runs again when a stopped container is started.
-func TestInitializeCommandRunsBeforeCreateE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"initializeCommand": "mkdir -p generated && echo init >> generated/runs",
-		"mounts": ["source=${localWorkspaceFolder}/generated,target=/generated,type=bind"]
-	}`, helpers.UniqueTestName(t)))
-
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-	assert.Equal(t, "init", dcxExec(t, ws, "cat", "/generated/runs"))
-
-	helpers.RunDCXInDirSuccess(t, ws, "stop")
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-	data, err := os.ReadFile(filepath.Join(ws, "generated", "runs"))
-	require.NoError(t, err)
-	assert.Equal(t, 2, strings.Count(string(data), "init"), "initializeCommand runs on every start")
 }

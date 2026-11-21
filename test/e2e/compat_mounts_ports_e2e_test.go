@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"fmt"
-	"net"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -43,50 +42,22 @@ func TestGitRootIsMountedE2E(t *testing.T) {
 }
 
 // TestComposePublishedForwardPortE2E: a port the compose file publishes
-// and forwardPorts also lists is published once (R1); it used to fail with
-// "address already in use".
+// and forwardPorts also lists (composeEnv's) is published once (R1); it
+// used to fail with "address already in use".
 func TestComposePublishedForwardPortE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	port := l.Addr().(*net.TCPAddr).Port
-	require.NoError(t, l.Close())
-
-	ws := helpers.CreateTempComposeWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"forwardPorts": [%d]
-	}`, helpers.UniqueTestName(t), port), fmt.Sprintf(`services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    ports:
-      - "127.0.0.1:%d:%d"
-`, port, port))
-
-	helpers.RunDCXInDirSuccess(t, ws, "up")
+	ws := composeEnv(t).Dir
 	assert.Equal(t, "running", helpers.GetContainerState(t, ws))
+	out, err := exec.Command("docker", "port", helpers.ContainerName(t, ws)).CombinedOutput()
+	require.NoError(t, err, string(out))
+	assert.Equal(t, 1, strings.Count(string(out), fmt.Sprintf("127.0.0.1:%d", composePort)), string(out))
 }
 
-// TestAppPortRangeE2E: an appPort range publishes every port in it (C17).
+// TestAppPortRangeE2E: an appPort range (richEnv's) publishes every port in
+// it (C17).
 func TestAppPortRangeE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"appPort": ["127.0.0.1::8000-8002"]
-	}`, helpers.UniqueTestName(t)))
-	helpers.RunDCXInDirSuccess(t, ws, "up")
-
-	out, err := exec.Command("docker", "port", helpers.ContainerName(t, ws)).CombinedOutput()
+	out, err := exec.Command("docker", "port", helpers.ContainerName(t, richEnv(t).Dir)).CombinedOutput()
 	require.NoError(t, err, string(out))
 	for _, port := range []string{"8000/tcp", "8001/tcp", "8002/tcp"} {
 		assert.Contains(t, string(out), port)

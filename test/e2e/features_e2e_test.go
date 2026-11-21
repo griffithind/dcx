@@ -17,218 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// createWorkspaceWithLocalFeature creates a workspace with a simple local feature.
-func createWorkspaceWithLocalFeature(t *testing.T, name string) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature metadata
-	featureJSON := `{
-		"id": "simple-marker",
-		"version": "1.0.0",
-		"name": "Simple Marker Feature",
-		"description": "Creates a marker file"
-	}`
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
-	require.NoError(t, err)
-
-	// Create install script (use /bin/sh for Alpine compatibility)
-	installScript := `#!/bin/sh
-set -e
-echo "feature installed" > /tmp/feature-marker
-`
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": "%s",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/simple-marker": {}
-		}
-	}`, name)
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// TestFeatureCachingE2E tests that features are cached between runs.
-func TestFeatureCachingE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	workspace := createWorkspaceForCachingTest(t)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	containerID := helpers.ContainerID(t, workspace)
-	imageID := helpers.ContainerImageID(t, workspace)
-
-	t.Run("second_up_keeps_the_container", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.Equal(t, containerID, helpers.ContainerID(t, workspace))
-	})
-
-	// Now change the feature options and verify rebuild happens
-	t.Run("config_change_triggers_rebuild", func(t *testing.T) {
-		// First tear down
-		helpers.RunDCXInDirSuccess(t, workspace, "down")
-
-		// Change the feature options in devcontainer.json
-		devcontainerDir := filepath.Join(workspace, ".devcontainer")
-		devcontainerJSON := `{
-		"name": "Feature Caching Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/with-options": {
-				"greeting": "ChangedHello",
-				"enabled": true,
-				"count": "10"
-			}
-		}
-	}`
-		err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-		require.NoError(t, err)
-
-		// The changed options rebuild the features image.
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-		assert.NotEqual(t, imageID, helpers.ContainerImageID(t, workspace))
-
-		// Verify new options are in effect
-		execStdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/feature-options-marker")
-		require.NoError(t, err)
-		assert.Contains(t, execStdout, "GREETING=ChangedHello")
-		assert.Contains(t, execStdout, "COUNT=10")
-	})
-}
-
-// createWorkspaceForCachingTest creates a workspace for the caching test with a unique name.
-func createWorkspaceForCachingTest(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "with-options")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Copy feature from testdata
-	featureFixture := helpers.FeatureFixture(t, "with-options")
-
-	// Copy devcontainer-feature.json
-	data, err := os.ReadFile(filepath.Join(featureFixture, "devcontainer-feature.json"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), data, 0644)
-	require.NoError(t, err)
-
-	// Copy install.sh
-	data, err = os.ReadFile(filepath.Join(featureFixture, "install.sh"))
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), data, 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json with unique name for caching test
-	devcontainerJSON := `{
-		"name": "Feature Caching Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/with-options": {
-				"greeting": "CustomHello",
-				"enabled": true,
-				"count": "5"
-			}
-		}
-	}`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	return workspace
-}
-
-// TestNoGeneratedFilesInDevcontainerE2E verifies that dcx up does not
-// pollute .devcontainer with generated build files like Dockerfile.dcx-features
-// or feature_N directories.
-func TestNoGeneratedFilesInDevcontainerE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	t.Run("single_container", func(t *testing.T) {
-		t.Parallel()
-
-		workspace := createWorkspaceWithLocalFeature(t, "No Generated Files Test")
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
-
-		// Record files before up
-		devcontainerDir := filepath.Join(workspace, ".devcontainer")
-		filesBefore := listFilesInDir(t, devcontainerDir)
-
-		// Run dcx up (this triggers feature installation which previously created files)
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		// Verify no new files created in .devcontainer
-		filesAfter := listFilesInDir(t, devcontainerDir)
-		assert.Equal(t, filesBefore, filesAfter, "dcx up should not create files in .devcontainer")
-
-		// Explicitly check for known generated files that should NOT exist
-		assert.NoFileExists(t, filepath.Join(devcontainerDir, "Dockerfile.dcx-features"))
-		assert.NoDirExists(t, filepath.Join(devcontainerDir, "feature_0"))
-	})
-
-	t.Run("compose", func(t *testing.T) {
-		t.Parallel()
-		helpers.RequireComposeAvailable(t)
-
-		workspace := createComposeWorkspaceWithLocalFeature(t)
-
-		t.Cleanup(func() {
-			helpers.RunDCXInDir(t, workspace, "down")
-		})
-
-		// Record files before up
-		devcontainerDir := filepath.Join(workspace, ".devcontainer")
-		filesBefore := listFilesInDir(t, devcontainerDir)
-
-		// Run dcx up
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		// Verify no new files created in .devcontainer
-		filesAfter := listFilesInDir(t, devcontainerDir)
-		assert.Equal(t, filesBefore, filesAfter, "dcx up should not create files in .devcontainer")
-
-		// Explicitly check for known generated files that should NOT exist
-		assert.NoFileExists(t, filepath.Join(devcontainerDir, "Dockerfile.dcx-features"))
-		assert.NoDirExists(t, filepath.Join(devcontainerDir, "feature_0"))
-	})
-}
-
 // listFilesInDir returns a sorted list of all files and directories in a directory (recursive).
 func listFilesInDir(t *testing.T, dir string) []string {
 	t.Helper()
@@ -252,69 +40,6 @@ func listFilesInDir(t *testing.T, dir string) []string {
 
 	sort.Strings(files)
 	return files
-}
-
-// createComposeWorkspaceWithLocalFeature creates a workspace with compose config and a local feature.
-func createComposeWorkspaceWithLocalFeature(t *testing.T) string {
-	t.Helper()
-
-	workspace := t.TempDir()
-
-	// Create .devcontainer directory
-	devcontainerDir := filepath.Join(workspace, ".devcontainer")
-	err := os.MkdirAll(devcontainerDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature directory
-	featureDir := filepath.Join(devcontainerDir, "features", "simple-marker")
-	err = os.MkdirAll(featureDir, 0755)
-	require.NoError(t, err)
-
-	// Create feature metadata
-	featureJSON := `{
-		"id": "simple-marker",
-		"version": "1.0.0",
-		"name": "Simple Marker Feature",
-		"description": "Creates a marker file"
-	}`
-	err = os.WriteFile(filepath.Join(featureDir, "devcontainer-feature.json"), []byte(featureJSON), 0644)
-	require.NoError(t, err)
-
-	// Create install script
-	installScript := `#!/bin/sh
-set -e
-echo "feature installed" > /tmp/feature-marker
-`
-	err = os.WriteFile(filepath.Join(featureDir, "install.sh"), []byte(installScript), 0755)
-	require.NoError(t, err)
-
-	// Create devcontainer.json with compose and features
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"./features/simple-marker": {}
-		}
-	}`, "no-gen-files-compose-"+helpers.UniqueTestName(t))
-	err = os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(devcontainerJSON), 0644)
-	require.NoError(t, err)
-
-	// Create docker-compose.yml
-	dockerComposeYAML := `version: '3.8'
-services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-`
-	err = os.WriteFile(filepath.Join(devcontainerDir, "docker-compose.yml"), []byte(dockerComposeYAML), 0644)
-	require.NoError(t, err)
-
-	return workspace
 }
 
 // TestLockfileGenerationE2E tests that dcx lock generates a lockfile.
@@ -518,7 +243,7 @@ echo "feature-b installed" > /tmp/feature-b-marker
 // extending the image's PATH with ${devcontainerId} in mount names
 // (pathfeature, and a devcontainer.json mount), and a feature entrypoint
 // and postCreateCommand that runs before devcontainer.json's
-// (with-entrypoint).
+// (with-entrypoint). dcx up writes nothing into .devcontainer.
 func TestLocalFeaturesE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
@@ -530,9 +255,14 @@ func TestLocalFeaturesE2E(t *testing.T) {
 			_ = exec.Command("docker", "volume", "rm", "-f", v).Run()
 		}
 	})
+	devcontainerDir := filepath.Join(workspace, ".devcontainer")
+	filesBefore := listFilesInDir(t, devcontainerDir)
 	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
 	assert.Contains(t, stdout, "Devcontainer started successfully")
 	assert.Equal(t, "running", helpers.GetContainerState(t, workspace))
+	assert.Equal(t, filesBefore, listFilesInDir(t, devcontainerDir), "dcx up should not create files in .devcontainer")
+	assert.NoFileExists(t, filepath.Join(devcontainerDir, "Dockerfile.dcx-features"))
+	assert.NoDirExists(t, filepath.Join(devcontainerDir, "feature_0"))
 
 	cat := func(path string) string {
 		t.Helper()

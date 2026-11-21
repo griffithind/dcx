@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,14 +18,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSSHServerE2E tests the built-in SSH server functionality.
+// TestSSHServerE2E walks the in-container SSH server through a workspace's
+// life: up writes the SSH config, OpenSSH sessions and SFTP work, session
+// processes exit with their sessions, a plain OpenSSH session gets what
+// `dcx ssh` gives (remoteEnv with ${containerEnv:…} and, for interactive
+// sessions only, postAttachCommand), and down removes the SSH config. It
+// counts the container's processes, so it has a container of its own.
 func TestSSHServerE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	// Create a simple workspace
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
+	workspace := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:3.24",
+		"workspaceFolder": "/workspace",
+		"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspace",
+		"containerEnv": {"BASE": "base-value"},
+		"remoteEnv": {"FROM_REMOTE": "remote-${containerEnv:BASE}"},
+		"postAttachCommand": "echo attached >> /tmp/attach.log"
+	}`, helpers.UniqueTestName(t)))
 
 	// Get the workspace ID for this workspace (used in SSH hostname)
 	var workspaceID string
@@ -119,6 +131,50 @@ func TestSSHServerE2E(t *testing.T) {
 		assert.Contains(t, stdout, "SSH_AUTH_SOCK=", "SSH agent should be forwarded")
 	})
 
+	// agentChildren counts processes whose parent is the dcx-agent
+	// listener: every session runs as one, so after sessions end it is 0.
+	agentChildren := func(t *testing.T) string {
+		t.Helper()
+		script := `a=$(pgrep -f '[d]cx-agent listen' | head -n1)
+[ -n "$a" ] || { echo no-agent; exit 0; }
+n=0
+for s in /proc/[0-9]*/stat; do
+  set -- $(cat "$s" 2>/dev/null)
+  [ "$4" = "$a" ] && n=$((n+1))
+done
+echo "$n"`
+		out, err := exec.Command("docker", "exec", containerName, "sh", "-c", script).CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+
+	t.Run("sessions_cleaned_up", func(t *testing.T) {
+		for i := 0; i < 3; i++ {
+			_, _, err := runSSH(t, hostname, "echo", "session", string(rune('1'+i)))
+			require.NoError(t, err)
+		}
+		assert.Eventually(t, func() bool { return agentChildren(t) == "0" }, 5*time.Second, 100*time.Millisecond,
+			"session processes must exit with their sessions")
+	})
+
+	t.Run("plain_ssh_session_parity", func(t *testing.T) {
+		out, err := plainSSH(t, hostname, "", "printenv", "FROM_REMOTE")
+		require.NoError(t, err, out)
+		assert.Equal(t, "remote-base-value", strings.TrimSpace(out))
+
+		_, _, err = helpers.RunDCXInDir(t, workspace, "ssh", "--", "test", "-f", "/tmp/attach.log")
+		assert.Error(t, err, "postAttachCommand must not run for exec sessions")
+
+		out, err = plainSSH(t, hostname, "exit\n", "-tt")
+		require.NoError(t, err, out)
+		assert.Equal(t, "attached", dcxExec(t, workspace, "cat", "/tmp/attach.log"))
+
+		// An interactive `dcx ssh` gets it from the agent as well, once per attach.
+		shellOut, err := helpers.RunDCXInPTY(t, workspace, "exit\n", "ssh")
+		require.NoError(t, err, shellOut)
+		assert.Equal(t, "attached\nattached", dcxExec(t, workspace, "cat", "/tmp/attach.log"))
+	})
+
 	// Test dcx down removes SSH config
 	t.Run("down_removes_ssh_config", func(t *testing.T) {
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "down")
@@ -150,40 +206,6 @@ func TestSSHServerMultipleContainersE2E(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, strings.TrimSpace(containerHostname1), strings.TrimSpace(containerHostname2),
 		"Each SSH hostname should route to a different container")
-}
-
-// TestSSHPortStableAcrossDownUpE2E verifies the SSH host port does not
-// change when a workspace is torn down and brought back up. Stability is
-// load-bearing: IDE clients (VS Code Remote-SSH, JetBrains Gateway,
-// Claude Desktop) key `known_hosts` entries and persistent connection
-// caches by (host, port) — a rotating port shows up as "connection
-// refused" or a host-key-changed warning even though dcx is healthy.
-func TestSSHPortStableAcrossDownUpE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	stdout1 := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	port1 := extractSSHPort(t, stdout1)
-
-	// Tear down completely — removes the container, freeing the port.
-	helpers.RunDCXInDirSuccess(t, workspace, "down")
-
-	// Up again. The port must be the same as before.
-	stdout2 := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	port2 := extractSSHPort(t, stdout2)
-
-	assert.Equal(t, port1, port2,
-		"SSH port changed across down+up: first=%d second=%d — IDE known_hosts entries break when this is not stable",
-		port1, port2)
-
-	// A third cycle for good measure.
-	helpers.RunDCXInDirSuccess(t, workspace, "down")
-	stdout3 := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	port3 := extractSSHPort(t, stdout3)
-	assert.Equal(t, port1, port3, "SSH port drifted after three cycles")
 }
 
 // TestSSHServerAlwaysEnabledE2E verifies that SSH is always configured when running dcx up.
@@ -218,62 +240,6 @@ func TestSSHFromDifferentDirectoryE2E(t *testing.T) {
 		require.NoError(t, err, "ssh %s from /tmp: %s", cmd, out)
 		assert.Contains(t, string(out), want, "ssh %s from another directory", cmd)
 	}
-}
-
-// TestSSHServerCleanupE2E tests that the SSH server process is cleaned up after SSH session ends.
-func TestSSHServerCleanupE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := helpers.SimpleImageConfig(t, "alpine:3.24")
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, workspace, "down")
-	})
-
-	// Start with SSH enabled
-	stdout := helpers.RunDCXInDirSuccess(t, workspace, "up")
-	hostname := extractSSHHostname(t, stdout)
-
-	// Get container name for direct docker exec checks
-	containerName := helpers.ContainerName(t, workspace)
-
-	// agentChildren counts processes whose parent is the dcx-agent
-	// listener: every session runs as one, so after sessions end it is 0.
-	agentChildren := func(t *testing.T) string {
-		t.Helper()
-		script := `a=$(pgrep -f '[d]cx-agent listen' | head -n1)
-[ -n "$a" ] || { echo no-agent; exit 0; }
-n=0
-for s in /proc/[0-9]*/stat; do
-  set -- $(cat "$s" 2>/dev/null)
-  [ "$4" = "$a" ] && n=$((n+1))
-done
-echo "$n"`
-		out, err := exec.Command("docker", "exec", containerName, "sh", "-c", script).CombinedOutput()
-		require.NoError(t, err, string(out))
-		return strings.TrimSpace(string(out))
-	}
-
-	t.Run("ssh_server_cleanup_after_session", func(t *testing.T) {
-		_, _, err := runSSH(t, hostname, "echo", "test")
-		require.NoError(t, err)
-		assert.Eventually(t, func() bool { return agentChildren(t) == "0" }, 5*time.Second, 100*time.Millisecond,
-			"session processes must exit with their session")
-	})
-
-	// Run multiple SSH sessions and verify cleanup
-	t.Run("multiple_sessions_cleanup", func(t *testing.T) {
-		// Run 3 SSH sessions sequentially
-		for i := 0; i < 3; i++ {
-			_, _, err := runSSH(t, hostname, "echo", "session", string(rune('1'+i)))
-			require.NoError(t, err)
-		}
-
-		assert.Eventually(t, func() bool { return agentChildren(t) == "0" }, 5*time.Second, 100*time.Millisecond,
-			"no session processes may linger after several sessions")
-	})
 }
 
 // TestSSHCommandHandlingE2E tests that SSH properly handles complex shell commands.

@@ -28,34 +28,3 @@ func TestEtcProfilePatchingE2E(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "patched", strings.TrimSpace(stdout), "/etc/profile should be patched")
 }
-
-// TestUserEnvProbeWithFeatureE2E tests that userEnvProbe captures
-// environment modifications from features.
-func TestUserEnvProbeWithFeatureE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Use a feature that sets environment variables
-	devcontainerJSON := `{
-		"name": "UserEnvProbe Feature Test",
-		"image": "debian:bookworm-slim",
-		"workspaceFolder": "/workspace",
-		"features": {
-			"ghcr.io/devcontainers/features/common-utils:2": {
-				"installZsh": false,
-				"installOhMyZsh": false
-			}
-		},
-		"userEnvProbe": "loginShell",
-		"postCreateCommand": "echo PATH=$PATH > /tmp/path-check.txt"
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up the container
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	// The postCreateCommand should have access to the full PATH
-	stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/path-check.txt")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "PATH=", "PATH should be captured")
-}

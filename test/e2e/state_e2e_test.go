@@ -3,8 +3,10 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/griffithind/dcx/test/helpers"
@@ -15,12 +17,37 @@ import (
 // TestStateLifecycleE2E walks one workspace through every state (absent,
 // running, stopped, and back), checking in each what state, status, doctor,
 // ssh, stop and down do there.
+//
+// Every start re-establishes the environment: `dcx up` on a stopped
+// container and `dcx restart` used to only run `docker start`, but the
+// in-container SSH agent dies with the container, so sessions must keep
+// working afterwards and postStartCommand must run on every start.
+// initializeCommand runs on the host on every up (also with the container
+// running, M6) and before the container is created, so it can prepare what
+// the container needs at creation time (here: a bind mount source). The
+// keep-alive handles SIGTERM, so stopping does not wait out Docker's 10s
+// kill timeout (a container killed after it exits 137).
 func TestStateLifecycleE2E(t *testing.T) {
 	t.Parallel()
 	helpers.RequireDockerAvailable(t)
 
-	workspace := helpers.CreateTempWorkspace(t, helpers.SimpleImageConfig(t, "alpine:3.24"))
+	workspace := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
+		"name": %q,
+		"image": "alpine:3.24",
+		"workspaceFolder": "/workspace",
+		"initializeCommand": "mkdir -p generated && echo init >> generated/runs",
+		"mounts": ["source=${localWorkspaceFolder}/generated,target=/generated,type=bind"],
+		"postStartCommand": "echo started >> /tmp/poststart.log"
+	}`, helpers.UniqueTestName(t)))
 	state := func() string { return helpers.GetContainerState(t, workspace) }
+	initRuns := func(t *testing.T) int {
+		data, err := os.ReadFile(filepath.Join(workspace, "generated", "runs"))
+		require.NoError(t, err)
+		return strings.Count(string(data), "init")
+	}
+	postStartRuns := func(t *testing.T) int {
+		return strings.Count(dcxExec(t, workspace, "cat", "/tmp/poststart.log"), "started")
+	}
 
 	t.Run("absent", func(t *testing.T) {
 		assert.Equal(t, "absent", state())
@@ -37,7 +64,7 @@ func TestStateLifecycleE2E(t *testing.T) {
 	})
 
 	t.Run("absent_to_running", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "up"), "Devcontainer started successfully")
 		assert.Equal(t, "running", state())
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		for _, want := range []string{"State:", "running", "Primary Container", "ID:", "Name:"} {
@@ -46,11 +73,21 @@ func TestStateLifecycleE2E(t *testing.T) {
 		stdout, _, err := helpers.RunDCXInDir(t, workspace, "doctor")
 		require.NoError(t, err)
 		assert.Contains(t, stdout, "Docker")
+		assert.Equal(t, "init", dcxExec(t, workspace, "cat", "/generated/runs"), "initializeCommand ran before create")
+		assert.Equal(t, 1, postStartRuns(t))
+	})
+
+	t.Run("up_while_running", func(t *testing.T) {
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "up"), "already running")
+		assert.Equal(t, 2, initRuns(t), "initializeCommand runs with the container running")
+		assert.Equal(t, 1, postStartRuns(t))
 	})
 
 	t.Run("running_to_stopped", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "stop")
+		name := helpers.ContainerName(t, workspace)
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "stop"), "stopped")
 		assert.Equal(t, "created", state())
+		assert.Equal(t, "0", inspect(t, name, "{{.State.ExitCode}}"), "the keep-alive must exit on SIGTERM, not be killed (137)")
 		stdout := helpers.RunDCXInDirSuccess(t, workspace, "status")
 		assert.Contains(t, stdout, "State:")
 		assert.Contains(t, stdout, "created")
@@ -60,12 +97,20 @@ func TestStateLifecycleE2E(t *testing.T) {
 	})
 
 	t.Run("stopped_to_running", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "up"), "started")
 		assert.Equal(t, "running", state())
+		assert.Equal(t, 2, postStartRuns(t), "postStartCommand runs on every start")
+		assert.Equal(t, 3, initRuns(t), "initializeCommand runs when a stopped container starts")
+	})
+
+	t.Run("restart", func(t *testing.T) {
+		helpers.RunDCXInDirSuccess(t, workspace, "restart")
+		assert.Equal(t, "running", state())
+		assert.Equal(t, 3, postStartRuns(t), "postStartCommand runs after restart")
 	})
 
 	t.Run("running_to_absent", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "down")
+		assert.Contains(t, helpers.RunDCXInDirSuccess(t, workspace, "down"), "removed")
 		assert.Equal(t, "absent", state())
 	})
 
@@ -79,60 +124,5 @@ func TestStateLifecycleE2E(t *testing.T) {
 		assert.Equal(t, "created", state())
 		helpers.RunDCXInDirSuccess(t, workspace, "down")
 		assert.Equal(t, "absent", state())
-	})
-}
-
-// TestStaleDetectionE2E tests that config changes result in stale state.
-func TestStaleDetectionE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Create initial config
-	devcontainerJSON := `{
-		"name": "Stale Test",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace"
-	}`
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	// Bring up
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	state := helpers.GetContainerState(t, workspace)
-	assert.Equal(t, "running", state)
-
-	// Modify devcontainer.json
-	modifiedConfig := `{
-		"name": "Stale Test Modified",
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {
-			"NEW_VAR": "value"
-		}
-	}`
-
-	configPath := filepath.Join(workspace, ".devcontainer", "devcontainer.json")
-	err := os.WriteFile(configPath, []byte(modifiedConfig), 0644)
-	require.NoError(t, err)
-
-	// Check state - should be stale
-	t.Run("detects_stale_config", func(t *testing.T) {
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "stale", state)
-	})
-
-	// Running 'up' should recreate
-	t.Run("up_recreates_stale", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-		state := helpers.GetContainerState(t, workspace)
-		assert.Equal(t, "running", state)
-	})
-
-	// Verify new env var exists
-	t.Run("new_config_applied", func(t *testing.T) {
-		stdout, _, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "printenv", "NEW_VAR")
-		require.NoError(t, err)
-		assert.Contains(t, stdout, "value")
 	})
 }

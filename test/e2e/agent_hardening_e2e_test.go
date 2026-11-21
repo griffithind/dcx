@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,63 +52,19 @@ func TestAgentFilesRootOwnedE2E(t *testing.T) {
 	assert.Empty(t, strings.TrimSpace(string(out)), "nothing of the agent's may live in /tmp")
 }
 
-// TestPlainSSHSessionParityE2E: a plain OpenSSH session gets what
-// `dcx ssh` gives — remoteEnv (with ${containerEnv:…}) and,
-// for interactive sessions only, postAttachCommand.
-func TestPlainSSHSessionParityE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {"BASE": "base-value"},
-		"remoteEnv": {"FROM_REMOTE": "remote-${containerEnv:BASE}"},
-		"postAttachCommand": "echo attached >> /tmp/attach.log"
-	}`, helpers.UniqueTestName(t)))
-	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
-	alias := extractSSHHostname(t, stdout)
-
-	out, err := plainSSH(t, alias, "", "printenv", "FROM_REMOTE")
-	require.NoError(t, err, out)
-	assert.Equal(t, "remote-base-value", strings.TrimSpace(out))
-
-	_, _, err = helpers.RunDCXInDir(t, ws, "ssh", "--", "test", "-f", "/tmp/attach.log")
-	assert.Error(t, err, "postAttachCommand must not run for exec sessions")
-
-	out, err = plainSSH(t, alias, "exit\n", "-tt")
-	require.NoError(t, err, out)
-	assert.Equal(t, "attached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
-
-	// An interactive `dcx ssh` gets it from the agent as well, once per attach.
-	shellOut, err := helpers.RunDCXInPTY(t, ws, "exit\n", "ssh")
-	require.NoError(t, err, shellOut)
-	assert.Equal(t, "attached\nattached", dcxExec(t, ws, "cat", "/tmp/attach.log"))
-}
-
-// TestNonRootRemoteUserSessionsE2E: with a root agent and a non-root
-// remoteUser, sessions keep the user's supplementary groups and get a
-// terminal they own (sudo, ssh and gpg reopen /dev/tty).
+// TestNonRootRemoteUserSessionsE2E: sessions of a non-root remoteUser keep
+// its supplementary groups and get a terminal it owns (sudo, ssh and gpg
+// reopen /dev/tty); with updateRemoteUserUID false its UID stays the
+// image's.
 func TestNonRootRemoteUserSessionsE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	ws := helpers.CreateTempWorkspace(t, fmt.Sprintf(`{
-		"name": %q,
-		"build": {"dockerfile": "Dockerfile"},
-		"workspaceFolder": "/workspace",
-		"remoteUser": "dev",
-		"updateRemoteUserUID": false
-	}`, helpers.UniqueTestName(t)))
-	dockerfile := "FROM alpine:3.24\nRUN adduser -D dev && addgroup extra && addgroup dev extra\n"
-	require.NoError(t, os.WriteFile(filepath.Join(ws, ".devcontainer", "Dockerfile"), []byte(dockerfile), 0o644))
-	stdout := helpers.RunDCXInDirSuccess(t, ws, "up")
-	alias := extractSSHHostname(t, stdout)
+	env := devUserEnv(t)
+	ws := env.Dir
+	alias := extractSSHHostname(t, env.UpOutput)
 
 	assert.Equal(t, "dev", dcxExec(t, ws, "id", "-un"))
+	assert.Equal(t, "1234", dcxExec(t, ws, "id", "-u"), "updateRemoteUserUID false keeps the image's UID")
 	assert.Contains(t, strings.Fields(dcxExec(t, ws, "id", "-Gn")), "extra", "supplementary groups must survive the privilege drop")
-
 	out, err := plainSSH(t, alias, "", "-tt", `stat -c %U "$(tty)"`)
 	require.NoError(t, err, out)
 	assert.Equal(t, "dev", strings.TrimSpace(out), "the session's terminal must belong to the session user")
@@ -121,27 +76,28 @@ func TestNonRootRemoteUserSessionsE2E(t *testing.T) {
 // one from the current directory.
 func TestSameNameWorkspacesGetDistinctAliasesE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
 
-	cfg := helpers.SimpleImageConfig(t, "alpine:3.24")
-	first := helpers.CreateTempWorkspace(t, cfg)
-	second := helpers.CreateTempWorkspace(t, cfg)
-	require.NoError(t, os.WriteFile(filepath.Join(first, "marker"), []byte("first"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(second, "marker"), []byte("second"), 0o644))
-	t.Cleanup(func() {
-		helpers.RunDCXInDir(t, first, "down")
-		helpers.RunDCXInDir(t, second, "down")
-	})
+	// The first checkout is alpineEnv; the second copies its config.
+	env := alpineEnv(t)
+	first := env.Dir
+	cfg, err := os.ReadFile(filepath.Join(first, ".devcontainer", "devcontainer.json"))
+	require.NoError(t, err)
+	second := helpers.CreateTempWorkspace(t, string(cfg))
+	marker := "marker-" + helpers.UniqueTestName(t)
+	require.NoError(t, os.WriteFile(filepath.Join(first, marker), []byte("first"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(second, marker), []byte("second"), 0o644))
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(first, marker)) })
 
-	firstAlias := extractSSHHostname(t, helpers.RunDCXInDirSuccess(t, first, "up"))
+	firstAlias := extractSSHHostname(t, env.UpOutput)
 	secondAlias := extractSSHHostname(t, helpers.RunDCXInDirSuccess(t, second, "up"))
+	assert.Equal(t, env.Name+".dcx", firstAlias)
 	assert.NotEqual(t, firstAlias, secondAlias)
 
 	for alias, want := range map[string]string{firstAlias: "first", secondAlias: "second"} {
-		out, err := plainSSH(t, alias, "", "cat", "/workspace/marker")
+		out, err := plainSSH(t, alias, "", "cat", "/workspace/"+marker)
 		require.NoError(t, err, out)
 		assert.Equal(t, want, strings.TrimSpace(out), "ssh %s", alias)
 	}
-	assert.Equal(t, "first", dcxExec(t, first, "cat", "/workspace/marker"))
-	assert.Equal(t, "second", dcxExec(t, second, "cat", "/workspace/marker"))
+	assert.Equal(t, "first", dcxExec(t, first, "cat", "/workspace/"+marker))
+	assert.Equal(t, "second", dcxExec(t, second, "cat", "/workspace/"+marker))
 }

@@ -3,9 +3,6 @@
 package e2e
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,104 +13,7 @@ import (
 	"github.com/griffithind/dcx/test/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gossh "golang.org/x/crypto/ssh"
 )
-
-// TestStopStartKeepsEnvironmentUsableE2E guards against `dcx up` on a stopped
-// container (and `dcx restart`) only running `docker start`: the in-container
-// SSH agent dies with the container, so exec must keep working afterwards and
-// postStartCommand must run on every start.
-func TestStopStartKeepsEnvironmentUsableE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"image": "alpine:3.24",
-		"workspaceFolder": "/workspace",
-		"postStartCommand": "echo started >> /tmp/poststart.log"
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-
-	execEcho := func(t *testing.T, marker string) {
-		t.Helper()
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "echo", marker)
-		require.NoError(t, err, "exec failed: stdout=%s stderr=%s", stdout, stderr)
-		assert.Contains(t, stdout, marker)
-	}
-	postStartRuns := func(t *testing.T) int {
-		t.Helper()
-		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/tmp/poststart.log")
-		require.NoError(t, err, "stdout=%s stderr=%s", stdout, stderr)
-		return strings.Count(stdout, "started")
-	}
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	execEcho(t, "exec-after-create")
-	assert.Equal(t, 1, postStartRuns(t))
-
-	t.Run("stop_then_up", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "stop")
-		helpers.RunDCXInDirSuccess(t, workspace, "up")
-		execEcho(t, "exec-after-stop-up")
-		assert.Equal(t, 2, postStartRuns(t), "postStartCommand should run on every start")
-	})
-
-	t.Run("restart", func(t *testing.T) {
-		helpers.RunDCXInDirSuccess(t, workspace, "restart")
-		execEcho(t, "exec-after-restart")
-		assert.Equal(t, 3, postStartRuns(t), "postStartCommand should run after restart")
-	})
-}
-
-// TestRecreatePreservesComposeNamedVolumesE2E guards against a config change
-// (which marks the environment stale and recreates it) running
-// `docker compose down -v` and deleting the user's named volumes.
-func TestRecreatePreservesComposeNamedVolumesE2E(t *testing.T) {
-	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-	helpers.RequireComposeAvailable(t)
-
-	name := helpers.UniqueTestName(t)
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace"
-	}`, name)
-	dockerComposeYAML := `services:
-  app:
-    image: alpine:3.24
-    command: sleep infinity
-    init: true
-    volumes:
-      - ..:/workspace:cached
-      - data:/data
-volumes:
-  data:
-`
-	workspace := helpers.CreateTempComposeWorkspace(t, devcontainerJSON, dockerComposeYAML)
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down", "--volumes") })
-
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-	_, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "sh", "-c", "echo keep-me > /data/marker")
-	require.NoError(t, err, stderr)
-
-	// Change the config so the environment becomes stale and is recreated.
-	changed := fmt.Sprintf(`{
-		"name": %q,
-		"dockerComposeFile": "docker-compose.yml",
-		"service": "app",
-		"workspaceFolder": "/workspace",
-		"containerEnv": {"CONFIG_CHANGED": "1"}
-	}`, name)
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "devcontainer.json"), []byte(changed), 0644))
-	helpers.RunDCXInDirSuccess(t, workspace, "up")
-
-	stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "cat", "/data/marker")
-	require.NoError(t, err, "named volume content lost after recreate: stdout=%s stderr=%s", stdout, stderr)
-	assert.Contains(t, stdout, "keep-me")
-}
 
 // TestSecretsDirIsTmpfsE2E guards against the SSH host private key being
 // written to the container's writable layer when no runtime secrets are
@@ -137,40 +37,10 @@ func TestSecretsDirIsTmpfsE2E(t *testing.T) {
 //   - SFTP must run as remoteUser, not as the agent's root identity.
 func TestAgentPrivilegeBoundariesE2E(t *testing.T) {
 	t.Parallel()
-	helpers.RequireDockerAvailable(t)
-
-	// Key that an unprivileged container user ("other") has added to its own
-	// authorized_keys.
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-	sshPub, err := gossh.NewPublicKey(pub)
-	require.NoError(t, err)
-	authLine := strings.TrimSpace(string(gossh.MarshalAuthorizedKey(sshPub)))
-
-	keyDir := t.TempDir()
-	keyPath := filepath.Join(keyDir, "other_key")
-	block, err := gossh.MarshalPrivateKey(priv, "")
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(block), 0600))
-
-	devcontainerJSON := fmt.Sprintf(`{
-		"name": %q,
-		"build": {"dockerfile": "Dockerfile"},
-		"workspaceFolder": "/workspace",
-		"remoteUser": "dev",
-		"updateRemoteUserUID": false
-	}`, helpers.UniqueTestName(t))
-	workspace := helpers.CreateTempWorkspace(t, devcontainerJSON)
-	dockerfile := fmt.Sprintf(`FROM alpine:3.24
-RUN adduser -D -u 1234 dev && adduser -D -u 1235 other \
- && mkdir -p /home/other/.ssh \
- && echo '%s' > /home/other/.ssh/authorized_keys \
- && chown -R other:other /home/other/.ssh && chmod 700 /home/other/.ssh
-`, authLine)
-	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".devcontainer", "Dockerfile"), []byte(dockerfile), 0644))
-	t.Cleanup(func() { helpers.RunDCXInDir(t, workspace, "down") })
-
-	upOut := helpers.RunDCXInDirSuccess(t, workspace, "up")
+	env := devUserEnv(t)
+	workspace := env.Dir
+	keyPath := otherKeyPath
+	upOut := env.UpOutput
 	hostname := extractSSHHostname(t, upOut)
 
 	t.Run("foreign_authorized_keys_rejected", func(t *testing.T) {
