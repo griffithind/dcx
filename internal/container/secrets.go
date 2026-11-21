@@ -65,52 +65,22 @@ func MountSecretsToContainer(ctx context.Context, engine Engine, containerName s
 		owner = "root"
 	}
 
-	docker := engine
-
-	// Create /run/secrets directory if it doesn't exist
-	if err := docker.MkdirInContainer(ctx, containerName, agentproto.SecretsDir, "root"); err != nil {
-		return fmt.Errorf("failed to create secrets directory: %w", err)
-	}
-
-	// Set permissions (755 for directory)
-	if err := docker.ChmodInContainer(ctx, containerName, agentproto.SecretsDir, "755", "root"); err != nil {
-		return fmt.Errorf("failed to set directory permissions: %w", err)
-	}
-
-	// Write each secret to the container
 	for _, secret := range secretList {
-		if err := writeSecretToContainer(ctx, docker, containerName, secret, owner); err != nil {
+		if err := secrets.ValidateName(secret.Name); err != nil {
+			return fmt.Errorf("failed to write secret %q: %w", secret.Name, err)
+		}
+		// One exec per secret: the tmpfs directory (0755), then the file,
+		// readable only by its owner.
+		if err := engine.WriteFileInContainer(ctx, containerName, FileWrite{
+			Path:    filepath.Join(agentproto.SecretsDir, secret.Name),
+			Content: secret.Value,
+			Owner:   owner,
+			Mode:    "400",
+			Dirs:    []string{agentproto.SecretsDir},
+		}); err != nil {
 			return fmt.Errorf("failed to write secret %q: %w", secret.Name, err)
 		}
 	}
-
-	return nil
-}
-
-// writeSecretToContainer writes a secret to the container's /run/secrets.
-// Uses docker exec to write directly (docker cp doesn't work with tmpfs mounts).
-func writeSecretToContainer(ctx context.Context, docker Engine, containerName string, secret secrets.Secret, owner string) error {
-	if err := secrets.ValidateName(secret.Name); err != nil {
-		return err
-	}
-	destPath := filepath.Join(agentproto.SecretsDir, secret.Name)
-
-	// Write secret content directly to container using docker exec
-	// (docker cp doesn't work with tmpfs mounts)
-	if err := docker.WriteFileInContainer(ctx, containerName, destPath, secret.Value, "root"); err != nil {
-		return err
-	}
-
-	// Set ownership to the specified user
-	if err := docker.ChownInContainer(ctx, containerName, destPath, owner); err != nil {
-		return err
-	}
-
-	// Set permissions (400 for secret files - read-only by owner)
-	if err := docker.ChmodInContainer(ctx, containerName, destPath, "400", "root"); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -140,48 +110,27 @@ func MountDCXSecrets(ctx context.Context, engine Engine, containerName string, m
 		return fmt.Errorf("container name not set")
 	}
 
-	docker := engine
-
-	// Ensure /run/secrets and /run/secrets/dcx both exist.
-	if err := docker.MkdirInContainer(ctx, containerName, agentproto.SecretsDir, "root"); err != nil {
-		return fmt.Errorf("failed to create secrets directory: %w", err)
-	}
-	if err := docker.ChmodInContainer(ctx, containerName, agentproto.SecretsDir, "755", "root"); err != nil {
-		return fmt.Errorf("failed to set secrets directory permissions: %w", err)
-	}
-
-	dcxDir := DCXSecretsDir()
-	if err := docker.MkdirInContainer(ctx, containerName, dcxDir, "root"); err != nil {
-		return fmt.Errorf("failed to create dcx secrets directory: %w", err)
-	}
-	if err := docker.ChmodInContainer(ctx, containerName, dcxDir, "755", "root"); err != nil {
-		return fmt.Errorf("failed to set dcx secrets directory permissions: %w", err)
-	}
-
-	for _, s := range mgmt {
-		owner := s.Owner
+	for _, sec := range mgmt {
+		owner := sec.Owner
 		if owner == "" {
 			owner = "root"
 		}
-		mode := s.Mode
+		mode := sec.Mode
 		if mode == "" {
 			mode = "0400"
 		}
-		if err := secrets.ValidateName(s.Name); err != nil {
+		if err := secrets.ValidateName(sec.Name); err != nil {
 			return err
 		}
-		destPath := DCXSecretPath(s.Name)
-
-		if err := docker.WriteFileInContainer(ctx, containerName, destPath, s.Value, "root"); err != nil {
-			return fmt.Errorf("write dcx secret %q: %w", s.Name, err)
-		}
-		if err := docker.ChownInContainer(ctx, containerName, destPath, owner); err != nil {
-			return fmt.Errorf("chown dcx secret %q: %w", s.Name, err)
-		}
-		if err := docker.ChmodInContainer(ctx, containerName, destPath, mode, "root"); err != nil {
-			return fmt.Errorf("chmod dcx secret %q: %w", s.Name, err)
+		if err := engine.WriteFileInContainer(ctx, containerName, FileWrite{
+			Path:    DCXSecretPath(sec.Name),
+			Content: sec.Value,
+			Owner:   owner,
+			Mode:    mode,
+			Dirs:    []string{agentproto.SecretsDir, DCXSecretsDir()},
+		}); err != nil {
+			return fmt.Errorf("write dcx secret %q: %w", sec.Name, err)
 		}
 	}
-
 	return nil
 }

@@ -27,16 +27,12 @@ func TestMountSecretsWritesOwnedReadOnlyFiles(t *testing.T) {
 
 	assert.Equal(t, []byte("t0k"), fake.Files["c1:/run/secrets/token"])
 	assert.Equal(t, []byte("//r/:_auth=x"), fake.Files["c1:/run/secrets/npmrc"])
-	assert.Equal(t, [][]string{{"c1", "/run/secrets/token", "dev"}, {"c1", "/run/secrets/npmrc", "dev"}},
-		argsOf(fake, "ChownInContainer"), "owned by the remote user")
+	// One write each: the tmpfs directory, then the file, owned by the
+	// remote user and readable only by it.
 	assert.Equal(t, [][]string{
-		{"c1", "/run/secrets", "755", "root"},
-		{"c1", "/run/secrets/token", "400", "root"},
-		{"c1", "/run/secrets/npmrc", "400", "root"},
-	}, argsOf(fake, "ChmodInContainer"))
-	for _, w := range argsOf(fake, "WriteFileInContainer") {
-		assert.Equal(t, "root", w[2], "written as root, then handed over")
-	}
+		{"c1", "/run/secrets/token", "dev", "400", "/run/secrets"},
+		{"c1", "/run/secrets/npmrc", "dev", "400", "/run/secrets"},
+	}, argsOf(fake, "WriteFileInContainer"))
 }
 
 func TestMountSecretsDefaultsAndRefusals(t *testing.T) {
@@ -47,7 +43,7 @@ func TestMountSecretsDefaultsAndRefusals(t *testing.T) {
 	assert.Empty(t, fake.Calls(), "no secrets: nothing touched")
 
 	require.NoError(t, container.MountSecretsToContainer(ctx, fake, "c1", []secrets.Secret{{Name: "s", Value: []byte("v")}}, ""))
-	assert.Equal(t, []string{"c1", "/run/secrets/s", "root"}, fake.CallsTo("ChownInContainer")[0].Args, "no owner: root")
+	assert.Equal(t, "root", fake.CallsTo("WriteFileInContainer")[0].Args[2], "no owner: root")
 
 	for _, name := range []string{"../escape", "a/b", ""} {
 		fake := &containertest.Fake{}
@@ -69,22 +65,12 @@ func TestMountDCXSecretsUsesModesAndOwners(t *testing.T) {
 	}))
 
 	assert.Equal(t, []byte("ssh-ed25519 AAAA"), fake.Files["c1:"+container.DCXSecretPath("authorized_keys")])
+	dirs := "/run/secrets,/run/secrets/dcx"
 	assert.Equal(t, [][]string{
-		{"c1", "/run/secrets", "root"},
-		{"c1", "/run/secrets/dcx", "root"},
-	}, argsOf(fake, "MkdirInContainer"))
-	assert.Equal(t, [][]string{
-		{"c1", "/run/secrets", "755", "root"},
-		{"c1", "/run/secrets/dcx", "755", "root"},
-		{"c1", "/run/secrets/dcx/authorized_keys", "0444", "root"},
-		{"c1", "/run/secrets/dcx/host_key", "0400", "root"},
-		{"c1", "/run/secrets/dcx/user_file", "0440", "root"},
-	}, argsOf(fake, "ChmodInContainer"), "the host key defaults to 0400")
-	assert.Equal(t, [][]string{
-		{"c1", "/run/secrets/dcx/authorized_keys", "root"},
-		{"c1", "/run/secrets/dcx/host_key", "root"},
-		{"c1", "/run/secrets/dcx/user_file", "dev"},
-	}, argsOf(fake, "ChownInContainer"))
+		{"c1", "/run/secrets/dcx/authorized_keys", "root", "0444", dirs},
+		{"c1", "/run/secrets/dcx/host_key", "root", "0400", dirs},
+		{"c1", "/run/secrets/dcx/user_file", "dev", "0440", dirs},
+	}, argsOf(fake, "WriteFileInContainer"), "the host key defaults to 0400, owner to root")
 
 	err := container.MountDCXSecrets(context.Background(), &containertest.Fake{}, "c1", []container.DCXSecret{{Name: "../x"}})
 	require.Error(t, err)

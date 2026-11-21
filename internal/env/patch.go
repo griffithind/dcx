@@ -57,13 +57,11 @@ func (p *Patcher) PatchEtcEnvironment(ctx context.Context, containerName string,
 	if content == string(current) {
 		return skipped, nil
 	}
-	if err := p.engine.WriteFileInContainer(ctx, containerName, etcEnvironment, []byte(content), "root"); err != nil {
+	if err := p.engine.WriteFileInContainer(ctx, containerName, container.FileWrite{
+		Path: etcEnvironment, Content: []byte(content), Mode: "0644",
+	}); err != nil {
 		return skipped, fmt.Errorf("write %s: %w", etcEnvironment, err)
 	}
-	if err := p.engine.ChmodInContainer(ctx, containerName, etcEnvironment, "0644", "root"); err != nil {
-		return skipped, fmt.Errorf("chmod %s: %w", etcEnvironment, err)
-	}
-	_, _ = p.engine.ExecAsRoot(ctx, containerName, []string{"rm", "-f", legacyMarkerEtcEnvironment})
 	return skipped, nil
 }
 
@@ -131,15 +129,17 @@ func validEnvKey(k string) bool {
 
 // PatchEtcProfile modifies /etc/profile to preserve an existing PATH, so the
 // system profile does not clobber PATH entries features added. It runs
-// once per container (a marker records it). The script is fixed; nothing
-// is interpolated into it.
+// once per container (a marker records it). The same exec removes the
+// marker older dcx versions left for /etc/environment. The script is
+// fixed; nothing is interpolated into it.
 func (p *Patcher) PatchEtcProfile(ctx context.Context, containerName string) error {
 	// The sed expression turns PATH=/some/path into PATH=${PATH:-/some/path}.
-	const script = `test -f "$1" && exit 0
+	const script = `rm -f "$2"
+test -f "$1" && exit 0
 mkdir -p "$(dirname "$1")"
 sed -i -E 's/((^|[[:space:]])PATH=)([^$]*)$/\1\${PATH:-\3}/g' /etc/profile 2>/dev/null || true
 touch "$1"`
-	if _, err := p.engine.ExecAsRoot(ctx, containerName, []string{"sh", "-c", script, "dcx-patch", markerEtcProfile}); err != nil {
+	if _, err := p.engine.ExecAsRoot(ctx, containerName, []string{"sh", "-c", script, "dcx-patch", markerEtcProfile, legacyMarkerEtcEnvironment}); err != nil {
 		return fmt.Errorf("patch /etc/profile: %w", err)
 	}
 	return nil

@@ -841,66 +841,29 @@ func (d *Docker) ExecOutputAs(ctx context.Context, containerName, user string, a
 	return runOutput(d.command(ctx, args...))
 }
 
-// ChmodInContainer changes file permissions inside a container.
-func (d *Docker) ChmodInContainer(ctx context.Context, containerName, path, mode, user string) error {
-	args := []string{"exec"}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	args = append(args, containerName, "chmod", mode, path)
+// writeFileScript writes stdin to $1 as root: it creates the directories
+// after $3 (mode 0755), then writes with umask 077 and applies the owner
+// ($2) and mode ($3). Every value is a positional argument; nothing is
+// interpolated into the script.
+const writeFileScript = `set -e
+f=$1 owner=$2 mode=$3
+shift 3
+for d in "$@"; do mkdir -p "$d"; chmod 0755 "$d"; done
+umask 077
+cat > "$f"
+[ -z "$owner" ] || chown "$owner" "$f"
+[ -z "$mode" ] || chmod "$mode" "$f"`
 
+// WriteFileInContainer writes f inside a container with a single docker
+// exec (docker cp cannot write to the /run/secrets tmpfs). The content
+// goes through stdin, so it never appears in a command line.
+func (d *Docker) WriteFileInContainer(ctx context.Context, containerName string, f FileWrite) error {
+	args := append([]string{"exec", "-i", "--user", "root", containerName,
+		"sh", "-c", writeFileScript, "dcx-write", f.Path, f.Owner, f.Mode}, f.Dirs...)
 	cmd := d.command(ctx, args...)
+	cmd.Stdin = bytes.NewReader(f.Content)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("chmod failed: %w, output: %s", err, output)
-	}
-	return nil
-}
-
-// MkdirInContainer creates a directory inside a container.
-func (d *Docker) MkdirInContainer(ctx context.Context, containerName, path, user string) error {
-	args := []string{"exec"}
-	if user != "" {
-		args = append(args, "--user", user)
-	}
-	args = append(args, containerName, "mkdir", "-p", path)
-
-	cmd := d.command(ctx, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mkdir failed: %w, output: %s", err, output)
-	}
-	return nil
-}
-
-// ChownInContainer changes file ownership inside a container.
-func (d *Docker) ChownInContainer(ctx context.Context, containerName, path, owner string) error {
-	args := []string{"exec", "--user", "root", containerName, "chown", owner, path}
-
-	cmd := d.command(ctx, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("chown failed: %w, output: %s", err, output)
-	}
-	return nil
-}
-
-// WriteFileInContainer writes content to a file inside a container using docker exec.
-// This is useful for writing to tmpfs mounts where docker cp doesn't work.
-//
-// The path is passed as a positional argument rather than interpolated into
-// the shell script, so no part of it is ever evaluated by the shell, and the
-// file is created with umask 077 so it is never readable by other users,
-// even before the caller's chmod.
-func (d *Docker) WriteFileInContainer(ctx context.Context, containerName, path string, content []byte, user string) error {
-	if user == "" {
-		user = "root"
-	}
-	args := []string{"exec", "-i", "--user", user, containerName,
-		"sh", "-c", `umask 077 && cat > "$1"`, "dcx-write", path}
-
-	cmd := d.command(ctx, args...)
-	cmd.Stdin = bytes.NewReader(content)
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("write file failed: %w, output: %s", err, output)
+		return fmt.Errorf("write %s failed: %w, output: %s", f.Path, err, output)
 	}
 	return nil
 }

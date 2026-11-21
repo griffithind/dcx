@@ -362,9 +362,10 @@ func (f *Fake) ExecOutput(_ context.Context, name string, argv []string) ([]byte
 	return nil, fmt.Errorf("exec failed")
 }
 
-// FileMarkers makes marker queries (`sh -c … <path>` printing "done") and
-// `cat <path>` answer from Files, so lifecycle markers written with
-// WriteFileInContainer are found (and read) again.
+// FileMarkers makes marker listings (`sh -c … dcx-marker <dir>`, printing
+// the names of the files in dir) and `cat <path>` answer from Files, so
+// lifecycle markers written with WriteFileInContainer are found (and read)
+// again.
 func (f *Fake) FileMarkers() {
 	f.OutputFunc = func(name string, argv []string) ([]byte, error) {
 		read := func(path string) ([]byte, bool) {
@@ -375,10 +376,16 @@ func (f *Fake) FileMarkers() {
 		}
 		switch {
 		case len(argv) == 5 && argv[0] == "sh" && argv[3] == "dcx-marker":
-			if _, ok := read(argv[4]); ok {
-				return []byte("done\n"), nil
+			prefix := name + ":" + strings.TrimSuffix(argv[4], "/") + "/"
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			var out strings.Builder
+			for key := range f.Files {
+				if rest, ok := strings.CutPrefix(key, prefix); ok && !strings.Contains(rest, "/") {
+					out.WriteString(rest + "\n")
+				}
 			}
-			return nil, nil
+			return []byte(out.String()), nil
 		case len(argv) == 2 && argv[0] == "cat":
 			if data, ok := read(argv[1]); ok {
 				return data, nil
@@ -419,34 +426,13 @@ func (f *Fake) ExecDetachedAsRoot(_ context.Context, name string, argv []string)
 	return nil
 }
 
-func (f *Fake) MkdirInContainer(_ context.Context, name, path, user string) error {
+func (f *Fake) WriteFileInContainer(_ context.Context, name string, w container.FileWrite) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("MkdirInContainer", name, path, user)
-	return nil
-}
-
-func (f *Fake) ChmodInContainer(_ context.Context, name, path, mode, user string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.record("ChmodInContainer", name, path, mode, user)
-	return nil
-}
-
-func (f *Fake) ChownInContainer(_ context.Context, name, path, owner string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.record("ChownInContainer", name, path, owner)
-	return nil
-}
-
-func (f *Fake) WriteFileInContainer(_ context.Context, name, path string, content []byte, user string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.record("WriteFileInContainer", name, path, user)
+	f.record("WriteFileInContainer", name, w.Path, w.Owner, w.Mode, strings.Join(w.Dirs, ","))
 	if f.Files == nil {
 		f.Files = map[string][]byte{}
 	}
-	f.Files[name+":"+path] = append([]byte(nil), content...)
+	f.Files[name+":"+w.Path] = append([]byte(nil), w.Content...)
 	return nil
 }

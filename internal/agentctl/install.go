@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -26,28 +25,27 @@ import (
 // executing its old inode). The binary directory is root-owned, so no
 // container user can swap the binary the root agent executes.
 //
-// Returns true when a binary was installed; an older agent process may then
-// still be running and should be stopped with StopOutdated.
+// Installing also signals agent processes still running a replaced binary
+// (or the legacy /tmp one); waitOutdatedGone then waits for them to exit.
+// The probe, the copy and the install are three execs.
+//
+// Returns true when a binary was installed.
 func Deploy(ctx context.Context, engine container.Engine, containerName string) (bool, error) {
 	return deployTo(ctx, engine, containerName, agentproto.BinaryPath)
 }
 
 func deployTo(ctx context.Context, engine container.Engine, containerName, binaryPath string) (bool, error) {
-	arch := containerArch(ctx, engine, containerName)
+	arch, installed, err := probe(ctx, engine, containerName, binaryPath)
+	if err != nil {
+		return false, err
+	}
 	binary, err := dcxembed.Binary(arch)
 	if err != nil || len(binary) == 0 {
 		return false, fmt.Errorf("no agent binary available for architecture %s: %v", arch, err)
 	}
 	want := sha256Hex(binary)
-	if installedDigest(ctx, engine, containerName, binaryPath) == want {
+	if installed == want {
 		return false, nil
-	}
-
-	// install -d fixes ownership and mode even when the directory exists.
-	if _, err := engine.ExecAsRoot(ctx, containerName, []string{
-		"install", "-d", "-o", "root", "-g", "root", "-m", "0755", filepath.Dir(binaryPath),
-	}); err != nil {
-		return false, fmt.Errorf("failed to create agent directory: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp("", "dcx-agent-*")
@@ -68,51 +66,61 @@ func deployTo(ctx context.Context, engine container.Engine, containerName, binar
 		return false, fmt.Errorf("failed to copy agent to container: %w", err)
 	}
 
-	// chown, chmod, atomic rename, then record the digest. Paths are
-	// positional arguments, never interpolated into the script.
-	const script = `chown root:root "$1" && chmod 0755 "$1" && mv -f "$1" "$2" && printf '%s\n' "$3" > "$2.sha256"`
 	if _, err := engine.ExecAsRoot(ctx, containerName, []string{
-		"sh", "-c", script, "dcx-deploy", staging, binaryPath, want,
+		"sh", "-c", installScript, "dcx-deploy", staging, binaryPath, want, agentproto.LegacyBinaryPath,
 	}); err != nil {
 		return false, fmt.Errorf("failed to install agent: %w", err)
 	}
 	return true, nil
 }
 
-// installedDigest returns the recorded digest of the installed agent, or ""
-// when the binary or its digest file is missing.
-func installedDigest(ctx context.Context, engine container.Engine, containerName, binaryPath string) string {
-	out, err := engine.ExecOutput(ctx, containerName, []string{
-		"sh", "-c", `test -x "$1" && cat "$1.sha256"`, "dcx-deploy", binaryPath,
-	})
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
+// probeScript prints the container's architecture and the installed
+// agent's recorded digest (nothing when the binary or digest is missing),
+// after making sure the binary's directory ($1's) exists, root-owned:
+// install -d fixes owner and mode even when it exists.
+const probeScript = `uname -m
+install -d -o root -g root -m 0755 "$(dirname "$1")"
+if [ -x "$1" ]; then cat "$1.sha256" 2>/dev/null; fi
+exit 0`
 
-// StopOutdated terminates agent processes still running a binary that has
-// been replaced on disk (their /proc/<pid>/exe is "<path> (deleted)") or
-// running from the legacy /tmp location, then waits for the listener port
-// (listenAddr) to be released so a fresh agent can bind.
-func StopOutdated(ctx context.Context, engine container.Engine, containerName, listenAddr string) error {
-	return stopOutdated(ctx, engine, containerName, agentproto.BinaryPath, agentproto.PingAddr(listenAddr), 15*time.Second)
-}
-
-func stopOutdated(ctx context.Context, engine container.Engine, containerName, binaryPath, listenAddr string, timeout time.Duration) error {
-	const script = `for d in /proc/[0-9]*; do
+// installScript moves the staged binary ($1) into place ($2) atomically,
+// records its digest ($3), then signals agent processes still running a
+// replaced binary (/proc/<pid>/exe is "<path> (deleted)") or the legacy
+// one ($4). Every value is a positional argument.
+const installScript = `chown root:root "$1" && chmod 0755 "$1" && mv -f "$1" "$2" && printf '%s\n' "$3" > "$2.sha256" || exit 1
+for d in /proc/[0-9]*; do
   exe="$(readlink "$d/exe" 2>/dev/null)"
   case "$exe" in
-    "$1 (deleted)"|"$2"|"$2 (deleted)") kill "${d#/proc/}" 2>/dev/null ;;
+    "$2 (deleted)"|"$4"|"$4 (deleted)") kill "${d#/proc/}" 2>/dev/null ;;
   esac
 done
 exit 0`
-	if _, err := engine.ExecAsRoot(ctx, containerName, []string{
-		"sh", "-c", script, "dcx-deploy", binaryPath, agentproto.LegacyBinaryPath,
-	}); err != nil {
-		return fmt.Errorf("failed to stop outdated agent: %w", err)
-	}
 
+// probe returns the container's architecture and the installed agent's
+// digest ("" when there is none).
+func probe(ctx context.Context, engine container.Engine, containerName, binaryPath string) (arch, digest string, err error) {
+	out, err := engine.ExecAsRoot(ctx, containerName, []string{"sh", "-c", probeScript, "dcx-deploy", binaryPath})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to prepare the agent directory: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	arch = strings.TrimSpace(lines[0])
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	if len(lines) > 1 {
+		digest = strings.TrimSpace(lines[len(lines)-1])
+	}
+	return arch, digest, nil
+}
+
+// waitOutdatedGone waits until no agent answers on listenAddr, after
+// Deploy signalled outdated ones, so a fresh agent can bind.
+func waitOutdatedGone(ctx context.Context, engine container.Engine, containerName, listenAddr string) error {
+	return waitGone(ctx, engine, containerName, agentproto.BinaryPath, agentproto.PingAddr(listenAddr), 15*time.Second)
+}
+
+func waitGone(ctx context.Context, engine container.Engine, containerName, binaryPath, listenAddr string, timeout time.Duration) error {
 	// The agent drains sessions for up to 10s on SIGTERM.
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -131,14 +139,4 @@ exit 0`
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-// containerArch returns the container's architecture as reported by
-// `uname -m`, falling back to the host's.
-func containerArch(ctx context.Context, engine container.Engine, containerName string) string {
-	out, err := engine.ExecOutput(ctx, containerName, []string{"uname", "-m"})
-	if err != nil {
-		return runtime.GOARCH
-	}
-	return strings.TrimSpace(string(out))
 }

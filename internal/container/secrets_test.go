@@ -14,7 +14,7 @@ type recordingEngine struct {
 	writes int
 }
 
-func (e *recordingEngine) WriteFileInContainer(context.Context, string, string, []byte, string) error {
+func (e *recordingEngine) WriteFileInContainer(context.Context, string, FileWrite) error {
 	e.writes++
 	return nil
 }

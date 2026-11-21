@@ -48,9 +48,9 @@ func TestPatchEtcEnvironmentWritesThroughEngine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, skipped)
 	assert.Equal(t, "LANG=C\n"+blockBegin+"\nFOO=\"bar\"\n"+blockEnd+"\n", string(fake.Files["c1:/etc/environment"]))
-	chmods := fake.CallsTo("ChmodInContainer")
-	require.Len(t, chmods, 1)
-	assert.Equal(t, []string{"c1", "/etc/environment", "0644", "root"}, chmods[0].Args)
+	writes := fake.CallsTo("WriteFileInContainer")
+	require.Len(t, writes, 1)
+	assert.Equal(t, []string{"c1", "/etc/environment", "", "0644", ""}, writes[0].Args, "root-owned, world-readable, one exec")
 	for _, c := range fake.CallsTo("ExecAsRoot") {
 		assert.False(t, strings.Contains(strings.Join(c.Args, " "), "bar"), "values must not reach a command line")
 	}
@@ -73,5 +73,7 @@ func TestPatchEtcProfilePassesMarkerAsArgument(t *testing.T) {
 	require.NoError(t, NewPatcher(fake).PatchEtcProfile(context.Background(), "c1"))
 	calls := fake.CallsTo("ExecAsRoot")
 	require.Len(t, calls, 1)
-	assert.Equal(t, markerEtcProfile, calls[0].Args[len(calls[0].Args)-1])
+	// Both markers are positional arguments: the profile marker, then the
+	// one older dcx left for /etc/environment, removed in the same exec.
+	assert.Equal(t, []string{markerEtcProfile, legacyMarkerEtcEnvironment}, calls[0].Args[len(calls[0].Args)-2:])
 }

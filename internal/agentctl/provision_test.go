@@ -26,7 +26,7 @@ func TestLaunchSkipsWhenAlreadyListening(t *testing.T) {
 	fake := &containertest.Fake{}
 	t.Setenv("HOME", t.TempDir())
 
-	err := launch(context.Background(), fake, agentOpts())
+	err := launch(context.Background(), fake, agentOpts(), true)
 	require.NoError(t, err)
 	assert.Empty(t, fake.CallsTo("ExecDetachedAsRoot"))
 }
@@ -43,7 +43,7 @@ func TestLaunchStartsAndWaitsForReadiness(t *testing.T) {
 	}}
 	t.Setenv("HOME", t.TempDir())
 
-	err := launch(context.Background(), fake, agentOpts("10.0.0.0/24"))
+	err := launch(context.Background(), fake, agentOpts("10.0.0.0/24"), true)
 	require.NoError(t, err)
 
 	launches := fake.CallsTo("ExecDetachedAsRoot")
@@ -72,7 +72,7 @@ func TestLaunchFailsWhenAgentNeverListens(t *testing.T) {
 	}}
 	t.Setenv("HOME", t.TempDir())
 
-	err := launch(context.Background(), fake, agentOpts())
+	err := launch(context.Background(), fake, agentOpts(), true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "did not start listening")
 }
@@ -92,14 +92,13 @@ func TestWriteSecretsWritesKeysWithOwnerAndModes(t *testing.T) {
 	assert.Contains(t, string(authKeys), "ssh-ed25519", "the dcx fallback key is always authorized")
 
 	modes := map[string]string{}
-	for _, c := range fake.CallsTo("ChmodInContainer") {
-		modes[c.Args[1]] = c.Args[2]
+	for _, c := range fake.CallsTo("WriteFileInContainer") {
+		modes[c.Args[1]] = c.Args[3]
+		assert.Equal(t, "root", c.Args[2], "secrets are owned by the (root) agent")
 	}
 	assert.Equal(t, "0400", modes[agentproto.HostKeyPath])
 	assert.Equal(t, "0444", modes[agentproto.AuthorizedKeysPath])
-	for _, c := range fake.CallsTo("ChownInContainer") {
-		assert.Equal(t, "root", c.Args[2], "secrets are owned by the (root) agent")
-	}
+	assert.Len(t, modes, 2, "one exec per file")
 }
 
 // When the agent never starts listening, the error must include its log so
@@ -122,7 +121,7 @@ func TestLaunchTimeoutIncludesAgentLog(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 
-	err := launch(context.Background(), fake, agentOpts())
+	err := launch(context.Background(), fake, agentOpts(), true)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "address already in use")
 
@@ -154,7 +153,7 @@ func TestLaunchWithoutSessionUserUsesContainerDefaultUser(t *testing.T) {
 
 	opts := agentOpts()
 	opts.User = ""
-	require.NoError(t, launch(context.Background(), fake, opts))
+	require.NoError(t, launch(context.Background(), fake, opts, true))
 	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
 	assert.Contains(t, argv, "--user node")
 }
@@ -172,7 +171,7 @@ func TestLaunchHonoursListenAddr(t *testing.T) {
 
 	opts := agentOpts()
 	opts.ListenAddr = "127.0.0.1:40123"
-	require.NoError(t, launch(context.Background(), fake, opts))
+	require.NoError(t, launch(context.Background(), fake, opts, true))
 	argv := strings.Join(fake.CallsTo("ExecDetachedAsRoot")[0].Args, " ")
 	assert.Contains(t, argv, "--addr 127.0.0.1:40123")
 	require.NotEmpty(t, pinged)

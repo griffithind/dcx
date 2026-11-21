@@ -458,10 +458,9 @@ func (s *DevContainerService) writeSessionConfig(ctx context.Context, r *upRun, 
 	if err != nil {
 		return err
 	}
-	if err := s.engine.WriteFileInContainer(ctx, r.info.Name, agentproto.SessionConfigPath, data, "root"); err != nil {
-		return err
-	}
-	return s.engine.ChmodInContainer(ctx, r.info.Name, agentproto.SessionConfigPath, "0644", "root")
+	return s.engine.WriteFileInContainer(ctx, r.info.Name, container.FileWrite{
+		Path: agentproto.SessionConfigPath, Content: data, Mode: "0644",
+	})
 }
 
 // stepHooks runs the once-per-container hooks that have not completed yet,
@@ -583,9 +582,13 @@ func (s *DevContainerService) markersFor(info *state.ContainerInfo) *containerMa
 }
 
 // containerMarkers stores lifecycle markers as files in the container.
+// containerMarkers reads the container's markers with one exec, the first
+// time Done is asked, and keeps that list up to date as it marks phases
+// (Up holds the workspace lock, so nothing else writes them meanwhile).
 type containerMarkers struct {
 	engine    container.Engine
 	container string
+	done      map[string]bool // marker file names; nil until loaded
 }
 
 var _ lifecycle.Markers = (*containerMarkers)(nil)
@@ -594,21 +597,33 @@ func markerPath(phase string) string {
 	return path.Join(lifecycleMarkerDir, strings.ReplaceAll(phase, "/", "_")+".done")
 }
 
-// markerQuery prints "done" when the marker file ($1) exists.
-const markerQuery = `if [ -f "$1" ]; then echo done; fi`
+// markerList prints the names in the marker directory ($1), nothing when
+// it does not exist yet.
+const markerList = `if [ -d "$1" ]; then ls -1A "$1"; fi`
 
 func (m *containerMarkers) Done(ctx context.Context, phase string) (bool, error) {
-	out, err := m.engine.ExecOutput(ctx, m.container, []string{"sh", "-c", markerQuery, "dcx-marker", markerPath(phase)})
-	if err != nil {
-		return false, err
+	if m.done == nil {
+		out, err := m.engine.ExecOutput(ctx, m.container, []string{"sh", "-c", markerList, "dcx-marker", lifecycleMarkerDir})
+		if err != nil {
+			return false, err
+		}
+		m.done = map[string]bool{}
+		for _, name := range strings.Fields(string(out)) {
+			m.done[name] = true
+		}
 	}
-	return strings.TrimSpace(string(out)) == "done", nil
+	return m.done[path.Base(markerPath(phase))], nil
 }
 
 func (m *containerMarkers) Mark(ctx context.Context, phase string) error {
-	if err := m.engine.MkdirInContainer(ctx, m.container, lifecycleMarkerDir, "root"); err != nil {
+	stamp := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
+	if err := m.engine.WriteFileInContainer(ctx, m.container, container.FileWrite{
+		Path: markerPath(phase), Content: stamp, Dirs: []string{lifecycleMarkerDir},
+	}); err != nil {
 		return err
 	}
-	stamp := []byte(time.Now().UTC().Format(time.RFC3339) + "\n")
-	return m.engine.WriteFileInContainer(ctx, m.container, markerPath(phase), stamp, "root")
+	if m.done != nil {
+		m.done[path.Base(markerPath(phase))] = true
+	}
+	return nil
 }

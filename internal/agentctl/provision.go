@@ -63,14 +63,15 @@ func Provision(ctx context.Context, engine container.Engine, rep report.Reporter
 		return fmt.Errorf("failed to install dcx agent: %w", err)
 	}
 	if installed {
-		if err := StopOutdated(ctx, engine, opts.ContainerName, opts.listenAddr()); err != nil {
+		if err := waitOutdatedGone(ctx, engine, opts.ContainerName, opts.listenAddr()); err != nil {
 			return err
 		}
 	}
 	if err := writeSecrets(ctx, engine, opts); err != nil {
 		return fmt.Errorf("failed to mount SSH secrets: %w", err)
 	}
-	if err := launch(ctx, engine, opts); err != nil {
+	// After an install nothing is listening (waitOutdatedGone checked).
+	if err := launch(ctx, engine, opts, !installed); err != nil {
 		return fmt.Errorf("failed to launch SSH agent: %w", err)
 	}
 	return nil
@@ -100,12 +101,12 @@ func writeSecrets(ctx context.Context, engine container.Engine, opts Options) er
 	})
 }
 
-// launch starts the agent's SSH listener unless one already answers, then
-// waits until it does, so lifecycle hooks (which connect over SSH) don't
-// race its startup.
-func launch(ctx context.Context, engine container.Engine, opts Options) error {
+// launch starts the agent's SSH listener unless one already answers
+// (checked when mayBeListening), then waits until it does, so lifecycle
+// hooks (which connect over SSH) don't race its startup.
+func launch(ctx context.Context, engine container.Engine, opts Options, mayBeListening bool) error {
 	addr := opts.listenAddr()
-	if Listening(ctx, engine, opts.ContainerName, addr) {
+	if mayBeListening && Listening(ctx, engine, opts.ContainerName, addr) {
 		return nil
 	}
 
