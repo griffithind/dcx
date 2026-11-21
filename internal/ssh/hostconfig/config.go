@@ -273,6 +273,7 @@ func renderBlock(e Entry, aliases []string, bindHost, knownHosts string) string 
 	fmt.Fprintln(&b, "  ForwardAgent yes")
 	fmt.Fprintln(&b, "  IdentitiesOnly no")
 	fmt.Fprintln(&b, "  LogLevel ERROR")
+	b.WriteString(renderShare(e.WorkspaceID, aliases))
 	fmt.Fprintf(&b, "%s%s\n\n", sshConfigMarkerEnd, e.ContainerName)
 	return b.String()
 }

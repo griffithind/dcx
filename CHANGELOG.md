@@ -8,6 +8,18 @@
   leaves dcx as it was. `--check` only reports whether a newer release
   exists. A dcx built from source is left alone. From 0.8.0, upgrade once
   more with the install command; after that, `dcx upgrade`.
+- Terminal titles name the machine running the container
+  (`ouzoerp@laptop:/workspaces/ouzoerp`), so a tab into a local container
+  and one into the same project on a remote machine tell apart, through
+  any number of ssh hops. Every interactive session (`dcx ssh`,
+  `ssh <alias>`) saves the terminal's title, sets this one, and restores
+  the saved title when it ends; commands' output is left as printed. Shells without dcx's integration
+  get the title too. Run `dcx up` once to update the agent.
+- `dcx ssh` runs plain `ssh <alias>` again, so terminal titles show that
+  instead of the shared-connection options: those moved into the
+  workspace's SSH config block, for dcx's own connections only. Run
+  `dcx up` once to rewrite the block; until then `dcx ssh` connects
+  without sharing.
 
 ## 0.8.0 (2026-11-21)
 

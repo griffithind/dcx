@@ -24,7 +24,7 @@ const (
 	// RecordFile is the Workspace record.
 	RecordFile = "workspace.json"
 	// ControlSocketPrefix starts the names of the workspace's shared SSH
-	// connection sockets (one per SSH agent; hostconfig.ShareOptions).
+	// connection sockets (one per SSH agent; hostconfig.ShareEnv).
 	ControlSocketPrefix = "ssh-"
 )
 

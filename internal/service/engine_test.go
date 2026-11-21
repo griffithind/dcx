@@ -159,3 +159,16 @@ func TestSessionSetupUsesTheContainerLookup(t *testing.T) {
 	environment, _ = sessionSetup(resolved, &state.ContainerInfo{})
 	assert.Equal(t, map[string]string{"A": "config"}, environment, "without the container's env, containerEnv")
 }
+
+// Terminal titles name the project and the machine running the container,
+// so tabs on different machines tell apart.
+func TestTerminalTitle(t *testing.T) {
+	host, err := os.Hostname()
+	require.NoError(t, err)
+	host, _, _ = strings.Cut(host, ".")
+	assert.Equal(t, "my_app@"+host, terminalTitle("My App"), "the project name as DCX_PROJECT_NAME has it")
+	resolved := &devcontainer.ResolvedDevContainer{}
+	resolved.Name = "ouzoerp"
+	_, session := sessionSetup(resolved, nil)
+	assert.Equal(t, "ouzoerp@"+host, session.Title)
+}

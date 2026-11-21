@@ -29,7 +29,8 @@ func TestInstallAgentE2E(t *testing.T) {
 		t.Skip("Skipping: embedded binaries are placeholders (run 'make build' first)")
 	}
 
-	containerName := helpers.ContainerName(t, alpineEnv(t).Dir)
+	workspace := alpineEnv(t).Dir
+	containerName := helpers.ContainerName(t, workspace)
 	require.NotEmpty(t, containerName, "should find container name")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -54,15 +55,14 @@ func TestInstallAgentE2E(t *testing.T) {
 	require.NoError(t, err, "binary should run on %s: %s", containerArch, string(output))
 	assert.Contains(t, string(output), "dcx-agent", "help output should contain 'dcx-agent'")
 
-	// The ELF header names the architecture (when `file` can be installed).
-	fileOutput, err := exec.CommandContext(ctx, "docker", "exec", containerName, "sh", "-c",
-		"apk add --no-cache file >/dev/null 2>&1 && file "+binaryPath).CombinedOutput()
-	if err == nil {
-		switch containerArch {
-		case "x86_64":
-			assert.Contains(t, string(fileOutput), "x86-64", "binary should be x86-64 for x86_64 container")
-		case "aarch64":
-			assert.Contains(t, string(fileOutput), "ARM aarch64", "binary should be ARM aarch64 for aarch64 container")
-		}
+	// The ELF header names the architecture.
+	requireAlpineTools(t, workspace)
+	fileOutput, err := exec.CommandContext(ctx, "docker", "exec", containerName, "file", binaryPath).CombinedOutput()
+	require.NoError(t, err, string(fileOutput))
+	switch containerArch {
+	case "x86_64":
+		assert.Contains(t, string(fileOutput), "x86-64", "binary should be x86-64 for x86_64 container")
+	case "aarch64":
+		assert.Contains(t, string(fileOutput), "ARM aarch64", "binary should be ARM aarch64 for aarch64 container")
 	}
 }

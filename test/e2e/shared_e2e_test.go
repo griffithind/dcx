@@ -76,23 +76,24 @@ func alpineFiles() (map[string]string, error) {
 	}, nil
 }
 
-// sshClientOnce installs openssh-client in alpineEnv once: tests installing
-// it at the same time would trip over apk's lock.
+// alpineToolsOnce installs the packages tests need in alpineEnv, once:
+// tests running apk at the same time trip over its lock.
 var (
-	sshClientOnce sync.Once
-	sshClientErr  error
+	alpineToolsOnce sync.Once
+	alpineToolsErr  error
 )
 
-// requireSSHClient makes sure alpineEnv has openssh-client (ssh-add).
-func requireSSHClient(t *testing.T, workspace string) {
+// requireAlpineTools makes sure alpineEnv has openssh-client (ssh-add) and
+// file.
+func requireAlpineTools(t *testing.T, workspace string) {
 	t.Helper()
-	sshClientOnce.Do(func() {
-		_, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client")
+	alpineToolsOnce.Do(func() {
+		_, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "apk", "add", "--no-cache", "openssh-client", "file")
 		if err != nil {
-			sshClientErr = fmt.Errorf("install openssh-client: %w: %s", err, stderr)
+			alpineToolsErr = fmt.Errorf("install openssh-client and file: %w: %s", err, stderr)
 		}
 	})
-	require.NoError(t, sshClientErr)
+	require.NoError(t, alpineToolsErr)
 }
 
 // richEnv is an alpine container with most of what a config can set that

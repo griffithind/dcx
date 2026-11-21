@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -467,7 +468,21 @@ func sessionSetup(resolved *devcontainer.ResolvedDevContainer, info *state.Conta
 		Env:        remoteEnv,
 		Unset:      resolved.RemoteEnvUnset,
 		PostAttach: lifecycle.AttachSteps(resolved.Hooks.PostAttach),
+		Title:      terminalTitle(resolved.Name),
 	}
+}
+
+// terminalTitle is SessionConfig.Title: the project's name (as in
+// DCX_PROJECT_NAME) at this machine's short host name.
+func terminalTitle(name string) string {
+	if slug := devcontainer.SanitizeProjectName(name); slug != "" {
+		name = slug
+	}
+	host, err := os.Hostname()
+	if host, _, _ = strings.Cut(host, "."); err != nil || host == "" {
+		return name
+	}
+	return name + "@" + host
 }
 
 // stepHooks runs the once-per-container hooks that have not completed yet,
@@ -544,11 +559,7 @@ func (s *DevContainerService) hookRunner(hooks devcontainer.Hooks, sshAlias stri
 	if s.newHooks != nil {
 		return s.newHooks(hooks, sshAlias)
 	}
-	var share []string
-	if sshAlias != "" {
-		share = hostconfig.ShareOptions(s.Identity().WorkspaceID)
-	}
-	return lifecycle.NewHookRunner(sshAlias, share, s.report, s.workspacePath, hooks)
+	return lifecycle.NewHookRunner(sshAlias, []string{hostconfig.ShareEnv()}, s.report, s.workspacePath, hooks)
 }
 
 // startedSinceLastPostStart reports whether the container started after

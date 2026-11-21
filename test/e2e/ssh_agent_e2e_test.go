@@ -42,7 +42,7 @@ func TestSSHAgentForwardingE2E(t *testing.T) {
 	// The forwarded agent is the e2e run's agent (helpers.Isolate): it
 	// lists exactly that agent's key.
 	t.Run("ssh_add_lists_the_host_key", func(t *testing.T) {
-		requireSSHClient(t, workspace)
+		requireAlpineTools(t, workspace)
 
 		stdout, stderr, err := helpers.RunDCXInDir(t, workspace, "ssh", "--", "ssh-add", "-l")
 		require.NoError(t, err, "ssh-add -l: %s", stderr)
@@ -100,7 +100,7 @@ func TestSSHAgentConcurrentExecE2E(t *testing.T) {
 	// Test that one exec finishing doesn't kill another's agent
 	t.Run("cleanup_doesnt_affect_other_execs", func(t *testing.T) {
 		// Install openssh-client first
-		requireSSHClient(t, workspace)
+		requireAlpineTools(t, workspace)
 
 		// Start a long-running exec
 		var wg sync.WaitGroup

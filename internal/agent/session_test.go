@@ -413,3 +413,54 @@ func TestPingChecksTheBanner(t *testing.T) {
 		t.Error("ping accepted a listener that is not a dcx agent")
 	}
 }
+
+// An interactive session (a terminal, no command) saves the terminal's
+// title, sets the environment's, tells the shell through DCX_TITLE, and
+// restores the saved title as it ends. A command's output is left exactly
+// as printed, with or without a terminal.
+func TestInteractiveSessionSetsAndRestoresTitle(t *testing.T) {
+	client, _ := startTestServer(t, &agentproto.SessionConfig{Title: "app@box\x1b]2;evil"})
+	session := func(command string) string {
+		sess, err := client.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = sess.Close() }()
+		if err := sess.RequestPty("xterm", 24, 80, gossh.TerminalModes{}); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		sess.Stdout = &out
+		if command == "" {
+			sess.Stdin = strings.NewReader("echo title=$DCX_TITLE; exit\n")
+			err = sess.Shell()
+			if err == nil {
+				err = sess.Wait()
+			}
+		} else {
+			err = sess.Run(command)
+		}
+		if err != nil {
+			t.Fatalf("session failed: %v (output %q)", err, out.String())
+		}
+		return out.String()
+	}
+
+	got := session("")
+	if want := "\x1b[22;0t\x1b]2;app@box]2;evil\a"; !strings.HasPrefix(got, want) {
+		t.Errorf("output does not start with the saved and set title:\n got %q\nwant %q…", got, want)
+	}
+	if !strings.Contains(got, "title=app@box]2;evil") {
+		t.Errorf("DCX_TITLE not set (control characters removed): %q", got)
+	}
+	if !strings.HasSuffix(got, "\x1b[23;0t") {
+		t.Errorf("output does not end by restoring the title: %q", got)
+	}
+
+	if got := session("echo cmd"); got != "cmd\r\n" {
+		t.Errorf("a command with a terminal gets no title sequences: %q", got)
+	}
+	if plain, err := run(t, client, "echo plain"); err != nil || plain != "plain\n" {
+		t.Errorf("a command without a terminal gets no title sequences: %q, %v", plain, err)
+	}
+}

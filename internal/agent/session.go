@@ -63,6 +63,15 @@ func (s *Server) sessionHandler(sess ssh.Session) {
 	if isPty {
 		env = append(env, "TERM="+ptyReq.Term)
 	}
+	// Interactive sessions (a terminal without a command) set the title; a
+	// command's output stays exactly what it printed, even with -t.
+	title := ""
+	if isPty && sess.RawCommand() == "" {
+		if title = titleText(cfg.Title); title != "" {
+			env = append(env, agentproto.TitleEnv+"="+title)
+			_, _ = io.WriteString(sess, saveTitle+"\x1b]2;"+title+"\a")
+		}
+	}
 
 	// postAttachCommand belongs to interactive attaches: a terminal without
 	// a command (`dcx ssh`, `ssh <alias>`), not editor exec channels.
@@ -74,11 +83,37 @@ func (s *Server) sessionHandler(sess ssh.Session) {
 	cmd.Env = env
 	applyCredential(cmd, cred)
 
-	if isPty {
-		s.runWithPTY(sess, cmd, ptyReq, winCh)
-	} else {
+	if !isPty {
 		s.runWithoutPTY(sess, cmd)
+		return
 	}
+	err = s.runWithPTY(sess, cmd, ptyReq, winCh)
+	if title != "" {
+		_, _ = io.WriteString(sess, restoreTitle)
+	}
+	exitSession(sess, err)
+}
+
+// Terminal titles (xterm's sequences, which nearly every terminal
+// follows): saveTitle pushes the current title on the terminal's title
+// stack and restoreTitle pops it, so the title from before the session
+// comes back when it ends; terminals without a stack ignore both. The
+// sequences travel in the session's output, so they reach the terminal
+// through any number of ssh hops.
+const (
+	saveTitle    = "\x1b[22;0t"
+	restoreTitle = "\x1b[23;0t"
+)
+
+// titleText is s without control characters, which could end the title
+// sequence and start another.
+func titleText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // buildCommand creates an exec.Cmd for the session.
@@ -252,16 +287,16 @@ func (s *Server) runAttachStep(sess ssh.Session, step agentproto.AttachStep, env
 	return errors.Join(errs...)
 }
 
-// runWithPTY runs a command with a pseudo-terminal.
-func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, winCh <-chan ssh.Window) {
+// runWithPTY runs a command with a pseudo-terminal, returning how it
+// ended (the caller ends the session).
+func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, winCh <-chan ssh.Window) error {
 	ptmx, err := startPTY(cmd, &pty.Winsize{
 		Rows: uint16(ptyReq.Window.Height),
 		Cols: uint16(ptyReq.Window.Width),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start PTY: %v\n", err)
-		_ = sess.Exit(1)
-		return
+		return err
 	}
 	// Resizes may still arrive while the session ends; never resize a
 	// closed terminal.
@@ -309,7 +344,7 @@ func (s *Server) runWithPTY(sess ssh.Session, cmd *exec.Cmd, ptyReq ssh.Pty, win
 		closePTY()
 		<-copied
 	}
-	exitSession(sess, waitErr)
+	return waitErr
 }
 
 // pollable returns f re-opened in non-blocking mode, so Go's poller serves

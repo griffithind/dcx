@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -173,6 +174,14 @@ echo "$n"`
 		shellOut, err := helpers.RunDCXInPTY(t, workspace, "exit\n", "ssh")
 		require.NoError(t, err, shellOut)
 		assert.Equal(t, "attached\nattached", dcxExec(t, workspace, "cat", "/tmp/attach.log"))
+
+		// The terminal's title is saved, set to "<project>@<host>" (the
+		// machine running the container) and restored when the session ends.
+		host, err := os.Hostname()
+		require.NoError(t, err)
+		host, _, _ = strings.Cut(host, ".")
+		assert.Regexp(t, `\x1b\[22;0t\x1b\]2;[^\x07]+@`+regexp.QuoteMeta(host)+`\x07`, shellOut)
+		assert.Contains(t, shellOut, "\x1b[23;0t")
 	})
 
 	// dcx ssh sessions share one connection (per SSH agent), left open for
@@ -188,6 +197,23 @@ echo "$n"`
 		out, err := exec.Command("ssh", "-o", "ControlPath="+controlSockets[0], "-O", "check", hostname).CombinedOutput()
 		require.NoError(t, err, "the shared connection stays open: %s", out)
 		assert.Equal(t, "shared", dcxExec(t, workspace, "echo", "shared"))
+
+		// dcx execs a plain `ssh <alias>` (terminals show its command line
+		// as the title); the sharing comes from the config block.
+		if runtime.GOOS == "linux" {
+			cmd := exec.Command(helpers.GetDCXBinary(t), "ssh", "--", "sleep", "3")
+			cmd.Dir = workspace
+			require.NoError(t, cmd.Start())
+			var argv []string
+			assert.Eventually(t, func() bool {
+				data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", cmd.Process.Pid))
+				argv = strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+				return err == nil && len(argv) > 0 && argv[0] == "ssh"
+			}, 5*time.Second, 20*time.Millisecond)
+			require.NoError(t, cmd.Wait())
+			assert.NotContains(t, strings.Join(argv, " "), "Control", "argv: %q", argv)
+			assert.Contains(t, argv, hostname)
+		}
 	})
 
 	// Test dcx down removes SSH config

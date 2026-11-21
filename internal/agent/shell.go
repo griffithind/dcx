@@ -68,13 +68,11 @@ source "%s"
 
 // SetupShellIntegration returns how to start an interactive shell so it
 // sources dcx's integration (terminal titles showing the typed command).
-// It only reads: when the scripts were not installed, or the workspace has
-// no project name, the shell starts normally.
+// It only reads: when the scripts were not installed, the shell starts
+// normally. The scripts set titles only when the session has one
+// (agentproto.TitleEnv).
 func SetupShellIntegration(shell string) ShellConfig {
 	config := ShellConfig{}
-	if os.Getenv("DCX_PROJECT_NAME") == "" {
-		return config
-	}
 	if _, err := os.Stat(filepath.Join(shellIntegrationDir, "bash-init.sh")); err != nil {
 		return config
 	}

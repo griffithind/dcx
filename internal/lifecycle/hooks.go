@@ -28,9 +28,9 @@ type HookRunner struct {
 	workspacePath string
 	hooks         devcontainer.Hooks
 
-	// sshOptions are added to every container hook's ssh command
-	// (hostconfig.ShareOptions: hooks share one connection).
-	sshOptions []string
+	// sshEnv is added to every container hook's ssh environment
+	// (hostconfig.ShareEnv: hooks share one connection).
+	sshEnv []string
 
 	// Command executors; default to the real host/container execution and
 	// are replaced in tests.
@@ -40,12 +40,12 @@ type HookRunner struct {
 
 // NewHookRunner creates a new hook runner. Container hooks run with
 // OpenSSH through sshAlias, the workspace's host in dcx's SSH config (""
-// when only host hooks run), as users' own sessions do, with sshOptions
-// added.
-func NewHookRunner(sshAlias string, sshOptions []string, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks) *HookRunner {
+// when only host hooks run), as users' own sessions do, with sshEnv added
+// to their environment.
+func NewHookRunner(sshAlias string, sshEnv []string, rep report.Reporter, workspacePath string, hooks devcontainer.Hooks) *HookRunner {
 	r := &HookRunner{
 		sshAlias:      sshAlias,
-		sshOptions:    sshOptions,
+		sshEnv:        sshEnv,
 		report:        report.OrDiscard(rep),
 		workspacePath: workspacePath,
 		hooks:         hooks,
@@ -238,7 +238,7 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecycle
 	if r.sshAlias == "" {
 		return fmt.Errorf("SSH is not configured for the container")
 	}
-	args := append(r.configArgs(), r.sshOptions...)
+	args := r.configArgs()
 	remote := shell.Join(stepArgv(step))
 	if cols, rows, ok := terminalSize(); ok {
 		args = append(args, "-tt")
@@ -249,6 +249,9 @@ func (r *HookRunner) executeContainerCommand(ctx context.Context, step lifecycle
 	args = append(args, r.sshAlias, "--", remote)
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	if len(r.sshEnv) > 0 {
+		cmd.Env = append(os.Environ(), r.sshEnv...)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

@@ -80,7 +80,18 @@ type SessionConfig struct {
 	// PostAttach runs at the start of each interactive session (a PTY
 	// without a command), before the shell starts.
 	PostAttach []AttachStep `json:"postAttach,omitempty"`
+
+	// Title names the environment in terminal titles: "<project>@<host>",
+	// the host being the machine that runs the container, so tabs on
+	// different machines tell apart. An interactive session (a terminal
+	// without a command) saves the terminal's title, sets this one (TitleEnv tells shells with dcx's
+	// integration, which add the directory or the running command), and
+	// restores the saved title when it ends.
+	Title string `json:"title,omitempty"`
 }
+
+// TitleEnv carries SessionConfig.Title into interactive sessions.
+const TitleEnv = "DCX_TITLE"
 
 // AttachStep is one postAttachCommand source (a feature or
 // devcontainer.json). Steps run in order and stop at the first failure;
