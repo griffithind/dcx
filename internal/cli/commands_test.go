@@ -55,12 +55,10 @@ func TestStatusCommandFlags(t *testing.T) {
 	assert.Equal(t, "d", detailedFlag.Shorthand)
 }
 
-func TestShellAndExecCommandsAreGone(t *testing.T) {
-	// `dcx ssh` replaced them; plain ssh gives the same session.
-	for _, name := range []string{"shell", "exec"} {
-		cmd, _, err := rootCmd.Find([]string{name})
-		assert.True(t, err != nil || cmd == rootCmd, "%s should not be a command", name)
-	}
+func TestExecCommandIsGone(t *testing.T) {
+	// `dcx ssh -- <cmd>` replaced it; plain ssh gives the same session.
+	cmd, _, err := rootCmd.Find([]string{"exec"})
+	assert.True(t, err != nil || cmd == rootCmd, "exec should not be a command")
 }
 
 func TestSSHRequiresDashBeforeCommand(t *testing.T) {
@@ -103,4 +101,11 @@ func TestResolveWorkspacePathIsAbsolute(t *testing.T) {
 	got, err = resolveWorkspacePath("/abs/ws")
 	require.NoError(t, err)
 	assert.Equal(t, "/abs/ws", got)
+}
+
+// `dcx shell` is muscle memory from older dcx: it is `dcx ssh`.
+func TestShellIsAnAliasOfSSH(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"shell", "--", "ls"})
+	require.NoError(t, err)
+	assert.Same(t, sshCmd, cmd)
 }

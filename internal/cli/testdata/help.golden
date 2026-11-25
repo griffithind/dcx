@@ -360,6 +360,9 @@ Arguments after '--' keep their quoting:
 Usage:
   dcx ssh [-- command [args...]] [flags]
 
+Aliases:
+  ssh, shell
+
 Global Flags:
   -c, --config string           path to devcontainer.json, relative to the current directory (default: auto-detect in the workspace)
       --no-color[=true|false]   disable colored output

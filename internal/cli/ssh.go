@@ -14,8 +14,9 @@ import (
 )
 
 var sshCmd = &cobra.Command{
-	Use:   "ssh [-- command [args...]]",
-	Short: "Open a shell or run a command in the container",
+	Use:     "ssh [-- command [args...]]",
+	Aliases: []string{"shell"},
+	Short:   "Open a shell or run a command in the container",
 	Long: `Open an interactive shell in the workspace's devcontainer, or run a
 command in it.
 

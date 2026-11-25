@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `dcx shell` is an alias of `dcx ssh` again.
+
 ## 0.8.1 (2026-11-21)
 
 - `dcx upgrade` replaces dcx with the latest release: the binary is checked
